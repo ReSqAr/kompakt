@@ -10,22 +10,22 @@ publish = false
 [dependencies]
 async-trait = { workspace = true }
 bytes = { workspace = true }
-const-fnv1a-hash = "1"
+const-fnv1a-hash = { workspace = true }
 crossbeam-channel = { workspace = true }
 futures = { workspace = true }
-itertools = "0"
+itertools = { workspace = true }
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true, optional = true }
 postcard = { workspace = true, features = ["alloc", "use-std"] }
 rust-rocksdb = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
+serde = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "fs", "signal", "net"] }
 tokio-util = { workspace = true, features = ["io-util"] }
 uuid = { workspace = true }
-zslg = { path = "../zslg" }
+zslg = { workspace = true }
 
 
 [dev-dependencies]
