@@ -11,7 +11,9 @@ async-trait = "0.1"
 axum = { version = "0", features = ["macros", "json"] }
 blake3 = "1"
 bytes = "1"
-clap = "4"
+clap = { version = "4", features = ["derive"] }
+console-subscriber = "0"
+const-fnv1a-hash = "1"
 crc32fast = "1"
 crossbeam-channel = "0"
 dashmap = "6"
@@ -19,6 +21,7 @@ futures = "0"
 http-body-util = "0"
 hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0", features = ["tokio"] }
+itertools = "0"
 memory-stats = { version = "1", features = ["always_use_statm"] }
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0", default-features = false, features = ["http-listener"] }
@@ -26,7 +29,7 @@ metrics-util = "0"
 object_store = { version = "0.14", features = [] }
 openraft = { version = "0", features = ["serde"] }
 parking_lot = "0.13"
-postcard = "1"
+postcard = { version = "1", features = ["use-std"] }
 pprof = { version = "0", features = ["flamegraph"] }
 proptest = "1"
 rand = "0.10"
@@ -37,6 +40,8 @@ sha2 = "0"
 socket2 = { version = "0", features = ["all"] }
 tempfile = "3"
 thiserror = "2"
+tikv-jemalloc-ctl = { version = "0", features = ["use_std", "stats"] }
+tikv-jemallocator = { version = "0", features = ["unprefixed_malloc_on_supported_platforms"] }
 time = "0"
 tokio = "1"
 tokio-metrics = { version = "0", features = ["metrics-rs-integration"] }

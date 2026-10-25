@@ -23,7 +23,7 @@ metrics-exporter-prometheus = { workspace = true }
 nvzn = { workspace = true, features = ["prometheus"] }
 object_store = { workspace = true }
 objectstorage-cache = { workspace = true }
-postcard = { version = "1", features = ["use-std"] }
+postcard = { workspace = true, features = ["use-std"] }
 serde = { workspace = true }
 rpassword = { workspace = true }
 thiserror = { workspace = true }
