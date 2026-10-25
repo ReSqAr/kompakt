@@ -1,0 +1,128 @@
+default:
+    just --list
+
+# ── Load + performance harness (see docs/PERFORMANCE.md) ────────────────────────
+#
+# perf.py is the consolidated driver (N reps, CPU pinning, variance gate, and a
+# git-tracked timeline at docs/perf-timeline.csv). perf_tui.py is a Textual TUI
+# over the same engine. Both are cwd-independent, so these recipes work whether
+# you run `just` from here or wire them into a repo-root justfile.
+#
+# All `perf-*` recipes build the loadgen binary first, default to the .scratch
+# tmpfs floor, pin to cores 0-7 (override PIN=''), and append to the timeline CSV.
+
+PERF := "python3 loadgen-analysis/perf.py"
+REPORT := "python3 loadgen-analysis/report.py"
+# Absolute: perf.py launches loadgen with cwd = the repo root, so a relative
+# default would resolve against THAT (…/.scratch beside the repo → EACCES).
+DATAROOT := join(justfile_directory(), "..", "..", "..", ".scratch")
+PIN := "0-7"
+# `--replicas`/`--writers` are required flags on the loadgen binary itself (no
+# default — see loadgen.rs), so the default cluster size lives here
+# instead, explicit and overridable with `just --set REPLICAS 5 --set WRITERS 5 <recipe> ...`.
+REPLICAS := "3"
+WRITERS := "3"
+
+_perf-build:
+    cargo build --release --features prometheus --example loadgen
+
+# Build with jemalloc heap profiling + line-table symbols retained (same
+# --profile profiling as harness/Dockerfile, so jeprof/pprof can symbolize).
+_perf-build-heap:
+    RUSTFLAGS="${RUSTFLAGS:--C force-frame-pointers=yes}" \
+      cargo build --profile profiling --features heap-profiling,prometheus --example loadgen
+
+# Full scenario sweep (idle + paced + saturate 1/16/128/512/1024). e.g. `just perf-sweep 30 "tuned channels"`
+perf-sweep DUR="30" COMMENT="" *ARGS: _perf-build
+    {{PERF}} sweep --dur {{DUR}} --pin-cpus "{{PIN}}" --dataroot {{DATAROOT}} --comment "{{COMMENT}}" {{ARGS}}
+
+# One scenario. e.g. `just perf-run 128 30 "baseline"`
+perf-run INFLIGHT DUR="30" COMMENT="" *ARGS: _perf-build
+    {{PERF}} run --inflight {{INFLIGHT}} --dur {{DUR}} --pin-cpus "{{PIN}}" --dataroot {{DATAROOT}} --comment "{{COMMENT}}" {{ARGS}}
+
+# Interleaved A/B of two flag-sets in one session. e.g.
+#   just perf-compare 128 '--fsync-min-interval-ms 0' '--fsync-min-interval-ms 3'
+perf-compare INFLIGHT A B *ARGS: _perf-build
+    {{PERF}} compare --inflight {{INFLIGHT}} --pin-cpus "{{PIN}}" --dataroot {{DATAROOT}} --a "{{A}}" --b "{{B}}" {{ARGS}}
+
+# Ad-hoc analysis of an existing metrics.jsonl (no run).
+perf-report *PATHS:
+    {{PERF}} report {{PATHS}}
+
+# Visual TUI driver (Textual): pick a scenario or run all, watch live, see results.
+perf-tui: _perf-build
+    uv run loadgen-analysis/perf_tui.py
+
+# Stage only the timeline CSV for commit (keeps experiment data out of unrelated diffs).
+perf-commit:
+    git add ../../../docs/perf-timeline.csv && git status --short ../../../docs/perf-timeline.csv
+
+# Run a multi-phase load schedule (CPU + jemalloc heap profiling on), then emit
+# a self-contained report.html — throughput/latency/memory over time, phase-shaded,
+# plus a per-subsystem heap breakdown. e.g.
+#   just perf-scenario "burst:1000@2m,rest:0@15m"
+#   just --set REPLICAS 5 --set WRITERS 5 perf-scenario "burst:1000@2m,rest:0@15m"
+# PROFILE is --load-profile's grammar: comma-separated `name:rps@dur` phases
+# (dur takes an `s`/`m` suffix). Needs `jeprof` on PATH for the heap section;
+# it degrades to a note (not an error) if jeprof or the feature build is missing.
+# Both MALLOC_CONF and _RJEM_MALLOC_CONF are set below: tikv-jemallocator's
+# `unprefixed_malloc_on_supported_platforms` excludes macOS, so jemalloc there
+# is built with a `_rjem_` symbol prefix and reads `_RJEM_MALLOC_CONF` instead
+# of plain `MALLOC_CONF` — setting both makes this work on every platform
+# without OS-detection.
+perf-scenario PROFILE *ARGS: _perf-build-heap
+    #!/usr/bin/env bash
+    set -euo pipefail
+    OUT_DIR="results"
+    mkdir -p "$OUT_DIR"
+    FLAME="$OUT_DIR/.cpu-$$.svg"
+    RUSTFLAGS="${RUSTFLAGS:--C force-frame-pointers=yes}" \
+      MALLOC_CONF="prof:true,prof_active:true,background_thread:true" \
+      _RJEM_MALLOC_CONF="prof:true,prof_active:true,background_thread:true" \
+      RUST_LOG="${RUST_LOG:-error,loadgen=info}" \
+      cargo run --profile profiling --features heap-profiling,prometheus --example loadgen -- \
+        --data-dir {{DATAROOT}} --out-dir "$OUT_DIR" \
+        --replicas {{REPLICAS}} --writers {{WRITERS}} \
+        --load-profile "{{PROFILE}}" --heap-profile-interval-secs 15 \
+        --pprof "$FLAME" \
+        {{ARGS}}
+    # Find the run dir by content (newest subdir of OUT_DIR containing
+    # metrics.jsonl), not by diffing OUT_DIR's listing before/after: if
+    # --data-dir shares a parent with OUT_DIR (e.g. DATAROOT=results/perf/),
+    # loadgen creates a SECOND new top-level entry there too (its data dir),
+    # and a "last new entry, sorted" pick can grab that one instead — this
+    # happened for real with DATAROOT=results/perf/, since "perf" sorts after
+    # any digit-leading timestamp. `ls -td` (portable: works on both GNU and
+    # BSD/macOS `ls`) sorts newest-first, so the first metrics.jsonl hit wins.
+    RUN_DIR=""
+    for d in $(ls -td "$OUT_DIR"/*/ 2>/dev/null); do
+        if [ -f "${d}metrics.jsonl" ]; then
+            RUN_DIR="${d%/}"
+            break
+        fi
+    done
+    if [ -z "$RUN_DIR" ]; then
+        echo "error: no run dir with metrics.jsonl found under $OUT_DIR" >&2
+        exit 1
+    fi
+    [ -f "$FLAME" ] && mv "$FLAME" "$RUN_DIR/cpu.svg"
+    [ -f "$FLAME.folded" ] && mv "$FLAME.folded" "$RUN_DIR/cpu.svg.folded"
+    {{REPORT}} "$RUN_DIR"
+
+# Build the full markdown+SVG report for an already-captured run dir (no run).
+perf-report-full DIR:
+    {{REPORT}} {{DIR}}
+
+# ── Raw load engine (no reps/analysis), for one-off manual runs ──────────────────
+
+# Run the load engine directly. Extra args pass through to the binary, e.g.
+#   just loadgen --saturate --max-inflight 512 --duration-secs 300
+#   just loadgen --target-rps 0                  # idle (background CPU floor)
+#   just loadgen --saturate --pprof flame.svg    # in-process flamegraph on exit
+#   just --set REPLICAS 5 --set WRITERS 5 loadgen --saturate
+# RUST_LOG defaults quiet so logging overhead doesn't skew the numbers.
+loadgen *ARGS:
+    RUST_LOG="${RUST_LOG:-error,loadgen=info}" \
+      cargo run --release --features prometheus --example loadgen -- --data-dir {{DATAROOT}} \
+        --replicas {{REPLICAS}} --writers {{WRITERS}} \
+        {{ARGS}}

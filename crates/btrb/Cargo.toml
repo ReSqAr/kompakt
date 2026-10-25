@@ -1,0 +1,42 @@
+[package]
+name = "btrb"
+version = "0.1.0"
+publish = false
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "The host runtime for btrb applications"
+
+[features]
+# zslg publishes jemalloc's stats as gauges. Declaring the allocator is the
+# binary's; the gauges mean something only when it did.
+jemalloc = ["zslg/jemalloc"]
+
+[dependencies]
+axum = { workspace = true }
+blake3 = { workspace = true }
+clap = { workspace = true }
+futures = { workspace = true }
+memory-stats = { workspace = true }
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
+nvzn = { workspace = true, features = ["prometheus"] }
+object_store = { workspace = true }
+objectstorage-cache = { workspace = true }
+postcard = { version = "1", features = ["use-std"] }
+serde = { workspace = true }
+rpassword = { workspace = true }
+thiserror = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["time", "net", "io-util", "macros", "rt", "signal"] }
+tokio-util = { workspace = true, features = ["rt"] }
+tower-http = { workspace = true, features = ["set-header", "timeout", "trace"] }
+tracing = { workspace = true }
+zslg = { workspace = true, features = ["prometheus", "s3"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["time", "macros", "rt", "test-util"] }
+tower = { workspace = true, features = ["util"] }
+
+[lints]
+workspace = true

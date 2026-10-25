@@ -1,0 +1,20 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+#
+# A line records a PRNG seed, not a script. Proptest re-derives the input from
+# the seed through the *current* strategies, so each of these replays as a
+# script in today's vocabulary (`WriteBurst` / `Down` / `Kill` / `Up` /
+# `Replace` / `Settle`) with today's generated dials — not as whatever shape it
+# had when it was saved. The stale `shrinks to ...` notes proptest wrote
+# alongside them are therefore dropped rather than kept: they described ops that
+# no longer exist and would send a reader looking for them. What the seeds still
+# buy is a fixed, free set of starting points that once found something, so they
+# are kept and re-run first.
+cc 171961daaea8a74eb499f1b184e4d665890e693dfd607ae2540c2d3594c95a78
+cc 2087bf592db2e4472268f909c2a9bdf81c487a5061bab5e5a33397bc79317525
+cc a6fad24d45b727c6a0bbd8e433507c709f4f85097c4bbea638af33bbd33af4c9
+cc ffd11e3e3c8578fd612d8df9ca81ba4e525bbfcc6fffd46147e1a55fd08f571f # shrinks to regime = Stressed, snapshot_pick = 562, election_pick = 567, flush_batch_pick = 725, write_capacity_pick = 216, ops = [Settle(50), WriteBurst { n: 6, len: 84, target: 1 }, Settle(50), Settle(148), WriteBurst { n: 21, len: 232, target: 1 }, Settle(50), Replace(1), WriteBurst { n: 3, len: 27, target: 2 }, WriteBurst { n: 24, len: 248, target: 0 }, Kill(1), Settle(50), WriteBurst { n: 21, len: 156, target: 2 }, Up, Replace(1), Settle(273), WriteBurst { n: 3, len: 235, target: 0 }, WriteBurst { n: 32, len: 188, target: 2 }, Kill(2), Up]

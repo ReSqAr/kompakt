@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 59c4a750902d30e2b43c709f9f1edba1da4287f8995eec5dae1c8606ee62e46f # shrinks to m = Single { replicas: {NodeId(00000000-0000-0000-0000-000000000000)} }, a = {}, b = {}

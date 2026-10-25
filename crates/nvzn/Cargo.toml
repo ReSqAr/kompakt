@@ -1,0 +1,55 @@
+[package]
+name = "nvzn"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Projections folded from an append-only log"
+publish = false
+
+[dependencies]
+async-trait = { workspace = true }
+bytes = { workspace = true }
+const-fnv1a-hash = "1"
+crossbeam-channel = { workspace = true }
+futures = { workspace = true }
+itertools = "0"
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true, optional = true }
+postcard = { workspace = true, features = ["alloc", "use-std"] }
+rust-rocksdb = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "fs", "signal", "net"] }
+tokio-util = { workspace = true, features = ["io-util"] }
+uuid = { workspace = true }
+zslg = { path = "../zslg" }
+
+
+[dev-dependencies]
+metrics-util = { workspace = true }
+tracing-subscriber = { workspace = true }
+proptest = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true
+
+[[example]]
+name = "todo"
+path = "examples/todo.rs"
+required-features = ["testing"]
+
+[[test]]
+name = "public_api"
+path = "tests/public_api.rs"
+required-features = ["testing"]
+
+[features]
+default = []
+prometheus = ["dep:metrics-exporter-prometheus", "zslg/prometheus"]
+# An in-process log and store (`nvzn::testing`), so a consumer can test
+# against nvzn without standing up zslg. For `[dev-dependencies]`.
+testing = []

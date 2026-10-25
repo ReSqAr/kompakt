@@ -1,0 +1,28 @@
+[package]
+name = "objectstorage-cache"
+version = "0.1.0"
+publish = false
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Disk cache and fetch scheduler for object stores"
+
+[dependencies]
+bytes = { workspace = true }
+futures = { workspace = true }
+metrics = { workspace = true }
+object_store = { workspace = true }
+parking_lot = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "fs", "io-util", "macros", "time"] }
+tempfile = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,85 @@
+[package]
+name = "zslg"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "A replicated, eventually-stable HLC-ordered log"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+bytes = { workspace = true }
+console-subscriber = { version = "0", optional = true }
+crc32fast = { workspace = true }
+crossbeam-channel = { workspace = true }
+dashmap = { workspace = true }
+futures = { workspace = true }
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true, optional = true }
+object_store = { workspace = true }
+openraft = { version = "0", features = ["serde"] }
+parking_lot = { workspace = true }
+postcard = { workspace = true, features = ["alloc", "use-std"] }
+rand = { workspace = true }
+rust-rocksdb = { workspace = true }
+serde = { workspace = true, features = ["rc"] }
+socket2 = { version = "0", features = ["all"] }
+thiserror = { workspace = true }
+tikv-jemalloc-ctl = { version = "0", optional = true, features = ["use_std", "stats"] }
+tikv-jemallocator = { version = "0", optional = true, features = ["unprefixed_malloc_on_supported_platforms"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "fs", "signal", "net"] }
+tokio-stream = { workspace = true, features = ["sync"] }
+tokio-util = { workspace = true, features = ["io-util"] }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["serde"] }
+zstd = { workspace = true }
+
+[dev-dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+tracing-subscriber = { workspace = true, features = ["json"] }
+http-body-util = { version = "0" }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0", features = ["tokio"] }
+metrics-util = { workspace = true }
+pprof = { version = "0", features = ["flamegraph"] }
+proptest = { workspace = true }
+tempfile = { workspace = true }
+time = { version = "0" }
+tokio = { workspace = true, features = ["test-util"] }
+tokio-metrics = { version = "0", features = ["metrics-rs-integration"] }
+
+
+[features]
+default = []
+s3 = ["object_store/aws"]
+prometheus = ["dep:metrics-exporter-prometheus"]
+tokio-console = ["dep:console-subscriber"]
+jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
+heap-profiling = ["jemalloc", "tikv-jemallocator/profiling"]
+
+[[example]]
+name = "replica"
+path = "examples/replica.rs"
+required-features = ["s3", "prometheus"]
+
+[[example]]
+name = "follower"
+path = "examples/follower.rs"
+required-features = ["s3", "prometheus"]
+
+[[example]]
+name = "loadgen"
+path = "examples/loadgen.rs"
+required-features = ["prometheus"]
+
+
+[[example]]
+name = "channel_bench"
+path = "examples/channel_bench.rs"

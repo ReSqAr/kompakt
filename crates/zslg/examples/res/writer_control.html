@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+<style>
+body { font-family: ui-monospace, monospace; max-width: 640px; margin: 2rem auto; background: #111; color: #eee; }
+h1 { font-size: 1.2rem; }
+table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+td { padding: 4px 12px; }
+td:first-child { color: #888; }
+form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+input { padding: 4px 8px; border: 1px solid #444; background: #222; color: #eee; width: 80px; }
+button { padding: 4px 16px; border: none; background: #3a3; color: #fff; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>Writer: <span id="node-name">{node_name}</span></h1>
+<div id="stats" hx-get="/stats" hx-trigger="every 1s" hx-swap="innerHTML">Loading...</div>
+<form hx-post="/config" hx-target="#stats" hx-swap="innerHTML">
+<label for="target_rps">RPS:</label>
+<input id="target_rps" name="target_rps" type="number" min="0" value="{rps_str}">
+<label for="data_size_min">Min bytes:</label>
+<input id="data_size_min" name="data_size_min" type="number" min="1" value="{size_min_str}">
+<label for="data_size_max">Max bytes:</label>
+<input id="data_size_max" name="data_size_max" type="number" min="1" value="{size_max_str}">
+<button type="submit">Apply</button>
+</form>
+</body>
+</html>

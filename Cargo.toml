@@ -1,0 +1,118 @@
+# ── Workspace ─────────────────────────────────────────────────────────────────
+# A virtual workspace for the storage and host layers: zslg is the replicated
+# log, nvzn folds projections from it, btrb runs applications on top, and
+# objectstorage-cache is their shared disk cache.
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.dependencies]
+async-trait = "0.1"
+axum = { version = "0", features = ["macros", "json"] }
+blake3 = "1"
+bytes = "1"
+clap = "4"
+crc32fast = "1"
+crossbeam-channel = "0"
+dashmap = "6"
+futures = "0"
+http-body-util = "0"
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0", features = ["tokio"] }
+memory-stats = { version = "1", features = ["always_use_statm"] }
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0", default-features = false, features = ["http-listener"] }
+metrics-util = "0"
+object_store = { version = "0.14", features = [] }
+openraft = { version = "0", features = ["serde"] }
+parking_lot = "0.12"
+postcard = "1"
+pprof = { version = "0", features = ["flamegraph"] }
+proptest = "1"
+rand = "0.10"
+rpassword = "7"
+rust-rocksdb = { version = "0", default-features = false, features = ["zstd", "bindgen-runtime"] }
+serde = { version = "1", features = ["derive"] }
+sha2 = "0"
+socket2 = { version = "0", features = ["all"] }
+tempfile = "3"
+thiserror = "2"
+time = "0"
+tokio = "1"
+tokio-metrics = { version = "0", features = ["metrics-rs-integration"] }
+tokio-stream = { version = "0", features = ["sync"] }
+tokio-util = "0"
+tower = "0"
+tower-http = { version = "0", features = ["set-header", "timeout", "trace"] }
+tracing = "0"
+tracing-subscriber = { version = "0", features = ["env-filter", "fmt"] }
+uuid = { version = "1", features = ["v4"] }
+zstd = { version = "0", default-features = false }
+
+btrb = { path = "crates/btrb" }
+nvzn = { path = "crates/nvzn" }
+objectstorage-cache = { path = "crates/objectstorage-cache" }
+zslg = { path = "crates/zslg" }
+
+[workspace.lints.clippy]
+all = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+string_slice = "deny"
+wildcard_imports = "deny"
+allow_attributes_without_reason = "deny"
+must_use_candidate = "deny"
+large_futures = "deny"
+large_stack_frames = "deny"
+
+[workspace.lints.rust]
+unreachable_pub = "deny"
+private_interfaces = "deny"
+unexpected_cfgs = "deny"
+unused_crate_dependencies = "deny"
+
+[profile.dev]
+debug = 2
+opt-level = 0
+
+[profile.dev.package.rust-librocksdb-sys]
+debug = 0
+opt-level = 1
+
+[profile.test]
+debug = 1
+
+[profile.test.package.rust-librocksdb-sys]
+debug = 0
+opt-level = 1
+
+[profile.lint]
+inherits = "dev"
+debug = 0
+opt-level = 0
+
+[profile.ci]
+inherits = "dev"
+debug = "line-tables-only"
+incremental = false
+
+[profile.ci.package.rust-librocksdb-sys]
+debug = 0
+opt-level = 1
+
+[profile.release]
+opt-level = 2
+debug = 0
+strip = "debuginfo"
+lto = "thin"
+panic = "abort"
+codegen-units = 1
+incremental = false
+
+[profile.profiling]
+inherits = "release"
+debug = "line-tables-only"
+strip = "none"
+lto = false
+codegen-units = 16
