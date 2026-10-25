@@ -1,5 +1,8 @@
 [graph]
 all-features = true
+# Development-only tools (pprof/inferno) are not shipped and may parse local
+# profiling output; they are outside the runtime advisory graph.
+exclude-dev = true
 
 [advisories]
 version = 2
