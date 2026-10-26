@@ -121,11 +121,28 @@ impl Dispatcher {
             }
         });
 
+        let halted = fold_state.halted();
         let dispatcher_handle = tokio::spawn(async move {
             tokio::pin!(fold);
             tokio::pin!(fence);
 
             tokio::select! {
+                () = halted.cancelled() => {
+                    // Asked from outside (`FoldState::halt`), which recorded
+                    // why first: stop the fold, make what it committed
+                    // durable, and end as a failure so the process notices.
+                    let reason = fold_state.reason().unwrap_or(StopReason::Cancelled);
+                    metrics::fold_stopped(reason);
+                    error!(
+                        reason = reason.as_str(),
+                        "nvzn dispatcher halted: projections are frozen and will not \
+                         resume without a new dispatcher"
+                    );
+                    cancel.cancel();
+                    let _ = (&mut fold).await;
+                    let _ = fence.await;
+                    Err(Error::FoldStopped(reason))
+                }
                 folded = &mut fold => {
                     cancel.cancel();
                     // Every exit of the loop itself records why; a task that

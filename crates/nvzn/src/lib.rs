@@ -20,6 +20,7 @@ use {metrics_util as _, proptest as _, tempfile as _, tracing_subscriber as _};
 mod dispatcher;
 mod events;
 mod ids;
+mod live;
 mod metrics;
 mod projection;
 mod reader;
@@ -38,8 +39,9 @@ pub mod testing;
 pub(crate) mod testsupport;
 
 pub use dispatcher::{AssociatedProjectorManager, Dispatcher, Encoder, EventWriter, Syncer};
-pub use events::{SubEventOf, WithWireFormat};
+pub use events::{EventSet, SubEventOf, WithWireFormat};
 pub use ids::{IndexId, ProjectionId, ProjectionTypeId, Tenant, TenantId};
+pub use live::{Live, LiveLimits, is_live};
 #[cfg(feature = "prometheus")]
 pub use metrics::configure_prometheus;
 pub use metrics::{METRIC_NAMESPACE, StopReason, describe_metrics, histogram_buckets};

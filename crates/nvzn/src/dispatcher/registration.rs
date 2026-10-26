@@ -76,6 +76,7 @@ where
         let ProjectorManager {
             tenant,
             projectors,
+            registered,
             registered_projection_types,
             registered_indices,
         } = manager;
@@ -119,6 +120,7 @@ where
                 dispatcher.fold_state.clone(),
                 dispatcher.subscriptions.clone(),
                 Arc::new(registered_projection_types),
+                Arc::new(registered),
             ),
         ))
     }

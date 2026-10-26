@@ -5,6 +5,10 @@ use serde::ser::SerializeSeq;
 pub trait WithWireFormat: Clone + Send + Sync + Sized + From<Self::WireFormat> + 'static {
     type WireFormat: Serialize + DeserializeOwned + Send + Sync + From<Self>;
 
+    /// This event's number: its `event N :=` in [`define_events!`], the key
+    /// [`EventSet::EVENTS`] lists.
+    fn number(&self) -> u32;
+
     type WireFormatRef<'a>: Serialize + From<&'a Self>
     where
         Self: 'a;
@@ -38,6 +42,40 @@ where
         }
         seq.end()
     }
+}
+
+/// A set of events by number: a subset enum of [`define_events!`], or a
+/// whole event enum (which lists all of its events). What
+/// [`Projection::EVENTS`](crate::Projection::EVENTS) and a live view's `S` are
+/// compared by ([`is_live`](crate::is_live)).
+pub trait EventSet {
+    const EVENTS: &'static [u32];
+}
+
+/// Whether every number in `a` is in `b`. `const`, so [`is_live`] works in a
+/// `const` assertion.
+///
+/// [`is_live`]: crate::is_live
+pub(crate) const fn subset(a: &[u32], b: &[u32]) -> bool {
+    let mut rest = a;
+    while let [first, tail @ ..] = rest {
+        if !contains(b, *first) {
+            return false;
+        }
+        rest = tail;
+    }
+    true
+}
+
+pub(crate) const fn contains(set: &[u32], number: u32) -> bool {
+    let mut rest = set;
+    while let [first, tail @ ..] = rest {
+        if *first == number {
+            return true;
+        }
+        rest = tail;
+    }
+    false
 }
 
 /// A subset of `E`, borrowed from the event: what [`Projection::next`]
@@ -171,6 +209,15 @@ macro_rules! define_events {
                 $( pub type $event = $current; )+
             }
 
+            mod __nvzn_numbers {
+                #![allow(
+                    non_upper_case_globals,
+                    reason = "each number is named after its event"
+                )]
+
+                $( pub const $event: u32 = $event_num; )+
+            }
+
             #[derive(Clone, Debug)]
             pub enum $eventname {
                 $( $event($current), )+
@@ -225,6 +272,20 @@ macro_rules! define_events {
             impl $crate::WithWireFormat for $eventname {
                 type WireFormat = WireFormat;
                 type WireFormatRef<'a> = WireFormatRef<'a>;
+
+                fn number(&self) -> u32 {
+                    match self {
+                        $( $eventname::$event(_) => __nvzn_numbers::$event, )+
+                    }
+                }
+            }
+
+            impl $crate::EventSet for $eventname {
+                const EVENTS: &'static [u32] = &[$( __nvzn_numbers::$event, )+];
+            }
+
+            impl<'a> $crate::EventSet for &'a $eventname {
+                const EVENTS: &'static [u32] = &[$( __nvzn_numbers::$event, )+];
             }
 
             impl<'a> $crate::SubEventOf<'a, $eventname> for &'a $eventname {
@@ -240,6 +301,13 @@ macro_rules! define_events {
                 pub enum $sub<'a> {
                     $sub_first(&'a __nvzn_types::$sub_first),
                     $( $sub_rest(&'a __nvzn_types::$sub_rest), )*
+                }
+
+                impl<'a> $crate::EventSet for $sub<'a> {
+                    const EVENTS: &'static [u32] = &[
+                        __nvzn_numbers::$sub_first,
+                        $( __nvzn_numbers::$sub_rest, )*
+                    ];
                 }
 
                 impl<'a> $crate::SubEventOf<'a, $eventname> for $sub<'a> {

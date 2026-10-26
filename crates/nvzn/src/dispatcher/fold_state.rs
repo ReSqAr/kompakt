@@ -24,6 +24,10 @@ pub(crate) struct FoldState(Arc<FoldShared>);
 
 struct FoldShared {
     stopped: std::sync::OnceLock<StopReason>,
+    /// Fired by [`FoldState::halt`]: something outside the fold (a live
+    /// view whose tail ended) needs the dispatcher stopped, and the
+    /// supervisor selects on it.
+    halt: tokio_util::sync::CancellationToken,
     /// Never held across an `.await` (§4): every critical section on it is
     /// synchronous. Poisoning is ignored throughout — a plain `Option<Hlc>`
     /// cannot be left half-written by a panic.
@@ -35,6 +39,7 @@ impl FoldState {
     pub(super) fn new(folded: Option<Hlc>) -> Self {
         Self(Arc::new(FoldShared {
             stopped: std::sync::OnceLock::new(),
+            halt: tokio_util::sync::CancellationToken::new(),
             folded: std::sync::Mutex::new(folded),
             changed: std::sync::Condvar::new(),
         }))
@@ -53,6 +58,20 @@ impl FoldState {
         // and its `wait`, so the wake-up cannot be lost.
         let _guard = self.folded();
         self.0.changed.notify_all();
+    }
+
+    /// Stop the dispatcher from outside the fold: record `reason` (unless the
+    /// fold already stopped for another) and wake the supervisor, which
+    /// cancels the fold and ends the dispatcher's task with
+    /// [`Error::FoldStopped`], so the process notices as for any fold stop.
+    pub(crate) fn halt(&self, reason: StopReason) {
+        self.stop(reason);
+        self.0.halt.cancel();
+    }
+
+    /// What the supervisor waits on for [`halt`](Self::halt).
+    pub(super) fn halted(&self) -> tokio_util::sync::CancellationToken {
+        self.0.halt.clone()
     }
 
     /// Record that the fold has committed through `hlc`.
