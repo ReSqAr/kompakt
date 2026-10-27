@@ -5,10 +5,15 @@ use crate::dispatcher::fold;
 async fn dispatcher_routes_by_tenant_prefix() {
     let store = inmemory();
     let log = TestLog::new();
-    let mut dispatcher =
-        Dispatcher::from_db(store.clone(), log.writer(), log.reader(), FLUSH_INTERVAL)
-            .await
-            .unwrap();
+    let mut dispatcher = Dispatcher::from_db(
+        store.clone(),
+        log.writer(),
+        log.reader(),
+        FLUSH_INTERVAL,
+        &tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    .unwrap();
 
     let mut user_manager = dispatcher.new_handler::<event::Event>(tenant());
     user_manager.register::<User>().unwrap();
@@ -61,6 +66,15 @@ async fn dispatcher_skips_replayed_entries() {
         ),
     );
     syncer.sync().await.unwrap();
+    // Read once the fold has committed index 1 (the ping), not just the first
+    // user: the two may land in separate commits.
+    let at_ping = Some(zslg::LogIndex::from_bytes(1u64.to_be_bytes()));
+    for _ in 0..500 {
+        if store.read().unwrap().watermark().unwrap().index == at_ping {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 
     let user = committed_user(&store, 1).await.unwrap();
 
@@ -79,9 +93,15 @@ async fn dispatcher_skips_replayed_entries() {
 async fn dispatcher_watermark_event_advances_hlc() {
     let store = inmemory();
     let log = TestLog::new();
-    let dispatcher = Dispatcher::from_db(store.clone(), log.writer(), log.reader(), FLUSH_INTERVAL)
-        .await
-        .unwrap();
+    let dispatcher = Dispatcher::from_db(
+        store.clone(),
+        log.writer(),
+        log.reader(),
+        FLUSH_INTERVAL,
+        &tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    .unwrap();
     let hlc_rx = dispatcher.watermark();
     let handle = dispatcher.finalise().await.unwrap();
     log.watermark(42);
@@ -126,9 +146,15 @@ async fn dispatcher_unknown_tenant() {
 async fn dispatcher_channel_aborted() {
     let store = inmemory();
     let log = TestLog::new();
-    let dispatcher = Dispatcher::from_db(store, log.writer(), log.reader(), FLUSH_INTERVAL)
-        .await
-        .unwrap();
+    let dispatcher = Dispatcher::from_db(
+        store,
+        log.writer(),
+        log.reader(),
+        FLUSH_INTERVAL,
+        &tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    .unwrap();
     let handle = dispatcher.finalise().await.unwrap();
 
     drop(log); // all senders gone without close(): Aborted
@@ -191,10 +217,15 @@ impl crate::Projection for Unreadable {
 async fn next_error_stops_the_fold() {
     let store = inmemory();
     let mut log = TestLog::new();
-    let mut dispatcher =
-        Dispatcher::from_db(store.clone(), log.writer(), log.reader(), FLUSH_INTERVAL)
-            .await
-            .unwrap();
+    let mut dispatcher = Dispatcher::from_db(
+        store.clone(),
+        log.writer(),
+        log.reader(),
+        FLUSH_INTERVAL,
+        &tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    .unwrap();
     let mut manager = dispatcher.new_handler::<event::Event>(tenant());
     manager.register::<Unreadable>().unwrap();
     manager.register::<Todo>().unwrap();
@@ -373,10 +404,15 @@ async fn commits_for_a_burst(fold_commit: usize) -> usize {
     let store: Arc<dyn Store> =
         Arc::new(testsupport::ObservingStore::new(inmemory(), calls.clone()));
     let mut log = TestLog::new();
-    let mut dispatcher =
-        Dispatcher::from_db(store.clone(), log.writer(), log.reader(), FLUSH_INTERVAL)
-            .await
-            .unwrap();
+    let mut dispatcher = Dispatcher::from_db(
+        store.clone(),
+        log.writer(),
+        log.reader(),
+        FLUSH_INTERVAL,
+        &tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    .unwrap();
     dispatcher.fold_commit = fold_commit;
     let mut manager = dispatcher.new_handler::<event::Event>(tenant());
     manager.register::<Echo>().unwrap();
@@ -446,9 +482,15 @@ async fn a_burst_that_writes_much_takes_several_commits_at_the_configured_size()
 async fn fold_loop_stops_when_cancelled_without_folding() {
     let store = inmemory();
     let mut log = TestLog::new();
-    let dispatcher = Dispatcher::from_db(store.clone(), log.writer(), log.reader(), FLUSH_INTERVAL)
-        .await
-        .unwrap();
+    let dispatcher = Dispatcher::from_db(
+        store.clone(),
+        log.writer(),
+        log.reader(),
+        FLUSH_INTERVAL,
+        &tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    .unwrap();
     let mut dispatcher = dispatcher;
     let mut manager = dispatcher.new_handler::<event::Event>(tenant());
     manager.register::<User>().unwrap();
@@ -489,10 +531,15 @@ async fn fold_loop_stops_when_cancelled_without_folding() {
 #[tokio::test]
 async fn an_upstream_cancel_stops_an_idle_fold_and_cancels_its_subscribers() {
     let log = TestLog::new();
-    let mut dispatcher =
-        Dispatcher::from_db(inmemory(), log.writer(), log.reader(), FLUSH_INTERVAL)
-            .await
-            .unwrap();
+    let mut dispatcher = Dispatcher::from_db(
+        inmemory(),
+        log.writer(),
+        log.reader(),
+        FLUSH_INTERVAL,
+        &tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    .unwrap();
     let mut manager = dispatcher.new_handler::<event::Event>(tenant());
     manager.register::<User>().unwrap();
     let (_writer, reader) = manager.finalise().unwrap();

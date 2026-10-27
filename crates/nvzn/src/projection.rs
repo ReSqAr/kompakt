@@ -24,8 +24,8 @@
 
 use crate::metrics::{self, RowOp};
 use crate::{
-    Error, IndexId, ProjectionId, ProjectionTypeId, SubEventOf, Tenant, View, WriteTransaction,
-    WriteTransactionImpl,
+    Error, EventSet, IndexId, ProjectionId, ProjectionTypeId, SubEventOf, Tenant, View,
+    WriteTransaction, WriteTransactionImpl,
 };
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -37,7 +37,10 @@ pub trait Projection:
 {
     /// The events this projection folds: a subset enum borrowed from the
     /// event (`event::TodoEvent<'a>`), so folding copies nothing.
-    type Event<'a>;
+    type Event<'a>: EventSet;
+    /// The numbers of the events it folds; what decides whether it is live
+    /// under a live view's sub-event set ([`is_live`](crate::is_live)).
+    const EVENTS: &'static [u32] = <Self::Event<'static> as EventSet>::EVENTS;
     const TYPE_ID: ProjectionTypeId;
     /// The indices the framework maintains for this projection; registering
     /// the projection registers them. Each is usually a named [`Index`] const
@@ -383,9 +386,25 @@ impl<P: Projection> Projector<P> {
     }
 }
 
+/// What a live view needs of a registered projection: the events it folds,
+/// and how to build a projector of its own (the fold keeps the first one).
+pub(crate) struct Registered<Ev> {
+    pub(crate) events: &'static [u32],
+    pub(crate) make: fn() -> Result<BoxedProjectorLike<Ev>, Error>,
+}
+
+fn make_projector<P, Ev>() -> Result<BoxedProjectorLike<Ev>, Error>
+where
+    P: Projection,
+    for<'a> P::Event<'a>: SubEventOf<'a, Ev>,
+{
+    Ok(Box::new(Projector::<P>::new()?))
+}
+
 pub struct ProjectorManager<Ev> {
     pub(crate) tenant: Tenant,
     pub(crate) projectors: BTreeMap<ProjectionTypeId, BoxedProjectorLike<Ev>>,
+    pub(crate) registered: BTreeMap<ProjectionTypeId, Registered<Ev>>,
     pub(crate) registered_projection_types: BTreeSet<ProjectionTypeId>,
     pub(crate) registered_indices: BTreeSet<(ProjectionTypeId, IndexId)>,
 }
@@ -396,6 +415,7 @@ impl<Ev> ProjectorManager<Ev> {
         Self {
             tenant,
             projectors: BTreeMap::new(),
+            registered: BTreeMap::new(),
             registered_projection_types: BTreeSet::new(),
             registered_indices: BTreeSet::new(),
         }
@@ -428,6 +448,13 @@ where
         }
 
         self.projectors.insert(P::TYPE_ID, Box::new(p));
+        self.registered.insert(
+            P::TYPE_ID,
+            Registered {
+                events: P::EVENTS,
+                make: make_projector::<P, Ev>,
+            },
+        );
 
         Ok(())
     }

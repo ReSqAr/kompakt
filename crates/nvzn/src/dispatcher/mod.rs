@@ -41,6 +41,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
+use tokio_util::sync::CancellationToken;
 use zslg::{Hlc, LogIndex};
 
 pub(crate) type InnerHandler = Arc<
@@ -68,13 +69,19 @@ pub struct Dispatcher {
 }
 
 impl Dispatcher {
+    /// A dispatcher over `writer` and `reader`, stopped by `shutdown`: the
+    /// token that stops the node they come from (`ReplicaNode::shutdown_token`).
+    /// The dispatcher has no cancellation of its own; it stops the fold
+    /// through a child of this one, so ending the fold leaves the node up.
     pub async fn new(
         config: &StoreConfig,
         writer: Arc<dyn zslg::Writer>,
         reader: Arc<dyn zslg::Reader>,
+        shutdown: &CancellationToken,
     ) -> Result<Self, Error> {
         let store = Arc::new(RocksDBStore::new(config)?);
-        let mut dispatcher = Self::from_db(store, writer, reader, config.flush_interval).await?;
+        let mut dispatcher =
+            Self::from_db(store, writer, reader, config.flush_interval, shutdown).await?;
         dispatcher.fold_commit = config.fold_commit_bytes();
         Ok(dispatcher)
     }
@@ -103,6 +110,8 @@ impl Dispatcher {
             writer,
             reader,
             crate::testing::FLUSH_INTERVAL,
+            // A test rig has no node to stop: its shutdown is the root.
+            &CancellationToken::new(),
         )
         .await
     }
@@ -112,6 +121,7 @@ impl Dispatcher {
         writer: Arc<dyn zslg::Writer>,
         reader: Arc<dyn zslg::Reader>,
         flush_interval: Duration,
+        shutdown: &CancellationToken,
     ) -> Result<Self, Error> {
         let max_hlc = store.read()?.watermark()?.hlc;
         let (tx, rx) = watch::channel(max_hlc);
@@ -130,7 +140,7 @@ impl Dispatcher {
                 .as_u64()
                 .try_into()
                 .unwrap_or(usize::MAX),
-            fold_state: FoldState::new(max_hlc),
+            fold_state: FoldState::new(max_hlc, shutdown.child_token()),
             subscriptions,
             subscribers,
         })

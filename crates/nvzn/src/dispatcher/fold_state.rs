@@ -24,6 +24,12 @@ pub(crate) struct FoldState(Arc<FoldShared>);
 
 struct FoldShared {
     stopped: std::sync::OnceLock<StopReason>,
+    /// The dispatcher's cancellation: a child of the node's shutdown token
+    /// (`Dispatcher::new`), so a node shutdown stops the fold while ending the
+    /// fold leaves the node up. The fold and its fence stop on it; the
+    /// supervisor fires it when the fold ends, and [`FoldState::halt`] when
+    /// something outside the fold needs it stopped.
+    cancel: tokio_util::sync::CancellationToken,
     /// Never held across an `.await` (§4): every critical section on it is
     /// synchronous. Poisoning is ignored throughout — a plain `Option<Hlc>`
     /// cannot be left half-written by a panic.
@@ -32,9 +38,10 @@ struct FoldShared {
 }
 
 impl FoldState {
-    pub(super) fn new(folded: Option<Hlc>) -> Self {
+    pub(super) fn new(folded: Option<Hlc>, cancel: tokio_util::sync::CancellationToken) -> Self {
         Self(Arc::new(FoldShared {
             stopped: std::sync::OnceLock::new(),
+            cancel,
             folded: std::sync::Mutex::new(folded),
             changed: std::sync::Condvar::new(),
         }))
@@ -53,6 +60,21 @@ impl FoldState {
         // and its `wait`, so the wake-up cannot be lost.
         let _guard = self.folded();
         self.0.changed.notify_all();
+    }
+
+    /// Stop the dispatcher from outside the fold (a live view whose tail
+    /// ended): record `reason` (unless the fold already stopped for another),
+    /// then cancel. The fold takes the recorded reason as why it stopped, and
+    /// as a failure, so the dispatcher's task ends with [`Error::FoldStopped`]
+    /// and the process notices as for any fold stop.
+    pub(crate) fn halt(&self, reason: StopReason) {
+        self.stop(reason);
+        self.0.cancel.cancel();
+    }
+
+    /// The dispatcher's cancellation, for the supervisor.
+    pub(super) fn cancellation(&self) -> tokio_util::sync::CancellationToken {
+        self.0.cancel.clone()
     }
 
     /// Record that the fold has committed through `hlc`.

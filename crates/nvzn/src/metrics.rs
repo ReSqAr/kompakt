@@ -61,6 +61,7 @@ const LABEL_REASON: &str = "reason";
 const LABEL_KIND: &str = "kind";
 const LABEL_OP: &str = "op";
 const LABEL_CF: &str = "cf";
+const LABEL_STATE: &str = "state";
 
 /// What the fold loop did with a log entry.
 #[derive(Debug, Clone, Copy)]
@@ -108,6 +109,14 @@ pub enum StopReason {
     /// The fold task itself died — a projection handler panicked under
     /// `panic = "unwind"` — without reaching any of the other exits.
     Panicked,
+    /// A live view's unstable-tail subscription ended: zslg resyncs a slow
+    /// consumer inside the stream, so an end means the node's reader broke,
+    /// and a live view that stopped integrating would serve a stale world as
+    /// fresh. Stops the dispatcher so the process goes down.
+    UnstableTailEnded,
+    /// A live view's cold-start scan of the stable log ended before reaching
+    /// the stable watermark it set out for; as `UnstableTailEnded`.
+    LiveScanEnded,
 }
 
 impl StopReason {
@@ -123,6 +132,8 @@ impl StopReason {
             Self::StoreDropped => "store_dropped",
             Self::Upstream => "upstream",
             Self::Panicked => "panicked",
+            Self::UnstableTailEnded => "unstable_tail_ended",
+            Self::LiveScanEnded => "live_scan_ended",
         }
     }
 }
@@ -149,6 +160,7 @@ impl FenceOutcome {
 pub(crate) enum ReadKind {
     Stable,
     Unstable,
+    Live,
 }
 
 impl ReadKind {
@@ -156,6 +168,7 @@ impl ReadKind {
         match self {
             Self::Stable => "stable",
             Self::Unstable => "unstable",
+            Self::Live => "live",
         }
     }
 }
@@ -199,9 +212,76 @@ pub(crate) const UNSTABLE_FOLD_ENTRIES: &str = "nvzn_unstable_fold_entries";
 pub(crate) const UNSTABLE_SUBSCRIPTION_UNDECODABLE_TOTAL: &str =
     "nvzn_unstable_subscription_undecodable_total";
 pub(crate) const WRITES_TOTAL: &str = "nvzn_writes_total";
+pub(crate) const LIVE_HELD_EVENTS: &str = "nvzn_live_held_events";
+pub(crate) const LIVE_HELD_BYTES: &str = "nvzn_live_held_bytes";
+pub(crate) const LIVE_COVERAGE: &str = "nvzn_live_coverage";
+pub(crate) const LIVE_MATERIALISE_SECONDS: &str = "nvzn_live_materialise_seconds";
+pub(crate) const LIVE_MATERIALISE_ENTRIES: &str = "nvzn_live_materialise_entries";
+pub(crate) const LIVE_SCAN_SECONDS: &str = "nvzn_live_scan_seconds";
+pub(crate) const LIVE_SCAN_ENTRIES: &str = "nvzn_live_scan_entries";
+pub(crate) const LIVE_UNDECODABLE_TOTAL: &str = "nvzn_live_undecodable_total";
 pub(crate) const WRITE_EVENTS_TOTAL: &str = "nvzn_write_events_total";
 
 pub(crate) const ALL_METRICS: &[MetricDef] = &[
+    MetricDef {
+        name: LIVE_HELD_EVENTS,
+        kind: MetricKind::Gauge,
+        unit: Some(Unit::Count),
+        help: "Writes a live view holds above the fold's watermark, by tenant: the \
+               `S` events that reached this node and are not folded yet. Small \
+               unless the fold stalls or `S` events flood.",
+    },
+    MetricDef {
+        name: LIVE_HELD_BYTES,
+        kind: MetricKind::Gauge,
+        unit: Some(Unit::Bytes),
+        help: "Payload bytes of the writes a live view holds, by tenant; with \
+               nvzn_live_held_events, what the overflow cap is checked against.",
+    },
+    MetricDef {
+        name: LIVE_COVERAGE,
+        kind: MetricKind::Gauge,
+        unit: None,
+        help: "A live view's state, by tenant and state: 1 for the current one of \
+               `scanning` (cold start, snapshots wait), `complete`, `overflowed` \
+               (over the cap: snapshots serve the fold's state alone until it \
+               passes what was dropped).",
+    },
+    MetricDef {
+        name: LIVE_MATERIALISE_SECONDS,
+        kind: MetricKind::Histogram,
+        unit: Some(Unit::Seconds),
+        help: "Time to build one live snapshot: open the store, fold the held \
+               events through the live projections.",
+    },
+    MetricDef {
+        name: LIVE_MATERIALISE_ENTRIES,
+        kind: MetricKind::Histogram,
+        unit: Some(Unit::Count),
+        help: "Held writes folded into one live snapshot. Repeated per snapshot, \
+               so this is the per-read cost the held set adds.",
+    },
+    MetricDef {
+        name: LIVE_SCAN_SECONDS,
+        kind: MetricKind::Histogram,
+        unit: Some(Unit::Seconds),
+        help: "Duration of a live view's cold-start scan of the stable log, \
+               which the first snapshots wait for.",
+    },
+    MetricDef {
+        name: LIVE_SCAN_ENTRIES,
+        kind: MetricKind::Histogram,
+        unit: Some(Unit::Count),
+        help: "Stable-log entries a live view's cold-start scan read: the gap \
+               between the store's watermark and the stable watermark at start.",
+    },
+    MetricDef {
+        name: LIVE_UNDECODABLE_TOTAL,
+        kind: MetricKind::Counter,
+        unit: None,
+        help: "Payloads a live view could not decode, by tenant: logged and \
+               skipped (the fold stops on the same entry once it is stable).",
+    },
     MetricDef {
         name: FOLD_WATERMARK_ADVANCED_TIMESTAMP_SECONDS,
         kind: MetricKind::Gauge,
@@ -537,6 +617,35 @@ pub(crate) fn unstable_subscription_undecodable(tenant: Tenant) {
         .increment(1);
 }
 
+pub(crate) fn live_held(tenant: Tenant, events: usize, bytes: usize) {
+    metrics::gauge!(LIVE_HELD_EVENTS, LABEL_TENANT => tenant.name())
+        .set(lossy_f64(u64::try_from(events).unwrap_or(u64::MAX)));
+    metrics::gauge!(LIVE_HELD_BYTES, LABEL_TENANT => tenant.name())
+        .set(lossy_f64(u64::try_from(bytes).unwrap_or(u64::MAX)));
+}
+
+pub(crate) fn live_coverage(tenant: Tenant, current: &'static str) {
+    for state in ["scanning", "complete", "overflowed"] {
+        metrics::gauge!(LIVE_COVERAGE, LABEL_TENANT => tenant.name(), LABEL_STATE => state)
+            .set(if state == current { 1.0 } else { 0.0 });
+    }
+}
+
+pub(crate) fn live_materialise(entries: usize, elapsed: Duration) {
+    metrics::histogram!(LIVE_MATERIALISE_SECONDS).record(elapsed);
+    metrics::histogram!(LIVE_MATERIALISE_ENTRIES)
+        .record(lossy_f64(u64::try_from(entries).unwrap_or(u64::MAX)));
+}
+
+pub(crate) fn live_scan(entries: u64, elapsed: Duration) {
+    metrics::histogram!(LIVE_SCAN_SECONDS).record(elapsed);
+    metrics::histogram!(LIVE_SCAN_ENTRIES).record(lossy_f64(entries));
+}
+
+pub(crate) fn live_undecodable(tenant: Tenant) {
+    metrics::counter!(LIVE_UNDECODABLE_TOTAL, LABEL_TENANT => tenant.name()).increment(1);
+}
+
 pub(crate) fn write(tenant: Tenant, events: usize) {
     metrics::counter!(WRITES_TOTAL, LABEL_TENANT => tenant.name()).increment(1);
     metrics::counter!(WRITE_EVENTS_TOTAL, LABEL_TENANT => tenant.name())
@@ -728,6 +837,11 @@ mod tests {
             unstable_fold(2);
             unstable_subscription_undecodable(tenant);
             write(tenant, 4);
+            live_held(tenant, 2, 300);
+            live_coverage(tenant, "complete");
+            live_materialise(2, Duration::from_millis(1));
+            live_scan(5, Duration::from_millis(1));
+            live_undecodable(tenant);
         });
 
         let snapshot = snapshotter.snapshot().into_hashmap();

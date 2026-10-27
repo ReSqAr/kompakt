@@ -151,6 +151,10 @@ impl From<&NoEvents> for NoWire {
 impl WithWireFormat for NoEvents {
     type WireFormat = NoWire;
     type WireFormatRef<'a> = NoWire;
+
+    fn number(&self) -> u32 {
+        match *self {}
+    }
 }
 
 /// No subcommands: for an app without CLI commands.

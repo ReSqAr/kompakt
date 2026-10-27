@@ -7,10 +7,15 @@ use super::*;
 async fn a_stopped_fold_is_reported_to_every_read() {
     let store = inmemory();
     let log = TestLog::new();
-    let mut dispatcher =
-        Dispatcher::from_db(store.clone(), log.writer(), log.reader(), FLUSH_INTERVAL)
-            .await
-            .unwrap();
+    let mut dispatcher = Dispatcher::from_db(
+        store.clone(),
+        log.writer(),
+        log.reader(),
+        FLUSH_INTERVAL,
+        &tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    .unwrap();
     let mut manager = dispatcher.new_handler::<event::Event>(tenant());
     manager.register::<User>().unwrap();
     let (_writer, reader) = manager.finalise().unwrap();
@@ -42,7 +47,7 @@ async fn a_stopped_fold_is_reported_to_every_read() {
 /// with the reason, never leave it parked.
 #[tokio::test]
 async fn a_blocked_fold_wait_wakes_on_progress_and_on_stop() {
-    let state = FoldState::new(None);
+    let state = FoldState::new(None, tokio_util::sync::CancellationToken::new());
 
     let reached = tokio::task::spawn_blocking({
         let state = state.clone();
