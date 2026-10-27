@@ -1017,10 +1017,13 @@ mod tests {
             .await
             .expect("the dispatcher stops")
             .unwrap();
-        assert!(matches!(
-            ended,
-            Err(Error::FoldStopped(StopReason::UnstableTailEnded))
-        ));
+        assert!(
+            matches!(
+                ended,
+                Err(Error::FoldStopped(StopReason::UnstableTailEnded))
+            ),
+            "{ended:?}"
+        );
         let live2 = live.clone();
         let read = tokio::task::spawn_blocking(move || live2.snapshot().map(|_| ()))
             .await

@@ -104,6 +104,15 @@ pub(super) fn run(
 
 impl FoldInputs {
     fn stop(self, FoldStop { reason, error }: FoldStop) -> Result<(), Error> {
+        // Cancelled because something outside the fold halted it
+        // (`FoldState::halt` recorded why first): that is why it stopped, and
+        // it is a failure, not a shutdown.
+        let (reason, error) = match (reason, self.fold_state.reason()) {
+            (StopReason::Cancelled, Some(halted)) if halted != StopReason::Cancelled => {
+                (halted, Some(Error::FoldStopped(halted)))
+            }
+            _ => (reason, error),
+        };
         metrics::fold_stopped(reason);
         self.fold_state.stop(reason);
         // The recorded reason, not `reason`: a fence failure that cancels the

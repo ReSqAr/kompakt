@@ -21,7 +21,6 @@ use crate::metrics::{self, FenceOutcome, StopReason};
 use crate::{ArcStore, Error};
 use std::sync::Arc;
 use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 use zslg::{Cancellation, LogIndex};
 
@@ -72,7 +71,7 @@ impl Dispatcher {
         let replay_target = reader.stable_watermark();
         info!(log_index = ?from, "subscribing to the stable log");
         let store = self.store.clone();
-        let cancel = CancellationToken::new();
+        let cancel = fold_state.cancellation();
         // Bound to `cancel` so asking the fold to stop wakes it even while it
         // is parked on a quiet log; zslg binds its own shutdown the same way,
         // and either reaches the fold as `ChannelEnd::Cancelled`.
@@ -121,28 +120,11 @@ impl Dispatcher {
             }
         });
 
-        let halted = fold_state.halted();
         let dispatcher_handle = tokio::spawn(async move {
             tokio::pin!(fold);
             tokio::pin!(fence);
 
             tokio::select! {
-                () = halted.cancelled() => {
-                    // Asked from outside (`FoldState::halt`), which recorded
-                    // why first: stop the fold, make what it committed
-                    // durable, and end as a failure so the process notices.
-                    let reason = fold_state.reason().unwrap_or(StopReason::Cancelled);
-                    metrics::fold_stopped(reason);
-                    error!(
-                        reason = reason.as_str(),
-                        "nvzn dispatcher halted: projections are frozen and will not \
-                         resume without a new dispatcher"
-                    );
-                    cancel.cancel();
-                    let _ = (&mut fold).await;
-                    let _ = fence.await;
-                    Err(Error::FoldStopped(reason))
-                }
                 folded = &mut fold => {
                     cancel.cancel();
                     // Every exit of the loop itself records why; a task that
@@ -154,11 +136,12 @@ impl Dispatcher {
                     }
                     let fenced = fence.await.map_err(|e| Error::TaskJoin(e.to_string()))?;
                     let folded = folded.map_err(|e| Error::TaskJoin(e.to_string()))?;
-                    // `cancel` fires only in these two arms, so the fold was
-                    // never asked to stop: reaching here means folding has
-                    // ended for good and the projections are frozen. `Ok` is
-                    // the log simply ending or the store going away — a
-                    // shutdown, not a fault — so only a failure is an error.
+                    // `cancel` fires in these two arms and in `FoldState::halt`,
+                    // which the fold returns as a failure: reaching here means
+                    // folding has ended for good and the projections are
+                    // frozen. `Ok` is the log simply ending or the store going
+                    // away — a shutdown, not a fault — so only a failure is an
+                    // error.
                     match &folded {
                         Err(e) => error!(
                             error = %e,
@@ -170,12 +153,19 @@ impl Dispatcher {
                     folded.and(fenced)
                 }
                 fenced = &mut fence => {
-                    // The fence stopping strands the fold: nothing it folds
+                    let fenced = fenced.map_err(|e| Error::TaskJoin(e.to_string()))?;
+                    // The fence ends cleanly only on `cancel`, which here came
+                    // from `FoldState::halt`: it made what was committed
+                    // durable, and the fold says why it stopped.
+                    if fenced.is_ok() {
+                        return (&mut fold).await.map_err(|e| Error::TaskJoin(e.to_string()))?;
+                    }
+                    // The fence failing strands the fold: nothing it folds
                     // from here can be made durable, so readers are owed the
                     // same answer as if the fold itself had stopped.
                     fold_state.stop(StopReason::StoreError);
                     cancel.cancel();
-                    fenced.map_err(|e| Error::TaskJoin(e.to_string()))?
+                    fenced
                 }
             }
         });
