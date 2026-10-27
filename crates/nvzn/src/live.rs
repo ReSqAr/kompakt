@@ -650,7 +650,7 @@ impl<Ev: WithWireFormat> Live<Ev> {
             inner.bump();
         }
 
-        let mut scratch = WriteTransactionImpl::new(txn, &*inner.store).scratch();
+        let mut scratch = WriteTransactionImpl::new(txn, &*inner.store);
         for events in &pending {
             for event in events.iter() {
                 fold_event(&inner.projectors, inner.tenant, event, &mut scratch)?;

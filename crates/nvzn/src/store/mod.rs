@@ -97,13 +97,6 @@ pub trait ReadTransactionExt: ReadTransaction {
 impl<T: ReadTransaction + ?Sized> ReadTransactionExt for T {}
 
 pub trait WriteTransaction: ReadTransaction {
-    /// Whether the rows it stages are counted (`nvzn_projection_rows_total`):
-    /// not for a live view's scratch transaction, which is never committed and
-    /// would count each held event once per snapshot.
-    fn counts_rows(&self) -> bool {
-        true
-    }
-
     /// Stage a row, or stage its removal with `None`.
     ///
     /// Takes an owned [`Bytes`] rather than a slice so the overlay can adopt

@@ -351,17 +351,15 @@ impl<P: Projection> Projector<P> {
         });
 
         store.set_raw(tenant_id, r.type_id(), r.id(), encoded)?;
-        if store.counts_rows() {
-            metrics::projection_row(
-                tenant,
-                metrics::short_type_name::<P>(),
-                if next.is_some() {
-                    RowOp::Upsert
-                } else {
-                    RowOp::Delete
-                },
-            );
-        }
+        metrics::projection_row(
+            tenant,
+            metrics::short_type_name::<P>(),
+            if next.is_some() {
+                RowOp::Upsert
+            } else {
+                RowOp::Delete
+            },
+        );
 
         for (iid, ix) in &self.indices {
             let current_i = current_indices.remove(iid);

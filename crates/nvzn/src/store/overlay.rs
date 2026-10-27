@@ -37,8 +37,6 @@ pub struct WriteTransactionImpl<'a> {
     pub(in crate::store) overlay_index: OverlayIndex,
     /// [`Self::staged_bytes`].
     staged: usize,
-    /// A live view's materialisation: read, never committed, rows not counted.
-    scratch: bool,
 }
 
 impl<'a> WriteTransactionImpl<'a> {
@@ -49,15 +47,7 @@ impl<'a> WriteTransactionImpl<'a> {
             overlay_store: Default::default(),
             overlay_index: Default::default(),
             staged: 0,
-            scratch: false,
         }
-    }
-
-    /// A transaction a live view folds its held events into and then reads:
-    /// never committed, so its rows are not counted as projected.
-    pub(crate) fn scratch(mut self) -> Self {
-        self.scratch = true;
-        self
     }
 
     /// What the transaction holds in memory until it commits, estimated: every
@@ -176,10 +166,6 @@ impl<'a> ReadTransaction for WriteTransactionImpl<'a> {
 }
 
 impl<'a> WriteTransaction for WriteTransactionImpl<'a> {
-    fn counts_rows(&self) -> bool {
-        !self.scratch
-    }
-
     fn set_raw(
         &mut self,
         tenant_id: TenantId,
