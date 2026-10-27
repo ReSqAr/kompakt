@@ -131,10 +131,15 @@ mod test_support {
     pub(super) async fn rig() -> (Arc<dyn Store>, Reader<event::Event>, Index<Todo, User>) {
         let store = inmemory();
         let log = TestLog::new();
-        let mut dispatcher =
-            Dispatcher::from_db(store.clone(), log.writer(), log.reader(), FLUSH_INTERVAL)
-                .await
-                .unwrap();
+        let mut dispatcher = Dispatcher::from_db(
+            store.clone(),
+            log.writer(),
+            log.reader(),
+            FLUSH_INTERVAL,
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         let mut manager = dispatcher.new_handler::<event::Event>(tenant());
         manager.register::<Todo>().unwrap();
         let (_writer, reader) = manager.finalise().unwrap();

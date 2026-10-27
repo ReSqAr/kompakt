@@ -44,10 +44,15 @@ pub(super) async fn user_dispatcher(
     JoinHandle<Result<(), Error>>,
 ) {
     let log = TestLog::new();
-    let mut dispatcher =
-        Dispatcher::from_db(store.clone(), log.writer(), log.reader(), FLUSH_INTERVAL)
-            .await
-            .unwrap();
+    let mut dispatcher = Dispatcher::from_db(
+        store.clone(),
+        log.writer(),
+        log.reader(),
+        FLUSH_INTERVAL,
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
     let mut manager = dispatcher.new_handler::<event::Event>(tenant());
     manager.register::<User>().unwrap();
     let (writer, _reader) = manager.finalise().unwrap();
@@ -91,10 +96,15 @@ pub(super) async fn run_with_interval(
     crate::Syncer,
     tokio::task::JoinHandle<Result<(), Error>>,
 ) {
-    let mut dispatcher =
-        Dispatcher::from_db(store.clone(), log.writer(), log.reader(), flush_interval)
-            .await
-            .unwrap();
+    let mut dispatcher = Dispatcher::from_db(
+        store.clone(),
+        log.writer(),
+        log.reader(),
+        flush_interval,
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
     let mut manager = dispatcher.new_handler::<event::Event>(tenant());
     for name in projections {
         match *name {
@@ -124,9 +134,15 @@ pub(super) async fn scripted_dispatcher(
     log: &TestLog,
     scripted: Arc<testsupport::ScriptedReader>,
 ) -> (Dispatcher, crate::Reader<event::Event>) {
-    let mut dispatcher = Dispatcher::from_db(store.clone(), log.writer(), scripted, FLUSH_INTERVAL)
-        .await
-        .unwrap();
+    let mut dispatcher = Dispatcher::from_db(
+        store.clone(),
+        log.writer(),
+        scripted,
+        FLUSH_INTERVAL,
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
     let mut manager = dispatcher.new_handler::<event::Event>(tenant());
     manager.register::<User>().unwrap();
     let (_writer, reader) = manager.finalise().unwrap();

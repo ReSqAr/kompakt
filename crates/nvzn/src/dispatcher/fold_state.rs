@@ -24,9 +24,11 @@ pub(crate) struct FoldState(Arc<FoldShared>);
 
 struct FoldShared {
     stopped: std::sync::OnceLock<StopReason>,
-    /// The dispatcher's one cancellation: the fold and its fence stop on it.
-    /// The supervisor fires it when the fold ends, and [`FoldState::halt`]
-    /// when something outside the fold needs it stopped.
+    /// The dispatcher's cancellation: a child of the node's shutdown token
+    /// (`Dispatcher::new`), so a node shutdown stops the fold while ending the
+    /// fold leaves the node up. The fold and its fence stop on it; the
+    /// supervisor fires it when the fold ends, and [`FoldState::halt`] when
+    /// something outside the fold needs it stopped.
     cancel: tokio_util::sync::CancellationToken,
     /// Never held across an `.await` (§4): every critical section on it is
     /// synchronous. Poisoning is ignored throughout — a plain `Option<Hlc>`
@@ -36,10 +38,10 @@ struct FoldShared {
 }
 
 impl FoldState {
-    pub(super) fn new(folded: Option<Hlc>) -> Self {
+    pub(super) fn new(folded: Option<Hlc>, cancel: tokio_util::sync::CancellationToken) -> Self {
         Self(Arc::new(FoldShared {
             stopped: std::sync::OnceLock::new(),
-            cancel: tokio_util::sync::CancellationToken::new(),
+            cancel,
             folded: std::sync::Mutex::new(folded),
             changed: std::sync::Condvar::new(),
         }))

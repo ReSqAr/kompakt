@@ -402,7 +402,7 @@ async fn setup_db(db: Db, config: &StoreConfig) -> (Dispatcher, Rig) {
                 node.run().boxed().await.expect("db failure");
             });
 
-            let dispatcher = Dispatcher::new(config, writer, reader)
+            let dispatcher = Dispatcher::new(config, writer, reader, &token)
                 .boxed()
                 .await
                 .expect("dispatcher");

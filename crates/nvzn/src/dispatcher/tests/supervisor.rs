@@ -200,3 +200,62 @@ async fn finalise_fails_when_the_fold_stops_during_replay() {
         Err(Error::FoldStopped(StopReason::SubscriptionAborted))
     ));
 }
+
+/// The dispatcher's only cancellation is the node's shutdown: cancelling it
+/// stops the fold, and the dispatcher ends cleanly.
+#[tokio::test]
+async fn the_nodes_shutdown_stops_the_dispatcher() {
+    let shutdown = CancellationToken::new();
+    let log = TestLog::new();
+    let mut dispatcher = Dispatcher::from_db(
+        inmemory(),
+        log.writer(),
+        log.reader(),
+        FLUSH_INTERVAL,
+        &shutdown,
+    )
+    .await
+    .unwrap();
+    let mut manager = dispatcher.new_handler::<event::Event>(tenant());
+    manager.register::<User>().unwrap();
+    let (_writer, reader) = manager.finalise().unwrap();
+    let handle = dispatcher.finalise().await.unwrap();
+
+    shutdown.cancel();
+    let ended = timeout(SYNC, handle).await.expect("it stops").unwrap();
+    assert!(ended.is_ok(), "a shutdown, not a fault: {ended:?}");
+    assert!(matches!(
+        reader.snapshot().map(|_| ()),
+        Err(Error::FoldStopped(StopReason::Cancelled))
+    ));
+}
+
+/// A halt stops the dispatcher through its child of the node's token: the
+/// node's own stays up (the host drains and exits on the failed fold).
+#[tokio::test]
+async fn a_halt_leaves_the_nodes_token_alone() {
+    let shutdown = CancellationToken::new();
+    let log = TestLog::new();
+    let dispatcher = Dispatcher::from_db(
+        inmemory(),
+        log.writer(),
+        log.reader(),
+        FLUSH_INTERVAL,
+        &shutdown,
+    )
+    .await
+    .unwrap();
+    let fold_state = dispatcher.fold_state.clone();
+    let handle = dispatcher.finalise().await.unwrap();
+
+    fold_state.halt(StopReason::UnstableTailEnded);
+    let ended = timeout(SYNC, handle).await.expect("it stops").unwrap();
+    assert!(
+        matches!(
+            ended,
+            Err(Error::FoldStopped(StopReason::UnstableTailEnded))
+        ),
+        "{ended:?}"
+    );
+    assert!(!shutdown.is_cancelled());
+}

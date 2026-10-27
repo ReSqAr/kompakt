@@ -216,9 +216,16 @@ impl Deployment {
         node_shutdown: Option<CancellationToken>,
     ) -> Self {
         let store: PathBuf = root.join(format!("{tag}-nvzn"));
-        let mut dispatcher = Dispatcher::new(&StoreConfig::new(store), zslg_writer, zslg_reader)
-            .await
-            .expect("dispatcher");
+        // The node's shutdown, or (no node: an in-process log) a root of its own.
+        let shutdown = node_shutdown.clone().unwrap_or_default();
+        let mut dispatcher = Dispatcher::new(
+            &StoreConfig::new(store),
+            zslg_writer,
+            zslg_reader,
+            &shutdown,
+        )
+        .await
+        .expect("dispatcher");
         let mut manager = dispatcher.new_handler::<event::Event>(Tenant::new("todo", 0));
         manager.register::<User>().expect("register");
         let (writer, reader) = manager.finalise().expect("finalise handler");

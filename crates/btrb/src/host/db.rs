@@ -51,7 +51,9 @@ pub(crate) async fn setup_db(
     nvzn: &nvzn::StoreConfig,
 ) -> Result<(nvzn::Dispatcher, NodeShutdown), Box<dyn Error>> {
     let (writer, reader, shutdown) = setup_zslg_db(zslg.clone()).boxed().await?;
-    let dispatcher = nvzn::Dispatcher::new(nvzn, writer, reader).boxed().await?;
+    let dispatcher = nvzn::Dispatcher::new(nvzn, writer, reader, &shutdown.token())
+        .boxed()
+        .await?;
 
     Ok((dispatcher, shutdown))
 }
@@ -61,7 +63,9 @@ pub(crate) async fn setup_follower_db(
     nvzn: &nvzn::StoreConfig,
 ) -> Result<(nvzn::Dispatcher, CancellationToken), Box<dyn Error>> {
     let (writer, reader, token) = setup_follower_zslg_db(zslg.clone()).boxed().await?;
-    let dispatcher = nvzn::Dispatcher::new(nvzn, writer, reader).boxed().await?;
+    let dispatcher = nvzn::Dispatcher::new(nvzn, writer, reader, &token)
+        .boxed()
+        .await?;
 
     Ok((dispatcher, token))
 }

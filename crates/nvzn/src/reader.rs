@@ -429,10 +429,15 @@ mod tests {
     async fn the_fold_passing_hlc_now_puts_earlier_writes_in_the_stable_snapshot() {
         let store = inmemory();
         let log = TestLog::new();
-        let mut dispatcher =
-            Dispatcher::from_db(store.clone(), log.writer(), log.reader(), FLUSH_INTERVAL)
-                .await
-                .unwrap();
+        let mut dispatcher = Dispatcher::from_db(
+            store.clone(),
+            log.writer(),
+            log.reader(),
+            FLUSH_INTERVAL,
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         let mut manager = dispatcher.new_handler::<event::Event>(tenant());
         manager.register::<User>().unwrap();
         let (writer, reader) = manager.finalise().unwrap();
@@ -468,10 +473,15 @@ mod tests {
     async fn reader() -> (Arc<dyn Store>, TestLog, Reader<event::Event>) {
         let store = inmemory();
         let log = TestLog::new();
-        let mut dispatcher =
-            Dispatcher::from_db(store.clone(), log.writer(), log.reader(), FLUSH_INTERVAL)
-                .await
-                .unwrap();
+        let mut dispatcher = Dispatcher::from_db(
+            store.clone(),
+            log.writer(),
+            log.reader(),
+            FLUSH_INTERVAL,
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         let mut manager = dispatcher.new_handler::<event::Event>(tenant());
         manager.register::<User>().unwrap();
         let (_writer, reader) = manager.finalise().unwrap();
@@ -640,9 +650,15 @@ mod tests {
             calls.clone(),
         ));
 
-        let mut dispatcher = Dispatcher::from_db(store, log.writer(), zslg_reader, FLUSH_INTERVAL)
-            .await
-            .unwrap();
+        let mut dispatcher = Dispatcher::from_db(
+            store,
+            log.writer(),
+            zslg_reader,
+            FLUSH_INTERVAL,
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         let mut manager = dispatcher.new_handler::<event::Event>(tenant());
         manager.register::<User>().unwrap();
         let (_writer, reader) = manager.finalise().unwrap();
@@ -673,10 +689,15 @@ mod tests {
         let store = inmemory();
         let log = TestLog::new();
         let (scripted, feed) = testsupport::ScriptedReader::new();
-        let mut dispatcher =
-            Dispatcher::from_db(store, log.writer(), scripted.clone(), FLUSH_INTERVAL)
-                .await
-                .unwrap();
+        let mut dispatcher = Dispatcher::from_db(
+            store,
+            log.writer(),
+            scripted.clone(),
+            FLUSH_INTERVAL,
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         let mut manager = dispatcher.new_handler::<event::Event>(tenant());
         manager.register::<User>().unwrap();
         let (_writer, reader) = manager.finalise().unwrap();
@@ -790,10 +811,15 @@ mod tests {
             tokio::task::JoinHandle<Result<(), Error>>,
         ) {
             let log = TestLog::new();
-            let mut dispatcher =
-                Dispatcher::from_db(inmemory(), log.writer(), log.reader(), FLUSH_INTERVAL)
-                    .await
-                    .unwrap();
+            let mut dispatcher = Dispatcher::from_db(
+                inmemory(),
+                log.writer(),
+                log.reader(),
+                FLUSH_INTERVAL,
+                &tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .unwrap();
             let mut manager = dispatcher.new_handler::<event::Event>(tenant());
             manager.register::<User>().unwrap();
             manager.register::<Todo>().unwrap();
@@ -918,10 +944,15 @@ mod tests {
         #[tokio::test]
         async fn a_dispatcher_dropped_unfinalised_ends_the_channel() {
             let log = TestLog::new();
-            let mut dispatcher =
-                Dispatcher::from_db(inmemory(), log.writer(), log.reader(), FLUSH_INTERVAL)
-                    .await
-                    .unwrap();
+            let mut dispatcher = Dispatcher::from_db(
+                inmemory(),
+                log.writer(),
+                log.reader(),
+                FLUSH_INTERVAL,
+                &tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .unwrap();
             let mut manager = dispatcher.new_handler::<event::Event>(tenant());
             manager.register::<Todo>().unwrap();
             let (_writer, reader) = manager.finalise().unwrap();
@@ -939,10 +970,15 @@ mod tests {
         #[tokio::test]
         async fn an_unregistered_projection_is_refused() {
             let log = TestLog::new();
-            let mut dispatcher =
-                Dispatcher::from_db(inmemory(), log.writer(), log.reader(), FLUSH_INTERVAL)
-                    .await
-                    .unwrap();
+            let mut dispatcher = Dispatcher::from_db(
+                inmemory(),
+                log.writer(),
+                log.reader(),
+                FLUSH_INTERVAL,
+                &tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .unwrap();
             let mut manager = dispatcher.new_handler::<event::Event>(tenant());
             manager.register::<User>().unwrap();
             let (_writer, reader) = manager.finalise().unwrap();
@@ -1047,10 +1083,15 @@ mod tests {
         #[tokio::test]
         async fn outlives_a_fold_that_stopped() {
             let log = TestLog::new();
-            let mut dispatcher =
-                Dispatcher::from_db(inmemory(), log.writer(), log.reader(), FLUSH_INTERVAL)
-                    .await
-                    .unwrap();
+            let mut dispatcher = Dispatcher::from_db(
+                inmemory(),
+                log.writer(),
+                log.reader(),
+                FLUSH_INTERVAL,
+                &tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .unwrap();
             let mut manager = dispatcher.new_handler::<event::Event>(tenant());
             manager.register::<User>().unwrap();
             let (_writer, reader) = manager.finalise().unwrap();

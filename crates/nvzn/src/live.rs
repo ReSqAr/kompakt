@@ -720,10 +720,15 @@ mod tests {
     async fn rig() -> (Arc<dyn Store>, TestLog, Reader<event::Event>) {
         let store = inmemory();
         let log = TestLog::new();
-        let mut dispatcher =
-            Dispatcher::from_db(store.clone(), log.writer(), log.reader(), FLUSH_INTERVAL)
-                .await
-                .unwrap();
+        let mut dispatcher = Dispatcher::from_db(
+            store.clone(),
+            log.writer(),
+            log.reader(),
+            FLUSH_INTERVAL,
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         let mut manager = dispatcher.new_handler::<event::Event>(tenant());
         manager.register::<User>().unwrap();
         manager.register::<Todo>().unwrap();
@@ -1002,10 +1007,15 @@ mod tests {
     async fn an_ended_tail_stops_the_dispatcher() {
         let store = inmemory();
         let log = TestLog::new();
-        let mut dispatcher =
-            Dispatcher::from_db(store.clone(), log.writer(), log.reader(), FLUSH_INTERVAL)
-                .await
-                .unwrap();
+        let mut dispatcher = Dispatcher::from_db(
+            store.clone(),
+            log.writer(),
+            log.reader(),
+            FLUSH_INTERVAL,
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
         let mut manager = dispatcher.new_handler::<event::Event>(tenant());
         manager.register::<User>().unwrap();
         let (_writer, reader) = manager.finalise().unwrap();
