@@ -31,10 +31,12 @@ else
 fi
 
 out=""
-add() { [[ "$1" = 1 ]] && out+="${out:+,}\"$2\""; }
+# An `if`, not `&&`: a false test would be the function's status, and under
+# `set -e` an unchanged crate would end the script.
+add() { if [[ "$1" = 1 ]]; then out+="${out:+,}\"$2\""; fi; }
 add "$cache" objectstorage-cache
 add "$zslg" zslg
 add "$nvzn" nvzn
 add "$btrb" btrb
 printf 'crates=[%s]\n' "$out"
-[[ -n "${GITHUB_OUTPUT:-}" ]] && printf 'crates=[%s]\n' "$out" >> "$GITHUB_OUTPUT"
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then printf 'crates=[%s]\n' "$out" >> "$GITHUB_OUTPUT"; fi
