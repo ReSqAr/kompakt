@@ -200,12 +200,17 @@ enum Coverage<Ev> {
     Complete { held: Held<Ev>, bytes: usize },
     /// The cap was hit. `until` is the newest `DataId` dropped, frozen: it moves
     /// only if the cap is hit again. `held` collects arrivals above it, not
-    /// served; snapshot = store@F only. Once F covers `until`, `Complete` with
-    /// what is held: all of it is newer than everything dropped.
+    /// served; snapshot = store@F only. Once F covers `until` — and the
+    /// cold-start scan, if it was running, has read to its end — `Complete`
+    /// with what is held: everything older is then folded, held, or dropped
+    /// below `until`, so nothing is served ahead of an event it depends on.
     Overflowed {
         until: DataId,
         held: Held<Ev>,
         bytes: usize,
+        /// The scan was running at the overflow and has not finished: what it
+        /// has not read yet is neither held nor folded, so no recovery yet.
+        scan: bool,
     },
 }
 
@@ -325,7 +330,9 @@ impl<Ev: WithWireFormat> Inner<Ev> {
                 }
                 held.last_key_value().map(|(newest, _)| *newest)
             }
-            Coverage::Overflowed { until, held, bytes } => {
+            Coverage::Overflowed {
+                until, held, bytes, ..
+            } => {
                 if id <= *until || held.contains_key(&id) {
                     return false;
                 }
@@ -348,6 +355,7 @@ impl<Ev: WithWireFormat> Inner<Ev> {
                 until,
                 held: Held::new(),
                 bytes: 0,
+                scan: matches!(state.coverage, Coverage::Scanning { .. }),
             };
             warn!(
                 tenant = self.tenant.name(),
@@ -357,7 +365,8 @@ impl<Ev: WithWireFormat> Inner<Ev> {
                 max_held_bytes = self.limits.max_held_bytes,
                 "live view overflowed: serving the fold's state alone until it passes what was dropped"
             );
-            // A scan stops at the overflow, and its waiters go on.
+            // The scan reads on to its end; its waiters go on now, served
+            // the fold's state alone.
             self.scanned.notify_all();
         }
         false
@@ -371,9 +380,14 @@ impl<Ev: WithWireFormat> Inner<Ev> {
                 retain_uncovered(held, bytes, &f);
                 false
             }
-            Coverage::Overflowed { until, held, bytes } => {
+            Coverage::Overflowed {
+                until,
+                held,
+                bytes,
+                scan,
+            } => {
                 retain_uncovered(held, bytes, &f);
-                f.covers(*until)
+                !*scan && f.covers(*until)
             }
         };
         if recovered
@@ -408,26 +422,38 @@ impl<Ev: WithWireFormat> Inner<Ev> {
         Ok(())
     }
 
-    /// The scan is over (or was cut short): `Scanning` becomes `Complete`.
+    /// The scan is over: `Scanning` becomes `Complete`; an overflow during it
+    /// may now recover, once F covers `until`.
     fn finish_scan(&self) {
         let mut state = self.lock();
-        if let Coverage::Scanning { held, bytes } = std::mem::replace(
+        match std::mem::replace(
             &mut state.coverage,
             Coverage::Complete {
                 held: Held::new(),
                 bytes: 0,
             },
         ) {
-            state.coverage = Coverage::Complete { held, bytes };
+            Coverage::Scanning { held, bytes } => {
+                state.coverage = Coverage::Complete { held, bytes };
+            }
+            Coverage::Overflowed {
+                until, held, bytes, ..
+            } => {
+                state.coverage = Coverage::Overflowed {
+                    until,
+                    held,
+                    bytes,
+                    scan: false,
+                };
+                let f = state.folded.clone();
+                self.retire(&mut state, f);
+            }
+            complete @ Coverage::Complete { .. } => state.coverage = complete,
         }
         self.publish(&state);
         drop(state);
         self.scanned.notify_all();
         self.bump();
-    }
-
-    fn scanning(&self) -> bool {
-        matches!(self.lock().coverage, Coverage::Scanning { .. })
     }
 }
 
@@ -490,11 +516,9 @@ fn scan<Ev: WithWireFormat>(
                     break false;
                 }
                 entries = entries.saturating_add(1);
+                // Overflowed or not, the scan reads to its end: until it
+                // has, an overflow cannot recover (`Coverage::Overflowed`).
                 inner.arrive(data);
-                if !inner.scanning() {
-                    // Overflowed: what the scan has not reached is the floor's.
-                    break false;
-                }
             }
             // Sent right after the replay (zslg `learner/read.rs`), so the
             // scan never waits for the next watermark advance.
@@ -1001,6 +1025,50 @@ mod tests {
             .await
             .expect("the snapshot does not hang on an overflowed scan");
         assert!(got.is_none(), "overflowed: store@F alone");
+
+        // The scan read on to its end: the third dropped is `until`, the
+        // last two held; nothing it read is lost.
+        settle(&live, |l| {
+            matches!(
+                l.inner.lock().coverage,
+                Coverage::Overflowed { scan: false, .. }
+            )
+        })
+        .await;
+        assert_eq!(held(&live), 2);
+    }
+
+    /// An overflow while the scan runs does not recover before the scan has
+    /// read to its end, however far F gets: what it has not read yet is
+    /// neither held nor folded.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_overflow_during_the_scan_recovers_only_after_it() {
+        let (store, _log, reader) = rig().await;
+        let live = reader
+            .live_with::<Users>(LiveLimits {
+                max_held_events: 1,
+                max_held_bytes: usize::MAX,
+            })
+            .unwrap();
+        // As if the scan were running.
+        live.inner.lock().coverage = Coverage::Scanning {
+            held: Held::new(),
+            bytes: 0,
+        };
+        for ms in [10u64, 11] {
+            live.inner.arrive(Data {
+                data_id: data_id(ms, ms),
+                blob: blob(&[new_user(u128::from(ms), "x")]),
+            });
+        }
+        assert_eq!(coverage(&live), "overflowed");
+
+        set_f(&store, data_id(11, 11));
+        live.inner.retire_now().unwrap();
+        assert_eq!(coverage(&live), "overflowed", "the scan has not ended");
+
+        live.inner.finish_scan();
+        assert_eq!(coverage(&live), "complete", "ended, and F covers `until`");
     }
 
     #[tokio::test(flavor = "multi_thread")]

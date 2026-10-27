@@ -66,6 +66,15 @@ async fn dispatcher_skips_replayed_entries() {
         ),
     );
     syncer.sync().await.unwrap();
+    // Read once the fold has committed index 1 (the ping), not just the first
+    // user: the two may land in separate commits.
+    let at_ping = Some(zslg::LogIndex::from_bytes(1u64.to_be_bytes()));
+    for _ in 0..500 {
+        if store.read().unwrap().watermark().unwrap().index == at_ping {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 
     let user = committed_user(&store, 1).await.unwrap();
 
