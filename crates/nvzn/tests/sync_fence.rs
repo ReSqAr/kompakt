@@ -1,6 +1,6 @@
 //! What `Reader::sync` promises a caller, against a real cluster.
 //!
-//! It is the fence an `unstable_snapshot` reads behind, and it has two
+//! It is the fence a live view's read stands behind, and it has two
 //! obligations that pull in opposite directions:
 //!
 //! ```text
@@ -42,7 +42,7 @@ async fn sync_returns_promptly_with_nothing_to_integrate() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn sync_fences_a_write_for_unstable_snapshot() {
+async fn sync_fences_a_write_for_the_live_view() {
     init_tracing();
     let cluster = Cluster::start(PORT + 1).await;
     let app = cluster.server("server").await;
@@ -51,7 +51,7 @@ async fn sync_fences_a_write_for_unstable_snapshot() {
         app.write(id, &format!("user-{id}")).await;
         app.sync(&format!("after writing user-{id}")).await;
         assert!(
-            app.sees(id),
+            app.sees(id).await,
             "user-{id}: sync returned but the write it fenced is not visible",
         );
     }

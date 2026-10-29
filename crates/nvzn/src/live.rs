@@ -2,6 +2,7 @@
 //! above it, readable at once, without waiting for the fold.
 //!
 //! ```text
+//!   NotStarted ──(the fold has caught up: Syncer::sync, retried)──▶ begin
 //!   unstable tail ──▶ integrator: keep the S events ──▶ Coverage { held }
 //!   stable log (once, at start) ──▶ scan ──────────────────┘     │
 //!   fold advanced ──▶ retire: drop what F covers ────────────────┤
@@ -19,7 +20,14 @@
 //! covers them, not at zslg's watermark: the fold stores an entry later than
 //! zslg calls it stable.
 //!
-//! Spec: nlnr `docs/logs/2026-10-26_spec_nvzn_live_views.md`.
+//! A view starts only once the fold has replayed the log: the dispatcher's
+//! finalise may reset the store and fold again, and a view begun before that
+//! would hold events above a watermark the store no longer has. Until then it
+//! serves the stable snapshot. [`Live::wait_for`] is the read-after-write
+//! question: does a snapshot taken now serve this entry?
+//!
+//! Spec: nlnr `docs/logs/2026-10-26_spec_nvzn_live_views.md`; the deferred
+//! start and `wait_for`: nlnr `docs/logs/2026-10-28_design_read_after_write.md`.
 
 use crate::dispatcher::FoldState;
 use crate::events::{contains, subset};
@@ -32,7 +40,7 @@ use crate::{
 };
 use std::collections::BTreeMap;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::watch;
 use tracing::{error, info, warn};
 use zslg::{ChannelEnd, Channels, Data, DataId, Hlc, LogIndex, StableLogEvent, UnstableEvent};
@@ -174,6 +182,9 @@ struct Inner<Ev> {
     /// snapshots waiting on it.
     scanned: Condvar,
     changed: watch::Sender<u64>,
+    /// Moves after every retirement (F reached the state): what
+    /// [`Live::wait_for`] wakes on for an entry only F shows.
+    retired: watch::Sender<u64>,
 }
 
 struct State<Ev> {
@@ -193,6 +204,9 @@ struct Entry<Ev> {
 type Held<Ev> = BTreeMap<DataId, Entry<Ev>>;
 
 enum Coverage<Ev> {
+    /// Waiting for the fold to replay the log (`Reader::live` defers the
+    /// start): nothing held, snapshot = the stable snapshot.
+    NotStarted,
     /// Cold start: the stable-log scan fills `held` up to the stable
     /// watermark at start. Snapshots wait for it.
     Scanning { held: Held<Ev>, bytes: usize },
@@ -217,17 +231,20 @@ enum Coverage<Ev> {
 impl<Ev> Coverage<Ev> {
     fn name(&self) -> &'static str {
         match self {
+            Self::NotStarted => "not_started",
             Self::Scanning { .. } => "scanning",
             Self::Complete { .. } => "complete",
             Self::Overflowed { .. } => "overflowed",
         }
     }
 
-    fn held(&self) -> (&Held<Ev>, usize) {
+    /// Held entries and their bytes.
+    fn held(&self) -> (usize, usize) {
         match self {
+            Self::NotStarted => (0, 0),
             Self::Scanning { held, bytes }
             | Self::Complete { held, bytes }
-            | Self::Overflowed { held, bytes, .. } => (held, *bytes),
+            | Self::Overflowed { held, bytes, .. } => (held.len(), *bytes),
         }
     }
 }
@@ -268,7 +285,7 @@ impl<Ev: WithWireFormat> Inner<Ev> {
 
     fn publish(&self, state: &State<Ev>) {
         let (held, bytes) = state.coverage.held();
-        metrics::live_held(self.tenant, held.len(), bytes);
+        metrics::live_held(self.tenant, held, bytes);
         metrics::live_coverage(self.tenant, state.coverage.name());
     }
 
@@ -319,6 +336,8 @@ impl<Ev: WithWireFormat> Inner<Ev> {
             return false;
         }
         let over = match &mut state.coverage {
+            // The tail is opened at the start: nothing arrives before it.
+            Coverage::NotStarted => return false,
             Coverage::Scanning { held, bytes } | Coverage::Complete { held, bytes } => {
                 if held.contains_key(&id) {
                     return false;
@@ -376,6 +395,7 @@ impl<Ev: WithWireFormat> Inner<Ev> {
     /// serves moved (an overflow ended).
     fn retire(&self, state: &mut State<Ev>, f: Watermark) -> bool {
         let recovered = match &mut state.coverage {
+            Coverage::NotStarted => false,
             Coverage::Scanning { held, bytes } | Coverage::Complete { held, bytes } => {
                 retain_uncovered(held, bytes, &f);
                 false
@@ -416,6 +436,7 @@ impl<Ev: WithWireFormat> Inner<Ev> {
         let recovered = self.retire(&mut state, f);
         self.publish(&state);
         drop(state);
+        self.retired.send_modify(|v| *v = v.wrapping_add(1));
         if recovered {
             self.bump();
         }
@@ -448,7 +469,7 @@ impl<Ev: WithWireFormat> Inner<Ev> {
                 let f = state.folded.clone();
                 self.retire(&mut state, f);
             }
-            complete @ Coverage::Complete { .. } => state.coverage = complete,
+            other @ (Coverage::NotStarted | Coverage::Complete { .. }) => state.coverage = other,
         }
         self.publish(&state);
         drop(state);
@@ -551,38 +572,19 @@ fn scan<Ev: WithWireFormat>(
     inner.finish_scan();
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "crate-internal constructor called once, from Reader::live"
-)]
-pub(crate) fn start<Ev: WithWireFormat>(
+/// A live view not started yet: see [`Coverage::NotStarted`]. [`begin`]
+/// starts it.
+pub(crate) fn not_started<Ev: WithWireFormat>(
     tenant: Tenant,
     store: ArcStore,
-    reader: &Arc<dyn zslg::Reader>,
     fold_state: FoldState,
-    cancelled: &zslg::Cancellation,
-    mut folded: watch::Receiver<Option<Hlc>>,
     projectors: BTreeMap<ProjectionTypeId, BoxedProjectorLike<Ev>>,
     events: &'static [u32],
     limits: LiveLimits,
 ) -> Result<Live<Ev>, Error> {
-    // Tail first, then the stable watermark: nothing falls between them.
-    let tail = reader.subscribe_unstable_tail().until(cancelled);
-    let until = reader.stable_watermark();
     let f = store.read()?.watermark()?;
-    let from = LogIndex::next_after(f.index);
-
-    let coverage = match until {
-        Some(_) => Coverage::Scanning {
-            held: Held::new(),
-            bytes: 0,
-        },
-        None => Coverage::Complete {
-            held: Held::new(),
-            bytes: 0,
-        },
-    };
     let (changed, _) = watch::channel(0);
+    let (retired, _) = watch::channel(0);
     let inner = Arc::new(Inner {
         tenant,
         store,
@@ -591,30 +593,63 @@ pub(crate) fn start<Ev: WithWireFormat>(
         events,
         limits,
         state: Mutex::new(State {
-            coverage,
+            coverage: Coverage::NotStarted,
             folded: f,
         }),
         scanned: Condvar::new(),
         changed,
+        retired,
     });
     inner.publish(&inner.lock());
+    Ok(Live { inner })
+}
+
+/// Start `live`: open the unstable tail, scan the stable log from the store's
+/// watermark up to the stable one, and integrate from then on.
+pub(crate) fn begin<Ev: WithWireFormat>(
+    live: &Live<Ev>,
+    reader: &Arc<dyn zslg::Reader>,
+    cancelled: &zslg::Cancellation,
+    mut folded: watch::Receiver<Option<Hlc>>,
+) -> Result<(), Error> {
+    let inner = &live.inner;
+    // Tail first, then the stable watermark: nothing falls between them.
+    let tail = reader.subscribe_unstable_tail().until(cancelled);
+    let until = reader.stable_watermark();
+    let f = inner.store.read()?.watermark()?;
+    let from = LogIndex::next_after(f.index);
+    {
+        let mut state = inner.lock();
+        state.coverage = match until {
+            Some(_) => Coverage::Scanning {
+                held: Held::new(),
+                bytes: 0,
+            },
+            None => Coverage::Complete {
+                held: Held::new(),
+                bytes: 0,
+            },
+        };
+        state.folded = f;
+        inner.publish(&state);
+    }
     info!(
-        tenant = tenant.name(),
+        tenant = inner.tenant.name(),
         live_projections = inner.projectors.len(),
         scan_until = ?until,
         "live view started"
     );
 
-    let integrator = Arc::clone(&inner);
+    let integrator = Arc::clone(inner);
     tokio::task::spawn_blocking(move || integrate(&integrator, tail));
 
     if let Some(until) = until {
         let log = reader.subscribe_stable_log(from).until(cancelled);
-        let scanner = Arc::clone(&inner);
+        let scanner = Arc::clone(inner);
         tokio::task::spawn_blocking(move || scan(&scanner, until, log));
     }
 
-    let retirer = Arc::clone(&inner);
+    let retirer = Arc::clone(inner);
     tokio::spawn(async move {
         // Ends with the fold (its sender goes) or the runtime.
         while folded.changed().await.is_ok() {
@@ -627,7 +662,74 @@ pub(crate) fn start<Ev: WithWireFormat>(
         }
     });
 
-    Ok(Live { inner })
+    // Started: a reader of the stable state until now looks again.
+    inner.bump();
+    Ok(())
+}
+
+/// The first wait between two attempts to start, doubling up to [`START_BACKOFF_MAX`].
+const START_BACKOFF: Duration = Duration::from_millis(250);
+const START_BACKOFF_MAX: Duration = Duration::from_secs(10);
+
+/// Start `live` once the fold has caught up (`Syncer::sync`): the dispatcher's
+/// finalise may reset the store and fold the log again, and a view started
+/// before that would hold events above a watermark the store no longer has.
+/// A failed sync is retried with backoff; the view stays `NotStarted` (and
+/// serves the stable snapshot) only if the fold stops.
+pub(crate) async fn begin_when_caught_up<Ev: WithWireFormat>(
+    live: Live<Ev>,
+    syncer: crate::Syncer,
+    reader: Arc<dyn zslg::Reader>,
+    cancelled: zslg::Cancellation,
+) {
+    let tenant = live.inner.tenant;
+    let mut backoff = START_BACKOFF;
+    loop {
+        let attempt = match syncer.sync().await {
+            Ok(()) => begin(&live, &reader, &cancelled, syncer.watermark()),
+            Err(e) => Err(e),
+        };
+        let Err(e) = attempt else { return };
+        if live.inner.fold_state.check().is_err() {
+            warn!(tenant = tenant.name(), error = %e, "live view: not started, the fold stopped");
+            return;
+        }
+        warn!(
+            tenant = tenant.name(),
+            error = %e,
+            retry_in_ms = u64::try_from(backoff.as_millis()).unwrap_or(u64::MAX),
+            "live view: not started yet, the fold has not caught up"
+        );
+        tokio::time::sleep(backoff).await;
+        backoff = backoff.saturating_mul(2).min(START_BACKOFF_MAX);
+    }
+}
+
+/// What [`Live::wait_for`] found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wait {
+    /// A snapshot taken now serves the entry: held, or folded.
+    Seen,
+    /// The deadline passed first.
+    TimedOut,
+    /// The view is overflowed: it serves the fold's state alone, so the entry
+    /// shows only once F passes it. Answered at once.
+    Overflowed,
+    /// The view has not started (the fold is replaying): it serves the stable
+    /// snapshot. Answered at once.
+    NotStarted,
+}
+
+impl Wait {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Seen => "seen",
+            Self::TimedOut => "timed_out",
+            Self::Overflowed => "overflowed",
+            Self::NotStarted => "not_started",
+        }
+    }
 }
 
 impl<Ev: WithWireFormat> Live<Ev> {
@@ -646,6 +748,10 @@ impl<Ev: WithWireFormat> Live<Ev> {
         let started = Instant::now();
 
         let mut state = inner.lock();
+        if matches!(state.coverage, Coverage::NotStarted) {
+            drop(state);
+            return Ok(Snapshot::from_txn(inner.tenant.id(), inner.store.read()?));
+        }
         while matches!(state.coverage, Coverage::Scanning { .. }) {
             inner.fold_state.check()?;
             state = inner
@@ -666,7 +772,9 @@ impl<Ev: WithWireFormat> Live<Ev> {
                 .values()
                 .map(|entry| Arc::clone(&entry.events))
                 .collect(),
-            Coverage::Scanning { .. } | Coverage::Overflowed { .. } => Vec::new(),
+            Coverage::NotStarted | Coverage::Scanning { .. } | Coverage::Overflowed { .. } => {
+                Vec::new()
+            }
         };
         inner.publish(&state);
         drop(state);
@@ -691,6 +799,55 @@ impl<Ev: WithWireFormat> Live<Ev> {
     #[must_use]
     pub fn changed(&self) -> watch::Receiver<u64> {
         self.inner.changed.subscribe()
+    }
+
+    /// Wait until a snapshot taken now serves the entry `d`, for at most
+    /// `timeout`. Answers at once while the view cannot serve it at all
+    /// (not started, overflowed).
+    ///
+    /// ```text
+    ///   NotStarted → NotStarted · Overflowed → Overflowed
+    ///   F covers d, or held has d (scanning or complete) → Seen
+    ///   else wake on an S arrival or a retirement; at the deadline → TimedOut
+    /// ```
+    ///
+    /// The retirement wake is for an entry that reached this node already
+    /// stable: the local store does not publish it on the tail, so only F
+    /// shows it.
+    pub async fn wait_for(&self, d: DataId, timeout: Duration) -> Wait {
+        let deadline = tokio::time::sleep(timeout);
+        tokio::pin!(deadline);
+        let mut arrived = self.inner.changed.subscribe();
+        let mut retired = self.inner.retired.subscribe();
+        loop {
+            arrived.mark_unchanged();
+            retired.mark_unchanged();
+            if let Some(found) = self.inner.find(d) {
+                return found;
+            }
+            tokio::select! {
+                () = &mut deadline => {
+                    return self.inner.find(d).unwrap_or(Wait::TimedOut);
+                }
+                r = arrived.changed() => if r.is_err() { return Wait::TimedOut },
+                r = retired.changed() => if r.is_err() { return Wait::TimedOut },
+            }
+        }
+    }
+}
+
+impl<Ev> Inner<Ev> {
+    /// [`Live::wait_for`]'s answer for `d` now, if it has one.
+    fn find(&self, d: DataId) -> Option<Wait> {
+        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        match &state.coverage {
+            Coverage::NotStarted => Some(Wait::NotStarted),
+            Coverage::Overflowed { .. } => Some(Wait::Overflowed),
+            _ if state.folded.covers(d) => Some(Wait::Seen),
+            Coverage::Scanning { held, .. } | Coverage::Complete { held, .. } => {
+                held.contains_key(&d).then_some(Wait::Seen)
+            }
+        }
     }
 }
 
@@ -798,7 +955,7 @@ mod tests {
     }
 
     fn held(live: &Live<event::Event>) -> usize {
-        live.inner.lock().coverage.held().0.len()
+        live.inner.lock().coverage.held().0
     }
 
     fn coverage(live: &Live<event::Event>) -> &'static str {
@@ -816,6 +973,122 @@ mod tests {
         .expect("the integrator caught up");
     }
 
+    const SHORT: Duration = Duration::from_millis(50);
+    const LONG: Duration = Duration::from_secs(5);
+
+    #[tokio::test]
+    async fn wait_for_sees_an_entry_once_held() {
+        let (_store, mut log, reader) = rig().await;
+        let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
+        let d = log.push_unstable(blob(&[new_user(1, "holden")]));
+        assert_eq!(live.wait_for(d, LONG).await, Wait::Seen);
+        assert!(
+            user(&live, 1).await.is_some(),
+            "Seen: a snapshot now shows it"
+        );
+    }
+
+    /// An entry that reached this node already stable is never held: only an
+    /// F advance shows it, and the retirement wakes the wait.
+    #[tokio::test]
+    async fn wait_for_wakes_when_f_passes_the_entry() {
+        let (store, _log, reader) = rig().await;
+        let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
+        let d = data_id(9, 9);
+        let waiting = tokio::spawn({
+            let live = live.clone();
+            async move { live.wait_for(d, LONG).await }
+        });
+        tokio::time::sleep(SHORT).await;
+        assert!(!waiting.is_finished());
+        set_f(&store, d);
+        // The retirer, as the fold's watermark watch would run it.
+        let inner = Arc::clone(&live.inner);
+        tokio::task::spawn_blocking(move || inner.retire_now())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(waiting.await.unwrap(), Wait::Seen);
+    }
+
+    #[tokio::test]
+    async fn wait_for_times_out_on_an_entry_that_never_arrives() {
+        let (_store, _log, reader) = rig().await;
+        let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
+        assert_eq!(live.wait_for(data_id(5, 5), SHORT).await, Wait::TimedOut);
+    }
+
+    /// Overflowed, the view serves store@F alone: waiting could only run to
+    /// the deadline, so it answers at once.
+    #[tokio::test]
+    async fn wait_for_answers_at_once_while_overflowed() {
+        let (_store, mut log, reader) = rig().await;
+        let live = reader
+            .live_started::<Users>(LiveLimits {
+                max_held_events: 1,
+                max_held_bytes: usize::MAX,
+            })
+            .unwrap();
+        log.push_unstable(blob(&[new_user(1, "a")]));
+        log.push_unstable(blob(&[new_user(2, "b")]));
+        settle(&live, |l| coverage(l) == "overflowed").await;
+        let started = Instant::now();
+        assert_eq!(live.wait_for(data_id(5, 5), LONG).await, Wait::Overflowed);
+        assert!(started.elapsed() < LONG);
+    }
+
+    /// Not started yet: the stable snapshot is served, and a wait answers at once.
+    #[tokio::test]
+    async fn not_started_serves_the_stable_snapshot_and_answers_at_once() {
+        let (store, mut log, reader) = rig().await;
+        let live = reader.not_started::<Users>(LiveLimits::default()).unwrap();
+        let holden = User {
+            id: UserId(1),
+            name: "holden".into(),
+            address: None,
+            email: None,
+            last_ping: None,
+        };
+        crate::testsupport::commit_row(&store, tenant_id(), Ref::new(UserId(1).into()), &holden);
+        let d = log.push_unstable(blob(&[new_user(2, "naomi")]));
+        assert_eq!(live.wait_for(d, LONG).await, Wait::NotStarted);
+        assert!(user(&live, 1).await.is_some(), "the stable row");
+        assert!(
+            user(&live, 2).await.is_none(),
+            "nothing held before the start"
+        );
+    }
+
+    /// A sync that fails at startup is retried: the view starts once one
+    /// succeeds, rather than serving the stable snapshot for good.
+    #[tokio::test]
+    async fn the_start_retries_a_failed_sync() {
+        let store = inmemory();
+        let log = TestLog::new();
+        let failing: Arc<dyn zslg::Reader> =
+            Arc::new(crate::testsupport::FailingSyncReader::new(log.reader(), 2));
+        let mut dispatcher = Dispatcher::from_db(
+            store,
+            log.writer(),
+            failing,
+            FLUSH_INTERVAL,
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        let mut manager = dispatcher.new_handler::<event::Event>(tenant());
+        manager.register::<User>().unwrap();
+        let (_writer, reader) = manager.finalise().unwrap();
+        let live = reader.live::<Users>().unwrap();
+        tokio::time::timeout(LONG, async {
+            while coverage(&live) == "not_started" {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the view started after two failed syncs");
+    }
+
     #[test]
     fn liveness_follows_the_events() {
         assert!(is_live::<User, Users>());
@@ -830,7 +1103,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn an_s_event_is_live_at_once_and_folds_only_into_live_projections() {
         let (_store, mut log, reader) = rig().await;
-        let live = reader.live::<Users>().unwrap();
+        let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
         let changed = live.changed();
         log.push_unstable(blob(&[new_user(1, "ada"), new_todo(7, 1)]));
         settle(&live, |l| held(l) == 1).await;
@@ -849,7 +1122,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_write_without_s_events_is_not_held() {
         let (_store, mut log, reader) = rig().await;
-        let live = reader.live::<Users>().unwrap();
+        let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
         log.push_unstable(blob(&[new_todo(7, 1)]));
         log.push_unstable(blob(&[new_user(1, "ada")]));
         settle(&live, |l| held(l) == 1).await;
@@ -859,7 +1132,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn held_events_retire_when_f_covers_them_not_at_the_watermark() {
         let (store, log, reader) = rig().await;
-        let live = reader.live::<Users>().unwrap();
+        let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
         let did = data_id(10, 1);
         log.push_unstable_at(did, blob(&[new_user(1, "ada")]));
         settle(&live, |l| held(l) == 1).await;
@@ -880,7 +1153,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn at_an_hlc_tie_only_the_data_id_decides() {
         let (store, log, reader) = rig().await;
-        let live = reader.live::<Users>().unwrap();
+        let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
         let (first, second) = (data_id(10, 1), data_id(10, 2));
         log.push_unstable_at(first, blob(&[new_user(1, "ada")]));
         log.push_unstable_at(second, blob(&[new_user(2, "grace")]));
@@ -897,7 +1170,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn held_events_fold_in_data_id_order_whatever_their_arrival() {
         let (_store, log, reader) = rig().await;
-        let live = reader.live::<Users>().unwrap();
+        let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
         log.push_unstable_at(data_id(20, 2), blob(&[pinged(1, 99)]));
         log.push_unstable_at(data_id(10, 1), blob(&[new_user(1, "ada")]));
         settle(&live, |l| held(l) == 2).await;
@@ -907,7 +1180,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_redelivery_is_held_once_and_announced_once() {
         let (_store, log, reader) = rig().await;
-        let live = reader.live::<Users>().unwrap();
+        let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
         let did = data_id(10, 1);
         log.push_unstable_at(did, blob(&[new_user(1, "ada")]));
         settle(&live, |l| held(l) == 1).await;
@@ -924,7 +1197,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn an_f_advance_does_not_move_changed() {
         let (store, log, reader) = rig().await;
-        let live = reader.live::<Users>().unwrap();
+        let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
         let did = data_id(10, 1);
         log.push_unstable_at(did, blob(&[new_user(1, "ada")]));
         settle(&live, |l| held(l) == 1).await;
@@ -939,7 +1212,7 @@ mod tests {
     async fn overflow_serves_f_freezes_until_and_recovers_with_what_it_collected() {
         let (store, log, reader) = rig().await;
         let live = reader
-            .live_with::<Users>(LiveLimits {
+            .live_started::<Users>(LiveLimits {
                 max_held_events: 2,
                 max_held_bytes: usize::MAX,
             })
@@ -975,7 +1248,7 @@ mod tests {
     async fn hitting_the_cap_again_moves_until() {
         let (store, log, reader) = rig().await;
         let live = reader
-            .live_with::<Users>(LiveLimits {
+            .live_started::<Users>(LiveLimits {
                 max_held_events: 1,
                 max_held_bytes: usize::MAX,
             })
@@ -1003,7 +1276,7 @@ mod tests {
         // nor the store has it.
         log.append(blob(&[new_user(1, "ada")]));
         log.append(blob(&[new_todo(7, 1)]));
-        let live = reader.live::<Users>().unwrap();
+        let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
         assert_eq!(user(&live, 1).await.unwrap().name, "ada");
         assert_eq!(coverage(&live), "complete");
         assert_eq!(held(&live), 1, "only the S event is kept");
@@ -1016,7 +1289,7 @@ mod tests {
             log.append(blob(&[new_user(id, "x")]));
         }
         let live = reader
-            .live_with::<Users>(LiveLimits {
+            .live_started::<Users>(LiveLimits {
                 max_held_events: 2,
                 max_held_bytes: usize::MAX,
             })
@@ -1045,7 +1318,7 @@ mod tests {
     async fn an_overflow_during_the_scan_recovers_only_after_it() {
         let (store, _log, reader) = rig().await;
         let live = reader
-            .live_with::<Users>(LiveLimits {
+            .live_started::<Users>(LiveLimits {
                 max_held_events: 1,
                 max_held_bytes: usize::MAX,
             })
@@ -1088,7 +1361,7 @@ mod tests {
         manager.register::<User>().unwrap();
         let (_writer, reader) = manager.finalise().unwrap();
         let fold = dispatcher.finalise().await.unwrap();
-        let live = reader.live::<Users>().unwrap();
+        let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
 
         log.hang_up_unstable();
         let ended = tokio::time::timeout(Duration::from_secs(5), fold)
@@ -1116,7 +1389,7 @@ mod tests {
     async fn no_snapshot_waits_on_a_stalled_fold() {
         let (_store, mut log, reader) = rig().await;
         // No fold runs at all in this rig: F never moves.
-        let live = reader.live::<Users>().unwrap();
+        let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
         log.push_unstable(blob(&[new_user(1, "ada")]));
         settle(&live, |l| held(l) == 1).await;
         let got = tokio::time::timeout(Duration::from_secs(1), user(&live, 1))
@@ -1192,7 +1465,7 @@ mod tests {
                 })
                 .unwrap();
 
-                let live = reader.live::<Users>().unwrap();
+                let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
                 // Arrivals in reverse order, above and below F alike.
                 let mut expected_held: usize = 0;
                 for (i, step) in steps.iter().enumerate().rev() {

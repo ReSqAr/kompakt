@@ -140,7 +140,7 @@ impl Dispatcher {
                 .as_u64()
                 .try_into()
                 .unwrap_or(usize::MAX),
-            fold_state: FoldState::new(max_hlc, shutdown.child_token()),
+            fold_state: FoldState::new(shutdown.child_token()),
             subscriptions,
             subscribers,
         })

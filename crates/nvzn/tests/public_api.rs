@@ -68,6 +68,8 @@ nvzn::define_events! {
     } subsets {
         NewOwnerEvent := NewOwner,
         NewItemEvent := NewItem,
+    } owned {
+        Owners := NewOwner,
     }
 }
 
@@ -194,41 +196,42 @@ async fn an_in_memory_rig_folds_writes_into_projections() {
     assert_eq!(items.len(), 2);
 }
 
-/// The unstable tail is above the watermark, so it shows in
-/// `unstable_snapshot` and not in `snapshot`.
+/// A live view started after the replay, written to through an owned subset:
+/// `wait_for` sees the write, and the view serves it.
 #[tokio::test]
-async fn the_unstable_tail_is_visible_only_to_the_unstable_snapshot() {
+async fn a_write_through_an_owned_subset_is_seen_by_the_live_view() {
     let log = TestLog::new();
     let mut dispatcher = Dispatcher::in_memory(log.writer(), log.reader())
         .await
         .expect("in-memory dispatcher");
-
     let mut manager = dispatcher.new_handler::<event::Event>(TENANT);
     manager.register::<Owner>().expect("register Owner");
     let (writer, reader) = manager.finalise().expect("finalise handler");
     let _handle = dispatcher.finalise().await.expect("finalise dispatcher");
+    let live = reader.live::<event::Owners>().expect("live view");
 
-    writer
-        .write(&[NewOwnerV1 {
-            id: OwnerId(2),
-            name: "Alex".to_string(),
+    let owned: event::Owners = NewOwnerV1 {
+        id: OwnerId(3),
+        name: "Amos".to_string(),
+    }
+    .into();
+    let d = writer.write(&[owned.into()]).await.expect("write");
+    let wait = loop {
+        match live.wait_for(d, std::time::Duration::from_secs(5)).await {
+            nvzn::Wait::NotStarted => {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await
+            }
+            other => break other,
         }
-        .into()])
-        .await
-        .expect("write");
-    reader.sync().await.expect("sync");
-
-    let stable = reader
-        .snapshot()
-        .expect("snapshot")
-        .get(Ref::<Owner>::new(OwnerId(2).into()))
-        .expect("get");
-    assert!(stable.is_some(), "a synced write is in the stable snapshot");
-
-    let unstable = reader
-        .unstable_snapshot()
-        .expect("unstable snapshot")
-        .get(Ref::<Owner>::new(OwnerId(2).into()))
-        .expect("get");
-    assert!(unstable.is_some(), "and in the unstable one");
+    };
+    assert_eq!(wait, nvzn::Wait::Seen);
+    let seen = tokio::task::spawn_blocking(move || {
+        live.snapshot()
+            .expect("live snapshot")
+            .get(Ref::<Owner>::new(OwnerId(3).into()))
+            .expect("get")
+    })
+    .await
+    .expect("snapshot task");
+    assert!(seen.is_some());
 }

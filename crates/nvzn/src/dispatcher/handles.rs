@@ -58,6 +58,7 @@ impl<Ev> Encoder<Ev> {
     }
 }
 
+#[derive(Clone)]
 pub struct Syncer {
     reader: Arc<dyn zslg::Reader>,
     watermark: watch::Receiver<Option<zslg::Hlc>>,

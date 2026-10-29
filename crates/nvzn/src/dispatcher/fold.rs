@@ -183,7 +183,6 @@ impl FoldInputs {
         metrics::fold_watermark(index, hlc);
 
         if let Some(hlc) = hlc {
-            self.fold_state.advance(hlc);
             let _ = self.watermark.send(Some(hlc));
         }
         Ok(())

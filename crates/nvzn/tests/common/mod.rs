@@ -38,6 +38,10 @@ use tokio_util::sync::CancellationToken;
 /// rather than showing up as latency in an application.
 pub const SYNC_BOUND: Duration = Duration::from_secs(5);
 
+/// How long the live view may take to show what the node has integrated: one
+/// integrate batch and a fan-out hop, neither on a timer.
+pub const SEE_BOUND: Duration = Duration::from_secs(2);
+
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct UserId(pub u128);
 
@@ -203,6 +207,8 @@ fn object_store(root: &Path) -> zslg::ObjectStoreConfig {
 pub struct Deployment {
     pub writer: EventWriter<event::Event>,
     pub reader: nvzn::Reader<event::Event>,
+    /// Every projection live: what a person's reads would go through.
+    pub live: nvzn::Live<event::Event>,
     pub fold: tokio::task::JoinHandle<Result<(), nvzn::Error>>,
     node_shutdown: Option<CancellationToken>,
 }
@@ -230,10 +236,12 @@ impl Deployment {
         manager.register::<User>().expect("register");
         let (writer, reader) = manager.finalise().expect("finalise handler");
         let fold = dispatcher.finalise().await.expect("finalise dispatcher");
+        let live = reader.live::<event::Event>().expect("live view");
 
         Self {
             writer,
             reader,
+            live,
             fold,
             node_shutdown,
         }
@@ -250,7 +258,7 @@ impl Deployment {
         assert!(elapsed < SYNC_BOUND, "{what}: sync took {elapsed:?}");
     }
 
-    pub async fn write(&self, id: u128, name: &str) {
+    pub async fn write(&self, id: u128, name: &str) -> zslg::DataId {
         self.writer
             .write(&[NewUserV1 {
                 id: UserId(id),
@@ -258,17 +266,33 @@ impl Deployment {
             }
             .into()])
             .await
-            .expect("write");
+            .expect("write")
     }
 
-    /// The blended view a caller reads behind [`sync`](Self::sync).
-    pub fn sees(&self, id: u128) -> bool {
-        self.reader
-            .unstable_snapshot()
-            .expect("unstable snapshot")
-            .get(Ref::<User>::new(UserId(id).into()))
-            .expect("get")
-            .is_some()
+    /// Whether the live view shows user `id` within [`SEE_BOUND`]: what a
+    /// caller reads behind [`sync`](Self::sync). Polled, because the view takes
+    /// in what the node integrated on its own task.
+    pub async fn sees(&self, id: u128) -> bool {
+        let started = Instant::now();
+        loop {
+            let live = self.live.clone();
+            let seen = tokio::task::spawn_blocking(move || {
+                live.snapshot()
+                    .expect("live snapshot")
+                    .get(Ref::<User>::new(UserId(id).into()))
+                    .expect("get")
+                    .is_some()
+            })
+            .await
+            .expect("snapshot task");
+            if seen {
+                return true;
+            }
+            if started.elapsed() > SEE_BOUND {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     }
 
     /// The folded state alone, without the unstable tail on top.

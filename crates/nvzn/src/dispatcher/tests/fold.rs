@@ -525,8 +525,7 @@ async fn fold_loop_stops_when_cancelled_without_folding() {
 /// cancel: the stable-log subscription ends `Cancelled` (zslg's node
 /// shutdown), so the fold stops cleanly as `StopReason::Cancelled`, and a
 /// `Reader::subscribe_stable_log` stream ends `Cancelled` — not the `Aborted`
-/// it gets when the fold stops for any other reason — and so does a
-/// `Reader::subscribe_unstable_tail` stream. The log stays quiet throughout:
+/// it gets when the fold stops for any other reason. The log stays quiet throughout:
 /// nothing but the cancel can wake the fold.
 #[tokio::test]
 async fn an_upstream_cancel_stops_an_idle_fold_and_cancels_its_subscribers() {
@@ -544,7 +543,6 @@ async fn an_upstream_cancel_stops_an_idle_fold_and_cancels_its_subscribers() {
     manager.register::<User>().unwrap();
     let (_writer, reader) = manager.finalise().unwrap();
     let users = reader.subscribe_stable_log::<User>().unwrap();
-    let fresh = reader.subscribe_unstable_tail();
 
     let (upstream, cancellation) = CancelHandle::new();
     let tail = log
@@ -569,16 +567,6 @@ async fn an_upstream_cancel_stops_an_idle_fold_and_cancels_its_subscribers() {
     let end = timeout(
         SYNC,
         tokio::task::spawn_blocking(move || users.recv().map(|_| ())),
-    )
-    .await
-    .unwrap()
-    .unwrap();
-    assert_eq!(end, Err(zslg::ChannelEnd::Cancelled));
-
-    let mut fresh = fresh;
-    let end = timeout(
-        SYNC,
-        tokio::task::spawn_blocking(move || fresh.recv().map(|_| ())),
     )
     .await
     .unwrap()
