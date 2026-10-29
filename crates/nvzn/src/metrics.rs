@@ -154,12 +154,10 @@ impl FenceOutcome {
 }
 
 /// Which snapshot a read was served from. `stable` sees only what has gone
-/// stable in the log; `unstable` folds the tail on top and is the one with
-/// read-your-own-writes.
+/// stable in the log; `live` adds the live events this node has received.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ReadKind {
     Stable,
-    Unstable,
     Live,
 }
 
@@ -167,7 +165,6 @@ impl ReadKind {
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Stable => "stable",
-            Self::Unstable => "unstable",
             Self::Live => "live",
         }
     }
@@ -208,9 +205,6 @@ pub(crate) const STORE_FENCE_SECONDS: &str = "nvzn_store_fence_seconds";
 pub(crate) const STORE_LIVE_SST_FILES_SIZE_BYTES: &str = "nvzn_store_live_sst_files_size_bytes";
 pub(crate) const STORE_RESETS_TOTAL: &str = "nvzn_store_resets_total";
 pub(crate) const READS_TOTAL: &str = "nvzn_reads_total";
-pub(crate) const UNSTABLE_FOLD_ENTRIES: &str = "nvzn_unstable_fold_entries";
-pub(crate) const UNSTABLE_SUBSCRIPTION_UNDECODABLE_TOTAL: &str =
-    "nvzn_unstable_subscription_undecodable_total";
 pub(crate) const WRITES_TOTAL: &str = "nvzn_writes_total";
 pub(crate) const LIVE_HELD_EVENTS: &str = "nvzn_live_held_events";
 pub(crate) const LIVE_HELD_BYTES: &str = "nvzn_live_held_bytes";
@@ -392,22 +386,6 @@ pub(crate) const ALL_METRICS: &[MetricDef] = &[
                and finding `stable` here is reading the wrong one.",
     },
     MetricDef {
-        name: UNSTABLE_FOLD_ENTRIES,
-        kind: MetricKind::Histogram,
-        unit: Some(Unit::Count),
-        help: "Unstable-tail entries re-folded per unstable snapshot. This work is \
-               repeated on every query, so the distribution is what says whether \
-               the per-query fold needs caching.",
-    },
-    MetricDef {
-        name: UNSTABLE_SUBSCRIPTION_UNDECODABLE_TOTAL,
-        kind: MetricKind::Counter,
-        unit: None,
-        help: "Unstable-tail payloads an unstable subscription could not decode, by \
-               tenant: each was handed to the subscriber as an error and skipped. \
-               Counted once per subscriber, so it scales with the subscriber count.",
-    },
-    MetricDef {
         name: WRITES_TOTAL,
         kind: MetricKind::Counter,
         unit: None,
@@ -432,7 +410,7 @@ const SECONDS_BUCKETS: &[f64] = &[
     60.0,
 ];
 
-/// Count ladder: entries per fold batch and the unstable tail's re-folds.
+/// Count ladder: entries per fold batch and per live-view scan.
 const COUNT_BUCKETS: &[f64] = &[1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 512.0, 4096.0];
 
 /// Bytes ladder: a fold batch is cut at 1 MB, so the top buckets say saturated.
@@ -604,16 +582,6 @@ pub(crate) fn store_reset() {
 
 pub(crate) fn read(tenant: Tenant, kind: ReadKind) {
     metrics::counter!(READS_TOTAL, LABEL_TENANT => tenant.name(), LABEL_KIND => kind.as_str())
-        .increment(1);
-}
-
-pub(crate) fn unstable_fold(entries: usize) {
-    metrics::histogram!(UNSTABLE_FOLD_ENTRIES)
-        .record(lossy_f64(u64::try_from(entries).unwrap_or(0)));
-}
-
-pub(crate) fn unstable_subscription_undecodable(tenant: Tenant) {
-    metrics::counter!(UNSTABLE_SUBSCRIPTION_UNDECODABLE_TOTAL, LABEL_TENANT => tenant.name())
         .increment(1);
 }
 
@@ -833,10 +801,8 @@ mod tests {
             store_fence(FenceOutcome::Ok, Duration::from_millis(1));
             store_live_sst_files_size_bytes("store", 4096);
             store_reset();
-            read(tenant, ReadKind::Unstable);
-            unstable_fold(2);
-            unstable_subscription_undecodable(tenant);
             write(tenant, 4);
+            read(tenant, ReadKind::Live);
             live_held(tenant, 2, 300);
             live_coverage(tenant, "complete");
             live_materialise(2, Duration::from_millis(1));
@@ -873,7 +839,7 @@ mod tests {
             vec!["op=upsert", "projection=Todo", "tenant=acct"],
         );
         assert_eq!(labels(STORE_LIVE_SST_FILES_SIZE_BYTES), vec!["cf=store"]);
-        assert_eq!(labels(READS_TOTAL), vec!["kind=unstable", "tenant=acct"]);
+        assert_eq!(labels(READS_TOTAL), vec!["kind=live", "tenant=acct"]);
         assert_eq!(labels(FOLD_STOPPED_TOTAL), vec!["reason=poison_entry"]);
         // `foreign_tenant` ids are unbounded on a shared log, so this one
         // carries no tenant label by design.

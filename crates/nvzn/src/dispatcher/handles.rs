@@ -58,6 +58,7 @@ impl<Ev> Encoder<Ev> {
     }
 }
 
+#[derive(Clone)]
 pub struct Syncer {
     reader: Arc<dyn zslg::Reader>,
     watermark: watch::Receiver<Option<zslg::Hlc>>,
@@ -134,6 +135,19 @@ impl Syncer {
 pub struct EventWriter<Ev> {
     encoder: Encoder<Ev>,
     writer: Arc<dyn zslg::Writer>,
+}
+
+// By hand: a derive would require `Ev: Clone`, and the writer holds no `Ev`.
+impl<Ev> Clone for EventWriter<Ev> {
+    fn clone(&self) -> Self {
+        Self {
+            encoder: Encoder {
+                tenant: self.encoder.tenant,
+                phantom: PhantomData,
+            },
+            writer: Arc::clone(&self.writer),
+        }
+    }
 }
 
 impl<Ev> EventWriter<Ev> {

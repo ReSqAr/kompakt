@@ -144,6 +144,8 @@ crate::define_events! {
         TodoEvent := NewTodo | TodoDeleted,
         TodoCreatedEvent := NewTodo,
         CascadeEvent := NewTodo | UserDeleted,
+    } owned {
+        UserWrite := NewUser | Pinged,
     }
 }
 
@@ -302,21 +304,37 @@ impl Store for ObservingStore {
     }
 }
 
-pub struct ObservingReader {
+/// A zslg reader whose first `failures` syncs fail (a quorum read timing
+/// out at startup); everything else is `inner`'s.
+pub struct FailingSyncReader {
     inner: Arc<dyn zslg::Reader>,
-    calls: Calls,
+    failures: Mutex<usize>,
 }
 
-impl ObservingReader {
+impl FailingSyncReader {
     #[must_use]
-    pub fn new(inner: Arc<dyn zslg::Reader>, calls: Calls) -> Self {
-        Self { inner, calls }
+    pub fn new(inner: Arc<dyn zslg::Reader>, failures: usize) -> Self {
+        Self {
+            inner,
+            failures: Mutex::new(failures),
+        }
     }
 }
 
 #[async_trait::async_trait]
-impl zslg::Reader for ObservingReader {
+impl zslg::Reader for FailingSyncReader {
     async fn sync(&self) -> Result<(), zslg::Error> {
+        let failing = {
+            let mut left = self.failures.lock().expect("test mutex");
+            let failing = *left > 0;
+            *left = left.saturating_sub(1);
+            failing
+        };
+        if failing {
+            return Err(zslg::Error::QuorumReadTimeout {
+                timeout: std::time::Duration::from_millis(1),
+            });
+        }
         self.inner.sync().await
     }
 
@@ -336,12 +354,10 @@ impl zslg::Reader for ObservingReader {
     }
 
     fn unstable_tail(&self) -> Channels<Result<Data, zslg::Error>> {
-        record(&self.calls, "unstable_tail");
         self.inner.unstable_tail()
     }
 
     fn subscribe_unstable_tail(&self) -> Channels<Result<zslg::UnstableEvent, zslg::Error>> {
-        record(&self.calls, "subscribe_unstable_tail");
         self.inner.subscribe_unstable_tail()
     }
 }
@@ -418,13 +434,6 @@ impl ScriptedReader {
 
     pub fn set_stable_watermark(&self, hlc_ms: u64) {
         *self.watermark.lock().expect("test mutex") = Some(hlc(hlc_ms));
-    }
-
-    pub fn push_unstable(&self, data_id: zslg::DataId, blob: Bytes) {
-        self.unstable
-            .lock()
-            .expect("test mutex")
-            .push(Data { data_id, blob });
     }
 }
 

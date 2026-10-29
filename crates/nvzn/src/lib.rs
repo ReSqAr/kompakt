@@ -41,7 +41,7 @@ pub(crate) mod testsupport;
 pub use dispatcher::{AssociatedProjectorManager, Dispatcher, Encoder, EventWriter, Syncer};
 pub use events::{EventSet, SubEventOf, WithWireFormat};
 pub use ids::{IndexId, ProjectionId, ProjectionTypeId, Tenant, TenantId};
-pub use live::{Live, LiveLimits, is_live};
+pub use live::{Live, LiveLimits, Wait, is_live};
 #[cfg(feature = "prometheus")]
 pub use metrics::configure_prometheus;
 pub use metrics::{METRIC_NAMESPACE, StopReason, describe_metrics, histogram_buckets};

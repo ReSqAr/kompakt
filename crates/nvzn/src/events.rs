@@ -109,6 +109,57 @@ macro_rules! chained_from {
 
 /// Defines an event enum, its versioned wire format, and any subset enums.
 ///
+/// Subsets come in two kinds, for two jobs:
+///
+/// ```text
+///   subsets { UserEvent := NewUser | Pinged }   a view: UserEvent<'a> borrows from &Event
+///                                               (SubEventOf::project); what folds read,
+///                                               decoded once, never copied
+///   owned   { Writes := NewUser }               owned: Writes { NewUser(NewUserV1) }, with
+///                                               From<NewUserV1> and From<Writes> for Event,
+///                                               both moves; what a write is built from
+/// ```
+///
+/// An owned subset has no conversion from `&Event` (it would have to clone),
+/// and an event outside it does not convert into it:
+///
+/// ```compile_fail
+/// # use serde::{Deserialize, Serialize};
+/// # #[derive(Debug, Serialize, Deserialize, Clone)] pub struct NoteSetV1 { id: u128 }
+/// # #[derive(Debug, Serialize, Deserialize, Clone)] pub struct FileSeenV1 { id: u128 }
+/// nvzn::define_events! {
+///     event::Event = {
+///         event 1 := NoteSet { version 1 => NoteSetV1 }
+///         event 2 := FileSeen { version 1 => FileSeenV1 }
+///     } owned {
+///         Notes := NoteSet,
+///     }
+/// }
+/// fn main() {
+///     let _: event::Notes = FileSeenV1 { id: 1 }.into();
+/// }
+/// ```
+///
+/// whereas a member does, and the subset moves into the event:
+///
+/// ```
+/// # use serde::{Deserialize, Serialize};
+/// # #[derive(Debug, Serialize, Deserialize, Clone)] pub struct NoteSetV1 { id: u128 }
+/// # #[derive(Debug, Serialize, Deserialize, Clone)] pub struct FileSeenV1 { id: u128 }
+/// nvzn::define_events! {
+///     event::Event = {
+///         event 1 := NoteSet { version 1 => NoteSetV1 }
+///         event 2 := FileSeen { version 1 => FileSeenV1 }
+///     } owned {
+///         Notes := NoteSet,
+///     }
+/// }
+/// fn main() {
+///     let note: event::Notes = NoteSetV1 { id: 1 }.into();
+///     let _: event::Event = note.into();
+/// }
+/// ```
+///
 /// Each variant is identified on the wire by an `(event number, version
 /// number)` tag, so both halves have to be unique: a repeated event number, or
 /// a version repeated within one event, is a compile error (E0081, pointing at
@@ -129,6 +180,11 @@ macro_rules! define_events {
         $( subsets {
             $(
                 $sub:ident := $sub_first:ident $( | $sub_rest:ident )*
+            ),* $(,)?
+        } )?
+        $( owned {
+            $(
+                $own:ident := $own_first:ident $( | $own_rest:ident )*
             ),* $(,)?
         } )?
     ) => {
@@ -326,6 +382,41 @@ macro_rules! define_events {
                 }
             )* )?
 
+            // A write builds an owned subset: shaped like the event enum,
+            // restricted to its members, and converted into it by move.
+            $( $(
+                #[derive(Clone, Debug)]
+                pub enum $own {
+                    $own_first(__nvzn_types::$own_first),
+                    $( $own_rest(__nvzn_types::$own_rest), )*
+                }
+
+                impl $crate::EventSet for $own {
+                    const EVENTS: &'static [u32] = &[
+                        __nvzn_numbers::$own_first,
+                        $( __nvzn_numbers::$own_rest, )*
+                    ];
+                }
+
+                impl ::core::convert::From<$own> for $eventname {
+                    fn from(v: $own) -> Self {
+                        match v {
+                            $own::$own_first(x) => $eventname::$own_first(x),
+                            $( $own::$own_rest(x) => $eventname::$own_rest(x), )*
+                        }
+                    }
+                }
+
+                impl ::core::convert::From<__nvzn_types::$own_first> for $own {
+                    fn from(v: __nvzn_types::$own_first) -> Self { $own::$own_first(v) }
+                }
+                $(
+                    impl ::core::convert::From<__nvzn_types::$own_rest> for $own {
+                        fn from(v: __nvzn_types::$own_rest) -> Self { $own::$own_rest(v) }
+                    }
+                )*
+            )* )?
+
             impl ::serde::Serialize for WireFormat {
                 fn serialize<S>(&self, serializer: S) -> ::core::result::Result<S::Ok, S::Error>
                 where
@@ -515,6 +606,24 @@ mod tests {
 
         let round_tripped = event::Event::decode(&via_borrowed).unwrap();
         assert_eq!(format!("{round_tripped:?}"), format!("{events:?}"));
+    }
+
+    /// An owned subset is a set like a view, and converts into the event
+    /// by move: the same event a direct conversion builds.
+    #[test]
+    fn an_owned_subset_moves_into_the_event_it_restricts() {
+        use crate::EventSet;
+        assert_eq!(
+            <event::UserWrite as EventSet>::EVENTS,
+            <event::UserEvent<'static> as EventSet>::EVENTS
+        );
+        let ping = PingedV1 {
+            id: UserId(7),
+            ts: 42,
+        };
+        let via_subset: event::Event = event::UserWrite::from(ping.clone()).into();
+        let direct: event::Event = ping.into();
+        assert_eq!(format!("{via_subset:?}"), format!("{direct:?}"));
     }
 
     /// An empty slice still writes the zero-length sequence a reader expects.

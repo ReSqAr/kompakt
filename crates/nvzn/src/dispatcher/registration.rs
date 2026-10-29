@@ -116,7 +116,6 @@ where
                 dispatcher.store.clone(),
                 dispatcher.reader.clone(),
                 dispatcher.syncer(),
-                tenant_event_handler,
                 dispatcher.fold_state.clone(),
                 dispatcher.subscriptions.clone(),
                 Arc::new(registered_projection_types),

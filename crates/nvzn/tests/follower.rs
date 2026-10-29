@@ -46,13 +46,13 @@ async fn a_follower_syncs_against_data_it_never_saw_written() {
     let cli = cluster.follower("cli").await;
     cli.sync("a fresh follower's first sync").await;
     assert!(
-        cli.sees(1),
+        cli.sees(1).await,
         "sync returned but the cluster's existing data is not visible",
     );
 
     cli.write(9, "written-by-the-follower").await;
     cli.sync("after the follower's own write").await;
-    assert!(cli.sees(9), "the follower cannot see its own write");
+    assert!(cli.sees(9).await, "the follower cannot see its own write");
 
     assert!(
         !cli.fold.is_finished(),
@@ -82,7 +82,7 @@ async fn a_second_invocation_syncs_against_what_the_first_wrote() {
     let second = cluster.follower("cli-2").await;
     second.sync("second invocation").await;
     assert!(
-        second.sees(1),
+        second.sees(1).await,
         "the second invocation synced but cannot see what the first wrote",
     );
 

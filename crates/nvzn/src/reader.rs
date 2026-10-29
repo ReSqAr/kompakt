@@ -1,19 +1,16 @@
-use crate::dispatcher::{FoldState, InnerHandler, PENDING_SUBSCRIBERS, Subscriptions};
+use crate::dispatcher::{FoldState, PENDING_SUBSCRIBERS, Subscriptions};
 use crate::events::subset;
-use crate::ids::APP_ID_LEN;
 use crate::live::{self, Live, LiveLimits};
 use crate::metrics::{self, ReadKind};
 use crate::projection::Registered;
 use crate::{
     ArcReadTransaction, ArcStore, Error, EventSet, Index, Projection, ProjectionTypeId,
-    ReadTransaction, ReadTransactionExt, Ref, ResultSet, SubEventOf, Syncer, Tenant, TenantId,
-    View, WithWireFormat, WriteTransactionImpl,
+    ReadTransactionExt, Ref, ResultSet, SubEventOf, Syncer, Tenant, TenantId, View, WithWireFormat,
 };
-use bytes::Bytes;
 use std::collections::{BTreeMap, BTreeSet};
 use std::marker::PhantomData;
 use std::sync::Arc;
-use zslg::{Channels, Data, DataId, UnstableEvent};
+use zslg::Channels;
 
 impl Error {
     pub(crate) fn reference_not_found<P: Projection>(r: Ref<P>) -> Self {
@@ -35,7 +32,6 @@ pub struct Reader<Ev> {
     store: ArcStore,
     reader: Arc<dyn zslg::Reader>,
     syncer: Syncer,
-    handler: InnerHandler,
     fold_state: FoldState,
     subscriptions: Subscriptions,
     registered: Arc<BTreeSet<ProjectionTypeId>>,
@@ -56,7 +52,6 @@ impl<Ev> Reader<Ev> {
         store: ArcStore,
         reader: Arc<dyn zslg::Reader>,
         syncer: Syncer,
-        handler: InnerHandler,
         fold_state: FoldState,
         subscriptions: Subscriptions,
         registered: Arc<BTreeSet<ProjectionTypeId>>,
@@ -68,7 +63,6 @@ impl<Ev> Reader<Ev> {
             store,
             reader,
             syncer,
-            handler,
             fold_state,
             subscriptions,
             registered,
@@ -191,60 +185,19 @@ impl<Ev> Reader<Ev> {
             .until(&self.subscriptions.cancelled)
             .map(Ref::new))
     }
-
-    /// The folded state with the unstable tail applied on top. Fails like
-    /// [`snapshot`](Self::snapshot) once the fold has stopped — the tail is
-    /// only the part of the view above the watermark the fold stopped at.
-    ///
-    /// Blocking: it drains the tail, and it may wait for the fold. The tail
-    /// starts above zslg's stable watermark `S` as of the call, the store
-    /// covers up to the fold's own watermark `F`, and `S` moves first when a
-    /// snapshot is loaded — entries in `(F, S]` would be in neither half. So
-    /// the order is: take the tail (cut at some `S_t`), read `S` again
-    /// (`S_t <= S`, since it only rises), wait for `F >= S`, then open the
-    /// store. The wait is empty unless a load is in flight. The overlap
-    /// `(S_t, F]` is dropped from the tail (`Watermark::covers`): what is
-    /// stable there is already folded, and what is not never will be.
-    pub fn unstable_snapshot(&self) -> Result<Snapshot<'_>, Error> {
-        self.fold_state.check()?;
-        metrics::read(self.tenant, ReadKind::Unstable);
-        let tail = self.reader.unstable_tail();
-        if let Some(cut) = self.reader.stable_watermark() {
-            self.fold_state.wait_folded(cut)?;
-        }
-
-        let mut txn = self.store.write()?;
-        let folded = txn.watermark()?;
-        let mut last_applied: Option<DataId> = None;
-        let mut applied = 0usize;
-
-        for item in tail {
-            let Data { data_id, blob } = item?;
-            // The tail is `DataId`-ordered, so `last_applied` drops a repeat.
-            if folded.covers(data_id) || last_applied.is_some_and(|last| data_id <= last) {
-                continue;
-            }
-            last_applied = Some(data_id);
-            applied = applied.saturating_add(1);
-
-            apply(self.tenant.id(), &self.handler, &mut txn, blob)?;
-        }
-        metrics::unstable_fold(applied);
-
-        Ok(Snapshot {
-            tenant_id: self.tenant.id(),
-            snapshot: Arc::new(txn),
-        })
-    }
 }
 
 impl<Ev: WithWireFormat> Reader<Ev> {
-    /// A live view under the sub-event set `S` (a subset enum of
-    /// `define_events!`, as `LiveEvent<'static>`): every registered projection
-    /// whose events are all in `S` is live in it; see [`Live`]. Opens the
-    /// unstable tail, scans the stable log from the store's watermark up to the
-    /// stable one (the first snapshots wait for that, once), and integrates
-    /// from then on. One per process: clone the [`Live`] to share it.
+    /// A live view under the sub-event set `S` (any `EventSet`: an owned or a
+    /// view subset of `define_events!`): every registered projection whose
+    /// events are all in `S` is live in it; see [`Live`]. One per process:
+    /// clone the [`Live`] to share it.
+    ///
+    /// Returns at once and starts itself once the fold has caught up
+    /// ([`sync`](Self::sync)): until then it serves the stable snapshot and
+    /// [`Live::wait_for`] answers `NotStarted`. An empty `S` never starts. Starting opens the unstable
+    /// tail and scans the stable log from the store's watermark up to the
+    /// stable one (the first snapshots wait for that, once).
     ///
     /// Needs a tokio runtime (it spawns its tasks); fails like
     /// [`snapshot`](Self::snapshot) once the fold has stopped.
@@ -254,6 +207,35 @@ impl<Ev: WithWireFormat> Reader<Ev> {
 
     /// [`live`](Self::live) with explicit caps on what it holds.
     pub fn live_with<S: EventSet>(&self, limits: LiveLimits) -> Result<Live<Ev>, Error> {
+        let view = self.not_started::<S>(limits)?;
+        if S::EVENTS.is_empty() {
+            // Nothing could ever be live: no tail, no scan, no tasks.
+            return Ok(view);
+        }
+        tokio::spawn(live::begin_when_caught_up(
+            view.clone(),
+            self.syncer.clone(),
+            Arc::clone(&self.reader),
+            self.subscriptions.cancelled.clone(),
+        ));
+        Ok(view)
+    }
+
+    /// A live view started now, without waiting for the fold: for tests that
+    /// drive F by hand.
+    #[cfg(test)]
+    pub(crate) fn live_started<S: EventSet>(&self, limits: LiveLimits) -> Result<Live<Ev>, Error> {
+        let view = self.not_started::<S>(limits)?;
+        live::begin(
+            &view,
+            &self.reader,
+            &self.subscriptions.cancelled,
+            self.syncer.watermark(),
+        )?;
+        Ok(view)
+    }
+
+    pub(crate) fn not_started<S: EventSet>(&self, limits: LiveLimits) -> Result<Live<Ev>, Error> {
         self.fold_state.check()?;
         let mut projectors = BTreeMap::new();
         for (type_id, registered) in self.projections.iter() {
@@ -261,85 +243,15 @@ impl<Ev: WithWireFormat> Reader<Ev> {
                 projectors.insert(*type_id, (registered.make)()?);
             }
         }
-        live::start(
+        live::not_started(
             self.tenant,
             self.store.clone(),
-            &self.reader,
             self.fold_state.clone(),
-            &self.subscriptions.cancelled,
-            self.syncer.watermark(),
             projectors,
             S::EVENTS,
             limits,
         )
     }
-
-    /// A trigger, not a feed: this tenant's events as they reach the node's
-    /// unstable tail, one item per write that carries any. Every write
-    /// integrated after the call is announced at least once, in arrival
-    /// order; the answer to an item is to read
-    /// [`unstable_snapshot`](Self::unstable_snapshot), which alone says what
-    /// is true. A write that never converges is announced and then absent
-    /// from a later snapshot. A caller that cares about a subset of the
-    /// events filters with [`SubEventOf::project`].
-    ///
-    /// A payload that cannot be decoded is an `Err` item and the stream goes
-    /// on. Ends `Cancelled` when the dispatcher is cancelled, independently of
-    /// the fold.
-    #[must_use]
-    pub fn subscribe_unstable_tail(&self) -> Channels<Result<Vec<Ev>, Error>> {
-        let tenant = self.tenant;
-        self.reader
-            .subscribe_unstable_tail()
-            .filter_map(move |item| match item {
-                Ok(UnstableEvent::Appended(data)) => announce::<Ev>(tenant, &data.blob),
-                Ok(UnstableEvent::Watermark(_)) => None,
-                Err(e) => Some(Err(e.into())),
-            })
-            .until(&self.subscriptions.cancelled)
-    }
-}
-
-/// `Ev`'s events of `blob`, if `blob` is this tenant's and carries any.
-fn announce<Ev: WithWireFormat>(tenant: Tenant, blob: &[u8]) -> Option<Result<Vec<Ev>, Error>> {
-    let Some((tenant_id, payload)) = blob.split_first_chunk() else {
-        metrics::unstable_subscription_undecodable(tenant);
-        return Some(Err(Error::PayloadTooShort(blob.len(), APP_ID_LEN)));
-    };
-    if TenantId::from_slice(*tenant_id) != tenant.id() {
-        return None;
-    }
-    match Ev::decode(payload) {
-        Ok(events) => (!events.is_empty()).then_some(Ok(events)),
-        Err(e) => {
-            metrics::unstable_subscription_undecodable(tenant);
-            Some(Err(e.into()))
-        }
-    }
-}
-
-fn apply(
-    tenant_id: TenantId,
-    handler: &InnerHandler,
-    txn: &mut WriteTransactionImpl,
-    payload: Bytes,
-) -> Result<(), Error> {
-    let Some((payload_tenant_id, payload)) = payload.split_first_chunk() else {
-        return Err(Error::PayloadTooShort(payload.len(), APP_ID_LEN));
-    };
-
-    let payload_tenant_id = TenantId::from_slice(*payload_tenant_id);
-    if payload_tenant_id != tenant_id {
-        tracing::trace!(
-            tenant_id = payload_tenant_id.as_u128(),
-            "not this reader's tenant; skipping"
-        );
-        return Ok(());
-    }
-
-    handler(tenant_id, txn, payload)?;
-
-    Ok(())
 }
 
 impl<'a> Snapshot<'a> {
@@ -401,10 +313,10 @@ impl<'a> Snapshot<'a> {
 mod tests {
     use super::*;
     use crate::{
-        Dispatcher, Store, Watermark,
+        Dispatcher, Store,
         testsupport::{
-            self, FLUSH_INTERVAL, TestLog, User, UserId, commit_row, event, inmemory, payload,
-            tenant, tenant_id,
+            self, FLUSH_INTERVAL, TestLog, User, UserId, commit_row, event, inmemory, tenant,
+            tenant_id,
         },
     };
     use std::sync::Arc;
@@ -416,11 +328,6 @@ mod tests {
             address: None,
             email: None,
         })
-    }
-
-    fn committed_user(store: &Arc<dyn Store>, id: u128) -> Option<User> {
-        let txn = store.read().unwrap();
-        ReadTransactionExt::get::<User>(&*txn, tenant_id(), Ref::new(UserId(id).into())).unwrap()
     }
 
     /// The contract of `folded_watermark` + `hlc_now`: once the fold has
@@ -538,250 +445,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unstable_snapshot_applies_own_payloads() {
-        let (store, mut log, reader) = reader().await;
-        log.push_unstable(payload(tenant_id(), &[new_user(1, "holden")]));
-        drop(log);
-
-        let snapshot = reader.unstable_snapshot().unwrap();
-        assert_eq!(
-            snapshot
-                .get(Ref::<User>::new(UserId(1).into()))
-                .unwrap()
-                .unwrap()
-                .name,
-            "holden"
-        );
-
-        assert!(committed_user(&store, 1).is_none());
-    }
-
-    #[tokio::test]
-    async fn unstable_snapshot_dedups_by_data_id() {
-        let (store, log, reader) = reader().await;
-
-        let seen = testsupport::data_id(1, 1);
-        let txn = store.write().unwrap();
-        txn.commit(Watermark {
-            index: None,
-            data_id: Some(seen),
-            hlc: None,
-        })
-        .unwrap();
-
-        log.push_unstable_at(seen, payload(tenant_id(), &[new_user(1, "first")]));
-        let newer = testsupport::data_id(2, 2);
-        log.push_unstable_at(newer, payload(tenant_id(), &[new_user(1, "second")]));
-        drop(log);
-
-        let snapshot = reader.unstable_snapshot().unwrap();
-        assert_eq!(
-            snapshot
-                .get(Ref::<User>::new(UserId(1).into()))
-                .unwrap()
-                .unwrap()
-                .name,
-            "second"
-        );
-    }
-
-    #[tokio::test]
-    async fn unstable_snapshot_skips_foreign_tenant_payloads() {
-        let (_store, mut log, reader) = reader().await;
-        let other_tenant = crate::TenantId::from_string_hash("other", 0);
-        log.push_unstable(payload(other_tenant, &[new_user(1, "foreign")]));
-        log.push_unstable(payload(tenant_id(), &[new_user(2, "own")]));
-        drop(log);
-
-        let snapshot = reader.unstable_snapshot().unwrap();
-        assert!(
-            snapshot
-                .get(Ref::<User>::new(UserId(1).into()))
-                .unwrap()
-                .is_none()
-        );
-        assert_eq!(
-            snapshot
-                .get(Ref::<User>::new(UserId(2).into()))
-                .unwrap()
-                .unwrap()
-                .name,
-            "own"
-        );
-    }
-
-    #[tokio::test]
-    async fn unstable_snapshot_payload_too_short() {
-        let (_store, mut log, reader) = reader().await;
-        log.push_unstable(bytes::Bytes::from_static(&[1, 2, 3]));
-        drop(log);
-
-        let err = reader.unstable_snapshot().err().expect("must error");
-        assert!(matches!(err, Error::PayloadTooShort(_, _)));
-    }
-
-    #[tokio::test]
-    async fn unstable_snapshot_can_be_taken_twice() {
-        let (_store, mut log, reader) = reader().await;
-        log.push_unstable(payload(tenant_id(), &[new_user(1, "holden")]));
-
-        for attempt in 0..3 {
-            let snapshot = reader.unstable_snapshot().unwrap();
-            assert_eq!(
-                snapshot
-                    .get(Ref::<User>::new(UserId(1).into()))
-                    .unwrap()
-                    .expect("attempt {attempt}")
-                    .name,
-                "holden",
-                "attempt {attempt}"
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn unstable_snapshot_reads_the_tail_before_opening_the_store() {
-        let calls = testsupport::calls();
-        let store: Arc<dyn Store> =
-            Arc::new(testsupport::ObservingStore::new(inmemory(), calls.clone()));
-        let log = TestLog::new();
-        let zslg_reader: Arc<dyn zslg::Reader> = Arc::new(testsupport::ObservingReader::new(
-            log.reader(),
-            calls.clone(),
-        ));
-
-        let mut dispatcher = Dispatcher::from_db(
-            store,
-            log.writer(),
-            zslg_reader,
-            FLUSH_INTERVAL,
-            &tokio_util::sync::CancellationToken::new(),
-        )
-        .await
-        .unwrap();
-        let mut manager = dispatcher.new_handler::<event::Event>(tenant());
-        manager.register::<User>().unwrap();
-        let (_writer, reader) = manager.finalise().unwrap();
-
-        calls.lock().unwrap().clear();
-        let _snapshot = reader.unstable_snapshot().unwrap();
-
-        let seen: Vec<&str> = testsupport::recorded(&calls)
-            .into_iter()
-            .filter(|c| ["unstable_tail", "write"].contains(c))
-            .collect();
-        assert_eq!(seen, vec!["unstable_tail", "write"]);
-    }
-
-    fn user_name(snapshot: &Snapshot<'_>, id: u128) -> Option<String> {
-        snapshot
-            .get(Ref::<User>::new(UserId(id).into()))
-            .unwrap()
-            .map(|u| u.name)
-    }
-
-    /// The seam: zslg's stable watermark moves as soon as a snapshot is
-    /// loaded, and the tail is cut there, but the fold has not folded that
-    /// snapshot's entries yet. Read straight away, the entry would be in
-    /// neither half.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn unstable_snapshot_waits_for_the_fold_to_reach_the_stable_watermark() {
-        let store = inmemory();
-        let log = TestLog::new();
-        let (scripted, feed) = testsupport::ScriptedReader::new();
-        let mut dispatcher = Dispatcher::from_db(
-            store,
-            log.writer(),
-            scripted.clone(),
-            FLUSH_INTERVAL,
-            &tokio_util::sync::CancellationToken::new(),
-        )
-        .await
-        .unwrap();
-        let mut manager = dispatcher.new_handler::<event::Event>(tenant());
-        manager.register::<User>().unwrap();
-        let (_writer, reader) = manager.finalise().unwrap();
-        let _handle = dispatcher.finalise().await.unwrap();
-
-        // Loaded at 10: the tail now starts above it and no longer carries
-        // the entry; only the fresher write at 20 is left in it.
-        scripted.set_stable_watermark(10);
-        scripted.push_unstable(
-            testsupport::data_id(20, 2),
-            payload(tenant_id(), &[new_user(2, "naomi")]),
-        );
-        let reader = Arc::new(reader);
-        let read = tokio::task::spawn_blocking({
-            let reader = Arc::clone(&reader);
-            move || {
-                let snapshot = reader.unstable_snapshot().unwrap();
-                (user_name(&snapshot, 1), user_name(&snapshot, 2))
-            }
-        });
-
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        assert!(
-            !read.is_finished(),
-            "the read must wait while the fold is behind the stable watermark"
-        );
-
-        feed.send(Ok(zslg::StableLogEvent::Appended {
-            index: zslg::LogIndex::ZERO,
-            data: Data {
-                data_id: testsupport::data_id(10, 1),
-                blob: payload(tenant_id(), &[new_user(1, "holden")]),
-            },
-        }))
-        .unwrap();
-        feed.send(Ok(zslg::StableLogEvent::Watermark(testsupport::hlc(10))))
-            .unwrap();
-
-        let (stable, unstable) = tokio::time::timeout(std::time::Duration::from_secs(5), read)
-            .await
-            .expect("the read returns once the fold catches up")
-            .unwrap();
-        assert_eq!(stable.as_deref(), Some("holden"), "folded, below the cut");
-        assert_eq!(
-            unstable.as_deref(),
-            Some("naomi"),
-            "from the tail, above it"
-        );
-    }
-
-    #[tokio::test]
-    async fn unstable_snapshot_hides_tail_entries_at_or_below_the_folded_watermark() {
-        let (store, log, reader) = reader().await;
-        let txn = store.write().unwrap();
-        txn.commit(Watermark {
-            index: None,
-            data_id: Some(testsupport::data_id(10, 1)),
-            hlc: Some(testsupport::hlc(50)),
-        })
-        .unwrap();
-
-        // Below the settled prefix but never part of it: a write that did not
-        // make quorum. Above it: fresh.
-        log.push_unstable_at(
-            testsupport::data_id(30, 2),
-            payload(tenant_id(), &[new_user(1, "doomed")]),
-        );
-        log.push_unstable_at(
-            testsupport::data_id(60, 3),
-            payload(tenant_id(), &[new_user(2, "fresh")]),
-        );
-        drop(log);
-
-        let snapshot = reader.unstable_snapshot().unwrap();
-        assert_eq!(user_name(&snapshot, 1), None);
-        assert_eq!(user_name(&snapshot, 2).as_deref(), Some("fresh"));
-    }
-
-    #[tokio::test]
     async fn a_snapshot_clone_reads_the_same_state() {
-        let (_store, mut log, reader) = reader().await;
-        log.push_unstable(payload(tenant_id(), &[new_user(1, "holden")]));
+        let (store, _log, reader) = reader().await;
+        let holden = User {
+            id: UserId(1),
+            name: "holden".into(),
+            address: None,
+            email: None,
+            last_ping: None,
+        };
+        commit_row(&store, tenant_id(), Ref::new(UserId(1).into()), &holden);
 
-        let snapshot = reader.unstable_snapshot().unwrap();
+        let snapshot = reader.snapshot().unwrap();
         let clone = snapshot.clone();
         let names = |s: Snapshot<'_>| -> Vec<String> {
             s.select::<User>()
@@ -992,120 +667,6 @@ mod tests {
             reader
                 .subscribe_stable_log::<User>()
                 .expect("a registered projection subscribes");
-        }
-    }
-
-    mod subscribe_unstable_tail {
-        use super::*;
-        use crate::testsupport::{NewTodoV1, TodoId};
-        use tokio::time::{Duration, timeout};
-        use zslg::ChannelEnd;
-
-        const WAIT: Duration = Duration::from_secs(5);
-
-        fn new_todo(id: u128) -> event::Event {
-            event::Event::NewTodo(NewTodoV1 {
-                id: TodoId(id),
-                user_id: UserId(100),
-                title: format!("todo {id}"),
-            })
-        }
-
-        /// The next item, off the runtime: `recv` blocks.
-        async fn next<T: Send + 'static>(ch: Channels<T>) -> (Channels<T>, Result<T, ChannelEnd>) {
-            timeout(
-                WAIT,
-                tokio::task::spawn_blocking(move || {
-                    let mut ch = ch;
-                    let got = ch.recv();
-                    (ch, got)
-                }),
-            )
-            .await
-            .expect("the subscription delivered in time")
-            .unwrap()
-        }
-
-        #[tokio::test]
-        async fn announces_this_tenants_events() {
-            let (_store, mut log, reader) = reader().await;
-            let all = reader.subscribe_unstable_tail();
-
-            log.push_unstable(payload(tenant_id(), &[new_todo(1)]));
-            log.push_unstable(payload(tenant_id(), &[new_todo(2), new_user(1, "holden")]));
-
-            let (all, first) = next(all).await;
-            assert_eq!(first.unwrap().unwrap().len(), 1);
-            let (_all, second) = next(all).await;
-            assert_eq!(second.unwrap().unwrap().len(), 2);
-        }
-
-        #[tokio::test]
-        async fn skips_foreign_tenants_and_watermarks() {
-            let (_store, mut log, reader) = reader().await;
-            let users = reader.subscribe_unstable_tail();
-
-            let other_tenant = crate::TenantId::from_string_hash("other", 0);
-            log.push_unstable(payload(other_tenant, &[new_user(1, "amos")]));
-            // Below the next write's HLC, so the write is still announced.
-            log.watermark(0);
-            log.push_unstable(payload(tenant_id(), &[new_user(2, "naomi")]));
-
-            let (_users, got) = next(users).await;
-            assert!(matches!(
-                got.unwrap().unwrap().as_slice(),
-                [event::Event::NewUser(u)] if u.name == "naomi"
-            ));
-        }
-
-        #[tokio::test]
-        async fn an_undecodable_payload_is_an_error_and_the_stream_goes_on() {
-            let (_store, mut log, reader) = reader().await;
-            let users = reader.subscribe_unstable_tail();
-
-            let mut garbage = bytes::BytesMut::new();
-            garbage.extend_from_slice(&tenant_id().as_slice());
-            garbage.extend_from_slice(&[0xff; 4]);
-            log.push_unstable(garbage.freeze());
-            log.push_unstable(Bytes::from_static(b"short"));
-            log.push_unstable(payload(tenant_id(), &[new_user(1, "holden")]));
-
-            let (users, undecodable) = next(users).await;
-            assert!(undecodable.unwrap().is_err());
-            let (users, short) = next(users).await;
-            assert!(matches!(short.unwrap(), Err(Error::PayloadTooShort(5, _))));
-            let (_users, decoded) = next(users).await;
-            assert_eq!(decoded.unwrap().unwrap().len(), 1);
-        }
-
-        /// The stream reads zslg, not the fold, so a fold that stopped for a
-        /// reason other than a cancel leaves it running.
-        #[tokio::test]
-        async fn outlives_a_fold_that_stopped() {
-            let log = TestLog::new();
-            let mut dispatcher = Dispatcher::from_db(
-                inmemory(),
-                log.writer(),
-                log.reader(),
-                FLUSH_INTERVAL,
-                &tokio_util::sync::CancellationToken::new(),
-            )
-            .await
-            .unwrap();
-            let mut manager = dispatcher.new_handler::<event::Event>(tenant());
-            manager.register::<User>().unwrap();
-            let (_writer, reader) = manager.finalise().unwrap();
-            let handle = dispatcher.finalise().await.unwrap();
-            let users = reader.subscribe_unstable_tail();
-
-            log.disconnect();
-            let folded = timeout(WAIT, handle).await.unwrap().unwrap();
-            assert!(matches!(folded, Err(Error::SubscriptionAborted)));
-
-            let mut log = log;
-            log.push_unstable(payload(tenant_id(), &[new_user(1, "holden")]));
-            let (_users, got) = next(users).await;
-            assert_eq!(got.unwrap().unwrap().len(), 1);
         }
     }
 }

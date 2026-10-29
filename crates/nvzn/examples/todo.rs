@@ -205,6 +205,19 @@ fn init_tracing() {
     tracing_subscriber::fmt().with_env_filter(filter).init();
 }
 
+/// Until `live` serves the write `d` (it starts once the fold has caught up).
+async fn seen(live: &nvzn::Live<event::Event>, d: zslg::DataId) {
+    loop {
+        match live.wait_for(d, std::time::Duration::from_secs(5)).await {
+            nvzn::Wait::Seen => return,
+            nvzn::Wait::NotStarted => {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await
+            }
+            other => panic!("the live view did not see the write: {other:?}"),
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     init_tracing();
@@ -225,6 +238,8 @@ async fn main() {
     let (writer, reader) = manager.finalise().expect("registration failed");
 
     let handle = dispatcher.finalise().await.expect("handle");
+    // Every projection live: the example reads its own writes at once.
+    let live = reader.live::<event::Event>().expect("live view");
 
     let user = NewUserV3 {
         id: UserId(0),
@@ -243,13 +258,13 @@ async fn main() {
         title: "Save the world".to_string(),
     };
 
-    writer
+    let written = writer
         .write(&[user.into(), todo1.into(), todo2.into()])
         .await
         .expect("encryption failed");
 
-    reader.sync().await.expect("sync failed");
-    let snapshot = reader.unstable_snapshot().expect("snapshot failed");
+    seen(&live, written).await;
+    let snapshot = live.snapshot().expect("snapshot failed");
     let all_users = snapshot.select::<User>();
     let all_todos = snapshot.select::<Todo>();
 
@@ -295,13 +310,12 @@ async fn main() {
     assert_eq!(u0.id, UserId(0));
     assert_eq!(ts.len(), 2);
 
-    writer
+    let deleted = writer
         .write(&[UserDeletedV1 { id: UserId(0) }.into()])
         .await
         .expect("write failed");
-    reader.sync().await.expect("sync failed");
-    // Unstable, like the reads above: the stable snapshot never saw user 0.
-    let after = reader.unstable_snapshot().expect("snapshot failed");
+    seen(&live, deleted).await;
+    let after = live.snapshot().expect("snapshot failed");
     assert!(
         after
             .get(Ref::<User>::from(UserId(0)))
