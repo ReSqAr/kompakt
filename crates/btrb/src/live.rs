@@ -240,6 +240,7 @@ impl<Ev: WithWireFormat, L: EventSet + Into<Ev>> Live<Ev, L> {
 /// read-after-write cookie. A path with no response (the CLI) drops it,
 /// saying why.
 #[must_use = "put it in the response: it is the person's read-after-write cookie"]
+#[derive(Debug)]
 pub struct Written {
     data_id: DataId,
     cookie: Arc<Cookie>,
