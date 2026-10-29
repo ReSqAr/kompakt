@@ -195,7 +195,7 @@ impl<Ev: WithWireFormat> Reader<Ev> {
     ///
     /// Returns at once and starts itself once the fold has caught up
     /// ([`sync`](Self::sync)): until then it serves the stable snapshot and
-    /// [`Live::wait_for`] answers `NotStarted`. Starting opens the unstable
+    /// [`Live::wait_for`] answers `NotStarted`. An empty `S` never starts. Starting opens the unstable
     /// tail and scans the stable log from the store's watermark up to the
     /// stable one (the first snapshots wait for that, once).
     ///
@@ -208,6 +208,10 @@ impl<Ev: WithWireFormat> Reader<Ev> {
     /// [`live`](Self::live) with explicit caps on what it holds.
     pub fn live_with<S: EventSet>(&self, limits: LiveLimits) -> Result<Live<Ev>, Error> {
         let view = self.not_started::<S>(limits)?;
+        if S::EVENTS.is_empty() {
+            // Nothing could ever be live: no tail, no scan, no tasks.
+            return Ok(view);
+        }
         tokio::spawn(live::begin_when_caught_up(
             view.clone(),
             self.syncer.clone(),

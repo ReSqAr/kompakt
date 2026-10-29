@@ -137,6 +137,19 @@ pub struct EventWriter<Ev> {
     writer: Arc<dyn zslg::Writer>,
 }
 
+// By hand: a derive would require `Ev: Clone`, and the writer holds no `Ev`.
+impl<Ev> Clone for EventWriter<Ev> {
+    fn clone(&self) -> Self {
+        Self {
+            encoder: Encoder {
+                tenant: self.encoder.tenant,
+                phantom: PhantomData,
+            },
+            writer: Arc::clone(&self.writer),
+        }
+    }
+}
+
 impl<Ev> EventWriter<Ev> {
     pub(super) fn new(encoder: Encoder<Ev>, writer: Arc<dyn zslg::Writer>) -> Self {
         Self { encoder, writer }
