@@ -76,7 +76,7 @@ pub(super) async fn run_standalone(entries: &[crate::Entry]) -> Result<(), Box<d
     let mut jobs: Vec<Job> = Vec::new();
     for b in booted {
         let (routes, app_jobs) = b.app.standalone(&b.base, stop.clone())?;
-        parts.push((b.base, routes));
+        parts.push((b.base, crate::Booted::wrap(b.read_after_write, routes)));
         jobs.extend(
             app_jobs
                 .into_iter()

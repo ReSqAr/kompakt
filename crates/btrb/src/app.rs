@@ -5,7 +5,8 @@
 //!   Entry::of::<A>(base)       one line of a binary's list
 //!        │ configure_all       A::config reads the app's env slice (Env::finish then
 //!        ▼                     rejects whatever nobody read, before any store opens)
-//!      Ready ── boot ──▶ A::new(Nvzn, AppCache) ──▶ Booted { base, Box<dyn Mounted> }
+//!      Ready ── boot ──▶ A::new(Nvzn, AppCache) ──▶ Booted { base, Box<dyn Mounted>,
+//!                                                           read_after_write }
 //!
 //!   Mounted::router      server      mount at its BasePath
 //!   Mounted::background  worker      jobs that end only when told to
@@ -25,6 +26,7 @@ use crate::admin::{Handler, Remote, Served};
 use crate::base_path::BasePath;
 use crate::config::{Env, Scope};
 use crate::console::Console;
+use crate::live::{Live, LiveSettings, ReadAfterWrite};
 use crate::metrics::Histogram;
 use crate::{CookiePolicy, Error};
 use axum::Router;
@@ -33,21 +35,25 @@ use futures::StreamExt;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
 use nvzn::{
-    AssociatedProjectorManager, Dispatcher, EventWriter, Projection, Reader, SubEventOf, Tenant,
-    WithWireFormat,
+    AssociatedProjectorManager, Dispatcher, EventSet, EventWriter, Projection, Reader, SubEventOf,
+    Tenant, WithWireFormat,
 };
 use objectstorage_cache::{AppCache, Builder as CacheBuilder};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::future::Future;
+use std::marker::PhantomData;
 use std::path::Path;
+use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 /// Deployment facts every app is given, by value.
 #[derive(Debug, Clone, Copy)]
 pub struct Global {
     pub cookies: CookiePolicy,
+    /// `BTRB_READ_AFTER_WRITE_WAIT`: the cap on either read-after-write wait.
+    pub read_after_write_wait: Duration,
 }
 
 /// The runtime's request to stop: SIGTERM, or the fold stopping.
@@ -93,32 +99,76 @@ impl Shutdown {
     }
 }
 
-/// What an app may do with nvzn: register its projections, then take its
-/// writer and reader. The manager borrows the dispatcher, so registration is
-/// sequential per app and the handle cannot outlive `App::new`.
-pub struct Nvzn<'d, Ev>(AssociatedProjectorManager<'d, Ev>);
+/// What [`Nvzn::finish`] hands an app: its writer, reader and live view.
+pub type Handles<Ev, L> = (EventWriter<Ev>, Reader<Ev>, Live<Ev, L>);
 
-impl<'d, Ev> Nvzn<'d, Ev> {
-    /// The runtime's way in; apps are handed an `Nvzn`, they never make one.
+/// What an app may do with nvzn: register its projections, then take its
+/// writer, reader and live view. The manager borrows the dispatcher, so
+/// registration is sequential per app and the handle cannot outlive `App::new`.
+///
+/// Generic over the event type and the live set `L` (an owned subset), not
+/// over the `App`: a test rig below the app's crate builds one too.
+pub struct Nvzn<'d, Ev, L> {
+    manager: AssociatedProjectorManager<'d, Ev>,
+    settings: LiveSettings,
+    /// Boot's slot for the request layer; a rig's `Nvzn` has none.
+    read_after_write: Option<&'d mut Option<ReadAfterWrite>>,
+    _live_set: PhantomData<fn() -> L>,
+}
+
+impl<'d, Ev, L> Nvzn<'d, Ev, L> {
+    /// A rig's way in (`LiveSettings::for_test()`): no request layer. Apps are
+    /// handed an `Nvzn` by the runtime, they never make one.
     #[must_use]
-    pub fn new(manager: AssociatedProjectorManager<'d, Ev>) -> Self {
-        Self(manager)
+    pub fn new(manager: AssociatedProjectorManager<'d, Ev>, settings: LiveSettings) -> Self {
+        Self {
+            manager,
+            settings,
+            read_after_write: None,
+            _live_set: PhantomData,
+        }
+    }
+
+    fn booted(
+        manager: AssociatedProjectorManager<'d, Ev>,
+        settings: LiveSettings,
+        slot: &'d mut Option<ReadAfterWrite>,
+    ) -> Self {
+        Self {
+            manager,
+            settings,
+            read_after_write: Some(slot),
+            _live_set: PhantomData,
+        }
     }
 }
 
-impl<Ev: WithWireFormat> Nvzn<'_, Ev> {
+impl<Ev, L> Nvzn<'_, Ev, L>
+where
+    Ev: WithWireFormat + Send + Sync + 'static,
+    L: EventSet + Into<Ev>,
+{
     /// Registers `P` and every index of it.
     pub fn register<P>(&mut self) -> Result<(), nvzn::Error>
     where
         P: Projection,
         for<'e> P::Event<'e>: SubEventOf<'e, Ev>,
     {
-        self.0.register::<P>()
+        self.manager.register::<P>()
     }
 
-    /// Ends registration.
-    pub fn finish(self) -> Result<(EventWriter<Ev>, Reader<Ev>), nvzn::Error> {
-        self.0.finalise()
+    /// Ends registration: the writer, the reader, and the app's live view
+    /// (it starts once the fold has replayed the log).
+    pub fn finish(self) -> Result<Handles<Ev, L>, nvzn::Error> {
+        let (writer, reader) = self.manager.finalise()?;
+        let view = reader.live::<L>()?;
+        let live = Live::new(view, writer.clone(), self.settings);
+        if let Some(slot) = self.read_after_write
+            && !L::EVENTS.is_empty()
+        {
+            *slot = Some(live.read_after_write());
+        }
+        Ok((writer, reader, live))
     }
 }
 
@@ -146,6 +196,11 @@ impl From<&NoEvents> for NoWire {
     fn from(event: &NoEvents) -> Self {
         match *event {}
     }
+}
+
+/// An app with no events has no live set either.
+impl EventSet for NoEvents {
+    const EVENTS: &'static [u32] = &[];
 }
 
 impl WithWireFormat for NoEvents {
@@ -218,6 +273,9 @@ pub trait App: Sized + Send + 'static {
     /// `[a-z]+`: the env prefix (`APP_`) and the tenant name. Permanent.
     const NAME: &'static str;
     type Event: WithWireFormat + Send + Sync + 'static;
+    /// The live set: an owned subset of `Event` (`define_events!`'s `owned`
+    /// block), what [`Live::write`] takes. `NoEvents` for an app without events.
+    type Live: EventSet + Into<Self::Event> + Send + 'static;
     /// What `config` reads. A zero-sized `Config` claims no env prefix.
     type Config: Send + 'static;
     type Command: Subcommand + FromArgMatches + Send + 'static;
@@ -233,7 +291,7 @@ pub trait App: Sized + Send + 'static {
     /// app's part of the process's cache; its kinds are registered here, and
     /// reads start after the boot.
     fn new(
-        nvzn: Nvzn<'_, Self::Event>,
+        nvzn: Nvzn<'_, Self::Event, Self::Live>,
         cache: AppCache,
         config: Self::Config,
     ) -> Result<Self, Error>;
@@ -346,7 +404,8 @@ trait Pending: Send {
         self: Box<Self>,
         dispatcher: &mut Dispatcher,
         cache: AppCache,
-    ) -> Result<Box<dyn Mounted>, Error>;
+        settings: LiveSettings,
+    ) -> Result<(Box<dyn Mounted>, Option<ReadAfterWrite>), Error>;
 }
 
 struct Configured<A: App>(A::Config);
@@ -357,10 +416,16 @@ impl<A: App> Pending for Configured<A> {
         self: Box<Self>,
         dispatcher: &mut Dispatcher,
         cache: AppCache,
-    ) -> Result<Box<dyn Mounted>, Error> {
+        settings: LiveSettings,
+    ) -> Result<(Box<dyn Mounted>, Option<ReadAfterWrite>), Error> {
         let manager = dispatcher.new_handler::<A::Event>(Tenant::new(A::NAME, 0));
-        let app = A::new(Nvzn(manager), cache, self.0)?;
-        Ok(Box::new(Wrapped(app)))
+        let mut read_after_write = None;
+        let app = A::new(
+            Nvzn::booted(manager, settings, &mut read_after_write),
+            cache,
+            self.0,
+        )?;
+        Ok((Box::new(Wrapped(app)), read_after_write))
     }
 }
 
@@ -466,12 +531,26 @@ pub struct Ready {
     base: BasePath,
     name: &'static str,
     pending: Box<dyn Pending>,
+    global: Global,
 }
 
 /// An app booted, with where it is mounted.
 pub struct Booted {
     pub base: BasePath,
     pub app: Box<dyn Mounted>,
+    /// The read side of read-after-write, for its routes; none for an app
+    /// without a live set.
+    pub read_after_write: Option<ReadAfterWrite>,
+}
+
+impl Booted {
+    /// `routes` with the read-after-write wait in front, if this app has one.
+    pub fn wrap(read_after_write: Option<ReadAfterWrite>, routes: Router) -> Router {
+        match read_after_write {
+            Some(raw) => raw.layer(routes),
+            None => routes,
+        }
+    }
 }
 
 impl Ready {
@@ -488,9 +567,17 @@ impl Ready {
         cache: &mut CacheBuilder,
     ) -> Result<Booted, Error> {
         let app_cache = cache.app(self.name);
+        let settings = LiveSettings::new(
+            self.name,
+            &self.base,
+            self.global.cookies,
+            self.global.read_after_write_wait,
+        );
+        let (app, read_after_write) = self.pending.boot(dispatcher, app_cache, settings)?;
         Ok(Booted {
             base: self.base,
-            app: self.pending.boot(dispatcher, app_cache)?,
+            app,
+            read_after_write,
         })
     }
 }
@@ -524,6 +611,7 @@ pub fn configure_all(
                 base: e.base,
                 name: e.name,
                 pending: (e.configure)(env, global)?,
+                global: *global,
             })
         })
         .collect()
@@ -540,6 +628,7 @@ mod tests {
     impl App for Probe {
         const NAME: &'static str = "probe";
         type Event = NoEvents;
+        type Live = NoEvents;
         type Config = ();
         type Command = Nothing;
         type Request = crate::NoCalls;
@@ -550,7 +639,7 @@ mod tests {
             Ok(())
         }
 
-        fn new(_: Nvzn<'_, NoEvents>, _: AppCache, (): ()) -> Result<Self, Error> {
+        fn new(_: Nvzn<'_, NoEvents, NoEvents>, _: AppCache, (): ()) -> Result<Self, Error> {
             Ok(Self)
         }
 

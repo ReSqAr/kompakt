@@ -25,16 +25,18 @@ pub mod console;
 pub mod error;
 pub mod floor;
 pub mod host;
+pub mod live;
 pub mod metrics;
 
 pub use admin::{AdminSocket, Handler, NoCalls, Remote, Served, fingerprint};
 pub use app::{
-    App, Booted, Entry, Global, Job, Mounted, NoEvents, Nothing, Nvzn, Ready, Shutdown, Stopped,
-    configure_all, env_prefixes, run_background,
+    App, Booted, Entry, Global, Handles, Job, Mounted, NoEvents, Nothing, Nvzn, Ready, Shutdown,
+    Stopped, configure_all, env_prefixes, run_background,
 };
 pub use base_path::{BasePath, with_base_href};
 pub use console::{Console, ScriptedConsole, StdConsole};
 pub use error::Error;
+pub use live::{Live, LiveSettings, ReadAfterWrite, Written};
 pub use metrics::{Histogram, describe_metrics, histograms};
 pub use objectstorage_cache::{
     AppCache, Builder as CacheBuilder, Cache, CacheConfig, Limits as CacheLimits,
