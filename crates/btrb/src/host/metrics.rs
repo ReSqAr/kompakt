@@ -41,10 +41,7 @@ pub(crate) fn install(apps: &[crate::Entry]) -> Result<PrometheusHandle, Box<dyn
     let builder = nvzn::configure_prometheus(builder)?;
     let builder = declared_buckets(builder, apps)?;
     let builder = http_buckets(builder)?;
-    let builder = builder.set_buckets_for_metric(
-        metrics_exporter_prometheus::Matcher::Full(crate::live::WAIT_SECONDS.to_owned()),
-        crate::live::WAIT_BUCKETS,
-    )?;
+    let builder = read_after_write_buckets(builder)?;
 
     let handle = builder.install_recorder()?;
 
@@ -69,7 +66,7 @@ pub(crate) fn install(apps: &[crate::Entry]) -> Result<PrometheusHandle, Box<dyn
         "HTTP requests, by method, matched route and status"
     );
     metrics::describe_histogram!(
-        crate::live::WAIT_SECONDS,
+        "btrb_read_after_write_wait_seconds",
         metrics::Unit::Seconds,
         "Read-after-write waits, by app, site (write: the writer's own view; read: \
          the next request's) and outcome (seen, timed_out, overflowed, not_started)"
@@ -92,6 +89,21 @@ fn http_buckets(builder: PrometheusBuilder) -> Result<PrometheusBuilder, Box<dyn
     ];
     Ok(builder.set_buckets_for_metric(
         Matcher::Full("btrb_http_request_duration_seconds".to_owned()),
+        SECONDS,
+    )?)
+}
+
+/// Read-after-write wait buckets: an entry already held answers in
+/// microseconds, the cap (`BTRB_READ_AFTER_WRITE_WAIT`) a fraction of a second.
+fn read_after_write_buckets(
+    builder: PrometheusBuilder,
+) -> Result<PrometheusBuilder, Box<dyn Error>> {
+    use metrics_exporter_prometheus::Matcher;
+    const SECONDS: &[f64] = &[
+        0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0,
+    ];
+    Ok(builder.set_buckets_for_metric(
+        Matcher::Full("btrb_read_after_write_wait_seconds".to_owned()),
         SECONDS,
     )?)
 }

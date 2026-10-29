@@ -39,15 +39,6 @@ use zslg::DataId;
 /// take before the request goes on.
 pub const DEFAULT_WAIT: Duration = Duration::from_millis(200);
 
-/// The read-after-write wait, by app, site (`write` or `read`) and outcome.
-pub const WAIT_SECONDS: &str = "btrb_read_after_write_wait_seconds";
-
-/// Seconds ladder for [`WAIT_SECONDS`]: a held entry in microseconds, the cap
-/// at a fraction of a second.
-pub(crate) const WAIT_BUCKETS: &[f64] = &[
-    0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0,
-];
-
 /// What an app's [`Live`] is built with: the cap and the cookie.
 #[derive(Debug, Clone)]
 pub struct LiveSettings {
@@ -154,7 +145,7 @@ fn record(cookie: &Cookie, site: Site, wait: Wait, elapsed: Duration) {
         Site::Read => "read",
     };
     metrics::histogram!(
-        WAIT_SECONDS,
+        "btrb_read_after_write_wait_seconds",
         "app" => cookie.app,
         "site" => site,
         "outcome" => wait.name()
