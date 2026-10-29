@@ -126,7 +126,10 @@ pub(super) async fn run_serve(apps: &[crate::Entry]) -> Result<(), Box<dyn Error
     )?;
     let parts = booted
         .into_iter()
-        .map(|b| Ok((b.base, b.app.router(&b.base)?)))
+        .map(|b| {
+            let routes = b.app.router(&b.base)?;
+            Ok((b.base, crate::Booted::wrap(b.read_after_write, routes)))
+        })
         .collect::<Result<Vec<_>, Box<dyn Error>>>()?;
     let router = assemble(parts, settings.cookies);
 

@@ -84,8 +84,17 @@ fn configure_apps(
     cookies: CookiePolicy,
     apps: &[crate::Entry],
 ) -> Result<Vec<crate::Ready>, ConfigError> {
-    crate::configure_all(env, &crate::Global { cookies }, apps)
-        .map_err(|e| ConfigError::Other(e.to_string()))
+    let mut read_after_write_wait = crate::live::DEFAULT_WAIT;
+    env.set(
+        &mut read_after_write_wait,
+        "BTRB_READ_AFTER_WRITE_WAIT",
+        parse::duration,
+    )?;
+    let global = crate::Global {
+        cookies,
+        read_after_write_wait,
+    };
+    crate::configure_all(env, &global, apps).map_err(|e| ConfigError::Other(e.to_string()))
 }
 
 /// The sentinel path standing for "a fresh directory, gone when the process is".

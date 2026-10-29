@@ -41,6 +41,10 @@ pub(crate) fn install(apps: &[crate::Entry]) -> Result<PrometheusHandle, Box<dyn
     let builder = nvzn::configure_prometheus(builder)?;
     let builder = declared_buckets(builder, apps)?;
     let builder = http_buckets(builder)?;
+    let builder = builder.set_buckets_for_metric(
+        metrics_exporter_prometheus::Matcher::Full(crate::live::WAIT_SECONDS.to_owned()),
+        crate::live::WAIT_BUCKETS,
+    )?;
 
     let handle = builder.install_recorder()?;
 
@@ -63,6 +67,12 @@ pub(crate) fn install(apps: &[crate::Entry]) -> Result<PrometheusHandle, Box<dyn
     metrics::describe_counter!(
         "btrb_http_requests_total",
         "HTTP requests, by method, matched route and status"
+    );
+    metrics::describe_histogram!(
+        crate::live::WAIT_SECONDS,
+        metrics::Unit::Seconds,
+        "Read-after-write waits, by app, site (write: the writer's own view; read: \
+         the next request's) and outcome (seen, timed_out, overflowed, not_started)"
     );
     metrics::describe_histogram!(
         "btrb_http_request_duration_seconds",
