@@ -105,7 +105,8 @@ mod tests {
     impl Ranged<u32> for Scripted {
         type Item = u32;
 
-        fn range(&self, _cut: u32) -> Channels<u32> {
+        fn range(&self, cut: u32) -> Channels<u32> {
+            assert_eq!(cut, 10, "range receives the cut that open read");
             self.seen.lock().unwrap().push("range");
             Channels::from_vec(self.history.clone())
         }
@@ -136,8 +137,14 @@ mod tests {
             live: vec![11],
             history: vec![1],
         };
-        let (_live, cut) = seam.open();
+        let (mut live, cut) = seam.open();
         assert_eq!(cut, 10);
+        assert_eq!(
+            live.try_recv(),
+            Some(11),
+            "above keeps the live side above cut"
+        );
+        assert_eq!(live.try_recv(), None);
         assert_eq!(*seen.lock().unwrap(), vec!["subscribe", "cut", "above"]);
     }
 
@@ -145,7 +152,7 @@ mod tests {
     fn blend_chain_is_history_then_live() {
         let seam = Scripted {
             seen: Arc::new(Mutex::new(Vec::new())),
-            live: vec![11, 12],
+            live: vec![9, 11, 12],
             history: vec![1, 2],
         };
         assert_eq!(drain(blend_chain(&seam, &seam)), vec![1, 2, 11, 12]);

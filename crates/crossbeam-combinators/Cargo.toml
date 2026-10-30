@@ -18,6 +18,7 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 futures = { workspace = true }
+proptest = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }
 tokio-util = { workspace = true }
 

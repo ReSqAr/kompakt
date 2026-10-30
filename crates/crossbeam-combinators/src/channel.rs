@@ -517,7 +517,10 @@ impl<T: Send + 'static> Source<T> for MergeState<T> {
                                 End::Closed => {
                                     drop(first);
                                     *self = MergeState::One { survivor: second };
-                                    None
+                                    // Retry in this same call: a clean death must
+                                    // not make `try_recv` report an empty batch
+                                    // while the survivor still holds items.
+                                    self.drain_first()
                                 }
                                 aborted @ (End::Aborted { .. } | End::Cancelled) => {
                                     drop(first);
@@ -540,7 +543,7 @@ impl<T: Send + 'static> Source<T> for MergeState<T> {
                                             End::Closed => {
                                                 drop(second);
                                                 *self = MergeState::One { survivor: first };
-                                                None
+                                                self.drain_first()
                                             }
                                             aborted @ (End::Aborted { .. } | End::Cancelled) => {
                                                 drop(first);
@@ -1846,6 +1849,18 @@ mod tests {
         assert_eq!(got, vec!["n7".to_owned(), "s".to_owned()]);
     }
 
+    /// A clean death in one merge branch must not make `try_recv` report an
+    /// empty batch while the survivor still holds items: it retries the
+    /// survivor after collapsing to `One`.
+    #[test]
+    fn try_recv_retries_the_survivor_after_a_clean_branch_death() {
+        let mut ch = Channels::from_vec(Vec::<u32>::new()).merge(Channels::from_vec(vec![1, 2]));
+        assert_eq!(ch.try_recv(), Some(1));
+        assert_eq!(ch.try_recv(), Some(2));
+        assert_eq!(ch.try_recv(), None);
+        assert_eq!(ch.end_reason(), End::Closed);
+    }
+
     #[test]
     fn try_recv_none_when_empty_or_disconnected() {
         let (tx_a, rx_a) = crossbeam_channel::bounded(4);
@@ -2150,6 +2165,29 @@ mod tests {
     fn from_vec_is_always_closed() {
         let mut ch = Channels::from_vec(vec![1u32]);
         assert_eq!(ch.recv(), Ok(1));
+        assert_eq!(ch.recv(), Err(End::Closed));
+    }
+
+    #[test]
+    fn closed_constructor_drains_then_reports_closed() {
+        let (tx, rx) = crossbeam_channel::bounded(2);
+        tx.send(1u32).unwrap();
+        tx.send(2).unwrap();
+        drop(tx);
+        let mut ch = Channels::closed(rx);
+        assert_eq!(ch.recv(), Ok(1));
+        assert_eq!(ch.recv(), Ok(2));
+        assert_eq!(ch.recv(), Err(End::Closed));
+    }
+
+    #[test]
+    fn chain_three_phases_keeps_order() {
+        let mut ch = Channels::from_vec(vec![1u32])
+            .chain(Channels::from_vec(vec![2]))
+            .chain(Channels::from_vec(vec![3]));
+        assert_eq!(ch.recv(), Ok(1));
+        assert_eq!(ch.recv(), Ok(2));
+        assert_eq!(ch.recv(), Ok(3));
         assert_eq!(ch.recv(), Err(End::Closed));
     }
 

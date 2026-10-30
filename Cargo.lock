@@ -723,6 +723,7 @@ dependencies = [
  "crossbeam-channel",
  "futures",
  "parking_lot 0.13.0",
+ "proptest",
  "tokio",
  "tokio-stream",
  "tokio-util",

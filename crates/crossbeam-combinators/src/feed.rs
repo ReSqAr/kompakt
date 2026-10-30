@@ -121,4 +121,19 @@ mod tests {
         drop(feed);
         assert_eq!(ch.recv(), Err(End::Aborted { what: "never ran" }));
     }
+
+    /// A consumer parked in `recv` is woken by a later `Feed::send`, and the
+    /// close still lands after the item.
+    #[test]
+    fn recv_wakes_when_a_feed_sends_later() {
+        let (feed, mut ch) = Feed::channel(1, "wake");
+        let producer = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            assert!(feed.send(7));
+            feed.close();
+        });
+        assert_eq!(ch.recv(), Ok(7));
+        assert_eq!(ch.recv(), Err(End::Closed));
+        producer.join().unwrap();
+    }
 }

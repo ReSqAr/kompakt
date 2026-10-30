@@ -36,6 +36,8 @@
 #[cfg(test)]
 use futures as _;
 #[cfg(test)]
+use proptest as _;
+#[cfg(test)]
 use tokio as _;
 #[cfg(test)]
 use tokio_util as _;
