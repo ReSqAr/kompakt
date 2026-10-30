@@ -193,6 +193,11 @@ impl<Ev: WithWireFormat, L: EventSet + Into<Ev>> Live<Ev, L> {
         self.live.snapshot()
     }
 
+    /// Until the view has started; see [`nvzn::Live::started`].
+    pub async fn started(&self) {
+        self.live.started().await;
+    }
+
     /// Moves when a live event reaches this node; see [`nvzn::Live::changed`].
     #[must_use]
     pub fn changed(&self) -> tokio::sync::watch::Receiver<u64> {

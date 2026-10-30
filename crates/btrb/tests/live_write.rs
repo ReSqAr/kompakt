@@ -84,16 +84,11 @@ async fn a_live_write_returns_once_its_own_view_serves_it() {
     let (_writer, _reader, live) = nvzn.finish().unwrap();
     let _fold = dispatcher.finalise().await.unwrap();
 
-    // `changed` moves once when the view starts (after the replay); a live
-    // write before that would return at once, its view not started.
-    let changed = live.changed();
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while *changed.borrow() == 0 {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("the view started");
+    // A live write before the view starts (after the replay) would return at
+    // once, its view not started.
+    tokio::time::timeout(Duration::from_secs(5), live.started())
+        .await
+        .expect("the view started");
 
     let written = live
         .write([NoteSetV1 {

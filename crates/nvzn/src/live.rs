@@ -801,6 +801,18 @@ impl<Ev: WithWireFormat> Live<Ev> {
         self.inner.changed.subscribe()
     }
 
+    /// Until the view has started: the replay is behind it, and from then on
+    /// it serves people's writes (before, [`Self::wait_for`] answers
+    /// `NotStarted` at once). Starting bumps [`Self::changed`].
+    pub async fn started(&self) {
+        let mut changed = self.inner.changed.subscribe();
+        while self.inner.not_started() {
+            if changed.changed().await.is_err() {
+                return;
+            }
+        }
+    }
+
     /// Wait until a snapshot taken now serves the entry `d`, for at most
     /// `timeout`. Answers at once while the view cannot serve it at all
     /// (not started, overflowed).
@@ -838,6 +850,11 @@ impl<Ev: WithWireFormat> Live<Ev> {
 
 impl<Ev> Inner<Ev> {
     /// [`Live::wait_for`]'s answer for `d` now, if it has one.
+    fn not_started(&self) -> bool {
+        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        matches!(state.coverage, Coverage::NotStarted)
+    }
+
     fn find(&self, d: DataId) -> Option<Wait> {
         let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         match &state.coverage {
@@ -1080,13 +1097,11 @@ mod tests {
         manager.register::<User>().unwrap();
         let (_writer, reader) = manager.finalise().unwrap();
         let live = reader.live::<Users>().unwrap();
-        tokio::time::timeout(LONG, async {
-            while coverage(&live) == "not_started" {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("the view started after two failed syncs");
+        assert_eq!(coverage(&live), "not_started");
+        tokio::time::timeout(LONG, live.started())
+            .await
+            .expect("the view started after two failed syncs");
+        assert_ne!(coverage(&live), "not_started");
     }
 
     #[test]
