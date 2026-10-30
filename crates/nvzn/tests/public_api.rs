@@ -216,14 +216,9 @@ async fn a_write_through_an_owned_subset_is_seen_by_the_live_view() {
     }
     .into();
     let d = writer.write(&[owned.into()]).await.expect("write");
-    let wait = loop {
-        match live.wait_for(d, std::time::Duration::from_secs(5)).await {
-            nvzn::Wait::NotStarted => {
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await
-            }
-            other => break other,
-        }
-    };
+    // Long: the view starts once the fold has caught up, and the wait waits
+    // for that too.
+    let wait = live.wait_for(d, std::time::Duration::from_secs(30)).await;
     assert_eq!(wait, nvzn::Wait::Seen);
     let seen = tokio::task::spawn_blocking(move || {
         live.snapshot()

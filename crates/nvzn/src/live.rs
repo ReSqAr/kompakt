@@ -705,19 +705,15 @@ pub(crate) async fn begin_when_caught_up<Ev: WithWireFormat>(
     }
 }
 
-/// What [`Live::wait_for`] found.
+/// What [`Live::wait_for`] found: the entry, or the deadline. Why a view could
+/// not serve it in time is the view's business; the caller goes on either way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
 pub enum Wait {
     /// A snapshot taken now serves the entry: held, or folded.
     Seen,
-    /// The deadline passed first.
+    /// The deadline passed first: go on without it.
     TimedOut,
-    /// The view is overflowed: it serves the fold's state alone, so the entry
-    /// shows only once F passes it. Answered at once.
-    Overflowed,
-    /// The deadline passed before the view started (the fold was still
-    /// replaying): it serves the stable snapshot until then.
-    NotStarted,
 }
 
 impl Wait {
@@ -726,8 +722,6 @@ impl Wait {
         match self {
             Self::Seen => "seen",
             Self::TimedOut => "timed_out",
-            Self::Overflowed => "overflowed",
-            Self::NotStarted => "not_started",
         }
     }
 }
@@ -802,14 +796,14 @@ impl<Ev: WithWireFormat> Live<Ev> {
     }
 
     /// Wait until a snapshot taken now serves the entry `d`, for at most
-    /// `timeout`. A view that has not started yet is waited for too: starting
-    /// bumps [`Self::changed`]. Answers at once while overflowed.
+    /// `timeout`. Whatever keeps the view from serving it meanwhile (not
+    /// started yet, overflowed, the entry still on its way) is waited out
+    /// alike: each ends with a bump of [`Self::changed`] or a retirement.
     ///
     /// ```text
-    ///   Overflowed → Overflowed
     ///   F covers d, or held has d (scanning or complete) → Seen
-    ///   else wake on an S arrival, a retirement or the start;
-    ///   at the deadline → NotStarted if the view still has not started, else TimedOut
+    ///   else wake on an S arrival, a retirement, the start or a recovery;
+    ///   at the deadline → TimedOut
     /// ```
     ///
     /// The retirement wake is for an entry that reached this node already
@@ -823,16 +817,12 @@ impl<Ev: WithWireFormat> Live<Ev> {
         loop {
             arrived.mark_unchanged();
             retired.mark_unchanged();
-            if let Some(found) = self.inner.find(d) {
-                return found;
+            if self.inner.serves(d) {
+                return Wait::Seen;
             }
             tokio::select! {
                 () = &mut deadline => {
-                    return self.inner.find(d).unwrap_or(if self.inner.not_started() {
-                        Wait::NotStarted
-                    } else {
-                        Wait::TimedOut
-                    });
+                    return if self.inner.serves(d) { Wait::Seen } else { Wait::TimedOut };
                 }
                 r = arrived.changed() => if r.is_err() { return Wait::TimedOut },
                 r = retired.changed() => if r.is_err() { return Wait::TimedOut },
@@ -842,20 +832,14 @@ impl<Ev: WithWireFormat> Live<Ev> {
 }
 
 impl<Ev> Inner<Ev> {
-    fn not_started(&self) -> bool {
-        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        matches!(state.coverage, Coverage::NotStarted)
-    }
-
-    /// [`Live::wait_for`]'s answer for `d` now, if it has one.
-    fn find(&self, d: DataId) -> Option<Wait> {
+    /// Whether a snapshot taken now serves the entry `d`.
+    fn serves(&self, d: DataId) -> bool {
         let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         match &state.coverage {
-            Coverage::NotStarted => None,
-            Coverage::Overflowed { .. } => Some(Wait::Overflowed),
-            _ if state.folded.covers(d) => Some(Wait::Seen),
+            Coverage::NotStarted | Coverage::Overflowed { .. } => false,
+            _ if state.folded.covers(d) => true,
             Coverage::Scanning { held, .. } | Coverage::Complete { held, .. } => {
-                held.contains_key(&d).then_some(Wait::Seen)
+                held.contains_key(&d)
             }
         }
     }
@@ -1028,10 +1012,10 @@ mod tests {
         assert_eq!(live.wait_for(data_id(5, 5), SHORT).await, Wait::TimedOut);
     }
 
-    /// Overflowed, the view serves store@F alone: waiting could only run to
-    /// the deadline, so it answers at once.
+    /// Overflowed, the view serves store@F alone: an entry it dropped is not
+    /// served, and a wait runs to its deadline.
     #[tokio::test]
-    async fn wait_for_answers_at_once_while_overflowed() {
+    async fn wait_for_times_out_while_overflowed() {
         let (_store, mut log, reader) = rig().await;
         let live = reader
             .live_started::<Users>(LiveLimits {
@@ -1042,15 +1026,17 @@ mod tests {
         log.push_unstable(blob(&[new_user(1, "a")]));
         log.push_unstable(blob(&[new_user(2, "b")]));
         settle(&live, |l| coverage(l) == "overflowed").await;
-        let started = Instant::now();
-        assert_eq!(live.wait_for(data_id(5, 5), LONG).await, Wait::Overflowed);
-        assert!(started.elapsed() < LONG);
+        assert_eq!(
+            live.wait_for(data_id(5, 5), Duration::from_millis(50))
+                .await,
+            Wait::TimedOut
+        );
     }
 
     /// Not started yet: the stable snapshot is served, and a wait that ends
-    /// before the start says so.
+    /// before the start times out.
     #[tokio::test]
-    async fn not_started_serves_the_stable_snapshot_and_a_wait_says_not_started() {
+    async fn not_started_serves_the_stable_snapshot_and_a_wait_times_out() {
         let (store, mut log, reader) = rig().await;
         let live = reader.not_started::<Users>(LiveLimits::default()).unwrap();
         let holden = User {
@@ -1064,7 +1050,7 @@ mod tests {
         let d = log.push_unstable(blob(&[new_user(2, "naomi")]));
         assert_eq!(
             live.wait_for(d, Duration::from_millis(50)).await,
-            Wait::NotStarted
+            Wait::TimedOut
         );
         assert!(user(&live, 1).await.is_some(), "the stable row");
         assert!(

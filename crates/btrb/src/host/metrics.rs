@@ -69,7 +69,7 @@ pub(crate) fn install(apps: &[crate::Entry]) -> Result<PrometheusHandle, Box<dyn
         "btrb_read_after_write_wait_seconds",
         metrics::Unit::Seconds,
         "Read-after-write waits, by app, site (write: the writer's own view; read: \
-         the next request's) and outcome (seen, timed_out, overflowed, not_started)"
+         the next request's) and outcome (seen, timed_out)"
     );
     metrics::describe_histogram!(
         "btrb_http_request_duration_seconds",
