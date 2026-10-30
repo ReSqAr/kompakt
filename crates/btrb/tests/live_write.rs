@@ -10,7 +10,6 @@ use nvzn::{
     testing::TestLog,
 };
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 struct NoteId(u128);
@@ -84,12 +83,7 @@ async fn a_live_write_returns_once_its_own_view_serves_it() {
     let (_writer, _reader, live) = nvzn.finish().unwrap();
     let _fold = dispatcher.finalise().await.unwrap();
 
-    // A live write before the view starts (after the replay) would return at
-    // once, its view not started.
-    tokio::time::timeout(Duration::from_secs(5), live.started())
-        .await
-        .expect("the view started");
-
+    // Written right after boot: the write waits for the view to start too.
     let written = live
         .write([NoteSetV1 {
             id: NoteId(1),

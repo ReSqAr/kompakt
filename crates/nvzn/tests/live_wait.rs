@@ -19,16 +19,6 @@ const PORT: u16 = 19355;
 /// Well past one integrate batch and a fan-out hop; neither waits on a timer.
 const WAIT_BOUND: Duration = Duration::from_secs(10);
 
-/// Until the view has started (it waits for the fold to catch up).
-async fn started(live: &nvzn::Live<common::event::Event>, d: zslg::DataId) -> Wait {
-    loop {
-        match live.wait_for(d, WAIT_BOUND).await {
-            Wait::NotStarted => tokio::time::sleep(Duration::from_millis(20)).await,
-            other => return other,
-        }
-    }
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn a_write_is_seen_by_the_writer_and_by_another_process() {
     init_tracing();
@@ -40,13 +30,13 @@ async fn a_write_is_seen_by_the_writer_and_by_another_process() {
 
     let d = server.write(7, "user-7").await;
     assert_eq!(
-        started(&server.live, d).await,
+        server.live.wait_for(d, WAIT_BOUND).await,
         Wait::Seen,
         "the writer's own view"
     );
     assert!(server.sees(7).await, "Seen means a snapshot now shows it");
     assert_eq!(
-        started(&cli.live, d).await,
+        cli.live.wait_for(d, WAIT_BOUND).await,
         Wait::Seen,
         "another process's view"
     );

@@ -64,14 +64,16 @@ impl LiveSettings {
         }
     }
 
-    /// For a test rig: the default cap, cookie `rw_test` at `/`.
+    /// For a test rig: cookie `rw_test` at `/`, and a cap long enough that a
+    /// write made right after boot waits for the view to start (a rig's
+    /// tests read their writes back at once).
     #[must_use]
     pub fn for_test() -> Self {
         Self::new(
             "test",
             &BasePath::ROOT,
             CookiePolicy::AllowPlainHttp,
-            DEFAULT_WAIT,
+            Duration::from_secs(10),
         )
     }
 }
@@ -191,11 +193,6 @@ impl<Ev: WithWireFormat, L: EventSet + Into<Ev>> Live<Ev, L> {
     /// blocking code.
     pub fn snapshot(&self) -> Result<nvzn::Snapshot<'_>, nvzn::Error> {
         self.live.snapshot()
-    }
-
-    /// Until the view has started; see [`nvzn::Live::started`].
-    pub async fn started(&self) {
-        self.live.started().await;
     }
 
     /// Moves when a live event reaches this node; see [`nvzn::Live::changed`].

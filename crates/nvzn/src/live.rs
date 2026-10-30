@@ -715,8 +715,8 @@ pub enum Wait {
     /// The view is overflowed: it serves the fold's state alone, so the entry
     /// shows only once F passes it. Answered at once.
     Overflowed,
-    /// The view has not started (the fold is replaying): it serves the stable
-    /// snapshot. Answered at once.
+    /// The deadline passed before the view started (the fold was still
+    /// replaying): it serves the stable snapshot until then.
     NotStarted,
 }
 
@@ -801,26 +801,15 @@ impl<Ev: WithWireFormat> Live<Ev> {
         self.inner.changed.subscribe()
     }
 
-    /// Until the view has started: the replay is behind it, and from then on
-    /// it serves people's writes (before, [`Self::wait_for`] answers
-    /// `NotStarted` at once). Starting bumps [`Self::changed`].
-    pub async fn started(&self) {
-        let mut changed = self.inner.changed.subscribe();
-        while self.inner.not_started() {
-            if changed.changed().await.is_err() {
-                return;
-            }
-        }
-    }
-
     /// Wait until a snapshot taken now serves the entry `d`, for at most
-    /// `timeout`. Answers at once while the view cannot serve it at all
-    /// (not started, overflowed).
+    /// `timeout`. A view that has not started yet is waited for too: starting
+    /// bumps [`Self::changed`]. Answers at once while overflowed.
     ///
     /// ```text
-    ///   NotStarted → NotStarted · Overflowed → Overflowed
+    ///   Overflowed → Overflowed
     ///   F covers d, or held has d (scanning or complete) → Seen
-    ///   else wake on an S arrival or a retirement; at the deadline → TimedOut
+    ///   else wake on an S arrival, a retirement or the start;
+    ///   at the deadline → NotStarted if the view still has not started, else TimedOut
     /// ```
     ///
     /// The retirement wake is for an entry that reached this node already
@@ -839,7 +828,11 @@ impl<Ev: WithWireFormat> Live<Ev> {
             }
             tokio::select! {
                 () = &mut deadline => {
-                    return self.inner.find(d).unwrap_or(Wait::TimedOut);
+                    return self.inner.find(d).unwrap_or(if self.inner.not_started() {
+                        Wait::NotStarted
+                    } else {
+                        Wait::TimedOut
+                    });
                 }
                 r = arrived.changed() => if r.is_err() { return Wait::TimedOut },
                 r = retired.changed() => if r.is_err() { return Wait::TimedOut },
@@ -849,16 +842,16 @@ impl<Ev: WithWireFormat> Live<Ev> {
 }
 
 impl<Ev> Inner<Ev> {
-    /// [`Live::wait_for`]'s answer for `d` now, if it has one.
     fn not_started(&self) -> bool {
         let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         matches!(state.coverage, Coverage::NotStarted)
     }
 
+    /// [`Live::wait_for`]'s answer for `d` now, if it has one.
     fn find(&self, d: DataId) -> Option<Wait> {
         let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         match &state.coverage {
-            Coverage::NotStarted => Some(Wait::NotStarted),
+            Coverage::NotStarted => None,
             Coverage::Overflowed { .. } => Some(Wait::Overflowed),
             _ if state.folded.covers(d) => Some(Wait::Seen),
             Coverage::Scanning { held, .. } | Coverage::Complete { held, .. } => {
@@ -1054,9 +1047,10 @@ mod tests {
         assert!(started.elapsed() < LONG);
     }
 
-    /// Not started yet: the stable snapshot is served, and a wait answers at once.
+    /// Not started yet: the stable snapshot is served, and a wait that ends
+    /// before the start says so.
     #[tokio::test]
-    async fn not_started_serves_the_stable_snapshot_and_answers_at_once() {
+    async fn not_started_serves_the_stable_snapshot_and_a_wait_says_not_started() {
         let (store, mut log, reader) = rig().await;
         let live = reader.not_started::<Users>(LiveLimits::default()).unwrap();
         let holden = User {
@@ -1068,7 +1062,10 @@ mod tests {
         };
         crate::testsupport::commit_row(&store, tenant_id(), Ref::new(UserId(1).into()), &holden);
         let d = log.push_unstable(blob(&[new_user(2, "naomi")]));
-        assert_eq!(live.wait_for(d, LONG).await, Wait::NotStarted);
+        assert_eq!(
+            live.wait_for(d, Duration::from_millis(50)).await,
+            Wait::NotStarted
+        );
         assert!(user(&live, 1).await.is_some(), "the stable row");
         assert!(
             user(&live, 2).await.is_none(),
@@ -1095,13 +1092,19 @@ mod tests {
         .unwrap();
         let mut manager = dispatcher.new_handler::<event::Event>(tenant());
         manager.register::<User>().unwrap();
-        let (_writer, reader) = manager.finalise().unwrap();
+        let (writer, reader) = manager.finalise().unwrap();
         let live = reader.live::<Users>().unwrap();
         assert_eq!(coverage(&live), "not_started");
-        tokio::time::timeout(LONG, live.started())
-            .await
-            .expect("the view started after two failed syncs");
-        assert_ne!(coverage(&live), "not_started");
+        // The fold runs: the start waits for it to pass the write below.
+        let _fold = dispatcher.finalise().await.unwrap();
+        // A write before the start: its wait waits for the start too.
+        let d = writer.write(&[new_user(3, "amos")]).await.unwrap();
+        assert_eq!(live.wait_for(d, LONG).await, Wait::Seen);
+        assert_ne!(
+            coverage(&live),
+            "not_started",
+            "started after two failed syncs"
+        );
     }
 
     #[test]
