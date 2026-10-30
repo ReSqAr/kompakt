@@ -37,7 +37,7 @@ use zslg::DataId;
 
 /// The default for `BTRB_READ_AFTER_WRITE_WAIT`: how long either wait may
 /// take before the request goes on.
-pub const DEFAULT_WAIT: Duration = Duration::from_millis(200);
+pub const DEFAULT_WAIT: Duration = Duration::from_millis(250);
 
 /// What an app's [`Live`] is built with: the cap and the cookie.
 #[derive(Debug, Clone)]
