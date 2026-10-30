@@ -207,15 +207,14 @@ fn init_tracing() {
 
 /// Until `live` serves the write `d` (it starts once the fold has caught up).
 async fn seen(live: &nvzn::Live<event::Event>, d: zslg::DataId) {
-    loop {
-        match live.wait_for(d, std::time::Duration::from_secs(5)).await {
-            nvzn::Wait::Seen => return,
-            nvzn::Wait::NotStarted => {
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await
-            }
-            other => panic!("the live view did not see the write: {other:?}"),
-        }
-    }
+    // Long: the view starts once the fold has caught up, and the wait waits
+    // for that too.
+    let wait = live.wait_for(d, std::time::Duration::from_secs(30)).await;
+    assert_eq!(
+        wait,
+        nvzn::Wait::Seen,
+        "the live view did not see the write"
+    );
 }
 
 #[tokio::main]

@@ -64,14 +64,16 @@ impl LiveSettings {
         }
     }
 
-    /// For a test rig: the default cap, cookie `rw_test` at `/`.
+    /// For a test rig: cookie `rw_test` at `/`, and a cap long enough that a
+    /// write made right after boot waits for the view to start (a rig's
+    /// tests read their writes back at once).
     #[must_use]
     pub fn for_test() -> Self {
         Self::new(
             "test",
             &BasePath::ROOT,
             CookiePolicy::AllowPlainHttp,
-            DEFAULT_WAIT,
+            Duration::from_secs(10),
         )
     }
 }

@@ -705,19 +705,15 @@ pub(crate) async fn begin_when_caught_up<Ev: WithWireFormat>(
     }
 }
 
-/// What [`Live::wait_for`] found.
+/// What [`Live::wait_for`] found: the entry, or the deadline. Why a view could
+/// not serve it in time is the view's business; the caller goes on either way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
 pub enum Wait {
     /// A snapshot taken now serves the entry: held, or folded.
     Seen,
-    /// The deadline passed first.
+    /// The deadline passed first: go on without it.
     TimedOut,
-    /// The view is overflowed: it serves the fold's state alone, so the entry
-    /// shows only once F passes it. Answered at once.
-    Overflowed,
-    /// The view has not started (the fold is replaying): it serves the stable
-    /// snapshot. Answered at once.
-    NotStarted,
 }
 
 impl Wait {
@@ -726,8 +722,6 @@ impl Wait {
         match self {
             Self::Seen => "seen",
             Self::TimedOut => "timed_out",
-            Self::Overflowed => "overflowed",
-            Self::NotStarted => "not_started",
         }
     }
 }
@@ -802,13 +796,14 @@ impl<Ev: WithWireFormat> Live<Ev> {
     }
 
     /// Wait until a snapshot taken now serves the entry `d`, for at most
-    /// `timeout`. Answers at once while the view cannot serve it at all
-    /// (not started, overflowed).
+    /// `timeout`. Whatever keeps the view from serving it meanwhile (not
+    /// started yet, overflowed, the entry still on its way) is waited out
+    /// alike: each ends with a bump of [`Self::changed`] or a retirement.
     ///
     /// ```text
-    ///   NotStarted → NotStarted · Overflowed → Overflowed
     ///   F covers d, or held has d (scanning or complete) → Seen
-    ///   else wake on an S arrival or a retirement; at the deadline → TimedOut
+    ///   else wake on an S arrival, a retirement, the start or a recovery;
+    ///   at the deadline → TimedOut
     /// ```
     ///
     /// The retirement wake is for an entry that reached this node already
@@ -822,12 +817,12 @@ impl<Ev: WithWireFormat> Live<Ev> {
         loop {
             arrived.mark_unchanged();
             retired.mark_unchanged();
-            if let Some(found) = self.inner.find(d) {
-                return found;
+            if self.inner.serves(d) {
+                return Wait::Seen;
             }
             tokio::select! {
                 () = &mut deadline => {
-                    return self.inner.find(d).unwrap_or(Wait::TimedOut);
+                    return if self.inner.serves(d) { Wait::Seen } else { Wait::TimedOut };
                 }
                 r = arrived.changed() => if r.is_err() { return Wait::TimedOut },
                 r = retired.changed() => if r.is_err() { return Wait::TimedOut },
@@ -837,15 +832,14 @@ impl<Ev: WithWireFormat> Live<Ev> {
 }
 
 impl<Ev> Inner<Ev> {
-    /// [`Live::wait_for`]'s answer for `d` now, if it has one.
-    fn find(&self, d: DataId) -> Option<Wait> {
+    /// Whether a snapshot taken now serves the entry `d`.
+    fn serves(&self, d: DataId) -> bool {
         let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         match &state.coverage {
-            Coverage::NotStarted => Some(Wait::NotStarted),
-            Coverage::Overflowed { .. } => Some(Wait::Overflowed),
-            _ if state.folded.covers(d) => Some(Wait::Seen),
+            Coverage::NotStarted | Coverage::Overflowed { .. } => false,
+            _ if state.folded.covers(d) => true,
             Coverage::Scanning { held, .. } | Coverage::Complete { held, .. } => {
-                held.contains_key(&d).then_some(Wait::Seen)
+                held.contains_key(&d)
             }
         }
     }
@@ -1018,10 +1012,10 @@ mod tests {
         assert_eq!(live.wait_for(data_id(5, 5), SHORT).await, Wait::TimedOut);
     }
 
-    /// Overflowed, the view serves store@F alone: waiting could only run to
-    /// the deadline, so it answers at once.
+    /// Overflowed, the view serves store@F alone: an entry it dropped is not
+    /// served, and a wait runs to its deadline.
     #[tokio::test]
-    async fn wait_for_answers_at_once_while_overflowed() {
+    async fn wait_for_times_out_while_overflowed() {
         let (_store, mut log, reader) = rig().await;
         let live = reader
             .live_started::<Users>(LiveLimits {
@@ -1032,14 +1026,17 @@ mod tests {
         log.push_unstable(blob(&[new_user(1, "a")]));
         log.push_unstable(blob(&[new_user(2, "b")]));
         settle(&live, |l| coverage(l) == "overflowed").await;
-        let started = Instant::now();
-        assert_eq!(live.wait_for(data_id(5, 5), LONG).await, Wait::Overflowed);
-        assert!(started.elapsed() < LONG);
+        assert_eq!(
+            live.wait_for(data_id(5, 5), Duration::from_millis(50))
+                .await,
+            Wait::TimedOut
+        );
     }
 
-    /// Not started yet: the stable snapshot is served, and a wait answers at once.
+    /// Not started yet: the stable snapshot is served, and a wait that ends
+    /// before the start times out.
     #[tokio::test]
-    async fn not_started_serves_the_stable_snapshot_and_answers_at_once() {
+    async fn not_started_serves_the_stable_snapshot_and_a_wait_times_out() {
         let (store, mut log, reader) = rig().await;
         let live = reader.not_started::<Users>(LiveLimits::default()).unwrap();
         let holden = User {
@@ -1051,7 +1048,10 @@ mod tests {
         };
         crate::testsupport::commit_row(&store, tenant_id(), Ref::new(UserId(1).into()), &holden);
         let d = log.push_unstable(blob(&[new_user(2, "naomi")]));
-        assert_eq!(live.wait_for(d, LONG).await, Wait::NotStarted);
+        assert_eq!(
+            live.wait_for(d, Duration::from_millis(50)).await,
+            Wait::TimedOut
+        );
         assert!(user(&live, 1).await.is_some(), "the stable row");
         assert!(
             user(&live, 2).await.is_none(),
@@ -1078,15 +1078,19 @@ mod tests {
         .unwrap();
         let mut manager = dispatcher.new_handler::<event::Event>(tenant());
         manager.register::<User>().unwrap();
-        let (_writer, reader) = manager.finalise().unwrap();
+        let (writer, reader) = manager.finalise().unwrap();
         let live = reader.live::<Users>().unwrap();
-        tokio::time::timeout(LONG, async {
-            while coverage(&live) == "not_started" {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("the view started after two failed syncs");
+        assert_eq!(coverage(&live), "not_started");
+        // The fold runs: the start waits for it to pass the write below.
+        let _fold = dispatcher.finalise().await.unwrap();
+        // A write before the start: its wait waits for the start too.
+        let d = writer.write(&[new_user(3, "amos")]).await.unwrap();
+        assert_eq!(live.wait_for(d, LONG).await, Wait::Seen);
+        assert_ne!(
+            coverage(&live),
+            "not_started",
+            "started after two failed syncs"
+        );
     }
 
     #[test]
