@@ -41,7 +41,6 @@ use tokio::sync::watch;
 use tracing::{info, warn};
 
 use crate::api::{Clock as _, PeersWatcher, RaftStateView, Replica, StampedWrite, WriteOutcome};
-use crate::channel::Channels;
 use crate::error::Error;
 use crate::hlc::{CutoffApplier, Hlc, HlcClock, HlcGate, HlcGuard};
 use crate::ids::{DataId, LogIndex, NodeId};
@@ -50,6 +49,7 @@ use crate::metrics::{self, ReplicaWriteState};
 use crate::replica::log::flush_loop;
 use crate::shutdown::Shutdown;
 use crate::warn_throttle::WarnThrottle;
+use crossbeam_combinators::Channels;
 
 /// Minimum spacing between replica-write-rejection `warn!`s. Rejections recur at
 /// the write rate (tens/sec) under a persistent failure, so they are throttled
@@ -692,7 +692,7 @@ mod tests {
             replica_with(me, &[me], 1_000, Duration::from_secs(10)).await;
 
         let (tx, rx) = crossbeam_channel::unbounded();
-        let outcomes = node.write(Channels::closed_for_test(rx));
+        let outcomes = node.write(Channels::closed(rx));
         for i in 0..8u8 {
             tx.send(StampedWrite::now(make_data(i, 1_000, b"payload")))
                 .expect("send");
@@ -721,7 +721,7 @@ mod tests {
             replica_with(me, &[me], 1_000, Duration::from_secs(10)).await;
 
         let (tx, rx) = crossbeam_channel::unbounded();
-        drop(node.write(Channels::closed_for_test(rx)));
+        drop(node.write(Channels::closed(rx)));
 
         // The output (and with it the input receiver) is gone, so the very next
         // send must fail.
@@ -747,7 +747,7 @@ mod tests {
             replica_with(me, &[nid(2)], 1_000, Duration::from_secs(10)).await;
 
         let (tx, rx) = crossbeam_channel::unbounded();
-        let outcomes = node.write(Channels::closed_for_test(rx));
+        let outcomes = node.write(Channels::closed(rx));
         for i in 0..4u8 {
             tx.send(StampedWrite::now(make_data(i, 1_000, b"payload")))
                 .expect("send");

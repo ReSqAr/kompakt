@@ -38,13 +38,13 @@ use crate::api::{
     AddMemberOutcome, LivenessProbe, RaftMembership, RaftTransport, Replica, ReplicaClient, Router,
     StampedWrite, WriteOutcome,
 };
-use crate::channel::Channels;
 use crate::ids::{DataId, LogIndex, NodeId, PeerAddr};
 use crate::learner::LocalStore;
 use crate::meta::{Data, RaftState, ReplicaStatus};
 use crate::raft::RaftStateHandle;
 use crate::raft::build_raft_for_test;
 use crate::raft::{NodeInfo, Raft, TypeConfig};
+use crossbeam_combinators::Channels;
 use dashmap::DashMap;
 use futures::stream::BoxStream;
 use openraft::Config;

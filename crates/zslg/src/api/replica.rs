@@ -25,9 +25,9 @@
 //! storage failure has no state to report (CLAUDE.md §9).
 
 use crate::Error;
-use crate::channel::Channels;
 use crate::ids::{DataId, LogIndex};
 use crate::meta::{Data, RaftState, ReplicaStatus};
+use crossbeam_combinators::Channels;
 
 /// A write with the wall-clock time it entered a queue, for *direct*
 /// queue-residency measurement (the write→replica triangulation). Threaded

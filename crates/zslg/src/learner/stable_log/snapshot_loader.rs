@@ -275,7 +275,7 @@ mod tests {
         async fn write_snapshot(
             &self,
             _id: SnapshotId,
-            _entries: crate::channel::Channels<Result<SnapshotEntry, Error>>,
+            _entries: crossbeam_combinators::Channels<Result<SnapshotEntry, Error>>,
             _compression: CompressionLevel,
             _reason: crate::metrics::ObjectStoreReason,
         ) -> Result<usize, Error> {
@@ -286,7 +286,7 @@ mod tests {
             &self,
             id: SnapshotId,
             _reason: crate::metrics::ObjectStoreReason,
-        ) -> Result<crate::channel::Channels<Result<SnapshotEntry, Error>>, Error> {
+        ) -> Result<crossbeam_combinators::Channels<Result<SnapshotEntry, Error>>, Error> {
             self.reads.lock().expect("lock").push(id);
             let (entries, truncate_after) = self
                 .snapshots
@@ -296,7 +296,7 @@ mod tests {
                 .cloned()
                 .ok_or_else(|| Error::ObjectStore(format!("no scripted snapshot {id:?}")))?;
             let deliver = truncate_after.unwrap_or(entries.len());
-            Ok(crate::channel::Channels::from_vec(
+            Ok(crossbeam_combinators::Channels::from_vec(
                 entries.into_iter().take(deliver).map(Ok).collect(),
             ))
         }

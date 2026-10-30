@@ -15,7 +15,6 @@ use std::sync::Weak;
 use crossbeam_channel::Sender;
 
 use crate::api::{StampedWrite, WriteOutcome};
-use crate::channel::Channels;
 use crate::error::Error;
 use crate::meta::Data;
 use crate::metrics;
@@ -23,6 +22,7 @@ use crate::network::client::{RpcClient, Target};
 use crate::network::framing::{TcpFrameSink, TcpFrameStream, adopt_blocking};
 use crate::network::messages::WriteOutcome as WireWriteOutcome;
 use crate::network::messages::{RpcReplicaRequest, RpcRequest, WriteStreamResponse};
+use crossbeam_combinators::Channels;
 
 /// Open a write stream to `target` over **one** connection. Drives writes off
 /// `input`, yielding their outcomes. See [`Replica::write`](crate::api::Replica::write).

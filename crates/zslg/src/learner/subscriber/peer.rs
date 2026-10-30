@@ -217,11 +217,11 @@ mod tests {
 
     use super::*;
     use crate::api::{LocalStoreView, Replica, StampedWrite, WriteOutcome};
-    use crate::channel::Channels;
     use crate::hlc::HlcClock;
     use crate::ids::LogIndex;
     use crate::meta::{Data, ReplicaStatus};
     use crate::tests::{fresh_local, make_meta, upstream as upstream_id};
+    use crossbeam_combinators::Channels;
 
     /// Drive a subscriber whose fake upstream declares completion. Even a
     /// *declared* close is an error (a subscription cannot complete), so these

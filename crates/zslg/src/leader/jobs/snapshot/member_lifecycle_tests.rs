@@ -60,7 +60,7 @@ async fn integrate_batch(
     for (idx, rec) in records {
         let _ = tx.send(Ok((source, idx, rec)));
     }
-    let (ch, closer) = crate::channel::Channels::from(rx, "test integrate");
+    let (ch, closer) = crossbeam_combinators::Channels::from(rx, "test integrate");
     // Close before the last sender drops, or the consumer forms its
     // verdict as "disconnected, not yet closed" — an abort.
     closer.close();

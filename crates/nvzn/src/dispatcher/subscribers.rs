@@ -10,13 +10,13 @@
 //!
 //! Every stream is bound to one [`Cancellation`]. The fold fires it only when
 //! it stops as [`StopReason::Cancelled`](crate::StopReason::Cancelled), so
-//! those streams end [`zslg::ChannelEnd::Cancelled`]; when it stops for any
+//! those streams end [`crossbeam_combinators::End::Cancelled`]; when it stops for any
 //! other reason it drops its senders and the streams end `Aborted`.
 
 use crate::metrics::StopReason;
 use crate::{ProjectionId, ProjectionTypeId, TenantId};
+use crossbeam_combinators::{CancelHandle, Cancellation};
 use std::sync::Arc;
-use zslg::{CancelHandle, Cancellation};
 
 /// A [`Reader::subscribe_stable_log`](crate::Reader::subscribe_stable_log) registration.
 pub(crate) type Subscriber = (

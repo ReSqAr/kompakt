@@ -17,7 +17,6 @@ use crate::api::{
     AddMemberOutcome, LivenessProbe, RaftMembership, RaftTransport, Replica, StampedWrite,
     WriteOutcome,
 };
-use crate::channel::Channels;
 use crate::error::Error;
 use crate::ids::{LogIndex, NodeId, PeerAddr};
 use crate::meta::{Data, ReplicaStatus};
@@ -27,6 +26,7 @@ use crate::network::messages::{
 };
 use crate::raft::TypeConfig;
 use async_trait::async_trait;
+use crossbeam_combinators::Channels;
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use openraft::error::{InstallSnapshotError, RaftError};

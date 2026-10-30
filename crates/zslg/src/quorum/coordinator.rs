@@ -41,12 +41,12 @@ use dashmap::mapref::entry::Entry as MapEntry;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
 use crate::api::{RaftStateTracker, Router, StampedWrite, WriteOutcome};
-use crate::channel::Channels;
 use crate::error::Error;
 use crate::ids::{DataId, NodeId};
 use crate::meta::Data;
 use crate::metrics::{self, FanoutResponseState, WriteRpcOutcome};
 use crate::quorum::{all_targets, is_quorum};
+use crossbeam_combinators::Channels;
 
 /// Global in-flight cap. A permit is held for a write's whole life, so this
 /// bounds `pending` and every per-stream channel with it (a `DataId` is 32 bytes;

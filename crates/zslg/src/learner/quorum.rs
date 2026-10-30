@@ -399,11 +399,11 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use crate::channel::Channels;
     use crate::hlc::Hlc;
     use crate::ids::{LogIndex, NodeId};
     use crate::meta::Data;
     use crate::tests::upstream;
+    use crossbeam_combinators::Channels;
 
     use super::*;
     use crate::api::WindowItem;
@@ -518,8 +518,11 @@ mod tests {
             drop(tx);
             rx
         }
-        fn subscribe_unstable(&self) -> crate::channel::Channels<crate::meta::Data> {
-            crate::channel::Channels::from_infinite(crossbeam_channel::never(), "stub unstable")
+        fn subscribe_unstable(&self) -> crossbeam_combinators::Channels<crate::meta::Data> {
+            crossbeam_combinators::Channels::from_infinite(
+                crossbeam_channel::never(),
+                "stub unstable",
+            )
         }
         async fn subscription_cursor(&self, upstream: NodeId) -> Result<Option<LogIndex>, Error> {
             Ok(self

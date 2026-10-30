@@ -39,8 +39,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::channel::Channels;
 use crate::object_store::CompressionLevel;
+use crossbeam_combinators::Channels;
 use object_store::ObjectStore;
 use object_store::memory::InMemory;
 use tokio::sync::Notify;
@@ -76,7 +76,7 @@ async fn integrate_batch(
     for (idx, rec) in records {
         let _ = tx.send(Ok((source, idx, rec)));
     }
-    let (ch, closer) = crate::channel::Channels::from(rx, "test integrate");
+    let (ch, closer) = crossbeam_combinators::Channels::from(rx, "test integrate");
     // Close before the last sender drops, or the consumer forms its
     // verdict as "disconnected, not yet closed" — an abort.
     closer.close();
@@ -135,7 +135,7 @@ impl LocalStoreView for StallingLocalStore {
         self.inner.subscribe_integrated()
     }
 
-    fn subscribe_unstable(&self) -> crate::channel::Channels<crate::meta::Data> {
+    fn subscribe_unstable(&self) -> crossbeam_combinators::Channels<crate::meta::Data> {
         self.inner.subscribe_unstable()
     }
 

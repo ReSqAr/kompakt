@@ -12,13 +12,13 @@ use std::sync::Weak;
 
 use tokio_util::sync::CancellationToken;
 
-use crate::channel::Channels;
 use crate::error::Error;
 use crate::ids::LogIndex;
 use crate::meta::Data;
 use crate::network::client::{RpcClient, Target};
 use crate::network::framing::{TcpFrameStream, adopt_blocking};
 use crate::network::messages::SubscribeStreamItem;
+use crossbeam_combinators::Channels;
 
 /// How long the reader waits for the consumer to make room before declaring it
 /// wedged and ending the connection.

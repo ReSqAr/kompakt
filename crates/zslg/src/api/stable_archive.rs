@@ -9,10 +9,10 @@
 //! bounds. Callers specify only the [`ArchiveBounds`] — never a snapshot id or a
 //! manifest — so snapshot selection lives in exactly one place.
 
-use crate::channel::Channels;
 use crate::error::Error;
 use crate::ids::LogIndex;
 use crate::meta::SnapshotEntry;
+use crossbeam_combinators::Channels;
 
 /// Inclusive lower bound of an archive stream.
 #[derive(Debug, Clone, Copy)]

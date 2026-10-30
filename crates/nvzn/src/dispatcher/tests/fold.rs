@@ -571,6 +571,6 @@ async fn an_upstream_cancel_stops_an_idle_fold_and_cancels_its_subscribers() {
     .await
     .unwrap()
     .unwrap();
-    assert_eq!(end, Err(zslg::ChannelEnd::Cancelled));
+    assert_eq!(end, Err(crossbeam_combinators::End::Cancelled));
     drop(log);
 }

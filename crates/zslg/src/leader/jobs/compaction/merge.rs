@@ -34,13 +34,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::api::{RaftStateView, SnapshotStore};
-use crate::channel::Channels;
 use crate::error::Error;
 use crate::ids::SnapshotId;
 use crate::leader::integrator::{IntentOutcome, IntentSubmitter};
 use crate::meta::{SnapshotEntry, SnapshotMetadata};
 use crate::metrics::{self, OpState};
 use crate::object_store::CompressionLevel;
+use crossbeam_combinators::Channels;
 
 /// A time window; snapshots sharing a bucket at this width may merge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -556,7 +556,7 @@ mod tests {
         for (idx, rec) in records {
             let _ = tx.send(Ok((source, idx, rec)));
         }
-        let (ch, closer) = crate::channel::Channels::from(rx, "test integrate");
+        let (ch, closer) = crossbeam_combinators::Channels::from(rx, "test integrate");
         // Close before the last sender drops, or the consumer forms its
         // verdict as "disconnected, not yet closed" — an abort.
         closer.close();

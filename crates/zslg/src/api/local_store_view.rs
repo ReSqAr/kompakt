@@ -17,10 +17,10 @@
 
 use tokio::sync::watch;
 
-use crate::channel::Channels;
 use crate::hlc::Hlc;
 use crate::ids::{LogIndex, NodeId};
 use crate::meta::Data;
+use crossbeam_combinators::Channels;
 
 #[async_trait::async_trait]
 pub(crate) trait LocalStoreView: Send + Sync + 'static {
@@ -61,7 +61,7 @@ pub(crate) trait LocalStoreView: Send + Sync + 'static {
     /// duplicate filter drops are not news and are not published.
     ///
     /// Infinite, with a bounded queue per subscriber: one that falls behind is
-    /// hung up on, which surfaces as [`End::Aborted`](crate::channel::End::Aborted)
+    /// hung up on, which surfaces as [`End::Aborted`](crossbeam_combinators::End::Aborted)
     /// after everything already queued — the cue to rescan above the watermark
     /// and subscribe again (`learner::read`).
     #[must_use]

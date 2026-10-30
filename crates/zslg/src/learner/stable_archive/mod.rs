@@ -15,11 +15,11 @@ use crate::api::{
     ArchiveBounds, ArchiveLowerBound, ArchiveUpperBound, RaftStateView, SnapshotStore,
     StableArchiveReader,
 };
-use crate::channel::Channels;
 use crate::error::Error;
 use crate::hlc::Hlc;
 use crate::ids::LogIndex;
 use crate::meta::SnapshotMetadata;
+use crossbeam_combinators::Channels;
 
 /// Depth of the channel handed back by [`stream`](ObjectStoreArchiveReader::stream).
 /// Matches the snapshot-store read channel: the consumer drains on its own

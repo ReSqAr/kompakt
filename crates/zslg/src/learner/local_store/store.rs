@@ -14,7 +14,7 @@
 //! integrate worker publishes a batch's rows right after `Storage::write` —
 //! only rows the duplicate filter admitted, only those still above the stable
 //! watermark — and never waits on a subscriber: a full queue is a hang-up
-//! (`learner::fanout`). No fsync is awaited, so an announced entry can be
+//! (the fan-out). No fsync is awaited, so an announced entry can be
 //! lost to a crash; the subscription is at-least-once and the rescan that
 //! follows a hang-up, not the live path, is its recovery.
 
@@ -29,23 +29,23 @@ use rust_rocksdb::WriteBatch;
 
 use crate::database::Subsystem;
 use crate::database::storage::Storage;
-use crate::learner::fanout::Fanout;
 use crate::learner::local_store::Dedup;
 use crate::learner::local_store::key::{
     DATA_PRIMARY_WIDTH, decode_data_key, encode_cursor_key, encode_data_key,
 };
 use bytes::Bytes;
+use crossbeam_combinators::Fanout;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tracing::error;
 
 use crate::api::{StableLogSnapshot, WindowItem};
-use crate::channel::Channels;
 use crate::error::{Error, ToStorage};
 use crate::hlc::Hlc;
 use crate::ids::{DataId, LogIndex, NodeId};
 use crate::meta::Data;
 use crate::metrics::{self, LocalWriteKind, LogType, OpState};
+use crossbeam_combinators::Channels;
 
 const STREAM_CHANNEL_CAPACITY: usize = 32;
 
@@ -327,14 +327,14 @@ impl crate::api::LocalStoreMut for LocalStore {
                     // end as a fault for that reason. An abort is a fault
                     // here, though: items may be missing (CLAUDE.md §20).
                     return match records.end_reason() {
-                        crate::channel::End::Closed => (Ok(()), sent_any),
-                        crate::channel::End::Aborted { what } => (
+                        crossbeam_combinators::End::Closed => (Ok(()), sent_any),
+                        crossbeam_combinators::End::Aborted { what } => (
                             Err(Error::SubscriptionStreamEnded {
                                 reason: format!("stream {what} ended"),
                             }),
                             sent_any,
                         ),
-                        crate::channel::End::Cancelled => (
+                        crossbeam_combinators::End::Cancelled => (
                             Err(Error::SubscriptionStreamEnded {
                                 reason: "stream cancelled".to_owned(),
                             }),
@@ -947,7 +947,7 @@ mod tests {
         for (idx, rec) in records {
             let _ = tx.send(Ok((source, idx, rec)));
         }
-        let (ch, closer) = crate::channel::Channels::from(rx, "test integrate");
+        let (ch, closer) = crossbeam_combinators::Channels::from(rx, "test integrate");
         // Close before the last sender drops, or the consumer forms its
         // verdict as "disconnected, not yet closed" — an abort.
         closer.close();
@@ -1148,7 +1148,7 @@ mod tests {
         assert_eq!(live.recv().expect("second").data_id.hlc(), Hlc(101));
         assert_eq!(
             live.recv().err(),
-            Some(crate::channel::End::Aborted {
+            Some(crossbeam_combinators::End::Aborted {
                 what: "unstable tail subscription"
             })
         );
@@ -1275,7 +1275,7 @@ mod tests {
         for (src, idx, rec) in records {
             let _ = tx.send(Ok((src, idx, rec)));
         }
-        let (ch, closer) = crate::channel::Channels::from(rx, "test integrate");
+        let (ch, closer) = crossbeam_combinators::Channels::from(rx, "test integrate");
         // Close before the last sender drops, or the consumer forms its
         // verdict as "disconnected, not yet closed" — an abort.
         closer.close();

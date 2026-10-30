@@ -43,7 +43,6 @@ use tracing::debug;
 
 use crate::ByteSize;
 use crate::api::{Clock, StampedWrite, WriteOutcome};
-use crate::channel::Channels;
 use crate::error::Error;
 use crate::ids::{LogIndex, NodeId, PeerAddr};
 use crate::meta::Data;
@@ -54,6 +53,7 @@ use crate::network::messages::{
     RpcStreamKind,
 };
 use crate::network::tcp::{self, SocketOpts};
+use crossbeam_combinators::Channels;
 
 mod write_stream;
 pub(super) use write_stream::open_write;

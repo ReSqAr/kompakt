@@ -21,10 +21,10 @@ use object_store::path::Path;
 use tokio_util::sync::CancellationToken;
 
 use crate::Error;
-use crate::channel::Channels;
 use crate::ids::SnapshotId;
 use crate::meta::SnapshotEntry;
 use crate::object_store::CompressionLevel;
+use crossbeam_combinators::Channels;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct CleanupReport {

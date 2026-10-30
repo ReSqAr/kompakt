@@ -19,10 +19,11 @@ use super::fold::{self, FoldInputs};
 use super::{Dispatcher, compute_config_hash};
 use crate::metrics::{self, FenceOutcome, StopReason};
 use crate::{ArcStore, Error};
+use crossbeam_combinators::Cancellation;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
-use zslg::{Cancellation, LogIndex};
+use zslg::LogIndex;
 
 impl Dispatcher {
     /// Start the fold, and return once it has replayed the stable log this
@@ -74,7 +75,7 @@ impl Dispatcher {
         let cancel = fold_state.cancellation();
         // Bound to `cancel` so asking the fold to stop wakes it even while it
         // is parked on a quiet log; zslg binds its own shutdown the same way,
-        // and either reaches the fold as `ChannelEnd::Cancelled`.
+        // and either reaches the fold as `End::Cancelled`.
         let tail = reader
             .subscribe_stable_log(from)
             .until(&Cancellation::from_token(&cancel));

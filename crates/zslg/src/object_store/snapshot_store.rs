@@ -47,7 +47,6 @@ use tracing::{debug, info, warn};
 
 use crate::Error;
 use crate::api::{CleanupReport, SnapshotStore};
-use crate::channel::Channels;
 use crate::error::ToStorage as _;
 use crate::ids::SnapshotId;
 #[cfg(test)]
@@ -56,6 +55,7 @@ use crate::meta::SnapshotEntry;
 use crate::metrics::{self, ObjectStoreOp, OpState};
 use crate::object_store::CompressionLevel;
 use crate::object_store::framing;
+use crossbeam_combinators::Channels;
 
 const SNAPSHOT_PREFIX: &str = "snapshots";
 
@@ -208,17 +208,19 @@ impl RemoteSnapshotStore {
                     }
                     match entries.recv() {
                         Ok(item) => Some(item),
-                        Err(crate::channel::End::Closed) => None,
+                        Err(crossbeam_combinators::End::Closed) => None,
                         // No declared completion, so this prefix must not be
                         // finalized as if it were the whole snapshot (§20).
-                        Err(crate::channel::End::Aborted { what }) => {
+                        Err(crossbeam_combinators::End::Aborted { what }) => {
                             Some(Err(Error::StreamTruncated {
                                 what: what.to_owned(),
                             }))
                         }
-                        Err(crate::channel::End::Cancelled) => Some(Err(Error::StreamTruncated {
-                            what: "cancelled".to_owned(),
-                        })),
+                        Err(crossbeam_combinators::End::Cancelled) => {
+                            Some(Err(Error::StreamTruncated {
+                                what: "cancelled".to_owned(),
+                            }))
+                        }
                     }
                 },
             )
@@ -582,7 +584,7 @@ mod tests {
         let result = store
             .write_snapshot(
                 id,
-                Channels::closed_for_test(rx),
+                Channels::closed(rx),
                 CompressionLevel::standard(),
                 crate::metrics::ObjectStoreReason::SnapshotCreate,
             )

@@ -717,6 +717,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-combinators"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-channel",
+ "futures",
+ "parking_lot 0.13.0",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "crossbeam-epoch"
 version = "0.9.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2059,6 +2072,7 @@ dependencies = [
  "bytes",
  "const-fnv1a-hash",
  "crossbeam-channel",
+ "crossbeam-combinators",
  "futures",
  "itertools 0.15.0",
  "metrics",
@@ -4357,6 +4371,7 @@ dependencies = [
  "console-subscriber",
  "crc32fast",
  "crossbeam-channel",
+ "crossbeam-combinators",
  "dashmap",
  "futures",
  "http-body-util",

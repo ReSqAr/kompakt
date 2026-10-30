@@ -38,12 +38,13 @@ use crate::{
     ArcStore, Error, EventSet, Projection, ProjectionTypeId, Snapshot, Tenant, TenantId, Watermark,
     WithWireFormat, WriteTransactionImpl,
 };
+use crossbeam_combinators::{Channels, End, Feed, Ranged, Tail};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
 use tracing::{error, info, warn};
-use zslg::{ChannelEnd, Channels, Data, DataId, Hlc, LogIndex, StableLogEvent, UnstableEvent};
+use zslg::{Data, DataId, Hlc, LogIndex, StableLogEvent, UnstableEvent};
 
 /// Whether `P` is live under `S`: every event `P` folds is in `S`. A `const
 /// fn`, so it answers at run time and in a `const` assertion
@@ -478,30 +479,166 @@ impl<Ev: WithWireFormat> Inner<Ev> {
     }
 }
 
-/// The integrator: the unstable tail, for as long as the process runs.
-fn integrate<Ev: WithWireFormat>(
-    inner: &Inner<Ev>,
-    mut tail: Channels<Result<UnstableEvent, zslg::Error>>,
-) {
+/// What the single live consumer sees from the two halves of the seam.
+enum FoldItem {
+    Live(Data),
+    Scan(Data),
+    ReplayDone,
+    TailFailed(zslg::Error),
+    ScanFailed(zslg::Error),
+    ScanEnded(End),
+}
+
+/// The live subscription and the stable watermark it is anchored to.
+struct LiveSeam {
+    reader: Arc<dyn zslg::Reader>,
+    from: LogIndex,
+    cancelled: crossbeam_combinators::Cancellation,
+}
+
+impl Tail for LiveSeam {
+    type Item = FoldItem;
+    type Cut = Option<Hlc>;
+
+    fn subscribe(&self) -> Channels<Self::Item> {
+        self.reader
+            .subscribe_unstable_tail()
+            .until(&self.cancelled)
+            .filter_map(|item| match item {
+                Ok(UnstableEvent::Appended(data)) => Some(FoldItem::Live(data)),
+                Ok(UnstableEvent::Watermark(_)) => None,
+                Err(e) => Some(FoldItem::TailFailed(e)),
+            })
+    }
+
+    fn cut(&self) -> Self::Cut {
+        self.reader.stable_watermark()
+    }
+
+    fn above(&self, live: Channels<Self::Item>, cut: Self::Cut) -> Channels<Self::Item> {
+        // Drop live entries the scan already covered. `Held` still dedups by
+        // DataId above the cut; the seam does not rely on that for the overlap.
+        live.filter_map(move |item| match item {
+            FoldItem::Live(data) if cut.is_some_and(|w| data.data_id.hlc() <= w) => None,
+            other => Some(other),
+        })
+    }
+}
+
+impl Ranged<Option<Hlc>> for LiveSeam {
+    type Item = FoldItem;
+
+    fn range(&self, cut: Option<Hlc>) -> Channels<Self::Item> {
+        let Some(until) = cut else {
+            return Channels::from_vec(Vec::new());
+        };
+        let (feed, ch) = Feed::channel(SCAN_CAP, "live scan");
+        let mut log = self
+            .reader
+            .subscribe_stable_log(self.from)
+            .until(&self.cancelled);
+        tokio::task::spawn_blocking(move || {
+            // Overflowed or not, the scan reads to its end: an overflow cannot
+            // recover until it has (`Coverage::Overflowed`).
+            loop {
+                match log.recv() {
+                    Ok(Ok(StableLogEvent::Appended { data, .. })) => {
+                        // The stable log is HLC-ordered: past `until`, done.
+                        if data.data_id.hlc() > until {
+                            break;
+                        }
+                        if !feed.send(FoldItem::Scan(data)) {
+                            return;
+                        }
+                    }
+                    Ok(Ok(StableLogEvent::Watermark(h))) => {
+                        if h >= until {
+                            break;
+                        }
+                    }
+                    Ok(Err(e)) => {
+                        let _ = feed.send(FoldItem::ScanFailed(e));
+                        feed.close();
+                        return;
+                    }
+                    Err(End::Cancelled) => {
+                        feed.close();
+                        return;
+                    }
+                    Err(end) => {
+                        let _ = feed.send(FoldItem::ScanEnded(end));
+                        feed.close();
+                        return;
+                    }
+                }
+            }
+            let _ = feed.send(FoldItem::ReplayDone);
+            feed.close();
+        });
+        ch
+    }
+}
+
+const SCAN_CAP: usize = 64;
+
+fn scan_done<Ev: WithWireFormat>(inner: &Inner<Ev>, entries: u64, started: Instant) {
+    metrics::live_scan(entries, started.elapsed());
+    info!(
+        tenant = inner.tenant.name(),
+        entries,
+        elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        "live view: cold-start scan done"
+    );
+    inner.finish_scan();
+}
+
+/// Wakes anyone waiting on `scanned` whenever `run` returns, for any reason.
+/// `finish_scan` is idempotent; `scan_done` already calls it on the normal path.
+struct FinishScanOnDrop<'a, Ev: WithWireFormat>(&'a Inner<Ev>);
+
+impl<Ev: WithWireFormat> Drop for FinishScanOnDrop<'_, Ev> {
+    fn drop(&mut self) {
+        self.0.finish_scan();
+    }
+}
+
+/// The single live consumer: stable scan, then/while the unstable tail.
+fn run<Ev: WithWireFormat>(inner: &Inner<Ev>, mut stream: Channels<FoldItem>) {
+    let _finish = FinishScanOnDrop(inner);
+    let started = Instant::now();
+    let mut entries: u64 = 0;
     loop {
-        match tail.recv() {
-            Ok(Ok(UnstableEvent::Appended(data))) => {
+        match stream.recv() {
+            Ok(FoldItem::Live(data)) => {
                 inner.arrive(data);
             }
-            // Not a drop signal: an entry at or below it is stable, but the
-            // fold may not have stored it yet. Retirement follows F.
-            Ok(Ok(UnstableEvent::Watermark(_))) => {}
-            Ok(Err(e)) => {
+            Ok(FoldItem::Scan(data)) => {
+                entries = entries.saturating_add(1);
+                inner.arrive(data);
+            }
+            Ok(FoldItem::ReplayDone) => scan_done(inner, entries, started),
+            Ok(FoldItem::TailFailed(e)) => {
                 error!(
                     tenant = inner.tenant.name(),
                     error = %e,
                     "live view: the unstable tail sent an error; stopping the dispatcher"
                 );
                 inner.fold_state.halt(StopReason::UnstableTailEnded);
-                inner.scanned.notify_all();
                 return;
             }
-            Err(ChannelEnd::Cancelled) => return,
+            Ok(FoldItem::ScanFailed(e)) => {
+                error!(error = %e, "live view: the cold-start scan read an error");
+                inner.fold_state.halt(StopReason::LiveScanEnded);
+                scan_done(inner, entries, started);
+                return;
+            }
+            Ok(FoldItem::ScanEnded(end)) => {
+                error!(?end, "live view: the cold-start scan ended early");
+                inner.fold_state.halt(StopReason::LiveScanEnded);
+                scan_done(inner, entries, started);
+                return;
+            }
+            Err(End::Cancelled) => return,
             Err(end) => {
                 // zslg resyncs a slow consumer inside the stream, so an end is
                 // the node's reader breaking; a live view that stopped
@@ -512,64 +649,10 @@ fn integrate<Ev: WithWireFormat>(
                     "live view: the unstable tail ended; stopping the dispatcher"
                 );
                 inner.fold_state.halt(StopReason::UnstableTailEnded);
-                inner.scanned.notify_all();
                 return;
             }
         }
     }
-}
-
-/// The cold-start scan: the stable log from the store's watermark up to
-/// `until`, the stable watermark when the view started. What it holds is
-/// stable but not folded yet, and never comes through the tail.
-fn scan<Ev: WithWireFormat>(
-    inner: &Inner<Ev>,
-    until: Hlc,
-    mut log: Channels<Result<StableLogEvent, zslg::Error>>,
-) {
-    let started = Instant::now();
-    let mut entries: u64 = 0;
-    let ended_early = loop {
-        match log.recv() {
-            Ok(Ok(StableLogEvent::Appended { data, .. })) => {
-                // The stable log is HLC-ordered: past `until`, done.
-                if data.data_id.hlc() > until {
-                    break false;
-                }
-                entries = entries.saturating_add(1);
-                // Overflowed or not, the scan reads to its end: until it
-                // has, an overflow cannot recover (`Coverage::Overflowed`).
-                inner.arrive(data);
-            }
-            // Sent right after the replay (zslg `learner/read.rs`), so the
-            // scan never waits for the next watermark advance.
-            Ok(Ok(StableLogEvent::Watermark(h))) => {
-                if h >= until {
-                    break false;
-                }
-            }
-            Ok(Err(e)) => {
-                error!(error = %e, "live view: the cold-start scan read an error");
-                break true;
-            }
-            Err(ChannelEnd::Cancelled) => break false,
-            Err(end) => {
-                error!(?end, "live view: the cold-start scan ended early");
-                break true;
-            }
-        }
-    };
-    if ended_early {
-        inner.fold_state.halt(StopReason::LiveScanEnded);
-    }
-    metrics::live_scan(entries, started.elapsed());
-    info!(
-        tenant = inner.tenant.name(),
-        entries,
-        elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
-        "live view: cold-start scan done"
-    );
-    inner.finish_scan();
 }
 
 /// A live view not started yet: see [`Coverage::NotStarted`]. [`begin`]
@@ -609,15 +692,21 @@ pub(crate) fn not_started<Ev: WithWireFormat>(
 pub(crate) fn begin<Ev: WithWireFormat>(
     live: &Live<Ev>,
     reader: &Arc<dyn zslg::Reader>,
-    cancelled: &zslg::Cancellation,
+    cancelled: &crossbeam_combinators::Cancellation,
     mut folded: watch::Receiver<Option<Hlc>>,
 ) -> Result<(), Error> {
     let inner = &live.inner;
-    // Tail first, then the stable watermark: nothing falls between them.
-    let tail = reader.subscribe_unstable_tail().until(cancelled);
-    let until = reader.stable_watermark();
     let f = inner.store.read()?.watermark()?;
     let from = LogIndex::next_after(f.index);
+    let seam = LiveSeam {
+        reader: Arc::clone(reader),
+        from,
+        cancelled: cancelled.clone(),
+    };
+    // The seam opens the live tail first and reads the stable watermark
+    // second; nothing falls between them. `f`/`from` bound the scan only, so
+    // reading them first is safe.
+    let (tail, until) = seam.open();
     {
         let mut state = inner.lock();
         state.coverage = match until {
@@ -640,14 +729,9 @@ pub(crate) fn begin<Ev: WithWireFormat>(
         "live view started"
     );
 
+    let stream = seam.range(until).merge(tail);
     let integrator = Arc::clone(inner);
-    tokio::task::spawn_blocking(move || integrate(&integrator, tail));
-
-    if let Some(until) = until {
-        let log = reader.subscribe_stable_log(from).until(cancelled);
-        let scanner = Arc::clone(inner);
-        tokio::task::spawn_blocking(move || scan(&scanner, until, log));
-    }
+    tokio::task::spawn_blocking(move || run(&integrator, stream));
 
     let retirer = Arc::clone(inner);
     tokio::spawn(async move {
@@ -680,7 +764,7 @@ pub(crate) async fn begin_when_caught_up<Ev: WithWireFormat>(
     live: Live<Ev>,
     syncer: crate::Syncer,
     reader: Arc<dyn zslg::Reader>,
-    cancelled: zslg::Cancellation,
+    cancelled: crossbeam_combinators::Cancellation,
 ) {
     let tenant = live.inner.tenant;
     let mut backoff = START_BACKOFF;
@@ -856,10 +940,11 @@ mod tests {
     use super::*;
     use crate::testsupport::{
         FLUSH_INTERVAL, NewTodoV1, NewUserV3, PingedV1, TestLog, Todo, TodoId, User, UserId,
-        data_id, event, inmemory, payload, tenant, tenant_id,
+        data_id, event, hlc, inmemory, payload, tenant, tenant_id,
     };
     use crate::{Dispatcher, Reader, Ref, Store};
     use bytes::Bytes;
+    use crossbeam_combinators::CancelHandle;
     use proptest::prelude::*;
     use std::time::Duration;
 
@@ -1346,6 +1431,100 @@ mod tests {
 
         live.inner.finish_scan();
         assert_eq!(coverage(&live), "complete", "ended, and F covers `until`");
+    }
+
+    /// A reader whose stable and unstable subscriptions stay quiet: the scan
+    /// cannot finish, so a snapshot waits on `scanned`.
+    struct StalledReader {
+        stable: Mutex<Option<crossbeam_channel::Sender<Result<StableLogEvent, zslg::Error>>>>,
+        tail: Mutex<Option<crossbeam_channel::Sender<Result<UnstableEvent, zslg::Error>>>>,
+        watermark: Hlc,
+    }
+
+    impl StalledReader {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                stable: Mutex::new(None),
+                tail: Mutex::new(None),
+                watermark: hlc(1_000),
+            })
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl zslg::Reader for StalledReader {
+        async fn sync(&self) -> Result<(), zslg::Error> {
+            Ok(())
+        }
+
+        fn stable_watermark(&self) -> Option<Hlc> {
+            Some(self.watermark)
+        }
+
+        fn hlc_now(&self) -> Hlc {
+            self.watermark
+        }
+
+        fn subscribe_stable_log(
+            &self,
+            _from: LogIndex,
+        ) -> Channels<Result<StableLogEvent, zslg::Error>> {
+            let (tx, rx) = crossbeam_channel::bounded(1);
+            *self.stable.lock().expect("test mutex") = Some(tx);
+            Channels::from_infinite(rx, "stalled stable")
+        }
+
+        fn unstable_tail(&self) -> Channels<Result<Data, zslg::Error>> {
+            Channels::from_vec(Vec::new())
+        }
+
+        fn subscribe_unstable_tail(&self) -> Channels<Result<UnstableEvent, zslg::Error>> {
+            let (tx, rx) = crossbeam_channel::bounded(1);
+            *self.tail.lock().expect("test mutex") = Some(tx);
+            Channels::from_infinite(rx, "stalled tail")
+        }
+    }
+
+    /// Cancelling while the cold-start scan is still running must wake a
+    /// `snapshot()` parked on `scanned`; the `run` guard calls `finish_scan`
+    /// on every exit, including `End::Cancelled`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cancelling_mid_scan_wakes_a_waiting_snapshot() {
+        let store = inmemory();
+        let log = TestLog::new();
+        let stalled = StalledReader::new();
+        let stalled_reader: Arc<dyn zslg::Reader> = stalled.clone();
+        let mut dispatcher = Dispatcher::from_db(
+            store,
+            log.writer(),
+            stalled_reader.clone(),
+            FLUSH_INTERVAL,
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        let mut manager = dispatcher.new_handler::<event::Event>(tenant());
+        manager.register::<User>().unwrap();
+        let (_writer, reader) = manager.finalise().unwrap();
+        let live = reader.not_started::<Users>(LiveLimits::default()).unwrap();
+        let (handle, cancellation) = CancelHandle::new();
+        let (_fold_tx, folded) = tokio::sync::watch::channel(None);
+        begin(&live, &stalled_reader, &cancellation, folded).unwrap();
+        assert_eq!(coverage(&live), "scanning");
+
+        let waiting = {
+            let live = live.clone();
+            tokio::task::spawn_blocking(move || live.snapshot().map(|_| ()))
+        };
+        tokio::time::sleep(SHORT).await;
+        assert!(!waiting.is_finished(), "the snapshot waits for the scan");
+
+        handle.cancel();
+        tokio::time::timeout(LONG, waiting)
+            .await
+            .expect("the cancel wakes the waiting snapshot")
+            .expect("the snapshot task")
+            .expect("the snapshot");
     }
 
     #[tokio::test(flavor = "multi_thread")]

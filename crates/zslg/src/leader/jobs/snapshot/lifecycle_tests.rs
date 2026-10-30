@@ -51,7 +51,7 @@ async fn integrate_batch(
     for (idx, rec) in records {
         let _ = tx.send(Ok((source, idx, rec)));
     }
-    let (ch, closer) = crate::channel::Channels::from(rx, "test integrate");
+    let (ch, closer) = crossbeam_combinators::Channels::from(rx, "test integrate");
     // Close before the last sender drops, or the consumer forms its
     // verdict as "disconnected, not yet closed" — an abort.
     closer.close();
@@ -79,8 +79,8 @@ async fn append_entries(local_store: &LocalStore, entries: &[Data]) {
 #[tokio::test]
 async fn snapshot_refuses_to_commit_an_aborted_window() {
     use crate::api::LocalStoreView;
-    use crate::channel::Channels;
     use crate::error::Error;
+    use crossbeam_combinators::Channels;
 
     use tokio::sync::watch;
 
@@ -112,7 +112,7 @@ async fn snapshot_refuses_to_commit_an_aborted_window() {
         fn subscribe_integrated(&self) -> watch::Receiver<()> {
             self.inner.subscribe_integrated()
         }
-        fn subscribe_unstable(&self) -> crate::channel::Channels<crate::meta::Data> {
+        fn subscribe_unstable(&self) -> crossbeam_combinators::Channels<crate::meta::Data> {
             self.inner.subscribe_unstable()
         }
         async fn subscription_cursor(&self, upstream: NodeId) -> Result<Option<LogIndex>, Error> {
@@ -577,12 +577,12 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
 
     use crate::api::Replica;
     use crate::api::{LocalStoreView, Router};
-    use crate::channel::Channels;
     use crate::error::Error;
     use crate::hlc::{Hlc, HlcParts};
     use crate::ids::{LogIndex, NodeId, RaftGeneration, SnapshotId};
     use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
     use crate::meta::{Data, SnapshotMetadata};
+    use crossbeam_combinators::Channels;
 
     use crate::tests::{FixedClock, ReadyReplica};
 
@@ -636,7 +636,7 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
             self.inner.subscribe_integrated()
         }
 
-        fn subscribe_unstable(&self) -> crate::channel::Channels<crate::meta::Data> {
+        fn subscribe_unstable(&self) -> crossbeam_combinators::Channels<crate::meta::Data> {
             self.inner.subscribe_unstable()
         }
 
@@ -884,13 +884,13 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
     use crate::api::Replica;
     use crate::api::Router;
     use crate::api::{RaftLeadership, SnapshotStore};
-    use crate::channel::Channels;
     use crate::error::Error;
     use crate::ids::ServerName;
     use crate::ids::SnapshotId;
     use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
     use crate::meta::SnapshotEntry;
     use crate::tests::ReadyReplica;
+    use crossbeam_combinators::Channels;
 
     /// Replica stub: always drained, no end_index — quorum checks pass instantly.
     struct OnePeerRouter {

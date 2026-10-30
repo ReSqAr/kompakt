@@ -1,0 +1,29 @@
+[package]
+name = "crossbeam-combinators"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Blocking channel pipelines: a composable read/write pair, verdicts, and a subscribe/cut/range seam"
+publish = false
+
+[dependencies]
+crossbeam-channel = { workspace = true }
+futures = { workspace = true, optional = true }
+parking_lot = { workspace = true }
+tokio = { workspace = true, optional = true, features = ["rt", "sync"] }
+tokio-stream = { workspace = true, optional = true, features = ["sync"] }
+tokio-util = { workspace = true, optional = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+futures = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio-util = { workspace = true }
+
+[features]
+default = []
+tokio = ["dep:futures", "dep:tokio", "dep:tokio-stream", "dep:tokio-util"]
+
+[lints]
+workspace = true

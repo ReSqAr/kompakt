@@ -19,6 +19,7 @@ bytes = { workspace = true }
 console-subscriber = { workspace = true, optional = true }
 crc32fast = { workspace = true }
 crossbeam-channel = { workspace = true }
+crossbeam-combinators = { workspace = true, features = ["tokio"] }
 dashmap = { workspace = true }
 futures = { workspace = true }
 metrics = { workspace = true }
@@ -35,7 +36,6 @@ thiserror = { workspace = true }
 tikv-jemalloc-ctl = { workspace = true, optional = true }
 tikv-jemallocator = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "fs", "signal", "net"] }
-tokio-stream = { workspace = true, features = ["sync"] }
 tokio-util = { workspace = true, features = ["io-util"] }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["serde"] }
@@ -54,6 +54,7 @@ tempfile = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 tokio-metrics = { workspace = true }
+tokio-stream = { workspace = true, features = ["sync"] }
 
 
 [features]
@@ -79,7 +80,3 @@ name = "loadgen"
 path = "examples/loadgen.rs"
 required-features = ["prometheus"]
 
-
-[[example]]
-name = "channel_bench"
-path = "examples/channel_bench.rs"

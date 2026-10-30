@@ -24,7 +24,6 @@ use tracing::{debug, warn};
 use crate::api::{
     LocalStoreView, RaftStateView, Router, SnapshotStore, StableLogSnapshot, WindowItem,
 };
-use crate::channel::Channels;
 use crate::error::Error;
 use crate::error::ToStorage;
 use crate::hlc::Hlc;
@@ -34,6 +33,7 @@ use crate::meta::{SnapshotEntry, SnapshotMetadata};
 use crate::metrics::{self, SnapshotState, SnapshotStep};
 use crate::object_store::CompressionLevel;
 use crate::quorum::{FanOutResponse, fan_out_quorum};
+use crossbeam_combinators::Channels;
 
 pub(in crate::leader) struct SnapshotEntryInputs<'a> {
     pub(in crate::leader) local_store: &'a dyn LocalStoreView,
@@ -457,7 +457,7 @@ mod tests {
         for (idx, rec) in records {
             let _ = tx.send(Ok((source, idx, rec)));
         }
-        let (ch, closer) = crate::channel::Channels::from(rx, "test integrate");
+        let (ch, closer) = crossbeam_combinators::Channels::from(rx, "test integrate");
         // Close before the last sender drops, or the consumer forms its
         // verdict as "disconnected, not yet closed" — an abort.
         closer.close();

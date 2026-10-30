@@ -40,9 +40,10 @@
 
 use crate::{RocksDBStore, Store};
 use bytes::Bytes;
+use crossbeam_combinators::Channels;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use zslg::{Channels, Data, DataId, Hlc, LogIndex, StableLogEvent, UnstableEvent};
+use zslg::{Data, DataId, Hlc, LogIndex, StableLogEvent, UnstableEvent};
 
 /// Long enough that the fence never fires mid-test; the tests that care
 /// about it set their own.
@@ -411,7 +412,7 @@ mod tests {
         log.hang_up_unstable();
         assert_eq!(
             sub.recv().err(),
-            Some(zslg::ChannelEnd::Aborted {
+            Some(crossbeam_combinators::End::Aborted {
                 what: "test-log unstable"
             })
         );

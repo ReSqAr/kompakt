@@ -1,4 +1,4 @@
-//! Microbenchmark for `zslg::Channels`' poll-routing cost.
+//! Microbenchmark for `crossbeam_combinators::Channels`' poll-routing cost.
 //!
 //! An example, not a test: nothing runs it in CI and no number is pinned. It
 //! exists to put a figure on the ordinal-routing change, in the shape this repo
@@ -33,7 +33,7 @@
 //! Run it (release, or the numbers are meaningless):
 //!
 //! ```sh
-//! timeout 600 cargo run --release -p zslg --example channel_bench
+//! timeout 600 cargo run --release -p crossbeam-combinators --example channel_bench
 //! ```
 
 #![allow(
@@ -46,7 +46,7 @@ use std::time::{Duration, Instant};
 
 use crossbeam_channel::Sender;
 
-use zslg::Channels;
+use crossbeam_combinators::Channels;
 
 /// Items pulled per timed round, split evenly across the leaves.
 const ITEMS_PER_ROUND: usize = 120_000;

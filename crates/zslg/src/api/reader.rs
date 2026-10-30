@@ -31,10 +31,10 @@
 //! shaped around.
 
 use crate::Error;
-use crate::channel::Channels;
 use crate::hlc::Hlc;
 use crate::ids::LogIndex;
 use crate::meta::{Data, StableLogEvent, UnstableEvent};
+use crossbeam_combinators::Channels;
 
 #[async_trait::async_trait]
 pub trait Reader: Send + Sync + 'static {
@@ -81,7 +81,7 @@ pub trait Reader: Send + Sync + 'static {
     ///
     /// Infinite: a consumer that falls behind is resynced silently (replay
     /// everything above the watermark, then live), so any termination is
-    /// [`End::Aborted`](crate::channel::End::Aborted), and node shutdown is
-    /// [`End::Cancelled`](crate::channel::End::Cancelled).
+    /// [`End::Aborted`](crossbeam_combinators::End::Aborted), and node shutdown is
+    /// [`End::Cancelled`](crossbeam_combinators::End::Cancelled).
     fn subscribe_unstable_tail(&self) -> Channels<Result<UnstableEvent, Error>>;
 }

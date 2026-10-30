@@ -30,7 +30,6 @@
 //! caught up to a quorum of replicas, which is what makes a subsequent read
 //! read-your-writes rather than merely eventually consistent.
 
-mod fanout;
 mod local_store;
 mod quorum;
 mod read;
@@ -216,7 +215,7 @@ pub(crate) async fn spawn_learner(
         stable_log.clone(),
         archive_reader.clone(),
         debouncer,
-        crate::channel::Cancellation::from_token(&shutdown.token()),
+        crossbeam_combinators::Cancellation::from_token(&shutdown.token()),
         clock.clone(),
     ));
     let learner = LearnerService::new(local_store, reader);

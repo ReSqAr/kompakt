@@ -33,7 +33,6 @@ use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use crate::api::{ReplicaClient, StampedWrite};
-use crate::channel::Channels;
 use crate::error::Error;
 use crate::ids::LogIndex;
 use crate::meta::Data;
@@ -41,6 +40,7 @@ use crate::network::framing::{
     AsyncFrameSink, AsyncFrameStream, TcpFrameSink, TcpFrameStream, adopt_blocking,
 };
 use crate::network::messages::{RpcReplicaRequest, RpcRequest, WriteOutcome, WriteStreamResponse};
+use crossbeam_combinators::Channels;
 
 /// In-flight window between the socket reader and the replica's write pipeline.
 /// Backpressure, not buffering: a peer that outruns the replica's flush loop

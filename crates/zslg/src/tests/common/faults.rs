@@ -13,7 +13,6 @@ use parking_lot::Mutex as SyncMutex;
 use tokio::sync::watch;
 
 use crate::api::{Clock, Replica, Router, StampedWrite, WriteOutcome};
-use crate::channel::Channels;
 use crate::error::Error;
 use crate::hlc::{Hlc, HlcClock, HlcGate};
 use crate::ids::{DataId, LogIndex, NodeId, PeerAddr};
@@ -21,6 +20,7 @@ use crate::meta::{Data, RaftState, ReplicaMembership, ReplicaStatus};
 use crate::raft::RaftStateHandle;
 use crate::replica::ReplicaLogStore;
 use crate::replica::ReplicaService;
+use crossbeam_combinators::Channels;
 
 /// Control handle for a [`FaultyReplica`]. Clone freely; clones share state.
 #[derive(Clone)]
@@ -115,7 +115,7 @@ impl Replica for FaultyReplica {
                 inner_tx
                     .get_or_insert_with(|| {
                         let (tx, rx) = crossbeam_channel::unbounded::<StampedWrite>();
-                        let mut outcomes = inner.write(Channels::closed_for_test(rx));
+                        let mut outcomes = inner.write(Channels::closed(rx));
                         let fwd_tx = out_tx.clone();
                         std::thread::spawn(move || {
                             while let Ok(outcome) = outcomes.recv() {
@@ -161,7 +161,7 @@ impl Replica for FaultyReplica {
             }
         });
 
-        Channels::closed_for_test(out_rx)
+        Channels::closed(out_rx)
     }
 
     fn subscribe_from(
@@ -469,7 +469,7 @@ impl Replica for DuplicateReplica {
     fn write(&self, input: Channels<StampedWrite>) -> Channels<Result<WriteOutcome, Error>> {
         let (out_tx, out_rx) = crossbeam_channel::unbounded::<Result<WriteOutcome, Error>>();
         let (inner_tx, inner_rx) = crossbeam_channel::unbounded::<StampedWrite>();
-        let mut outcomes = self.inner.write(Channels::closed_for_test(inner_rx));
+        let mut outcomes = self.inner.write(Channels::closed(inner_rx));
 
         // How many outcomes are still expected per data_id, and the best one seen
         // so far. Only shared between this thread and the feeder below.
@@ -532,7 +532,7 @@ impl Replica for DuplicateReplica {
             }
         });
 
-        Channels::closed_for_test(out_rx)
+        Channels::closed(out_rx)
     }
 
     fn subscribe_from(&self, from: Option<LogIndex>) -> Channels<Result<(LogIndex, Data), Error>> {

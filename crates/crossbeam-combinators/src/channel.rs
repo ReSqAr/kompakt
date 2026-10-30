@@ -1,94 +1,59 @@
-//! `Channels<T>` — the blocking data-pipeline primitive.
+//! `Channels<T>` — the blocking read half of a pipeline.
 //!
-//! A `Channels<T>` holds a single `Source` — a composable pull-source
-//! behind one blocking interface. Sources compose: [`LeafState`] (leaf),
-//! `Merge` (concurrent select across two sources), `Chain` (sequential
-//! first-then-second), `Unfold` (segments produced lazily and without bound,
-//! each from the previous one's verdict), `Guarded` (an inner source raced
-//! against a liveness receiver or a [`Cancellation`]) and `FilterMap`
-//! (transform at pull time).
+//! A `Channels<T>` owns a private tree of sources: a leaf (one crossbeam
+//! receiver), a concurrent merge, a sequential chain, a guard raced against a
+//! liveness signal or [`Cancellation`], a lazy `unfold`, and pull-time
+//! `map`/`filter_map`. The tree is invisible through one blocking interface.
 //!
-//! `recv` blocks on `Select::ready` over all leaf receivers; `try_recv`
-//! breadth-first drains through the source tree. The combinators mirror
-//! `Iterator`/`Stream` and run at pull time, on the consumer's thread.
+//! `recv` blocks on `Select::ready` over all live leaves; `try_recv` drains
+//! without blocking; `ready_batch` takes its first item through `recv` and the
+//! rest through `try_recv`. Everything runs at pull time, on the consumer's
+//! thread; the crate never spawns.
 //!
-//! ## Reliability contract
+//! ## Verdicts
 //!
-//! A `Channels<T>` is **fast and a little unreliable**. Disconnection means
-//! "no more items" — it does **not** mean "the producer finished its work".
-//! The two are indistinguishable here, by design:
+//! Disconnection means "no more items"; it does **not** mean "the producer
+//! finished its work". The two are indistinguishable at the channel level:
 //!
-//! - Some channels wrap a TCP connection (`network/client/write_stream.rs`,
-//!   `subscribe_stream.rs`): the reader loop drops its sender when the socket
-//!   dies, which is a routine event, not a fault. No channel-level signal could
-//!   tell that apart from a peer that finished.
-//! - A producer that panics (under `panic = "unwind"`) closes its channel
-//!   exactly like one that ran to completion.
-//! - A `spawn_blocking` task discarded before it runs never sends at all.
-//!
-//! ### Explicit close
+//! - A producer that panics closes its channel exactly like one that ran to
+//!   completion.
+//! - A task discarded before it runs never sends at all.
+//! - An infinite stream (a socket tail, a subscription) can end because the
+//!   peer went away, the connection reset, or the reader loop exited. The
+//!   response is the same: resume from the last position.
 //!
 //! For **finite** streams the producer says so: [`Channels::from`] hands back a
 //! [`Closer`], and [`recv`](Channels::recv) reports [`End::Closed`] only if
-//! `close()` was actually called. A producer that panicked, was discarded before
-//! it ran, or just forgot yields [`End::Aborted`] instead — the "I forgot" case
-//! and the "I died" case are the same case, deliberately.
+//! `close()` was actually called. A producer that panicked, was discarded, or
+//! forgot yields [`End::Aborted`] instead — "I forgot" and "I died" are the
+//! same case, deliberately. This is a local guarantee: a reader that exits on
+//! EOF will close, whether the peer finished or crashed.
 //!
-//! This is a **local** guarantee. It cannot cross a socket: a reader loop that
-//! exits on EOF has exited normally and will close, whether the peer finished or
-//! crashed. That is fine, because the infinite streams do not rely on it — they
-//! never terminate and resume from the last position instead
-//! (`learner::local_store::subscription_cursor`,
-//! `quorum::coordinator`'s `iter_unacked_data` on reopen).
+//! A third verdict, [`End::Cancelled`], is a stop request: a [`Cancellation`]
+//! bound with [`Channels::until`] fired. It exists because a tokio token cannot
+//! wake a consumer parked in `recv`. Items may be missing, but nothing went
+//! wrong; the response is to stop, not to back off and resume.
 //!
-//! ### Cancellation
-//!
-//! A third verdict, [`End::Cancelled`], is neither: the stream was stopped on
-//! request, by a [`Cancellation`] bound with [`Channels::until`]. It exists
-//! because a tokio token cannot wake a consumer parked in `recv`, and node
-//! shutdown has to — a quiet infinite stream otherwise outlives the node. Like
-//! `Aborted`, items may be missing; unlike it, the response is to stop rather
-//! than back off and resume.
-//!
-//! ### Consumers still validate
+//! ## Consumers still validate
 //!
 //! An explicit close proves the producer *believed* it finished. Where
-//! completeness is a durability matter, **verify it against an independent
-//! source of truth** as well — that is the established pattern in this crate:
+//! completeness is a durability matter, verify it against an independent source
+//! of truth as well: a gapless-fence check, a cursor, or a manifest bound. The
+//! channel reports the claim; the consumer owns the proof.
 //!
-//! - `learner::stable_log::append` — gapless ingest fence; refuses an index
-//!   past `end + 1` (`Error::StableLogGap`).
-//! - `learner::stable_log::snapshot_loader::integrate_manifest` — compares the
-//!   loaded `end_index` against the *manifest's* covered end, explicitly to
-//!   catch "a snapshot stream ended early".
-//! - `learner::stable_archive` — running contiguity guard across snapshot
-//!   tiling.
-//! - `learner::local_store` integrate — dedups by `data_id`; the durable cursor
-//!   re-delivers any lost suffix after a crash.
+//! ## Composition
 //!
-//! ## The public read surface
+//! [`Channels::merge`] selects across two sources and drops a dead branch as
+//! soon as it dies, releasing whatever its closures captured. [`Channels::chain`]
+//! runs phases in order and condemns the chain on an abort. [`Channels::unfold`]
+//! produces resumable segments lazily, handing each segment's verdict to the
+//! caller. [`Channels::filter_map`], [`Channels::map`] and
+//! [`Channels::until`] transform and bound a stream at pull time.
 //!
-//! `Channels<T>` is what the public [`crate::Reader`] hands back, so the
-//! *consumption* half is public — [`Channels::recv`], [`try_recv`](Channels::try_recv),
-//! [`ready_batch`](Channels::ready_batch), [`end_reason`](Channels::end_reason),
-//! [`End`] and the [`IntoIterator`] impl, plus
-//! [`into_stream`](Channels::into_stream) for an async caller.
-//!
-//! Enough of the *building* half is public to assemble a stream from receivers
-//! you own — [`from_infinite`](Channels::from_infinite),
-//! [`from_vec`](Channels::from_vec), [`merge`](Channels::merge),
-//! [`filter_map`](Channels::filter_map), [`map`](Channels::map) — and to bind
-//! one to a cancellation: [`until`](Channels::until), [`Cancellation`],
-//! [`CancelHandle`]. What stays
-//! crate-private is everything carrying a *verdict* or a growth rule the crate
-//! must own: [`Channels::from`] (it hands back a [`Closer`], and who may
-//! declare a stream complete is not an embedder's call), `chain` and `unfold`.
-//! Publishing [`End`] is deliberate — the `Closed`/`Aborted`/`Cancelled`
-//! distinction above is exactly what a consumer must act on.
-//!
-//! The one guarantee that *is* made here concerns senders, not producers: a
-//! `Merge` branch is dropped as soon as it dies, releasing whatever its closures
-//! captured. `crate::api::Replica::write` depends on it (see [`MergeState`]).
+//! The write half lives next door: [`crate::Feed`] for one producer and
+//! [`crate::Fanout`]/[`crate::Wakes`] for many. The seam
+//! ([`crate::Tail`], [`crate::Ranged`], [`crate::blend_chain`],
+//! [`crate::blend_merge`]) composes a live tail with a bounded history.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -96,18 +61,22 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crossbeam_channel::{Receiver, Select, TryRecvError};
 
-/// Buffer capacity for the `into_stream()` mpsc bridge.
-const STREAM_BRIDGE_CAP: usize = 256;
-
+#[cfg(feature = "tokio")]
 use futures::StreamExt;
+#[cfg(feature = "tokio")]
 use futures::stream::BoxStream;
+
+/// Buffer capacity for the `into_stream()` mpsc bridge.
+#[cfg(feature = "tokio")]
+const STREAM_BRIDGE_CAP: usize = 256;
 
 /// Why a [`Channels`] stopped yielding items.
 ///
 /// Go's `close(ch)`: a producer that finished says so, and silence is a fault.
 /// The distinction only carries weight for **finite** streams (a bounded scan, a
-/// snapshot read) — infinite ones (`network/client/*_stream.rs`) never terminate
-/// and get their correctness from resuming at the last position instead.
+/// snapshot read) — infinite ones (a socket tail, a subscription) never
+/// terminate and get their correctness from resuming at the last position
+/// instead.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum End {
     /// Every producer called [`Closer::close`] — the stream ended deliberately.
@@ -128,7 +97,7 @@ pub enum End {
 /// Dropping this without calling [`close`](Self::close) marks the stream
 /// [`End::Aborted`] — that is the whole point, so the "I forgot" case and the
 /// "I panicked" case land in the same place.
-pub(crate) struct Closer(tokio::sync::oneshot::Sender<()>);
+pub struct Closer(crossbeam_channel::Sender<()>);
 
 impl Closer {
     /// Declare the stream complete. Everything the producer meant to send has
@@ -145,8 +114,8 @@ impl Closer {
     /// `break` out to one unconditional `close()` rather than closing on each
     /// path. Do not move the sender into a nested `async` block or closure while
     /// closing outside it; the sender would then drop first.
-    pub(crate) fn close(self) {
-        let _ = self.0.send(());
+    pub fn close(self) {
+        let _ = self.0.try_send(());
     }
 }
 
@@ -219,14 +188,14 @@ trait Source<T>: Send {
 enum LeafState<T> {
     Alive {
         rx: Receiver<T>,
-        close_rx: Option<tokio::sync::oneshot::Receiver<()>>,
+        close_rx: Option<crossbeam_channel::Receiver<()>>,
         what: &'static str,
     },
     /// Data channel dead, but the `Closer` is still outstanding. Holds
     /// `close_rx` so a late `close()` can still be honoured on the next
     /// `end_reason()` read. Fail-closed in the meantime: reports `Aborted`.
     Pending {
-        close_rx: tokio::sync::oneshot::Receiver<()>,
+        close_rx: crossbeam_channel::Receiver<()>,
         what: &'static str,
     },
     Resolved(End),
@@ -288,14 +257,14 @@ impl<T: Send + 'static> Source<T> for LeafState<T> {
                         *self = LeafState::Resolved(End::Closed);
                         End::Closed
                     }
-                    Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                    Err(crossbeam_channel::TryRecvError::Disconnected) => {
                         *self = LeafState::Resolved(End::Aborted { what });
                         End::Aborted { what }
                     }
                     // Still outstanding: fail closed for this read, but do not
                     // commit — a late `close()` can still be honoured next time.
                     // This IS the non-memoisation the test guards.
-                    Err(tokio::sync::oneshot::error::TryRecvError::Empty) => End::Aborted { what },
+                    Err(crossbeam_channel::TryRecvError::Empty) => End::Aborted { what },
                 }
             }
             // Called before the leaf reported Dead (defensive / fail-closed).
@@ -307,10 +276,10 @@ impl<T: Send + 'static> Source<T> for LeafState<T> {
                 let (verdict, settle) = match close_rx.as_mut() {
                     Some(rx) => match rx.try_recv() {
                         Ok(()) => (End::Closed, true),
-                        Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                        Err(crossbeam_channel::TryRecvError::Disconnected) => {
                             (End::Aborted { what }, true)
                         }
-                        Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {
+                        Err(crossbeam_channel::TryRecvError::Empty) => {
                             (End::Aborted { what }, false)
                         }
                     },
@@ -348,16 +317,16 @@ impl<T> LeafState<T> {
     /// Resolve the leaf after the data channel disconnects. A `None` `close_rx`
     /// is an infinite stream — ending is always an abort.
     fn resolve(
-        close_rx: Option<tokio::sync::oneshot::Receiver<()>>,
+        close_rx: Option<crossbeam_channel::Receiver<()>>,
         what: &'static str,
     ) -> LeafState<T> {
         match close_rx {
-            Some(mut rx) => match rx.try_recv() {
+            Some(rx) => match rx.try_recv() {
                 Ok(()) => LeafState::Resolved(End::Closed),
-                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                Err(crossbeam_channel::TryRecvError::Disconnected) => {
                     LeafState::Resolved(End::Aborted { what })
                 }
-                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {
+                Err(crossbeam_channel::TryRecvError::Empty) => {
                     LeafState::Pending { close_rx: rx, what }
                 }
             },
@@ -384,13 +353,12 @@ enum Side {
 /// a branch reports `Dead` it is dropped — `Both` collapses to `One` (or
 /// straight to `Done` on an abort). Two invariants depend on it:
 ///
-/// 1. A source's closures may own the `Sender` for the *other* branch. The
-///    canonical case is [`crate::api::Replica::write`], where the gate's
-///    `filter_map` captures the commit-channel `Arc<Sender>`
-///    (`replica/mod.rs`): only dropping the exhausted gate branch releases that
-///    sender, letting the commit channel disconnect once the last in-flight
-///    write lands. Merely *pruning it from `register`* leaves the sender alive
-///    and the merged output blocks in `recv()` forever.
+/// 1. A source's closures may own the `Sender` for the *other* branch — a
+///    request/response merge where the request filter holds the shared
+///    completion sender. Only dropping the exhausted branch releases that
+///    sender, letting the merged output disconnect once the last in-flight
+///    request lands. Merely *pruning it from `register`* leaves the sender
+///    alive and the merged output blocks in `recv()` forever.
 /// 2. `Dead` is reported only when **both** branches are gone; a half-dead
 ///    merge reports `Filtered` so the caller retries. Returning `Dead` while
 ///    the survivor still holds buffered items makes an enclosing [`ChainState`]
@@ -935,6 +903,7 @@ impl Cancellation {
     /// Spawns one task, which lives until the token fires, so call it once per
     /// token and clone the result rather than once per stream. Must be called
     /// from within a Tokio runtime.
+    #[cfg(feature = "tokio")]
     #[must_use]
     pub fn from_token(token: &tokio_util::sync::CancellationToken) -> Self {
         let (handle, cancellation) = CancelHandle::new();
@@ -973,9 +942,9 @@ impl Cancellation {
 /// behind later items. `Unfold` cannot make that call on the caller's behalf —
 /// for some streams an ending segment IS the control signal — so it **hands the
 /// previous segment's [`End`] to `next`** and lets the caller decide: continue,
-/// or decline by returning `None`. The canonical continuing case is
-/// `learner::read`'s stable tail, where the fan-out hanging up on an overrun
-/// subscriber is precisely the cue to replay from the cursor and resubscribe.
+/// or decline by returning `None`. A resuming consumer whose fan-out hangs up
+/// on an overrun subscriber uses that verdict as the cue to replay from its
+/// durable cursor and resubscribe.
 ///
 /// A segment is materialised eagerly — at construction, and again the instant
 /// its predecessor dies — never lazily inside `register`, and never while a
@@ -985,7 +954,6 @@ impl Cancellation {
 /// not merely during registration. A segment swapped in mid-window would
 /// misalign every index to its right. `Unfold` is the one source whose leaf
 /// count is meant to change, which is why the rule is written down here.
-#[allow(dead_code, reason = "TEMP: wired into learner::read next")]
 struct Unfold<S, T> {
     state: S,
     #[allow(clippy::type_complexity, reason = "one boxed closure, named inline")]
@@ -1123,8 +1091,14 @@ impl<T: Send + 'static> Channels<T> {
     /// forever wants [`from_infinite`](Self::from_infinite) instead — do not
     /// reach for `from(..)` and an immediate `close()`, which claims a clean
     /// finish the stream cannot vouch for.
-    pub(crate) fn from(rx: Receiver<T>, what: &'static str) -> (Self, Closer) {
-        let (close_tx, close_rx) = tokio::sync::oneshot::channel();
+    ///
+    /// Prefer [`Feed::channel`](crate::Feed::channel) for a new producer: it
+    /// pairs the sender and the closer. This low-level form is for adapters
+    /// that must keep them separate — an async producer, or a fan-out that
+    /// shares only the sender.
+    #[must_use]
+    pub fn from(rx: Receiver<T>, what: &'static str) -> (Self, Closer) {
+        let (close_tx, close_rx) = crossbeam_channel::bounded(1);
         (
             Self {
                 source: Box::new(LeafState::Alive {
@@ -1158,11 +1132,14 @@ impl<T: Send + 'static> Channels<T> {
         }
     }
 
-    /// Test-only: a channel whose producer has already declared completion, for
-    /// tests that exercise item flow rather than the termination verdict.
-    #[cfg(test)]
-    pub(crate) fn closed_for_test(rx: Receiver<T>) -> Self {
-        let (ch, closer) = Channels::from(rx, "test");
+    /// A receiver whose producer has already declared completion.
+    ///
+    /// Useful when the items are already queued and the producer is gone; the
+    /// stream reports [`End::Closed`] after draining. For a producer that is
+    /// still running, use [`Channels::from`] and keep its [`Closer`].
+    #[must_use]
+    pub fn closed(rx: Receiver<T>) -> Self {
+        let (ch, closer) = Self::from(rx, "closed");
         closer.close();
         ch
     }
@@ -1189,7 +1166,7 @@ impl<T: Send + 'static> Channels<T> {
     /// is a separate combinator rather than a loop over `chain`: an aborted
     /// segment condemns a chain, whereas here `next` decides, because for some
     /// streams a segment ending IS the signal to build the next one.
-    pub(crate) fn unfold<S, F>(state: S, next: F) -> Channels<T>
+    pub fn unfold<S, F>(state: S, next: F) -> Channels<T>
     where
         S: Send + 'static,
         F: FnMut(&mut S, Option<End>) -> Option<Channels<T>> + Send + 'static,
@@ -1246,7 +1223,8 @@ impl<T: Send + 'static> Channels<T> {
         }
     }
 
-    pub(crate) fn chain(self, next: Channels<T>) -> Channels<T> {
+    #[must_use]
+    pub fn chain(self, next: Channels<T>) -> Channels<T> {
         let mut phases = VecDeque::new();
         phases.push_back(self.source);
         phases.push_back(next.source);
@@ -1343,12 +1321,13 @@ impl<T: Send + 'static> Channels<T> {
     /// started blocking tasks, so one dropped tail subscription would hang
     /// shutdown.
     ///
-    /// So the source is raced against a liveness receiver ([`Guarded`]): it
+    /// So the source is raced against a liveness receiver (a guard): it
     /// carries no items, its sender rides with the returned stream, and
     /// dropping the stream disconnects it. A race, not a
     /// [`merge`](Self::merge) — a merge keeps the surviving branch when the
     /// other closes cleanly, which would stop a *finite* stream from ever
     /// ending.
+    #[cfg(feature = "tokio")]
     #[must_use = "a stream does nothing unless polled"]
     pub fn into_stream(self) -> BoxStream<'static, T> {
         let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BRIDGE_CAP);
@@ -1489,8 +1468,8 @@ mod tests {
 
     /// The load-bearing difference from `chain`, which an aborted phase
     /// condemns: `unfold` hands the verdict to `next` and lets it decide. A
-    /// resuming consumer (`learner::read`'s stable tail, where a hung-up
-    /// subscription IS the lag signal) continues; anything else can decline.
+    /// resuming consumer (a stable tail, where a hung-up subscription IS the
+    /// lag signal) continues; anything else can decline.
     #[test]
     fn unfold_hands_the_previous_end_to_next_and_may_continue_past_an_abort() {
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1534,6 +1513,7 @@ mod tests {
     /// thing that can end the drain is the consumer going away. The guard
     /// travels with the source, so it is released exactly when the drain
     /// thread drops it — i.e. when the thread ends.
+    #[cfg(feature = "tokio")]
     #[tokio::test]
     async fn into_stream_stops_draining_when_the_consumer_drops_it() {
         let guard = Arc::new(());
@@ -1935,10 +1915,10 @@ mod tests {
         assert_eq!(got, vec![1, 2, 99]);
     }
 
-    /// The `Replica::write` topology: the *left* branch's closure owns the
-    /// `Sender` for the *right* branch. Dropping the exhausted left branch is
-    /// what releases that sender and lets the merged output disconnect — without
-    /// it `recv()` blocks forever and the server's writer loop leaks its thread.
+    /// A request/response topology: the *left* branch's closure owns the
+    /// `Sender` for the *right* branch. Dropping the exhausted left branch
+    /// releases that sender and lets the merged output disconnect — without it
+    /// `recv()` blocks forever and the writer loop leaks its thread.
     #[test]
     fn merge_drops_dead_branch_releasing_its_captured_senders() {
         let (in_tx, in_rx) = crossbeam_channel::bounded::<u32>(8);
@@ -2268,6 +2248,7 @@ mod tests {
         assert!(got.is_empty());
     }
 
+    #[cfg(feature = "tokio")]
     #[test]
     fn into_stream_yields_items() {
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -2414,6 +2395,7 @@ mod tests {
 
     /// `from_token` is the bridge from a tokio token to a blocked crossbeam
     /// `recv` on a blocking thread.
+    #[cfg(feature = "tokio")]
     #[tokio::test(flavor = "multi_thread")]
     async fn from_token_wakes_a_blocking_recv() {
         let token = tokio_util::sync::CancellationToken::new();

@@ -26,7 +26,6 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use crate::api::{LocalStoreView, RaftLeadership, SnapshotStore, StableLogSnapshot, WindowItem};
-use crate::channel::Channels;
 use crate::error::Error;
 use crate::hlc::Hlc;
 use crate::ids::{LogIndex, NodeId, ServerName, SnapshotId};
@@ -40,6 +39,7 @@ use crate::leader::jobs::snapshot::{SNAPSHOT_LOOP_FLOOR, SnapshotJob};
 use crate::meta::{Data, RaftManifestState, RaftState, ReplicaMembership};
 use crate::object_store::CompressionLevel;
 use crate::raft::RaftStateHandle;
+use crossbeam_combinators::Channels;
 
 // ── the pure pacing primitive ────────────────────────────────────────────
 
@@ -299,8 +299,8 @@ impl LocalStoreView for FailingWindowStore {
         self.integrated.subscribe()
     }
 
-    fn subscribe_unstable(&self) -> crate::channel::Channels<crate::meta::Data> {
-        crate::channel::Channels::from_infinite(crossbeam_channel::never(), "stub unstable")
+    fn subscribe_unstable(&self) -> crossbeam_combinators::Channels<crate::meta::Data> {
+        crossbeam_combinators::Channels::from_infinite(crossbeam_channel::never(), "stub unstable")
     }
 
     async fn subscription_cursor(&self, _upstream: NodeId) -> Result<Option<LogIndex>, Error> {

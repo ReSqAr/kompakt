@@ -2,9 +2,9 @@
 //!
 //! ```text
 //!   node.shutdown_token().cancel()
-//!     └─> zslg reader's streams end ChannelEnd::Cancelled   (even on a quiet log)
+//!     └─> zslg reader's streams end End::Cancelled   (even on a quiet log)
 //!           └─> nvzn fold stops as StopReason::Cancelled    (dispatcher task: Ok)
-//!                 └─> Reader::subscribe_stable_log streams end ChannelEnd::Cancelled
+//!                 └─> Reader::subscribe_stable_log streams end End::Cancelled
 //! ```
 //!
 //! The quiet log is the point. A fold parked in `recv` with nothing arriving
@@ -77,5 +77,5 @@ async fn cancelling_the_node_stops_an_idle_fold_and_its_subscribers() {
     .await
     .expect("the subscribe_stable_log stream did not end after the fold was cancelled")
     .expect("recv panicked");
-    assert_eq!(end, zslg::ChannelEnd::Cancelled);
+    assert_eq!(end, crossbeam_combinators::End::Cancelled);
 }

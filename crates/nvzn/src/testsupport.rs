@@ -16,9 +16,10 @@ use crate::{
     TenantId, View, WithWireFormat, Write,
 };
 use bytes::Bytes;
+use crossbeam_combinators::Channels;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
-use zslg::{Channels, Data, Hlc, LogIndex, StableLogEvent};
+use zslg::{Data, Hlc, LogIndex, StableLogEvent};
 
 pub use crate::testing::{FLUSH_INTERVAL, TestLog, data_id, inmemory, rocksdb, rocksdb_store};
 pub fn tenant() -> Tenant {

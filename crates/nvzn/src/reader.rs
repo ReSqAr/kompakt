@@ -7,10 +7,10 @@ use crate::{
     ArcReadTransaction, ArcStore, Error, EventSet, Index, Projection, ProjectionTypeId,
     ReadTransactionExt, Ref, ResultSet, SubEventOf, Syncer, Tenant, TenantId, View, WithWireFormat,
 };
+use crossbeam_combinators::Channels;
 use std::collections::{BTreeMap, BTreeSet};
 use std::marker::PhantomData;
 use std::sync::Arc;
-use zslg::Channels;
 
 impl Error {
     pub(crate) fn reference_not_found<P: Projection>(r: Ref<P>) -> Self {
@@ -130,7 +130,7 @@ impl<Ev> Reader<Ev> {
     /// Every stable `P` committed from now on, deletions included, as a
     /// [`Ref`] to look up. The fold blocks on a subscriber that stops reading;
     /// the channel ends only with the fold — with
-    /// [`ChannelEnd::Cancelled`](zslg::ChannelEnd::Cancelled) when the fold was
+    /// [`End::Cancelled`](crossbeam_combinators::End::Cancelled) when the fold was
     /// cancelled (its stop reason is [`StopReason::Cancelled`](crate::StopReason::Cancelled)),
     /// `Aborted` when it stopped for any other reason.
     ///
@@ -195,9 +195,10 @@ impl<Ev: WithWireFormat> Reader<Ev> {
     ///
     /// Returns at once and starts itself once the fold has caught up
     /// ([`sync`](Self::sync)): until then it serves the stable snapshot and
-    /// [`Live::wait_for`] answers `NotStarted`. An empty `S` never starts. Starting opens the unstable
-    /// tail and scans the stable log from the store's watermark up to the
-    /// stable one (the first snapshots wait for that, once).
+    /// [`Live::wait_for`] waits for the start (or times out). An empty `S`
+    /// never starts. Starting opens the unstable tail and scans the stable log
+    /// from the store's watermark up to the stable one (the first snapshots
+    /// wait for that, once).
     ///
     /// Needs a tokio runtime (it spawns its tasks); fails like
     /// [`snapshot`](Self::snapshot) once the fold has stopped.
@@ -474,8 +475,8 @@ mod tests {
             EventWriter, StopReason,
             testsupport::{NewTodoV1, Todo, TodoDeletedV1, TodoId},
         };
+        use crossbeam_combinators::End;
         use tokio::time::{Duration, timeout};
-        use zslg::ChannelEnd;
 
         const WAIT: Duration = Duration::from_secs(5);
 
@@ -519,7 +520,7 @@ mod tests {
         async fn recv_n<T: Send + 'static>(
             ch: Channels<T>,
             n: usize,
-        ) -> (Channels<T>, Vec<Result<T, ChannelEnd>>) {
+        ) -> (Channels<T>, Vec<Result<T, End>>) {
             timeout(
                 WAIT,
                 tokio::task::spawn_blocking(move || {
@@ -585,7 +586,7 @@ mod tests {
 
             let (_todos, got) = recv_n(todos, 2).await;
             assert_eq!(got[0], Ok(todo_ref(1)), "what was sent is still delivered");
-            assert!(matches!(got[1], Err(ChannelEnd::Aborted { .. })));
+            assert!(matches!(got[1], Err(End::Aborted { .. })));
             assert!(matches!(
                 reader.subscribe_stable_log::<Todo>().map(|_| ()),
                 Err(Error::FoldStopped(StopReason::SubscriptionAborted))
@@ -638,7 +639,7 @@ mod tests {
 
             for ch in [before, after] {
                 let (_ch, got) = recv_n(ch, 1).await;
-                assert!(matches!(got[0], Err(ChannelEnd::Aborted { .. })));
+                assert!(matches!(got[0], Err(End::Aborted { .. })));
             }
         }
 

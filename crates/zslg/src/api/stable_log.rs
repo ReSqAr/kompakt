@@ -24,7 +24,7 @@
 //! §8), fed straight from the off-reactor snapshot decode. A `blocking_send` on
 //! a full channel is the backpressure that paces decode to the commit rate.
 
-use crate::channel::Channels;
+use crossbeam_combinators::Channels;
 
 use crate::hlc::Hlc;
 use crate::ids::LogIndex;
@@ -63,10 +63,10 @@ pub(crate) trait StableLogSnapshot: Send + Sync + 'static {
     ///
     /// The subscription is infinite and its own queue is bounded: a consumer
     /// that falls too far behind is **hung up on** (the fan-out drops its
-    /// sender), which surfaces as [`crate::channel::End::Aborted`] after every
+    /// sender), which surfaces as [`crossbeam_combinators::End::Aborted`] after every
     /// event that was already queued. That is the lag signal, and the response
     /// is to replay from your cursor and subscribe again — see
-    /// `learner::fanout` and `learner::read`.
+    /// the fan-out and `learner::read`.
     #[must_use]
     fn subscribe_events(&self) -> Channels<StableLogEvent>;
 

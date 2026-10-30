@@ -23,7 +23,7 @@ mod snapshot_loader;
 pub(crate) struct StableLogConfig {
     /// Depth of each stable-log subscriber's own event queue — how far behind
     /// a consumer may fall before the fan-out hangs up on it and it has to
-    /// replay from its cursor (`learner::fanout`).
+    /// replay from its cursor (the fan-out).
     ///
     /// Per subscriber, not shared: an `Appended` carries the entry `Data`, so
     /// this bounds ~capacity x payload x live subscribers. A latency/memory
@@ -114,15 +114,15 @@ use rust_rocksdb::WriteBatch;
 use tokio::sync::{Mutex as AsyncMutex, watch};
 
 use crate::Error;
-use crate::channel::Channels;
 use crate::database::Subsystem;
 use crate::database::storage::Storage;
 use crate::error::{ToCodec, ToStorage};
 use crate::hlc::Hlc;
 use crate::ids::LogIndex;
-use crate::learner::fanout::{Fanout, Wakes};
 use crate::meta::{Data, SnapshotEntry, StableLogEvent};
 use crate::metrics::{self, LogType, OpState};
+use crossbeam_combinators::Channels;
+use crossbeam_combinators::{Fanout, Wakes};
 
 // ── key codec ───────────────────────────────────────────────────────────────
 //
@@ -617,11 +617,11 @@ impl BatchAppender {
         // Exhaustive on purpose: a new non-`Closed` end must not pass as a
         // complete load by default.
         match self.rx.end_reason() {
-            crate::channel::End::Closed => Ok(total),
-            crate::channel::End::Aborted { what } => Err(Error::StreamTruncated {
+            crossbeam_combinators::End::Closed => Ok(total),
+            crossbeam_combinators::End::Aborted { what } => Err(Error::StreamTruncated {
                 what: what.to_owned(),
             }),
-            crate::channel::End::Cancelled => Err(Error::StreamTruncated {
+            crossbeam_combinators::End::Cancelled => Err(Error::StreamTruncated {
                 what: "cancelled".to_owned(),
             }),
         }

@@ -69,7 +69,7 @@ async fn integrate_batch(
     for (idx, rec) in records {
         let _ = tx.send(Ok((source, idx, rec)));
     }
-    let (ch, closer) = crate::channel::Channels::from(rx, "test integrate");
+    let (ch, closer) = crossbeam_combinators::Channels::from(rx, "test integrate");
     // Close before the last sender drops, or the consumer forms its
     // verdict as "disconnected, not yet closed" — an abort.
     closer.close();
@@ -476,7 +476,7 @@ async fn leader_loop_compacts_manifest() {
             .snapshot_store
             .write_snapshot(
                 meta.snapshot_id,
-                crate::channel::Channels::from_vec(vec![Ok::<_, crate::Error>(entry)]),
+                crossbeam_combinators::Channels::from_vec(vec![Ok::<_, crate::Error>(entry)]),
                 CompressionLevel::fast(),
                 crate::metrics::ObjectStoreReason::SnapshotCreate,
             )

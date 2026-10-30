@@ -41,7 +41,6 @@ use rust_rocksdb::WriteBatch;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
-use crate::channel::Channels;
 use crate::database::Subsystem;
 use crate::database::storage::Storage;
 use crate::error::{Error, ToStorage};
@@ -49,6 +48,7 @@ use crate::hlc::{Hlc, HlcGuard};
 use crate::ids::{DataId, LogIndex};
 use crate::meta::Data;
 use crate::metrics::{self, FlushTrigger, LogType, OpState, ShedSite};
+use crossbeam_combinators::{Channels, Ranged, Tail, blend_chain};
 
 /// Fallback sizing for [`ReplicaLogStore::open_with_flush`], the
 /// directory-shaped entry point used by the test constructors. Production goes
@@ -658,58 +658,11 @@ impl ReplicaLogStore {
         self: &Arc<Self>,
         from: Option<LogIndex>,
     ) -> Channels<Result<(LogIndex, Data), Error>> {
-        let start = LogIndex::next_after(from);
-        // ORDER IS LOAD-BEARING: register the live tail FIRST, then snapshot the
-        // frontier. Reversing these drops records, and the window is exactly the
-        // one a busy replica sits in.
-        //
-        // The flush loop advances the frontier *before* it broadcasts
-        // (`flush_one_batch_blocking`: `frontier.advance` then
-        // `fan_out.retain(try_send)`). So for any entry:
-        //
-        //   broadcast before registration  ⇒  its frontier.advance was also
-        //     before registration, hence before this snapshot  ⇒  its index is
-        //     ≤ cutover  ⇒  the historic scan serves it.
-        //   broadcast after registration   ⇒  the live tail serves it.
-        //
-        // Both halves are covered, and entries in the overlap (broadcast after
-        // registration but ≤ cutover) arrive twice — harmlessly, since the live
-        // filter below drops `idx <= cutover`, and duplicates are benign by
-        // construction anyway (CLAUDE.md §8).
-        //
-        // With the snapshot first, an entry committed between the snapshot and
-        // the registration is above `cutover` (so the scan's range excludes it)
-        // *and* was broadcast before this subscriber existed (so the live tail
-        // never sees it): silently lost, showing up downstream as a forward jump
-        // misattributed to a benign purge gap.
-        let (live_tx, live_rx) = crossbeam_channel::bounded(self.subscribe_channel_capacity);
-        self.fan_out.lock().push(live_tx);
-        #[cfg(test)]
-        subscribe_handoff_pause();
-        let cutover = self.frontier.index();
-        // How far behind this subscriber is resuming. Rising across successive
-        // connects for the same peer = the deficit is diverging, i.e. shedding
-        // has stopped being protection and started preventing catch-up.
-        metrics::subscription_catchup_backlog(match cutover {
-            Some(end) => end.raw().saturating_sub(start.raw()),
-            None => 0,
-        });
-        let historic = match cutover {
-            // A subscriber already at the frontier gives `start == end + 1`:
-            // an empty window, not an error — the routine state of a peer that
-            // reconnects with nothing to catch up on.
-            Some(end) if start <= end => self.pump_range(start, end),
-            // Nothing to replay (no committed data, or already caught up):
-            // live-only tail.
-            _ => Self::empty_historic(),
+        let seam = ReplicaSeam {
+            log: Arc::clone(self),
+            from,
         };
-        // The live tail runs until the connection dies — never completed.
-        let live_ch = Channels::from_infinite(live_rx, "replica live tail");
-        let live = live_ch.filter_map(move |(idx, data)| match cutover {
-            Some(c) if idx <= c => None,
-            _ => Some(Ok((idx, data))),
-        });
-        historic.chain(live)
+        blend_chain(&seam, &seam)
     }
 
     /// An empty historic phase: complete by construction, so it is closed
@@ -809,6 +762,68 @@ impl ReplicaLogStore {
     }
 }
 
+/// The live subscription and the frontier it is anchored to.
+///
+/// [`Tail::subscribe`] registers the fan-out before [`Tail::cut`] reads the
+/// frontier. The flush loop advances the frontier before it broadcasts, so
+/// an entry broadcast before registration is at or below the cut and the
+/// historic scan serves it; one broadcast after registration is on the live
+/// tail. The overlap is filtered by [`Tail::above`]. Reversing the order
+/// would lose entries committed between the snapshot and the registration.
+struct ReplicaSeam {
+    log: Arc<ReplicaLogStore>,
+    from: Option<LogIndex>,
+}
+
+impl Tail for ReplicaSeam {
+    type Item = Result<(LogIndex, Data), Error>;
+    type Cut = Option<LogIndex>;
+
+    fn subscribe(&self) -> Channels<Self::Item> {
+        let (live_tx, live_rx) = crossbeam_channel::bounded(self.log.subscribe_channel_capacity);
+        self.log.fan_out.lock().push(live_tx);
+        #[cfg(test)]
+        subscribe_handoff_pause();
+        Channels::from_infinite(live_rx, "replica live tail").map(Ok)
+    }
+
+    fn cut(&self) -> Self::Cut {
+        self.log.frontier.index()
+    }
+
+    fn above(&self, live: Channels<Self::Item>, cut: Self::Cut) -> Channels<Self::Item> {
+        live.filter_map(move |item| match item {
+            Ok((idx, _)) if cut.is_some_and(|c| idx <= c) => None,
+            other => Some(other),
+        })
+    }
+}
+
+impl Ranged<Option<LogIndex>> for ReplicaSeam {
+    type Item = Result<(LogIndex, Data), Error>;
+
+    fn range(&self, cut: Option<LogIndex>) -> Channels<Self::Item> {
+        let start = LogIndex::next_after(self.from);
+        // How far behind this subscriber is resuming. Rising across
+        // successive connects for the same peer = the deficit is diverging,
+        // i.e. shedding has stopped being protection and started preventing
+        // catch-up.
+        metrics::subscription_catchup_backlog(match cut {
+            Some(end) => end.raw().saturating_sub(start.raw()),
+            None => 0,
+        });
+        match cut {
+            // A subscriber already at the frontier gives `start == end + 1`:
+            // an empty window, not an error — the routine state of a peer
+            // that reconnects with nothing to catch up on.
+            Some(end) if start <= end => self.log.pump_range(start, end),
+            // Nothing to replay (no committed data, or already caught up):
+            // live-only tail.
+            _ => ReplicaLogStore::empty_historic(),
+        }
+    }
+}
+
 /// Flush loop — the single appender of the dense log.
 ///
 /// Thin async wrapper: runs [`flush_loop_blocking`] on the blocking pool for its
@@ -817,7 +832,7 @@ impl ReplicaLogStore {
 /// (timer-free) crossbeam `recv` for the idle wait — no per-batch async↔blocking
 /// hop. The signature is kept (`async` + `CancellationToken` + `Result`) so all
 /// spawn sites and tests are unchanged. A plain crossbeam `Receiver` (not
-/// `crate::channel::Channels`): the loop only recv/try_recv-batches — no transforms
+/// `crossbeam_combinators::Channels`): the loop only recv/try_recv-batches — no transforms
 /// — so the `Channels` combinators would add nothing.
 pub(in crate::replica) async fn flush_loop(
     weak: Weak<ReplicaLogStore>,
@@ -1081,7 +1096,7 @@ mod tests {
         for (idx, rec) in records {
             let _ = tx.send(Ok((source, idx, rec)));
         }
-        let (ch, closer) = crate::channel::Channels::from(rx, "test integrate");
+        let (ch, closer) = crossbeam_combinators::Channels::from(rx, "test integrate");
         // Close before the last sender drops, or the consumer forms its
         // verdict as "disconnected, not yet closed" — an abort.
         closer.close();

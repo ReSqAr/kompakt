@@ -19,10 +19,10 @@ use crate::Error;
 use crate::api::{
     LivenessProbe, RaftConsensus, RaftStateView, Replica, StampedWrite, WriteOutcome,
 };
-use crate::channel::Channels;
 use crate::ids::{LogIndex, NodeId, PeerAddr};
 use crate::meta::{Data, RaftState, ReplicaStatus};
 use crate::raft::TypeConfig;
+use crossbeam_combinators::Channels;
 use futures::stream::BoxStream;
 use openraft::error::{InstallSnapshotError, RaftError};
 use openraft::raft::{

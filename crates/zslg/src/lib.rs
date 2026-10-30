@@ -39,8 +39,12 @@ use console_subscriber as _;
 #[cfg(feature = "jemalloc")]
 use tikv_jemallocator as _;
 
+// The examples use `tokio_stream::StreamExt`; the lib test target receives the
+// dev-dependency too and would otherwise be flagged as not using it.
+#[cfg(test)]
+use tokio_stream as _;
+
 pub(crate) mod api;
-pub(crate) mod channel;
 mod database;
 pub(crate) mod error;
 pub(crate) mod follower_node;
@@ -68,7 +72,6 @@ pub(crate) mod writer;
 pub(crate) mod writer_node;
 
 pub use crate::api::{RaftStateView, Reader, Writer};
-pub use crate::channel::{CancelHandle, Cancellation, Channels, End as ChannelEnd};
 pub use crate::error::Error;
 pub use crate::follower_node::{FollowerNode, FollowerNodeConfig};
 pub use crate::hlc::{Hlc, HlcClock};

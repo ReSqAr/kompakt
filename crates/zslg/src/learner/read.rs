@@ -52,7 +52,6 @@ use crate::api::{
     ArchiveBounds, ArchiveLowerBound, ArchiveUpperBound, Clock, LocalStoreView, Reader,
     StableArchiveReader, StableLogSnapshot,
 };
-use crate::channel::{Cancellation, Channels};
 use crate::error::ToStorage;
 use crate::hlc::Hlc;
 use crate::ids::{LogIndex, NodeId};
@@ -60,6 +59,7 @@ use crate::learner::QuorumReadDebouncer;
 use crate::meta::{Data, StableLogEvent, UnstableEvent};
 use crate::metrics::{self, ReadEntrySource, ReadSource};
 use crate::raft::EvictionStatus;
+use crossbeam_combinators::{Cancellation, Channels, Ranged, Tail};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -180,7 +180,7 @@ pub(in crate::learner) struct ReaderImpl {
     archive: Arc<dyn StableArchiveReader>,
     debouncer: Arc<QuorumReadDebouncer>,
     /// Bound to every stream handed out, so node shutdown ends them with
-    /// [`End::Cancelled`](crate::channel::End::Cancelled) even while a consumer
+    /// [`End::Cancelled`](crossbeam_combinators::End::Cancelled) even while a consumer
     /// is parked in `recv` on a quiet log.
     shutdown: Cancellation,
     /// The node's clock, the one its writes are minted from (`hlc_now`).
@@ -238,7 +238,7 @@ impl HistoricalReplay {
         stable_log: Arc<dyn StableLogSnapshot>,
         from_idx: LogIndex,
         until: LogIndex,
-    ) -> crate::channel::Channels<Result<(LogIndex, Data), Error>> {
+    ) -> crossbeam_combinators::Channels<Result<(LogIndex, Data), Error>> {
         let (tx, rx) = crossbeam_channel::bounded(STREAM_CHANNEL_CAP);
         let replay = Self {
             archive,
@@ -247,7 +247,7 @@ impl HistoricalReplay {
             last_hlc: None,
             tx,
         };
-        let (ch, closer) = crate::channel::Channels::from(rx, "HistoricalReplay");
+        let (ch, closer) = crossbeam_combinators::Channels::from(rx, "HistoricalReplay");
         let from_raw = from_idx.raw();
         tokio::spawn(async move {
             replay.run(until).await;
@@ -376,6 +376,81 @@ impl HistoricalReplay {
 
 // ── Resyncing tail ─────────────────────────────────────────────────────────
 
+/// The frontier and watermark captured after the live subscription.
+#[derive(Clone, Copy)]
+struct StableCut {
+    frontier: Option<LogIndex>,
+    watermark: Option<Hlc>,
+}
+
+/// One resync cycle: the live subscription and the durable window it continues.
+struct StableSeam {
+    archive: Arc<dyn StableArchiveReader>,
+    stable_log: Arc<dyn StableLogSnapshot>,
+    at: LogIndex,
+}
+
+impl Tail for StableSeam {
+    type Item = Result<StableLogEvent, Error>;
+    type Cut = StableCut;
+
+    fn subscribe(&self) -> Channels<Self::Item> {
+        self.stable_log.subscribe_events().map(Ok)
+    }
+
+    fn cut(&self) -> Self::Cut {
+        // Watermark before frontier: the watermark emitted after the replay
+        // must not cover an entry the replay did not emit.
+        let watermark = self.stable_log.end_hlc();
+        let frontier = self.stable_log.end_index();
+        StableCut {
+            frontier,
+            watermark,
+        }
+    }
+
+    fn above(&self, live: Channels<Self::Item>, cut: Self::Cut) -> Channels<Self::Item> {
+        // Drop the live overlap with the replay at the cut. The outer cursor
+        // filter still advances across cycles; this keeps the seam correct on
+        // its own rather than relying on that downstream pass.
+        live.filter_map(move |item| match item {
+            Ok(StableLogEvent::Appended { index, .. })
+                if cut.frontier.is_some_and(|f| index <= f) =>
+            {
+                None
+            }
+            other => Some(other),
+        })
+    }
+}
+
+impl Ranged<StableCut> for StableSeam {
+    type Item = Result<StableLogEvent, Error>;
+
+    fn range(&self, cut: StableCut) -> Channels<Self::Item> {
+        let replay = HistoricalReplay::stream(
+            Arc::clone(&self.archive),
+            Arc::clone(&self.stable_log),
+            self.at,
+            LogIndex::next_after(cut.frontier),
+        )
+        .map(|item| item.map(|(index, data)| StableLogEvent::Appended { index, data }));
+
+        // The watermark trails the entries it covers, per the causal-order
+        // contract in `api/reader.rs`. A hang-up can eat a `Watermark` event, so
+        // re-emitting the current one per cycle is what stops a consumer that
+        // fell behind once from sitting on a stale watermark forever.
+        let watermark = Channels::from_vec(
+            cut.watermark
+                .map(|hlc| Ok(StableLogEvent::Watermark(hlc)))
+                .into_iter()
+                .collect(),
+        );
+
+        replay.chain(watermark)
+    }
+}
+
 /// One gapless, index-ordered stream from `from`, spliced out of repeated
 /// cycles of *replay the durable window, then follow the live tail*:
 ///
@@ -389,8 +464,8 @@ impl HistoricalReplay {
 ///
 /// **Falling behind is not an error here.** A consumer slower than its
 /// subscriber queue is deep gets hung up on by the fan-out, which arrives as
-/// [`End::Aborted`] *after* every event already queued — the in-band lag signal
-/// (`learner::fanout`). [`Channels::unfold`] hands that verdict
+/// [`End::Aborted`](crossbeam_combinators::End::Aborted) *after* every event already queued — the in-band lag signal
+/// (the fan-out). [`Channels::unfold`] hands that verdict
 /// back and this closure answers it the way §20 prescribes for an infinite
 /// stream: resume from the last position. The caller sees one seamless stream;
 /// falling behind costs latency, not data.
@@ -445,58 +520,33 @@ fn resyncing_tail(
             return None;
         };
 
+        let at = LogIndex(read_cursor.load(Ordering::Relaxed));
+
+        let seam = StableSeam {
+            archive,
+            stable_log,
+            at,
+        };
+        let (live, cut) = seam.open();
         if previous.is_some() {
             // Only a hung-up (or exhausted) previous cycle brings us back here.
             metrics::stable_read_resync();
-        }
-        let at = LogIndex(read_cursor.load(Ordering::Relaxed));
-
-        let live = stable_log.subscribe_events();
-        let watermark = stable_log.end_hlc();
-        let frontier = stable_log.end_index();
-
-        if previous.is_some() {
             tracing::warn!(
                 log_index = at.raw(),
-                gap = frontier.map_or(0, |f| f.raw().saturating_sub(at.raw())),
+                gap = cut.frontier.map_or(0, |f| f.raw().saturating_sub(at.raw())),
                 ?previous,
                 "stable read fell behind its subscriber queue; replaying from \
                  the durable log"
             );
         }
-
         tracing::debug!(
-            cycle = if previous.is_some() {
-                "resync"
-            } else {
-                "initial"
-            },
+            cycle = if previous.is_some() { "resync" } else { "initial" },
             log_index = at.raw(),
-            frontier = frontier.map(LogIndex::raw),
-            ?watermark,
+            frontier = cut.frontier.map(LogIndex::raw),
+            watermark = ?cut.watermark,
             "stable tail: opening a segment"
         );
-
-        let replay = HistoricalReplay::stream(
-            Arc::clone(&archive),
-            Arc::clone(&stable_log),
-            at,
-            LogIndex::next_after(frontier),
-        )
-        .map(|item| item.map(|(index, data)| StableLogEvent::Appended { index, data }));
-
-        // The watermark trails the entries it covers, per the causal-order
-        // contract in `api/reader.rs`. A hang-up can eat a `Watermark` event, so
-        // re-emitting the current one per cycle is what stops a consumer that
-        // fell behind once from sitting on a stale watermark forever.
-        let watermark = Channels::from_vec(
-            watermark
-                .map(|hlc| Ok(StableLogEvent::Watermark(hlc)))
-                .into_iter()
-                .collect(),
-        );
-
-        Some(replay.chain(watermark).chain(live.map(Ok)))
+        Some(seam.range(cut).chain(live))
     })
     .filter_map(move |item| match item {
         // One comparison filters the captured frontier and drops the replay's
@@ -558,6 +608,58 @@ impl WatermarkGate {
     }
 }
 
+/// The live unstable half and the watermark it is anchored to.
+struct UnstableSeam {
+    local_store: Arc<dyn LocalStoreView>,
+    stable_log: Arc<dyn StableLogSnapshot>,
+}
+
+impl Tail for UnstableSeam {
+    type Item = Result<UnstableStep, Error>;
+    type Cut = Option<Hlc>;
+
+    fn subscribe(&self) -> Channels<Self::Item> {
+        self.local_store
+            .subscribe_unstable()
+            .map(|data| Ok(UnstableStep::Entry(data)))
+            .merge(
+                self.stable_log
+                    .watermark_moves()
+                    .map(|()| Ok(UnstableStep::WatermarkMoved)),
+            )
+    }
+
+    fn cut(&self) -> Self::Cut {
+        self.stable_log.end_hlc()
+    }
+
+    fn above(&self, live: Channels<Self::Item>, cut: Self::Cut) -> Channels<Self::Item> {
+        // Drop live entries at or below the cut: they are stable, and the
+        // stable log — not the scan, which reads only above the cut — covers
+        // them. `WatermarkGate` still handles the moving level; this
+        // seam-local filter does not rely on it for the overlap at the cut.
+        live.filter_map(move |item| match item {
+            Ok(UnstableStep::Entry(data)) if cut.is_some_and(|w| data.data_id.hlc() <= w) => None,
+            other => Some(other),
+        })
+    }
+}
+
+impl Ranged<Option<Hlc>> for UnstableSeam {
+    type Item = Result<UnstableStep, Error>;
+
+    fn range(&self, cut: Option<Hlc>) -> Channels<Self::Item> {
+        let opening = Channels::from_vec(vec![Ok(UnstableStep::Opened(cut))]);
+        let scan = self.local_store.stream_above_hlc(cut).map(|item| {
+            item.map(|data| {
+                metrics::read_entry(ReadEntrySource::LocalStore);
+                UnstableStep::Entry(data)
+            })
+        });
+        opening.chain(scan)
+    }
+}
+
 /// Every local entry above the watermark, then the live integrations, cycled
 /// whenever the fan-out hangs up:
 ///
@@ -606,32 +708,21 @@ fn resyncing_unstable_tail(
             return None;
         };
 
-        let live = local_store.subscribe_unstable();
-        let watermark = stable_log.end_hlc();
-
+        let seam = UnstableSeam {
+            local_store,
+            stable_log,
+        };
+        let (live, cut) = seam.open();
         if previous.is_some() {
             metrics::unstable_read_resync();
             tracing::warn!(
-                ?watermark,
+                ?cut,
                 ?previous,
                 "unstable tail subscription fell behind its queue; rescanning \
                  the unstable window"
             );
         }
-
-        let opening = Channels::from_vec(vec![Ok(UnstableStep::Opened(watermark))]);
-        let scan = local_store.stream_above_hlc(watermark).map(|item| {
-            item.map(|data| {
-                metrics::read_entry(ReadEntrySource::LocalStore);
-                UnstableStep::Entry(data)
-            })
-        });
-        let live = live.map(|data| Ok(UnstableStep::Entry(data))).merge(
-            stable_log
-                .watermark_moves()
-                .map(|()| Ok(UnstableStep::WatermarkMoved)),
-        );
-        Some(opening.chain(scan).chain(live))
+        Some(seam.range(cut).chain(live))
     })
     .filter_map(move |step| match step {
         Ok(step) => gate.admit(step).map(Ok),
@@ -704,8 +795,8 @@ mod tests {
 
     use crate::api::QuorumCheck;
     use crate::api::{LocalStoreMut, StableLogSnapshot};
-    use crate::channel::{Cancellation, Channels};
     use crate::{Reader, StableLogEvent};
+    use crossbeam_combinators::{Cancellation, Channels};
 
     use crate::hlc::Hlc;
     use crate::ids::{LogIndex, NodeId};
@@ -808,7 +899,9 @@ mod tests {
         async fn write_snapshot(
             &self,
             _id: crate::ids::SnapshotId,
-            _entries: crate::channel::Channels<Result<crate::meta::SnapshotEntry, crate::Error>>,
+            _entries: crossbeam_combinators::Channels<
+                Result<crate::meta::SnapshotEntry, crate::Error>,
+            >,
             _compression: crate::object_store::CompressionLevel,
             _reason: crate::metrics::ObjectStoreReason,
         ) -> Result<usize, crate::Error> {
@@ -819,7 +912,7 @@ mod tests {
             id: crate::ids::SnapshotId,
             _reason: crate::metrics::ObjectStoreReason,
         ) -> Result<
-            crate::channel::Channels<Result<crate::meta::SnapshotEntry, crate::Error>>,
+            crossbeam_combinators::Channels<Result<crate::meta::SnapshotEntry, crate::Error>>,
             crate::Error,
         > {
             let entries = self
@@ -829,7 +922,7 @@ mod tests {
                 .get(&id)
                 .cloned()
                 .ok_or_else(|| crate::Error::ObjectStore(format!("no scripted snapshot {id:?}")))?;
-            Ok(crate::channel::Channels::from_vec(
+            Ok(crossbeam_combinators::Channels::from_vec(
                 entries.into_iter().map(Ok).collect(),
             ))
         }
@@ -857,8 +950,8 @@ mod tests {
     /// Pre-load a closed `Channels` for the channel-based `append`.
     fn rx_of(
         items: impl IntoIterator<Item = Result<(LogIndex, Data), crate::Error>>,
-    ) -> crate::channel::Channels<Result<crate::meta::SnapshotEntry, crate::Error>> {
-        crate::channel::Channels::from_vec(
+    ) -> crossbeam_combinators::Channels<Result<crate::meta::SnapshotEntry, crate::Error>> {
+        crossbeam_combinators::Channels::from_vec(
             items
                 .into_iter()
                 .map(|item| {
@@ -883,7 +976,7 @@ mod tests {
         for (idx, rec) in records {
             let _ = tx.send(Ok((source, idx, rec)));
         }
-        let (ch, closer) = crate::channel::Channels::from(rx, "test integrate");
+        let (ch, closer) = crossbeam_combinators::Channels::from(rx, "test integrate");
         // Close before the last sender drops, or the consumer forms its
         // verdict as "disconnected, not yet closed" — an abort.
         closer.close();
@@ -1132,9 +1225,9 @@ mod tests {
         entries: std::sync::Mutex<Vec<(LogIndex, Data)>>,
         end_index: std::sync::Mutex<Option<LogIndex>>,
         end_hlc: std::sync::Mutex<Option<Hlc>>,
-        events: crate::learner::fanout::Fanout<StableLogEvent>,
+        events: crossbeam_combinators::Fanout<StableLogEvent>,
         watermark: tokio::sync::watch::Sender<Option<Hlc>>,
-        watermark_wakes: crate::learner::fanout::Wakes,
+        watermark_wakes: crossbeam_combinators::Wakes,
     }
 
     impl ScriptedStableLog {
@@ -1148,7 +1241,7 @@ mod tests {
         fn with_broadcast_capacity(entries: Vec<(LogIndex, Data)>, capacity: usize) -> Self {
             let end_index = entries.last().map(|(i, _)| *i);
             let end_hlc = entries.last().map(|(_, d)| d.data_id.hlc());
-            let events = crate::learner::fanout::Fanout::new(
+            let events = crossbeam_combinators::Fanout::new(
                 std::num::NonZeroUsize::new(capacity).expect("capacity > 0"),
                 "stable log subscription",
             );
@@ -1160,7 +1253,7 @@ mod tests {
                 end_hlc: std::sync::Mutex::new(end_hlc),
                 events,
                 watermark,
-                watermark_wakes: crate::learner::fanout::Wakes::new("scripted moves"),
+                watermark_wakes: crossbeam_combinators::Wakes::new("scripted moves"),
             }
         }
 
@@ -1857,7 +1950,7 @@ mod tests {
     /// Node shutdown ends a quiet unstable subscription with `End::Cancelled`.
     #[tokio::test(flavor = "multi_thread")]
     async fn shutdown_cancels_a_quiet_unstable_subscription() {
-        let (handle, shutdown) = crate::channel::CancelHandle::new();
+        let (handle, shutdown) = crossbeam_combinators::CancelHandle::new();
         let (_dir, _local, _stable, reader) = unstable_rig(16, Hlc(50), shutdown).await;
         let mut tail = reader.subscribe_unstable_tail();
         let blocked = tokio::task::spawn_blocking(move || {
@@ -1876,7 +1969,7 @@ mod tests {
             .await
             .expect("shutdown did not wake the subscription")
             .expect("recv panicked");
-        assert_eq!(end, crate::channel::End::Cancelled);
+        assert_eq!(end, crossbeam_combinators::End::Cancelled);
     }
 
     #[derive(Debug, Clone)]
@@ -2065,7 +2158,7 @@ mod tests {
             .await
             .expect("append");
 
-        let (handle, shutdown) = crate::channel::CancelHandle::new();
+        let (handle, shutdown) = crossbeam_combinators::CancelHandle::new();
         let reader = reader_shut_down_by(
             local_log,
             stable_log.clone(),
@@ -2091,7 +2184,7 @@ mod tests {
             .await
             .expect("shutdown did not wake the subscription")
             .expect("recv panicked");
-        assert_eq!(end, crate::channel::End::Cancelled);
+        assert_eq!(end, crossbeam_combinators::End::Cancelled);
         drop(stable_log);
     }
 

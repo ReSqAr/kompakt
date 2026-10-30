@@ -19,11 +19,11 @@ use crate::api::{
     AddMemberOutcome, LivenessProbe, RaftMembership, RaftTransport, Replica, ReplicaClient, Router,
     StampedWrite, WriteOutcome,
 };
-use crate::channel::Channels;
 use crate::ids::{LogIndex, NodeId, PeerAddr};
 use crate::meta::ReplicaStatus;
 use crate::raft::TypeConfig;
 use crate::{Data, Error};
+use crossbeam_combinators::Channels;
 use futures::stream::BoxStream;
 use openraft::error::{InstallSnapshotError, RaftError};
 use openraft::raft::{
