@@ -116,8 +116,9 @@ macro_rules! chained_from {
 ///                                               (SubEventOf::project); what folds read,
 ///                                               decoded once, never copied
 ///   owned   { Writes := NewUser }               owned: Writes { NewUser(NewUserV1) }, with
-///                                               From<NewUserV1> and From<Writes> for Event,
-///                                               both moves; what a write is built from
+///                                               From<NewUserV1>, From<Writes> for Event and
+///                                               TryFrom<Event> (a non-member comes back as
+///                                               the error), all moves; what a write is built from
 /// ```
 ///
 /// An owned subset has no conversion from `&Event` (it would have to clone),
@@ -407,6 +408,20 @@ macro_rules! define_events {
                     }
                 }
 
+                // The way back, by move: an event outside the subset is
+                // returned as it came.
+                impl ::core::convert::TryFrom<$eventname> for $own {
+                    type Error = $eventname;
+                    fn try_from(v: $eventname) -> ::core::result::Result<Self, $eventname> {
+                        #[allow(unreachable_patterns, reason = "a subset may list every event")]
+                        match v {
+                            $eventname::$own_first(x) => ::core::result::Result::Ok($own::$own_first(x)),
+                            $( $eventname::$own_rest(x) => ::core::result::Result::Ok($own::$own_rest(x)), )*
+                            other => ::core::result::Result::Err(other),
+                        }
+                    }
+                }
+
                 impl ::core::convert::From<__nvzn_types::$own_first> for $own {
                     fn from(v: __nvzn_types::$own_first) -> Self { $own::$own_first(v) }
                 }
@@ -624,6 +639,21 @@ mod tests {
         let via_subset: event::Event = event::UserWrite::from(ping.clone()).into();
         let direct: event::Event = ping.into();
         assert_eq!(format!("{via_subset:?}"), format!("{direct:?}"));
+
+        // And back: a member converts, a non-member is returned unchanged.
+        let back = event::UserWrite::try_from(direct).unwrap();
+        assert_eq!(
+            format!("{:?}", event::Event::from(back)),
+            format!("{via_subset:?}")
+        );
+        let todo: event::Event = NewTodoV1 {
+            id: TodoId(1),
+            user_id: UserId(7),
+            title: "milk".into(),
+        }
+        .into();
+        let refused = event::UserWrite::try_from(todo.clone()).unwrap_err();
+        assert_eq!(format!("{refused:?}"), format!("{todo:?}"));
     }
 
     /// An empty slice still writes the zero-length sequence a reader expects.
