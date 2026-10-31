@@ -479,3 +479,30 @@ variant.
 
 1. Final public name.
 2. Then design doc sign-off; implementation sequence after that.
+
+## Update after Q27-Q28
+
+- `resume_on_abort` is settled. `stitch` is settled.
+- The remaining wide-reaching decision is the trait boundary for
+  `OrderedChannel`. The learner and server writer disagree on backwards items:
+  learner ignores them, server treats them as corruption.
+- A single return policy is a lie unless the trait contract is strict. My
+  recommendation is to return plain `Channels<T>` from `Replica::subscribe_from`
+  and wrap at each consumer with the policy it needs. That preserves behavior
+  and still replaces `detect_purge_gap`/`classify_order` with the same type.
+- If the user says the trait is actually strict (no duplicates/regressions), the
+  boundary can return `OrderedChannel<..., StrictlyMonotone<...>>` and the
+  learner becomes stricter.
+
+## Predicted answer to Q28
+
+The user may prefer the trait boundary to carry the invariant, but the
+learner/server disagreement makes a single policy hard. I expect either a
+consumer-side wrapper or a generic trait policy. The domain answer to "are
+duplicates expected?" decides it.
+
+## Next likely questions
+
+1. Are backwards/duplicate items expected or corruption?
+2. Then finalize the trait boundary list.
+3. Then design doc.

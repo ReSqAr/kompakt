@@ -955,3 +955,56 @@ Status: open naming.
 
 Recommendation: `retry_on_fault`. It names the trigger and the action, and it
 no longer has anything to do with gaps.
+
+## Q27 — Resolution: `resume_on_abort`
+
+Status: settled.
+
+Final name: `resume_on_abort`. `retry` implied doing the same operation again;
+this combinator is more general. It is only for actual aborts. Gaps use
+`stitch`, not this.
+
+## Q28 — Which trait boundaries get `OrderedChannel`?
+
+Status: open.
+
+The candidates are:
+
+```text
+  Replica::subscribe_from
+  Reader::subscribe_stable_log
+  StableLogSnapshot::range
+  LocalStoreView::stream_above_hlc
+  LocalStoreView::stream_window_ordered
+```
+
+The first is the blocker. Two consumers disagree today:
+
+```text
+  learner subscriber   forward gap = benign/count
+                       anything <= expected = duplicate, ignored
+  server writer        forward gap = benign/count
+                       anything < expected = corruption, close
+```
+
+A single `OrderedChannel<T, P>` return type has one policy. It cannot be both
+lenient and strict for backwards items.
+
+Options:
+
+1. **Strict at the trait.** Return `OrderedChannel<..., StrictlyMonotone<...>>`;
+   the learner's duplicate tolerance disappears (duplicates abort). Only safe
+   if duplicates are not actually expected.
+2. **Raw channel at the trait, wrapper at the consumer.** Return `Channels<T>`;
+   each consumer wraps with its own policy. Preserves behavior, but the
+   invariant is no longer in the trait return type.
+3. **Generic trait policy.** `subscribe_from<P: OrderPolicy<...>>`; the caller
+   chooses the policy. Type-level at the boundary, but the source trait becomes
+   generic and every call site names a policy.
+4. **Weakest common policy.** Return `NonDecreasing`; duplicates allowed,
+   backwards rejected. The learner's "ignore backwards" is lost; the server
+   still needs to reject duplicates, so it would tighten again.
+
+Recommendation: 2 unless the trait contract is genuinely strict. The policy is
+a consumer choice; the type-level invariant can live where the consumer knows
+which trade-off it wants.
