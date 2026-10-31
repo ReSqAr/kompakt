@@ -346,3 +346,33 @@ exist somewhere.
 3. `stitch` verification details.
 4. Final `retry_on_fault` naming.
 5. Implementation sequencing.
+
+## Update after Q19-Q20
+
+- The key extractor is a construction parameter. The item is often `Data`, but
+  the key varies by use, so a trait on `T` is wrong.
+- The successor is naturally a trait on `K`, bounded only for `Gapless`/`stitch`.
+  `LogIndex` implements it; `Hlc` stays orderable but not gapless.
+- The trait structure is now small:
+  - `T`, `K`, policy marker `P` on the ordered boundary type;
+  - key closure stored type-erased;
+  - private `Policy<K>` for checking/advancing;
+  - public `Successor` for `K`.
+- The remaining uncertainty is whether the user prefers the successor as a
+  construction parameter instead of a trait. I expect the trait, because it
+  keeps the type honest and avoids a second closure.
+
+## Predicted answer to Q20
+
+The user may push back that "parameters at construction time" is simpler and
+more flexible. If so, the alternative is `next: Fn(K)->K` stored alongside the
+key closure, with `stitch` requiring it. That avoids implementing a trait for
+domain keys but makes the successor a runtime choice.
+
+## Next likely questions
+
+1. Successor trait vs constructor closure.
+2. `Gap<K>` and the fallback signature.
+3. `stitch` coverage verification.
+4. `retry_on_fault` final name.
+5. Implementation sequencing.

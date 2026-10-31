@@ -699,3 +699,60 @@ gapless; it would not use `stitch`.
 
 Open: is `K` a raw key with a `Successor` bound only where needed, or should
 the item implement a `Position` trait that supplies both extraction and `next`?
+
+## Q19 — Key extractor: construction parameter, not a trait on `T`
+
+Status: settled direction.
+
+The item type and the key are independent. `Data` may be the item in several
+sites while the key differs by context (`Hlc`, `(Hlc, DataId)`, `LogIndex`), so
+the extractor cannot live on `T`.
+
+```text
+  key: Fn(&T) -> Option<K>     construction parameter
+  K                            named in the ordered type
+```
+
+A named extractor trait is possible, but not needed: a closure can be a named
+function, and it can capture context. `OrderedChannel` stores the extractor
+type-erased and keeps `T`, `K`, and the policy marker in the type.
+
+## Q20 — Successor: trait or construction parameter?
+
+Status: open.
+
+`Gapless` and `stitch` need `K::next` to verify `[expected, got)`. Two options:
+
+```text
+  trait:        pub trait Successor: Copy { fn next(self) -> Self; }
+                Gapless/stitch add K: Successor
+  parameter:    next: Fn(K) -> K at construction (or at stitch)
+```
+
+Recommendation: **trait**. The successor is a property of the key, not of the
+use site; `LogIndex` has exactly one natural next. The bound is visible in the
+type and only appears on `Gapless`/`stitch`; `StrictlyMonotone` and
+`NonDecreasing` only need `K: Ord`, so `Hlc` works there but is not gapless.
+
+Proposed structure:
+
+```text
+  OrderedChannel<T, K, P> {
+      inner: Channels<T>,
+      key: Arc<dyn Fn(&T) -> Option<K> + Send + Sync>,
+      policy: PhantomData<P>,
+  }
+
+  P = Gapless | StrictlyMonotone | NonDecreasing
+  private trait Policy<K> { check; advance; }
+  Gapless: K: Successor
+  StrictlyMonotone / NonDecreasing: K: Ord
+
+  impl OrderedChannel<T, K, StrictlyMonotone> where K: Successor {
+      fn stitch<F>(self, fallback: F) -> OrderedChannel<T, K, Gapless>
+  }
+```
+
+If a key ever needs context-dependent successor semantics, wrap the key in a
+newtype and implement `Successor` for that; do not add a second closure to the
+common case.
