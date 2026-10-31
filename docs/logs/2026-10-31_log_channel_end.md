@@ -397,3 +397,107 @@ The domain supplies the key, the archive range, and the cursor; the crate
 supplies ordering enforcement and `resume_on_fault`. This removes the bespoke
 `HistoricalReplay` loop if the typed gap position is available to the resumer
 (observer/state), and leaves `blend_chain` for the live handoff.
+
+## Q7b — No default policy
+
+Status: settled.
+
+`OrderedChannel::new` requires an explicit `OrderPolicy`. There is no
+`Default` and no implicit "usually strict monotone" choice. The caller names the
+concept:
+
+```text
+  Contiguous
+  StrictMonotone
+  NonDecreasing
+```
+
+## Q8 — Typed order detail: options
+
+Status: open.
+
+The callback is not convincing. It hides the cursor in shared state and makes
+the dependency between `OrderedChannel` and `resume_on_fault` implicit. The real
+question is: where does `OrderedEnd<K> = Complete | OrderedAborted<K>` live, and
+how does it compose with `Channels`?
+
+### D — Detail parameter on `End`/`Channels`
+
+```text
+  End<D = ()> = Complete | Aborted { reason: AbortReason<D> }
+
+  AbortReason<D> =
+      ProducerGone { what }
+    | Cancelled
+    | CancelHandleDropped
+    | ConsumerGone { what }
+    | RoutingViolation { what }
+    | OrderViolation { what, detail: D }
+
+  Channels<T, D = ()>
+
+  OrderDetail<K> = { kind: Gap | Duplicate | Regression, expected: K, got: K }
+  OrderedEnd<K>  = End<OrderDetail<K>>
+```
+
+- `OrderedChannel<T,K>` is `Channels<T, OrderDetail<K>>` plus an order source.
+- `resume_on_fault` becomes generic over `D`, so it receives the typed detail.
+- All existing combinators get a `D` parameter (mostly mechanical).
+- Projection to ordinary `Channels<T>` is `erase_detail`.
+- One primitive family; typed replay works directly.
+
+### E — End type parameter on `Channels`
+
+```text
+  Channels<T, E = End>
+  OrderedEnd<K> = Complete | OrderedAborted<K>
+  trait StreamEnd { fn complete() -> Self; fn from_end(End) -> Self; ... }
+```
+
+- Closest to the proposed `OrderedEnd<T>`; each end type can have its own shape.
+- Requires a `StreamEnd` trait, conversions for guards/cancellation, and every
+  combinator generic over `E`.
+- More general than D, but more machinery for the same current need.
+
+### B — Boundary type plus explicit fault handle
+
+```text
+  OrderedChannel<T,K> { channels: Channels<T>, faults: Faults<K> }
+  recv -> OrderedEnd<K> at the boundary
+  into_channels() -> (Channels<T>, Faults<K>)
+```
+
+- No generic core. The typed event is an explicit one-shot channel, not a
+  callback. `resume_on_fault` reads the fault handle from its state.
+- Chaining ordered segments means combining fault handles; the typed detail is
+  not in the `Channels` end, so it is easy to lose.
+
+### C — Separate ordered channel family
+
+- `OrderedChannel<T,K>` with its own `map`, `filter_map`, `chain`,
+  `resume_on_fault`, returning `OrderedEnd<K>`.
+- Strongest typing and no generic core, but duplicates combinators, loses
+  `merge`, and grows a type lattice.
+
+Recommendation to discuss: D. It gives `OrderedEnd<K>` as a type alias, keeps
+`resume_on_fault` one primitive, and makes the typed gap first-class for the
+`HistoricalReplay` decomposition. The cost is one generic parameter through the
+source tree; default `D = ()` keeps ordinary call sites unchanged. E is the
+full version of the same idea; B is the fallback if the generic parameter is too
+invasive.
+
+## Q9 — HistoricalReplay interface refactor
+
+Status: open detail.
+
+```text
+  stable-log scan with Contiguous
+      -> OrderViolation { kind: Gap, expected, got }
+      -> resume_on_fault sees the typed detail
+      -> archive.range(expected, got).chain(scan_from(got))
+      -> live via blend_chain
+```
+
+With D, the gap detail is in `End<OrderDetail<K>>`; no side channel. The
+interface work is mostly making `chain`/`resume_on_fault`/`Ranged` generic over
+D, and projecting to plain `Channels` where the seam only needs an end.

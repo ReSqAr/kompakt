@@ -226,3 +226,36 @@ than a shared observer. The next question should test that coupling.
 3. Where does the HLC monotonicity check live: a second key, a policy hook, or
    a domain filter?
 4. Then implementation.
+
+## Update after Q8
+
+- The user rejects a default policy: `OrderPolicy` must be explicit.
+- The callback is not acceptable. The typed `expected`/`got` must be first-class
+  in the end/resume path.
+- My leading option is D: a generic detail parameter on `End`/`Channels`.
+  `OrderedEnd<K> = End<OrderDetail<K>>`; `resume_on_fault` stays one primitive
+  and sees the typed gap. Projection is `erase_detail`.
+- E (generic end type) is more faithful to `OrderedEnd<T>` but needs a
+  `StreamEnd` trait and conversions; likely overkill for now.
+- B (boundary type + fault handle) avoids the generic cascade but makes typed
+  detail out-of-band again, just explicit. Chaining faults is awkward.
+- C (separate ordered family) duplicates combinators and loses merge.
+- The HistoricalReplay decomposition is the test case that decides this:
+  can `resume_on_fault` see the typed gap without a side channel? D says yes.
+
+## Predicted answer to Q9
+
+The user will likely accept D's generic parameter if the alternative is a
+callback or a duplicated combinator family, because they explicitly proposed
+`OrderedEnd<T>` and want the replay to use existing primitives. The main risk is
+the `D` cascade through `blend`/`Ranged` and every `Source`. I should quantify
+that before committing.
+
+## Next likely questions
+
+1. D vs E: generic detail vs generic end type.
+2. Does `OrderedChannel` get `D = OrderDetail<K>` at the trait boundary, or is
+   the detail erased before `Reader`/`Replica` return?
+3. How do `chain`/`merge`/`Guard` lift a plain `Channels<T>` into a typed D
+   when composing with an ordered one?
+4. Then implementation sequencing.
