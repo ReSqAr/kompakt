@@ -640,3 +640,62 @@ assertion.
 
 Recommendation: type-level, because the policy is exactly the invariant we
 want the type to name, and `stitch` is the one place where it changes.
+
+## Q16 — Resolution: policy is in the type
+
+Status: settled.
+
+```text
+  OrderedChannel<T, K, StrictlyMonotone>
+      .stitch(fallback)
+      -> OrderedChannel<T, K, Gapless>
+```
+
+The policy marker is part of the ordered boundary type; `Channels<T>` stays
+non-generic. `stitch` only exists where the input policy allows gaps and the
+key has a successor, so the `Gapless` output is a compile-time guarantee. There
+is no default policy.
+
+## Q17 — Is `what: &'static str` usable?
+
+Status: leaning.
+
+`&'static str` is a **label**, not a formatted message. All current producers
+already pass static labels (`Channels::from(rx, "stable log")`,
+`Feed::channel(..., "live scan")`), so there is no leak. The string names the
+source; it does not carry `expected`/`got`.
+
+If we want dynamic text, the options are:
+
+```text
+  &'static str          no allocation, no leak, static label only
+  Cow<'static, str>     static labels free, dynamic text allocates; End loses Copy
+  String                simplest dynamic, always owned; End loses Copy
+```
+
+Recommendation: keep `&'static str` for `AbortReason`. Put typed/dynamic order
+detail in the `Gap<K>` event and logs, not in `End`. `End` remains a compact,
+copyable verdict. If a formatted message is needed, `Cow<'static, str>` is the
+compromise when we are ready to lose `Copy`.
+
+## Q18 — What is `K`?
+
+Status: open detail.
+
+`K` is the **position key**, not the item:
+
+```text
+  T = item type
+  K = key/position type, e.g. LogIndex, Hlc, (Hlc, DataId)
+  key: Fn(&T) -> Option<K>
+```
+
+The extractor returns `None` for items that do not participate in the order
+(stable-log `Watermark`, error items); those pass through without advancing the
+position. `StrictlyMonotone`/`NonDecreasing` need `K: Ord`. `Gapless` and
+`stitch` need a successor/step (`K::next`), because they must verify
+`[expected, got)` and advance the expected key. `Hlc` may be ordered but is not
+gapless; it would not use `stitch`.
+
+Open: is `K` a raw key with a `Successor` bound only where needed, or should
+the item implement a `Position` trait that supplies both extraction and `next`?

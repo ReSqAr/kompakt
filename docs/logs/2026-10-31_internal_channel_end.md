@@ -319,3 +319,30 @@ type-family idea.
 3. How `stitch` verifies coverage and reports a bad fallback.
 4. Final rename of `resume_on_fault`.
 5. Implementation sequencing.
+
+## Update after Q16-Q18
+
+- The policy is type-level and explicit: `OrderedChannel<T,K,P>`.
+  `stitch: StrictlyMonotone -> Gapless`. No default.
+- `what: &'static str` is fine as a static label; no leak. If we need dynamic
+  text, `Cow`/`String` makes `End` non-Copy, so keep it out of the verdict.
+- `K` is the position key, with `Option<K>` extraction for non-positional items
+  (watermarks/errors). Gapless needs a successor; HLC is ordered but not
+  gapless.
+- The next design detail is whether K carries a `Successor` bound or the item
+  implements a `Position` trait.
+
+## Predicted answer to Q18
+
+The user will likely prefer a raw `K` plus a policy-specific `Successor` bound,
+because `Position` on the item couples extraction to the ordered wrapper. But
+`Gapless` needs a successor, so `K` cannot be purely `Ord`; the trait has to
+exist somewhere.
+
+## Next likely questions
+
+1. `K: Successor` bound vs `Position` trait.
+2. `Gap<K>` shape and fallback signature.
+3. `stitch` verification details.
+4. Final `retry_on_fault` naming.
+5. Implementation sequencing.
