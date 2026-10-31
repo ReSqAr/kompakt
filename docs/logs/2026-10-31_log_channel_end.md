@@ -1067,3 +1067,51 @@ gap without making it control flow:
 
 This is observability, not the typed-end callback that was rejected. It keeps
 the gap count out of the consumer's order logic.
+
+## Q30 — Initial expected key
+
+Status: settled direction.
+
+`OrderedChannel::new` takes an explicit starting position:
+
+```text
+  OrderedChannel::new(inner, start: Option<K>)
+```
+
+`start` is the first expected/lower-bound key; it is not a default. The policy
+interprets it:
+
+```text
+  Gapless           first key == start
+  StrictlyMonotone  first key >= start; > start is a leading gap
+  NonDecreasing     first key >= start; duplicates allowed after
+```
+
+Call sites compute it:
+
+```text
+  Replica::subscribe_from(from)
+      start = Some(LogIndex::next_after(from))   // None -> ZERO if leading gaps count
+  Reader::subscribe_stable_log(from)
+      start = Some(from)                         // replay is inclusive
+  HLC streams
+      start = threshold
+```
+
+`None` means “no expectation”; it is an explicit choice, not a default. This
+preserves the learner's leading-gap metric without keeping `detect_purge_gap`.
+
+## Q31 — Gap metrics hook
+
+Status: open detail.
+
+`StrictlyMonotone` accepts forward gaps, but the learner/server still count
+them. The ordered channel needs a gap hook:
+
+```text
+  on_gap: FnMut(Gap<K>)     accepted gap only
+  violations: Aborted(OrderViolation)   never a gap
+```
+
+This is observability, not control flow. It keeps gap counting out of the
+consumer's order logic and does not reintroduce the typed-end callback.

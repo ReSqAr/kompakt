@@ -531,3 +531,22 @@ callback as the carrier of typed end, not as a metrics hook.
 
 1. Gap observer shape.
 2. Then design doc sign-off.
+
+## Update after Q30
+
+- `start: Option<K>` is the initial expected/lower-bound key; explicit, no
+  default. `next_after(from)` is computed at the call site.
+- This preserves leading-gap detection and lets the learner drop
+  `detect_purge_gap` entirely.
+- The last small open item is the gap-metrics hook. An optional `on_gap`
+  observer is the natural answer; it only reports accepted gaps, while
+  violations abort.
+
+## Predicted answer to Q31
+
+The user will accept an optional gap observer or a simple counter; they rejected
+the callback as the carrier of typed end, not as an observability hook.
+
+## Next step
+
+Once Q31 is settled, write the design doc and ask for sign-off.
