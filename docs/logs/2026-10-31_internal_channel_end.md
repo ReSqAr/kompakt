@@ -287,3 +287,35 @@ question is the name and the fallback contract, not whether the pattern exists.
    caller explicitly erases it?
 3. How does `fill_gaps` handle the gap-triggering item and fallback coverage?
 4. Then implementation sequencing.
+
+## Update after Q11-Q15
+
+- The user wants `stitch` to return an ordered channel whose policy is
+  strengthened to `Gapless`. `StrictlyMonotone -> Gapless` is the normal path.
+- Reuse `End`; add `AbortReason::OrderViolation { what }` carrying a string, not
+  a typed key object. The typed gap stays internal to ordered/stitch.
+- Buffer the gap-triggering item and make the fallback cover `[expected, got)`.
+  Verify exact coverage; propagate fallback aborts. This matches
+  `HistoricalReplay` and keeps the archive contract narrow.
+- Rename `resume_on_fault` likely to `retry_on_fault`; `resume_on_abort` is more
+  precise but longer. Gaps no longer use it.
+- `stitch` is the method name; `fill_gaps` is the behavior/doc phrase.
+- The remaining structural question is whether the policy is a type parameter
+  on `OrderedChannel` or a runtime value. Type-level gives the nice
+  `StrictlyMonotone -> Gapless` guarantee.
+
+## Predicted answer to Q16
+
+The user will choose type-level policy because they explicitly asked to name
+the invariant and "upsert" the policy. The cost is confined to the ordered
+boundary type, not the channel core, so it is much cheaper than the earlier
+type-family idea.
+
+## Next likely questions
+
+1. Policy markers: `Gapless`, `StrictlyMonotone`, `NonDecreasing`; are these
+   the final names?
+2. `stitch` signature and the fallback type (`Channels<T>` vs ordered).
+3. How `stitch` verifies coverage and reports a bad fallback.
+4. Final rename of `resume_on_fault`.
+5. Implementation sequencing.

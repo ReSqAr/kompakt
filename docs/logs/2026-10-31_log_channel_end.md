@@ -549,3 +549,94 @@ Open details:
   silently drop the gap.
 - Does `fill_gaps` return `Channels<T>` with the normal `End`, or retain order
   detail for a later composer?
+
+## Q11 — `stitch` returns a stronger ordered channel
+
+Status: settled direction.
+
+`stitch` (the operation; `fill_gaps` describes it) takes an ordered channel
+whose policy permits gaps and returns an ordered channel whose policy is
+gapless:
+
+```text
+  OrderedChannel<T,K, StrictlyMonotone>
+      .stitch(fallback)
+      -> OrderedChannel<T,K, Gapless>
+```
+
+The policy is strengthened, not carried over unchanged. `NonDecreasing` cannot
+become `Gapless` without deciding what happens to duplicates; that is a
+separate policy step, not part of `stitch`.
+
+## Q12 — Reuse `End`; no typed `OrderedEnd`
+
+Status: settled direction.
+
+`OrderedChannel::recv` returns the normal `End`. Add an abort reason:
+
+```text
+  AbortReason::OrderViolation { what: &'static str }
+```
+
+The typed `expected`/`got` does not enter `End`; it stays inside
+`OrderedChannel`/`stitch`. This avoids a generic `End` or `Channels<T,D>` just
+for the replay path.
+
+## Q13 — Gap-triggering item and fallback contract
+
+Status: leaning.
+
+Recommended: buffer the gap-triggering primary item, and let the fallback cover
+the gap **exclusive** of `got`:
+
+```text
+  fallback: [expected, got)
+  buffered: primary item at got
+  output:   fallback items, then buffered item
+```
+
+This matches the existing `HistoricalReplay` shape and does not require the
+archive to provide `got`. `stitch` verifies that the fallback covers exactly
+`[expected, got)`; a short/overlong fallback aborts. A fallback abort
+propagates.
+
+Alternative: fallback covers `[expected, got]`; no buffer, but the fallback must
+provide `got`, which may duplicate the primary item and is not guaranteed by
+the archive.
+
+## Q14 — Rename `resume_on_fault`
+
+Status: open naming.
+
+`retry_on_fault` is better than bare `retry` (the trigger is the point).
+`resume_on_abort` is the most precise with the new `Complete | Aborted`
+vocabulary, but `retry_on_fault` reads better for reconnect/rebuild sites.
+Gaps do not use this combinator; it is for actual aborts.
+
+## Q15 — `stitch` vs `fill_gaps`
+
+Status: leaning.
+
+Use `stitch` as the method name; it names the composition of primary and
+fallback. `fill_gaps` is the behavior in the docs. A separate `fill_gaps`
+alias is unnecessary unless the call sites read better with it.
+
+## Q16 — Policy in the type or a runtime value?
+
+Status: open.
+
+```text
+  type-level:  OrderedChannel<T, K, P>
+               stitch: OrderedChannel<T,K,StrictlyMonotone>
+                         -> OrderedChannel<T,K,Gapless>
+  runtime:     OrderedChannel<T, K> { policy: OrderPolicy }
+               stitch checks the policy and returns a Gapless wrapper
+```
+
+Type-level makes the one-way strengthening a compile-time guarantee and puts
+the invariant in the type, at the cost of one marker parameter on the ordered
+boundary type (not on `Channels`). Runtime is less code but the guarantee is an
+assertion.
+
+Recommendation: type-level, because the policy is exactly the invariant we
+want the type to name, and `stitch` is the one place where it changes.
