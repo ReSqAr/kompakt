@@ -198,10 +198,11 @@ The fallback is an ordinary `Channels<T>`; it does not have to be an
 
 ### 7.1 Async fallback adaptation
 
-`stitch` is synchronous over `Channels<T>`. The archive fetch in zslg is async,
-so the call site adapts it with the existing producer pattern: create a `Feed`,
-spawn the archive fetch on the runtime, and return the `Feed`'s `Channels` from
-the fallback closure. The crate does not learn about async or runtimes.
+`stitch` is synchronous over `Channels<T>`. In zslg the replay consumer already
+runs on a blocking thread, so the archive fallback uses
+`tokio::runtime::Handle::block_on` to turn the async `archive.stream(...)` into
+a `Channels<T>`. The crate stays runtime-agnostic; the adapter lives in the
+domain call site.
 
 ## 8. Trait boundaries
 
@@ -212,8 +213,8 @@ The ordered type is applied only where the boundary really promises order:
 | `Replica::subscribe_from(from)` | `StrictlyMonotone<LogIndex>` | `next_after(from)` |
 | `Reader::subscribe_stable_log(from)` | `Gapless<LogIndex>` | `from` |
 | `StableLogSnapshot::range(from, until)` | `StrictlyMonotone<LogIndex>` if wrapped | `from` |
-| `LocalStoreView::stream_above_hlc(threshold)` | `StrictlyMonotone<(Hlc, DataId)>` | `threshold` |
-| `LocalStoreView::stream_window_ordered` | `StrictlyMonotone<(Hlc, DataId)>` | lower bound |
+| `LocalStoreView::stream_above_hlc(threshold)` | deferred; still `Channels` | — |
+| `LocalStoreView::stream_window_ordered` | deferred; still `Channels` | — |
 | `Reader::subscribe_unstable_tail` | none | arrival order |
 | merge output | none | unordered |
 
@@ -247,7 +248,8 @@ producer gone). Gaps are not aborts and do not use it.
 - **Forward gap**: allowed by `StrictlyMonotone`; not an abort.
 - **Stitch fallback short/overlong/gapped**: `OrderViolation` abort.
 - **Stitch fallback abort**: propagate.
-- **Stitch no-key item in the gap**: cannot verify coverage; abort.
+- **Stitch no-key item in the fallback**: passes through without advancing
+  coverage; the endpoint check must still pass. This carries archive error items.
 - **Projection without stitching**: `into_channels`; order checks are already
   in the source, but the caller loses the type-level guarantee.
 - **`take_while` short read**: source ending before the predicate is `Complete`
@@ -335,7 +337,24 @@ zslg/nvzn:
   dispatch. `stitch` buffers one item. No extra copies otherwise.
 - **Dependencies/unsafe.** None added.
 
-## 15. Deferred
+## 15. Implementation status
+
+The first implementation covers:
+
+- `End`/`AbortReason`, `take_while`, and `resume_on_abort`.
+- `OrderedChannel<T,P>`, `Key<T>`, `Successor`, the three policy markers,
+  full read surface, and `into_channels`.
+- `stitch` with exact fallback coverage.
+- `Replica::subscribe_from` as `StrictlyMonotone<LogIndex>`.
+- `Reader::subscribe_stable_log` as `Gapless<LogIndex>`, with zslg's
+  `HistoricalReplay` rebuilt on `OrderedChannel` + `stitch`.
+- nvzn's zslg reader stubs and live seam updated.
+
+The HLC/window `LocalStoreView` boundaries remain plain `Channels` for now;
+`subscription_purge_gaps` is retained but unused until the optional metrics
+feature.
+
+## 16. Deferred
 
 - Optional `metrics` feature / gap counter.
 - User-defined order policies.

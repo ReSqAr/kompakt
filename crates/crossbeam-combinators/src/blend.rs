@@ -74,6 +74,7 @@ mod tests {
 
     use super::*;
     use crate::End;
+    use crate::channel::AbortReason;
 
     /// Records the calls `Tail::open` makes, in order.
     struct Scripted {
@@ -200,7 +201,9 @@ mod tests {
         };
         assert_eq!(
             end_of(blend_chain(&history, &history)),
-            End::Aborted { what: "history" }
+            End::Aborted {
+                reason: AbortReason::ProducerGone { what: "history" }
+            }
         );
         let live = Seam {
             fail_history: false,
@@ -208,7 +211,9 @@ mod tests {
         };
         assert_eq!(
             end_of(blend_chain(&live, &live)),
-            End::Aborted { what: "live" }
+            End::Aborted {
+                reason: AbortReason::ProducerGone { what: "live" }
+            }
         );
     }
 

@@ -90,13 +90,13 @@ impl Replica for ErrorTransport {
         })
     }
 
-    fn subscribe_from(&self, _from: Option<LogIndex>) -> Channels<Result<(LogIndex, Data), Error>> {
+    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::ordered::ReplicaStream {
         let (tx, rx) = crossbeam_channel::bounded::<Result<(LogIndex, Data), Error>>(1);
         drop(tx);
         // Node is shutting down: a deliberately empty stream, so close it.
         let (ch, closer) = Channels::from(rx, "shutdown stub");
         closer.close();
-        ch
+        crate::ordered::replica_stream(ch, from)
     }
 
     async fn fetch_status(&self) -> Result<ReplicaStatus, crate::Error> {

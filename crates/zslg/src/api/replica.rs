@@ -108,7 +108,7 @@ pub(crate) trait Replica: Send + Sync + 'static {
     fn write(&self, input: Channels<StampedWrite>) -> Channels<Result<WriteOutcome, Error>>;
 
     /// Resumable subscription to the replica's append stream.
-    fn subscribe_from(&self, from: Option<LogIndex>) -> Channels<Result<(LogIndex, Data), Error>>;
+    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::ordered::ReplicaStream;
 
     /// Log frontier, Raft state, and the fully-drained effective HLC cutoff, in
     /// one call. All cheap in-memory reads, fetched together to keep the trait

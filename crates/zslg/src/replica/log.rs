@@ -657,12 +657,12 @@ impl ReplicaLogStore {
     pub(in crate::replica) fn subscribe_from(
         self: &Arc<Self>,
         from: Option<LogIndex>,
-    ) -> Channels<Result<(LogIndex, Data), Error>> {
+    ) -> crate::ordered::ReplicaStream {
         let seam = ReplicaSeam {
             log: Arc::clone(self),
             from,
         };
-        blend_chain(&seam, &seam)
+        crate::ordered::replica_stream(blend_chain(&seam, &seam), from)
     }
 
     /// An empty historic phase: complete by construction, so it is closed
@@ -1801,6 +1801,7 @@ mod tests {
         }
         let ch = store.subscribe_from(None);
         let entries: Vec<_> = ch
+            .into_channels()
             .into_iter()
             .take(5)
             .filter_map(|r| match r {
@@ -1858,7 +1859,12 @@ mod tests {
             // `subscribe_from(Some(LogIndex(3)))` → start = 4: entries 4..=8
             // survive (5). The live tail is infinite, so bound the drain.
             let ch = store.subscribe_from(Some(LogIndex(3)));
-            let entries: Vec<_> = ch.into_iter().filter_map(|r| r.ok()).take(5).collect();
+            let entries: Vec<_> = ch
+                .into_channels()
+                .into_iter()
+                .filter_map(|r| r.ok())
+                .take(5)
+                .collect();
             assert_eq!(entries.len(), 5, "indices 4..=8 should survive");
             for (n, (idx, _)) in entries.iter().enumerate() {
                 let expected = LogIndex(u64::try_from(n).expect("fits").saturating_add(4));
@@ -1875,7 +1881,12 @@ mod tests {
         assert_eq!(store.frontier(), Some(LogIndex(8)));
         {
             let ch = store.subscribe_from(Some(LogIndex(3)));
-            let entries: Vec<_> = ch.into_iter().filter_map(|r| r.ok()).take(5).collect();
+            let entries: Vec<_> = ch
+                .into_channels()
+                .into_iter()
+                .filter_map(|r| r.ok())
+                .take(5)
+                .collect();
             assert_eq!(entries.len(), 5, "indices 4..=8 should survive reopen");
         }
 
@@ -1890,7 +1901,12 @@ mod tests {
         {
             // start = 8 (next_after 7): only the frontier entry survives.
             let ch = store.subscribe_from(Some(LogIndex(7)));
-            let entries: Vec<_> = ch.into_iter().filter_map(|r| r.ok()).take(1).collect();
+            let entries: Vec<_> = ch
+                .into_channels()
+                .into_iter()
+                .filter_map(|r| r.ok())
+                .take(1)
+                .collect();
             assert_eq!(entries.len(), 1, "only the frontier entry survives");
             assert_eq!(entries[0].0, LogIndex(8));
         }

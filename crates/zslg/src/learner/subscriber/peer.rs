@@ -117,42 +117,29 @@ impl ReplicationSubscriber {
         // `filter_map` runs at pull time on the integrator's forwarding thread,
         // so tagging and metering cost no thread and no queue of their own —
         // the socket is already decoupled by the client's own reader loop.
-        // `Fn`, not `FnMut`, hence the atomic for the gap cursor.
-        let expected_next =
-            std::sync::atomic::AtomicU64::new(LogIndex::next_after(resume_from).raw());
         // Decided once, not per item, so skew sampling stays "every Nth item".
         let stride = u64::try_from(SKEW_SAMPLE_STRIDE).unwrap_or(8);
 
-        let stream = self.upstream.subscribe_from(resume_from).filter_map(
-            move |item: Result<(LogIndex, Data), Error>| {
+        // The upstream is already `StrictlyMonotone`: forward purge gaps are
+        // allowed and duplicate/backwards indices abort inside the channel.
+        // This filter only tags, samples and meters the accepted items.
+        let stream = self
+            .upstream
+            .subscribe_from(resume_from)
+            .into_channels()
+            .filter_map(move |item: Result<(LogIndex, Data), Error>| {
                 let (idx, data) = match item {
                     Ok(v) => v,
                     // In-band: `integrate_loop` stops on it and returns it.
                     Err(e) => return Some(Err(e)),
                 };
-                let prev = LogIndex(
-                    expected_next.load(std::sync::atomic::Ordering::Relaxed),
-                );
-                let (next_expected, gapped) = detect_purge_gap(idx, prev);
-                expected_next
-                    .store(next_expected.raw(), std::sync::atomic::Ordering::Relaxed);
-                if gapped {
-                    crate::metrics::subscription_purge_gaps(1);
-                    tracing::debug!(
-                        peer_id = ?peer_id,
-                        from = ?prev,
-                        to = ?idx,
-                        "subscription skipped replica-purged indices (benign; recovered via snapshot load)",
-                    );
-                }
                 if idx.raw().checked_rem(stride).unwrap_or(1) == 0 {
                     let skew_s = clock.skew_against(data.data_id.hlc()).as_secs_f64();
                     crate::metrics::hlc_skew(peer_id, skew_s);
                 }
                 crate::metrics::subscription_messages(1);
                 Some(Ok((peer_id, idx, data)))
-            },
-        );
+            });
 
         // A subscription is infinite by contract: the replica's append stream
         // never completes, so even a *declared* close is the upstream going
@@ -172,29 +159,6 @@ impl ReplicationSubscriber {
             Err(other) => Err(other),
         }
     }
-}
-
-/// Classify one delivered index against the expected next contiguous one. The
-/// replica log is gapless, so an index strictly greater than expected means the
-/// replica purged the entries in between (the learner resumed across a purged
-/// range). Returns the advanced expectation and whether this index jumped.
-///
-/// Per item, not per batch: the stream arrives one record at a time through a
-/// `filter_map`, and the batch form obliged the only caller to clone the record
-/// — a `Bytes` refcount bump per record on the subscription hot path — purely
-/// to build a one-element slice. The payload was never read.
-///
-/// Pure (no I/O), so it is directly testable. Duplicates from the subscribe
-/// overlap window (index `<` expected) are ignored and do not regress the
-/// expectation.
-fn detect_purge_gap(idx: LogIndex, expected_next: LogIndex) -> (LogIndex, bool) {
-    let gapped = idx > expected_next;
-    let expected = if idx >= expected_next {
-        LogIndex::next_after(Some(idx))
-    } else {
-        expected_next
-    };
-    (expected, gapped)
 }
 
 #[cfg(test)]
@@ -262,16 +226,16 @@ mod tests {
         async fn fetch_status(&self) -> Result<ReplicaStatus, Error> {
             unimplemented!()
         }
-        fn subscribe_from(
-            &self,
-            _from: Option<LogIndex>,
-        ) -> Channels<Result<(LogIndex, Data), Error>> {
+        fn subscribe_from(&self, _from: Option<LogIndex>) -> crate::ordered::ReplicaStream {
             let items = self.items.lock().expect("lock").take().unwrap_or_default();
-            Channels::from_vec(
-                items
-                    .into_iter()
-                    .map(|(idx, data)| Ok((idx, data)))
-                    .collect(),
+            crate::ordered::replica_stream(
+                Channels::from_vec(
+                    items
+                        .into_iter()
+                        .map(|(idx, data)| Ok((idx, data)))
+                        .collect(),
+                ),
+                None,
             )
         }
         async fn subscribe_status(
@@ -293,13 +257,13 @@ mod tests {
         async fn fetch_status(&self) -> Result<ReplicaStatus, Error> {
             unimplemented!()
         }
-        fn subscribe_from(
-            &self,
-            _from: Option<LogIndex>,
-        ) -> Channels<Result<(LogIndex, Data), Error>> {
+        fn subscribe_from(&self, _from: Option<LogIndex>) -> crate::ordered::ReplicaStream {
             let (tx, rx) = crossbeam_channel::bounded::<Result<(LogIndex, Data), Error>>(1);
             drop(tx); // the peer went away
-            Channels::from_infinite(rx, "client subscribe stream")
+            crate::ordered::replica_stream(
+                Channels::from_infinite(rx, "client subscribe stream"),
+                None,
+            )
         }
         async fn subscribe_status(
             &self,
@@ -424,62 +388,6 @@ mod tests {
             "a fresh learner reaching index 0 retired one record",
         );
         assert_eq!(cursor_delta(Some(LogIndex(4)), Some(LogIndex(9))), 5);
-    }
-
-    // ── B-1 purge-gap detection ──────────────────────────────────────────
-
-    /// Fold a delivered sequence the way `stream_from` does — one item at a
-    /// time, carrying the expectation forward — so the tests exercise the same
-    /// path production takes rather than a batch helper that no caller uses.
-    fn fold_gaps(indices: &[u64], expected_next: LogIndex) -> (LogIndex, u64) {
-        let mut expected = expected_next;
-        let mut gaps: u64 = 0;
-        for i in indices {
-            let (next, gapped) = detect_purge_gap(LogIndex(*i), expected);
-            expected = next;
-            if gapped {
-                gaps = gaps.saturating_add(1);
-            }
-        }
-        (expected, gaps)
-    }
-
-    #[test]
-    fn detect_purge_gap_finds_leading_gap() {
-        // Fresh learner (expected next = 0); first surviving index is 5, so
-        // entries 0..=4 were purged on the replica.
-        let (next, gaps) = fold_gaps(&[5, 6, 7], LogIndex::next_after(None));
-        assert_eq!(gaps, 1, "one leading gap (indices 0..=4 purged)");
-        assert_eq!(next, LogIndex(8));
-    }
-
-    #[test]
-    fn detect_purge_gap_none_when_contiguous() {
-        let (next, gaps) = fold_gaps(&[3, 4], LogIndex::next_after(Some(LogIndex(2))));
-        assert_eq!(gaps, 0, "contiguous delivery must report no gaps");
-        assert_eq!(next, LogIndex(5));
-    }
-
-    #[test]
-    fn detect_purge_gap_mid_stream_and_ignores_duplicates() {
-        // expected 3; a duplicate index 2 from the subscribe overlap arrives
-        // first (ignored, no regress), then contiguous 3, then a jump to 7 →
-        // one gap (4..=6).
-        let (next, gaps) = fold_gaps(&[2, 3, 7], LogIndex(3));
-        assert_eq!(
-            gaps, 1,
-            "one mid-stream gap (4..=6 purged); the duplicate 2 is ignored"
-        );
-        assert_eq!(next, LogIndex(8));
-    }
-
-    /// A duplicate must never pull the expectation backwards: the next real
-    /// index would then read as a gap and inflate the purge counter.
-    #[test]
-    fn detect_purge_gap_duplicate_does_not_regress_the_expectation() {
-        let (next, gapped) = detect_purge_gap(LogIndex(2), LogIndex(5));
-        assert_eq!(next, LogIndex(5), "expectation held");
-        assert!(!gapped, "a replay is not a gap");
     }
 
     /// End-to-end: a fresh learner whose upstream delivers only the survivors

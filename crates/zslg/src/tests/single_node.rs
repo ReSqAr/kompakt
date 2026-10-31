@@ -232,6 +232,7 @@ async fn snapshot_creation_tick_promotes_into_stable_log() {
     let promoted = loop {
         let mut stream = reader
             .subscribe_stable_log(LogIndex::ZERO)
+            .into_channels()
             .filter_map(|item| match item {
                 Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
                 Ok(StableLogEvent::Watermark(_)) => None,

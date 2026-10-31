@@ -35,12 +35,11 @@ use tracing::warn;
 use crate::api::{ReplicaClient, StampedWrite};
 use crate::error::Error;
 use crate::ids::LogIndex;
-use crate::meta::Data;
 use crate::network::framing::{
     AsyncFrameSink, AsyncFrameStream, TcpFrameSink, TcpFrameStream, adopt_blocking,
 };
 use crate::network::messages::{RpcReplicaRequest, RpcRequest, WriteOutcome, WriteStreamResponse};
-use crossbeam_combinators::Channels;
+use crossbeam_combinators::{AbortReason, Channels, End};
 
 /// In-flight window between the socket reader and the replica's write pipeline.
 /// Backpressure, not buffering: a peer that outruns the replica's flush loop
@@ -213,30 +212,6 @@ pub(in crate::network) async fn run_subscribe(
     drop(raw);
 }
 
-/// How one delivered index relates to the one the stream owes us. The direction
-/// is what matters: forward is benign, backwards is corruption.
-#[derive(Debug, PartialEq, Eq)]
-enum OrderVerdict {
-    /// Exactly the index we expected (or the first item of the stream).
-    Contiguous,
-    /// Forward jump — entries purged between the cursor and the surviving
-    /// range. Benign; counted for observability.
-    PurgeGap,
-    /// Backwards — a reorder or duplicate. Impossible on a gapless
-    /// single-writer log read in index order, so it means local corruption.
-    WentBackwards { expected: LogIndex },
-}
-
-/// Classify one delivered index against the one the stream owes us. Split out of
-/// [`subscribe_writer_loop`] so the invariant is testable without a socket.
-fn classify_order(expected: Option<LogIndex>, idx: LogIndex) -> OrderVerdict {
-    match expected {
-        Some(exp) if idx < exp => OrderVerdict::WentBackwards { expected: exp },
-        Some(exp) if idx > exp => OrderVerdict::PurgeGap,
-        _ => OrderVerdict::Contiguous,
-    }
-}
-
 /// Blocking writer for a subscription stream, with a per-item ordering check.
 ///
 /// A *forward* jump is benign — entries purged between the cursor and the
@@ -251,38 +226,26 @@ fn classify_order(expected: Option<LogIndex>, idx: LogIndex) -> OrderVerdict {
 /// panic strategy, which a library does not control — under `unwind` it killed
 /// only this thread anyway (`run_subscribe` swallows the `JoinError`), so it
 /// bought nothing over closing the connection.
-fn subscribe_writer_loop(
-    mut sink: TcpFrameSink,
-    mut items: Channels<Result<(LogIndex, Data), Error>>,
-) {
-    let mut expected: Option<LogIndex> = None;
+fn subscribe_writer_loop(mut sink: TcpFrameSink, mut items: crate::ordered::ReplicaStream) {
     loop {
         let Some(batch) = items.ready_batch(MAX_BATCH) else {
-            return; // disconnected
+            if let End::Aborted {
+                reason: AbortReason::OrderViolation { what },
+            } = items.end_reason()
+            {
+                crate::metrics::subscription_reorder();
+                tracing::error!(
+                    what,
+                    "subscription stream closed: replica log index violated strict order"
+                );
+            }
+            return; // disconnected or order violation
         };
         for item in batch {
             let (idx, record) = match item {
                 Ok(pair) => pair,
                 Err(_) => return,
             };
-            match classify_order(expected, idx) {
-                OrderVerdict::Contiguous => {}
-                OrderVerdict::PurgeGap => {
-                    crate::metrics::subscription_purge_gaps(1);
-                    tracing::debug!(expected = ?expected, got = ?idx, "subscribe writer loop: benign purge gap");
-                }
-                OrderVerdict::WentBackwards { expected: exp } => {
-                    crate::metrics::subscription_reorder();
-                    tracing::error!(
-                        expected = ?exp,
-                        got = ?idx,
-                        "subscription stream closed: replica log index went backwards \
-                         (reorder/duplicate) — the serving replica's log is corrupt"
-                    );
-                    return;
-                }
-            }
-            expected = Some(LogIndex::next_after(Some(idx)));
             if sink
                 .feed_blocking(crate::network::messages::SubscribeStreamItem {
                     source_index: idx,
@@ -296,41 +259,5 @@ fn subscribe_writer_loop(
         if sink.flush_blocking().is_err() {
             return;
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The three cases the subscription stream distinguishes. A backwards index
-    /// is the only one that means corruption; forward jumps are purge gaps and
-    /// must never fail-stop the node (CLAUDE.md §20).
-    #[test]
-    fn classify_order_separates_purge_gaps_from_corruption() {
-        assert_eq!(classify_order(None, LogIndex(9)), OrderVerdict::Contiguous);
-        assert_eq!(
-            classify_order(Some(LogIndex(5)), LogIndex(5)),
-            OrderVerdict::Contiguous
-        );
-        assert_eq!(
-            classify_order(Some(LogIndex(5)), LogIndex(9)),
-            OrderVerdict::PurgeGap,
-            "a forward jump is a benign purge gap"
-        );
-        assert_eq!(
-            classify_order(Some(LogIndex(5)), LogIndex(4)),
-            OrderVerdict::WentBackwards {
-                expected: LogIndex(5)
-            },
-            "a backwards index is replica-log corruption"
-        );
-        assert_eq!(
-            classify_order(Some(LogIndex(5)), LogIndex(0)),
-            OrderVerdict::WentBackwards {
-                expected: LogIndex(5)
-            },
-            "a duplicate/reorder far back is still corruption"
-        );
     }
 }

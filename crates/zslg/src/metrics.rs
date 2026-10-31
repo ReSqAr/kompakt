@@ -683,6 +683,10 @@ pub(crate) fn log_index_frontier(log_type: LogType, index: u64) {
     .set(lossy_f64(index));
 }
 
+#[allow(
+    dead_code,
+    reason = "reserved for the optional ordered-channel metrics feature"
+)]
 pub(crate) fn subscription_purge_gaps(count: u64) {
     if count == 0 {
         return;

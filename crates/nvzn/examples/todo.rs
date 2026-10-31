@@ -353,7 +353,7 @@ impl Rig {
             // its result is not awaited here.
             Self::InMemory(log) => drop(log),
             // Cancelling the node ends the fold's stable-log subscription with
-            // `ChannelEnd::Cancelled`, even on a quiet log, so the dispatcher
+            // `End::Aborted { reason: AbortReason::Cancelled }`, even on a quiet log, so the dispatcher
             // stops cleanly and can be awaited.
             Self::Zslg(token) => {
                 token.cancel();

@@ -20,7 +20,7 @@ use crate::api::{
     LivenessProbe, RaftConsensus, RaftStateView, Replica, StampedWrite, WriteOutcome,
 };
 use crate::ids::{LogIndex, NodeId, PeerAddr};
-use crate::meta::{Data, RaftState, ReplicaStatus};
+use crate::meta::{RaftState, ReplicaStatus};
 use crate::raft::TypeConfig;
 use crossbeam_combinators::Channels;
 use futures::stream::BoxStream;
@@ -59,7 +59,7 @@ impl Replica for LocalReplicaClient {
         self.replica.write(input)
     }
 
-    fn subscribe_from(&self, from: Option<LogIndex>) -> Channels<Result<(LogIndex, Data), Error>> {
+    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::ordered::ReplicaStream {
         self.replica.subscribe_from(from)
     }
 

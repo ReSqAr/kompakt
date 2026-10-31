@@ -16,7 +16,7 @@ use crate::api::{Clock, Replica, Router, StampedWrite, WriteOutcome};
 use crate::error::Error;
 use crate::hlc::{Hlc, HlcClock, HlcGate};
 use crate::ids::{DataId, LogIndex, NodeId, PeerAddr};
-use crate::meta::{Data, RaftState, ReplicaMembership, ReplicaStatus};
+use crate::meta::{RaftState, ReplicaMembership, ReplicaStatus};
 use crate::raft::RaftStateHandle;
 use crate::replica::ReplicaLogStore;
 use crate::replica::ReplicaService;
@@ -164,10 +164,7 @@ impl Replica for FaultyReplica {
         Channels::closed(out_rx)
     }
 
-    fn subscribe_from(
-        &self,
-        from: Option<LogIndex>,
-    ) -> Channels<Result<(LogIndex, Data), crate::Error>> {
+    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::ordered::ReplicaStream {
         self.inner.subscribe_from(from)
     }
     async fn fetch_status(&self) -> Result<ReplicaStatus, crate::Error> {
@@ -193,10 +190,7 @@ impl Replica for ReadyReplica {
     fn write(&self, _: Channels<StampedWrite>) -> Channels<Result<WriteOutcome, Error>> {
         unimplemented!("ReadyReplica does not serve writes")
     }
-    fn subscribe_from(
-        &self,
-        _: Option<LogIndex>,
-    ) -> Channels<Result<(LogIndex, Data), crate::Error>> {
+    fn subscribe_from(&self, _: Option<LogIndex>) -> crate::ordered::ReplicaStream {
         unimplemented!("ReadyReplica does not serve subscriptions")
     }
     async fn fetch_status(&self) -> Result<ReplicaStatus, crate::Error> {
@@ -535,7 +529,7 @@ impl Replica for DuplicateReplica {
         Channels::closed(out_rx)
     }
 
-    fn subscribe_from(&self, from: Option<LogIndex>) -> Channels<Result<(LogIndex, Data), Error>> {
+    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::ordered::ReplicaStream {
         self.inner.subscribe_from(from)
     }
 

@@ -1145,3 +1145,26 @@ Options:
 
 Recommendation: 1. The enforcement change is already large; metrics should
 follow once the ordered type is in use.
+
+## Implementation — 2026-10-31
+
+- `End` is `Complete | Aborted { reason }`; `AbortReason` is public with
+  `ProducerGone`, `Cancelled`, `CancelHandleDropped`, `ConsumerGone`,
+  `RoutingViolation`, `OrderViolation`.
+- `take_while` ends `Complete`; `resume_on_abort` only resumes on `Aborted`.
+- `OrderedChannel<T,P>` uses `Key<T>`, `Successor`, and the policy markers
+  `Gapless<K>`, `StrictlyMonotone<K>`, `NonDecreasing<K>`. Policy is in the
+  type; `start: Option<K>` is explicit.
+- `stitch` returns `OrderedChannel<T, Gapless<K>>`; no-key fallback items
+  (archive errors) pass through without advancing coverage, and the endpoint
+  check still applies.
+- `Replica::subscribe_from` returns `ReplicaStream` (`StrictlyMonotone`);
+  `detect_purge_gap` and `classify_order` are removed.
+- `Reader::subscribe_stable_log` returns `StableStream` (`Gapless`);
+  `HistoricalReplay` is rebuilt on `OrderedChannel` + `stitch`. The archive
+  fallback uses `Handle::block_on` on the blocking replay consumer.
+- `LocalStoreView` HLC/window boundaries remain plain `Channels` for now.
+- The nvzn duplicate-index fold tests and zslg order-classifier tests are gone:
+  those inputs are unrepresentable under the new strict/gapless contracts.
+  `subscription_purge_gaps` remains defined but unused until the optional
+  metrics feature; `subscription_reorder` still fires on an order violation.

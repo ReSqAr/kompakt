@@ -75,9 +75,10 @@ impl Dispatcher {
         let cancel = fold_state.cancellation();
         // Bound to `cancel` so asking the fold to stop wakes it even while it
         // is parked on a quiet log; zslg binds its own shutdown the same way,
-        // and either reaches the fold as `End::Cancelled`.
+        // and either reaches the fold as `AbortReason::Cancelled`.
         let tail = reader
             .subscribe_stable_log(from)
+            .into_channels()
             .until(&Cancellation::from_token(&cancel));
         let inputs = self.fold_inputs();
         let fold = tokio::task::spawn_blocking({

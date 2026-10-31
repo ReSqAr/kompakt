@@ -347,10 +347,7 @@ impl zslg::Reader for FailingSyncReader {
         self.inner.hlc_now()
     }
 
-    fn subscribe_stable_log(
-        &self,
-        from: LogIndex,
-    ) -> Channels<Result<StableLogEvent, zslg::Error>> {
+    fn subscribe_stable_log(&self, from: LogIndex) -> zslg::StableStream {
         self.inner.subscribe_stable_log(from)
     }
 
@@ -453,17 +450,14 @@ impl zslg::Reader for ScriptedReader {
         self.stable_watermark().unwrap_or_else(|| hlc(0))
     }
 
-    fn subscribe_stable_log(
-        &self,
-        _from: LogIndex,
-    ) -> Channels<Result<StableLogEvent, zslg::Error>> {
+    fn subscribe_stable_log(&self, from: LogIndex) -> zslg::StableStream {
         let rx = self
             .stable
             .lock()
             .expect("test mutex")
             .take()
             .expect("a scripted reader serves one subscription");
-        Channels::from_infinite(rx, "scripted")
+        zslg::StableStream::new(Channels::from_infinite(rx, "scripted"), Some(from))
     }
 
     fn unstable_tail(&self) -> Channels<Result<Data, zslg::Error>> {

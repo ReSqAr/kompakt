@@ -33,7 +33,7 @@ use crate::ids::APP_ID_LEN;
 use crate::metrics::{self, EntryOutcome, StopReason};
 use crate::{Error, ReadTransaction, Store, TenantId, Watermark, WriteTransactionImpl};
 use bytes::Bytes;
-use crossbeam_combinators::Channels;
+use crossbeam_combinators::{AbortReason, Channels, End};
 use std::collections::BTreeMap;
 use std::sync::Weak;
 use tokio::sync::watch;
@@ -229,21 +229,27 @@ impl FoldInputs {
 }
 
 /// The stop for a subscription that has ended: only an abort is a fault.
-fn ended(end: crossbeam_combinators::End) -> FoldStop {
+fn ended(end: End) -> FoldStop {
     match end {
-        crossbeam_combinators::End::Closed => {
-            info!("stable log subscription closed; fold loop finished");
+        End::Complete => {
+            info!("stable log subscription completed; fold loop finished");
             FoldStop::clean(StopReason::SubscriptionClosed)
         }
-        crossbeam_combinators::End::Cancelled => {
-            info!("stable log subscription cancelled; fold loop stopping");
-            FoldStop::clean(StopReason::Cancelled)
-        }
-        crossbeam_combinators::End::Aborted { what } => {
-            // `what` names the leaf that ended — where to look upstream.
-            info!(what, "stable log subscription ended; fold loop stopping");
-            FoldStop::failed(StopReason::SubscriptionAborted, Error::SubscriptionAborted)
-        }
+        End::Aborted { reason } => match reason {
+            AbortReason::Cancelled | AbortReason::CancelHandleDropped => {
+                info!("stable log subscription cancelled; fold loop stopping");
+                FoldStop::clean(StopReason::Cancelled)
+            }
+            AbortReason::ProducerGone { what } => {
+                // `what` names the leaf that ended — where to look upstream.
+                info!(what, "stable log subscription ended; fold loop stopping");
+                FoldStop::failed(StopReason::SubscriptionAborted, Error::SubscriptionAborted)
+            }
+            other => {
+                info!(reason = %other, "stable log subscription aborted; fold loop stopping");
+                FoldStop::failed(StopReason::SubscriptionAborted, Error::SubscriptionAborted)
+            }
+        },
     }
 }
 

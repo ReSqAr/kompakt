@@ -561,8 +561,8 @@ mod tests {
         async fn fetch_status(&self) -> Result<ReplicaStatus, Error> {
             unimplemented!()
         }
-        fn subscribe_from(&self, _: Option<LogIndex>) -> Channels<Result<(LogIndex, Data), Error>> {
-            Channels::from_vec(vec![])
+        fn subscribe_from(&self, _: Option<LogIndex>) -> crate::ordered::ReplicaStream {
+            crate::ordered::replica_stream(Channels::from_vec(vec![]), None)
         }
         async fn subscribe_status(
             &self,

@@ -59,6 +59,7 @@ pub(crate) mod metrics;
 pub(crate) mod network;
 pub(crate) mod object_store;
 pub(crate) mod observability;
+mod ordered;
 pub(crate) mod quorum;
 pub(crate) mod raft;
 pub(crate) mod replica;
@@ -88,6 +89,7 @@ pub use crate::object_store::{CompressionLevel, IntoArcObjectStore, ObjectStoreC
 #[cfg(feature = "prometheus")]
 pub use crate::observability::configure_prometheus;
 pub use crate::observability::{METRIC_NAMESPACE, describe_metrics, histogram_buckets};
+pub use crate::ordered::StableStream;
 pub use crate::raft::{RaftStateHandle, SpareSelectionStrategy};
 pub use crate::replica_node::{InitialisingReplicaNode, ReplicaNode, ReplicaNodeConfig};
 pub use crate::unit::ByteSize;

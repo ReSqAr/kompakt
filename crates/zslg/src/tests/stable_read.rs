@@ -82,6 +82,7 @@ async fn writes_appear_in_stable_log_across_all_nodes() {
                 let mut stream = node
                     .reader()
                     .subscribe_stable_log(LogIndex::ZERO)
+                    .into_channels()
                     .filter_map(|item| match item {
                         Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
                         Ok(StableLogEvent::Watermark(_)) => None,

@@ -156,7 +156,7 @@ impl Wakes {
 #[allow(clippy::unwrap_used, clippy::panic, reason = "test code")]
 mod tests {
     use super::*;
-    use crate::channel::End;
+    use crate::channel::{AbortReason, End};
     use std::num::NonZeroUsize;
 
     fn cap(n: usize) -> NonZeroUsize {
@@ -193,7 +193,9 @@ mod tests {
         assert_eq!(sub.recv().unwrap(), 2);
         assert_eq!(
             sub.recv().err(),
-            Some(End::Aborted { what: "fan-out" }),
+            Some(End::Aborted {
+                reason: AbortReason::ProducerGone { what: "fan-out" }
+            }),
             "the hang-up arrives after the queued events, never before"
         );
     }

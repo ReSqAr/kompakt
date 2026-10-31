@@ -208,17 +208,12 @@ impl RemoteSnapshotStore {
                     }
                     match entries.recv() {
                         Ok(item) => Some(item),
-                        Err(crossbeam_combinators::End::Closed) => None,
+                        Err(crossbeam_combinators::End::Complete) => None,
                         // No declared completion, so this prefix must not be
                         // finalized as if it were the whole snapshot (§20).
-                        Err(crossbeam_combinators::End::Aborted { what }) => {
+                        Err(crossbeam_combinators::End::Aborted { reason }) => {
                             Some(Err(Error::StreamTruncated {
-                                what: what.to_owned(),
-                            }))
-                        }
-                        Err(crossbeam_combinators::End::Cancelled) => {
-                            Some(Err(Error::StreamTruncated {
-                                what: "cancelled".to_owned(),
+                                what: reason.label().to_owned(),
                             }))
                         }
                     }

@@ -327,16 +327,10 @@ impl crate::api::LocalStoreMut for LocalStore {
                     // end as a fault for that reason. An abort is a fault
                     // here, though: items may be missing (CLAUDE.md §20).
                     return match records.end_reason() {
-                        crossbeam_combinators::End::Closed => (Ok(()), sent_any),
-                        crossbeam_combinators::End::Aborted { what } => (
+                        crossbeam_combinators::End::Complete => (Ok(()), sent_any),
+                        crossbeam_combinators::End::Aborted { reason } => (
                             Err(Error::SubscriptionStreamEnded {
-                                reason: format!("stream {what} ended"),
-                            }),
-                            sent_any,
-                        ),
-                        crossbeam_combinators::End::Cancelled => (
-                            Err(Error::SubscriptionStreamEnded {
-                                reason: "stream cancelled".to_owned(),
+                                reason: reason.to_string(),
                             }),
                             sent_any,
                         ),
@@ -1149,7 +1143,9 @@ mod tests {
         assert_eq!(
             live.recv().err(),
             Some(crossbeam_combinators::End::Aborted {
-                what: "unstable tail subscription"
+                reason: crossbeam_combinators::AbortReason::ProducerGone {
+                    what: "unstable tail subscription",
+                },
             })
         );
     }

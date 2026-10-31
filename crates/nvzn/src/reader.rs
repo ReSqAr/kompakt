@@ -130,7 +130,7 @@ impl<Ev> Reader<Ev> {
     /// Every stable `P` committed from now on, deletions included, as a
     /// [`Ref`] to look up. The fold blocks on a subscriber that stops reading;
     /// the channel ends only with the fold — with
-    /// [`End::Cancelled`](crossbeam_combinators::End::Cancelled) when the fold was
+    /// [`AbortReason::Cancelled`](crossbeam_combinators::AbortReason::Cancelled) when the fold was
     /// cancelled (its stop reason is [`StopReason::Cancelled`](crate::StopReason::Cancelled)),
     /// `Aborted` when it stopped for any other reason.
     ///

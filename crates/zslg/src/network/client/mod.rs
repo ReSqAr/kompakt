@@ -45,7 +45,6 @@ use crate::ByteSize;
 use crate::api::{Clock, StampedWrite, WriteOutcome};
 use crate::error::Error;
 use crate::ids::{LogIndex, NodeId, PeerAddr};
-use crate::meta::Data;
 use crate::metrics::OpState;
 use crate::network::framing::{AsyncFrameSink, AsyncFrameStream};
 use crate::network::messages::{
@@ -409,13 +408,16 @@ impl StreamOpener {
         &self,
         node_id: NodeId,
         from: Option<LogIndex>,
-    ) -> Channels<Result<(LogIndex, Data), Error>> {
-        open_subscribe(
-            self.rpc_weak.clone(),
-            Target::Registered(node_id),
+    ) -> crate::ordered::ReplicaStream {
+        crate::ordered::replica_stream(
+            open_subscribe(
+                self.rpc_weak.clone(),
+                Target::Registered(node_id),
+                from,
+                self.subscribe_channel_cap,
+                self.cancel.clone(),
+            ),
             from,
-            self.subscribe_channel_cap,
-            self.cancel.clone(),
         )
     }
 }
@@ -591,7 +593,7 @@ impl RpcClient {
         &self,
         node_id: NodeId,
         from: Option<LogIndex>,
-    ) -> Channels<Result<(LogIndex, Data), Error>> {
+    ) -> crate::ordered::ReplicaStream {
         self.streams.subscribe_from(node_id, from)
     }
 }

@@ -278,10 +278,7 @@ impl zslg::Reader for TestReader {
         Hlc::from_bytes(next.saturating_sub(1).to_be_bytes())
     }
 
-    fn subscribe_stable_log(
-        &self,
-        from: LogIndex,
-    ) -> Channels<Result<StableLogEvent, zslg::Error>> {
+    fn subscribe_stable_log(&self, from: LogIndex) -> zslg::StableStream {
         let (tx, rx) = crossbeam_channel::bounded(4096);
 
         let mut shared = self.shared.lock().expect("test mutex");
@@ -301,7 +298,7 @@ impl zslg::Reader for TestReader {
             senders.lock().expect("test mutex").push(tx);
         }
 
-        Channels::from_infinite(rx, "test-log")
+        zslg::StableStream::new(Channels::from_infinite(rx, "test-log"), Some(from))
     }
 
     fn unstable_tail(&self) -> Channels<Result<Data, zslg::Error>> {
@@ -413,7 +410,9 @@ mod tests {
         assert_eq!(
             sub.recv().err(),
             Some(crossbeam_combinators::End::Aborted {
-                what: "test-log unstable"
+                reason: crossbeam_combinators::AbortReason::ProducerGone {
+                    what: "test-log unstable",
+                },
             })
         );
     }

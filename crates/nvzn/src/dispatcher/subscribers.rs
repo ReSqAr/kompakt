@@ -10,7 +10,7 @@
 //!
 //! Every stream is bound to one [`Cancellation`]. The fold fires it only when
 //! it stops as [`StopReason::Cancelled`](crate::StopReason::Cancelled), so
-//! those streams end [`crossbeam_combinators::End::Cancelled`]; when it stops for any
+//! those streams end [`crossbeam_combinators::AbortReason::Cancelled`]; when it stops for any
 //! other reason it drops its senders and the streams end `Aborted`.
 
 use crate::metrics::StopReason;

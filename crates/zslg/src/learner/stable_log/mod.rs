@@ -617,12 +617,9 @@ impl BatchAppender {
         // Exhaustive on purpose: a new non-`Closed` end must not pass as a
         // complete load by default.
         match self.rx.end_reason() {
-            crossbeam_combinators::End::Closed => Ok(total),
-            crossbeam_combinators::End::Aborted { what } => Err(Error::StreamTruncated {
-                what: what.to_owned(),
-            }),
-            crossbeam_combinators::End::Cancelled => Err(Error::StreamTruncated {
-                what: "cancelled".to_owned(),
+            crossbeam_combinators::End::Complete => Ok(total),
+            crossbeam_combinators::End::Aborted { reason } => Err(Error::StreamTruncated {
+                what: reason.label().to_owned(),
             }),
         }
     }

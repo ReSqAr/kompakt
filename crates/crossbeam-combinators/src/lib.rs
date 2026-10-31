@@ -10,16 +10,17 @@
 //!   ──────────                         ─────────
 //!   Feed::channel(cap, what) ────────▶ Channels<T>
 //!     send(item)                         recv() / try_recv() / ready_batch()
-//!     close()        ⇒ End::Closed       filter_map / map / merge / chain /
-//!     drop()         ⇒ End::Aborted      resume_on_fault / until / into_stream
+//!     close()        ⇒ End::Complete     filter_map / map / merge / chain /
+//!     drop()         ⇒ End::Aborted      resume_on_abort / take_while /
+//!                                        until / into_stream
 //!   Fanout<T>::subscribe() ───────────▶ Channels<T>  (hang up on lag)
 //! ```
 //!
-//! The verdict is the contract: `Closed` means a producer declared completion,
-//! `Aborted` means it vanished (panic, drop, discarded task, or an infinite
-//! leaf disconnecting), `Cancelled` means a [`Cancellation`] fired. A consumer
-//! that needs completeness verifies it against its own source of truth; the
-//! channel only reports what the producer claimed.
+//! The verdict is the contract: `Complete` means the stream ended cleanly
+//! (producer close, all phases/branches complete, or a consumer bound);
+//! `Aborted` means it did not, and [`AbortReason`] says why. A consumer that
+//! needs completeness verifies it against its own source of truth; the channel
+//! only reports the transport outcome.
 //!
 //! The seam ([`Tail`], [`Ranged`], [`blend_chain`]) is the
 //! subscribe-then-cut pattern: open the live source, snapshot the cut, read the
@@ -46,8 +47,14 @@ mod blend;
 mod channel;
 mod fanout;
 mod feed;
+mod ordered;
 
 pub use blend::{Ranged, Tail, blend_chain};
-pub use channel::{CancelHandle, Cancellation, ChannelIter, Channels, Closer, End, ReadyBatch};
+pub use channel::{
+    AbortReason, CancelHandle, Cancellation, ChannelIter, Channels, Closer, End, ReadyBatch,
+};
 pub use fanout::{Fanout, Wakes};
 pub use feed::Feed;
+pub use ordered::{
+    Gap, Gapless, Key, NonDecreasing, OrderPolicy, OrderedChannel, StrictlyMonotone, Successor,
+};

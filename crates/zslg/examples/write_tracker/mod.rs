@@ -351,6 +351,7 @@ impl WriteTracker {
         let mut found: HashSet<DataId> = HashSet::new();
         let mut scan = reader
             .subscribe_stable_log(floor)
+            .into_channels()
             .filter_map(|item| match item {
                 Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
                 Ok(StableLogEvent::Watermark(_)) => None,

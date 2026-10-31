@@ -38,7 +38,7 @@ use crate::{
     ArcStore, Error, EventSet, Projection, ProjectionTypeId, Snapshot, Tenant, TenantId, Watermark,
     WithWireFormat, WriteTransactionImpl,
 };
-use crossbeam_combinators::{Channels, End, Feed, Ranged, Tail};
+use crossbeam_combinators::{AbortReason, Channels, End, Feed, Ranged, Tail};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
@@ -536,6 +536,7 @@ impl Ranged<Option<Hlc>> for LiveSeam {
         let mut log = self
             .reader
             .subscribe_stable_log(self.from)
+            .into_channels()
             .until(&self.cancelled);
         tokio::task::spawn_blocking(move || {
             // Overflowed or not, the scan reads to its end: an overflow cannot
@@ -561,7 +562,9 @@ impl Ranged<Option<Hlc>> for LiveSeam {
                         feed.close();
                         return;
                     }
-                    Err(End::Cancelled) => {
+                    Err(End::Aborted {
+                        reason: AbortReason::Cancelled | AbortReason::CancelHandleDropped,
+                    }) => {
                         feed.close();
                         return;
                     }
@@ -638,7 +641,9 @@ fn run<Ev: WithWireFormat>(inner: &Inner<Ev>, mut stream: Channels<FoldItem>) {
                 scan_done(inner, entries, started);
                 return;
             }
-            Err(End::Cancelled) => return,
+            Err(End::Aborted {
+                reason: AbortReason::Cancelled | AbortReason::CancelHandleDropped,
+            }) => return,
             Err(end) => {
                 // zslg resyncs a slow consumer inside the stream, so an end is
                 // the node's reader breaking; a live view that stopped
@@ -1465,13 +1470,10 @@ mod tests {
             self.watermark
         }
 
-        fn subscribe_stable_log(
-            &self,
-            _from: LogIndex,
-        ) -> Channels<Result<StableLogEvent, zslg::Error>> {
+        fn subscribe_stable_log(&self, from: LogIndex) -> zslg::StableStream {
             let (tx, rx) = crossbeam_channel::bounded(1);
             *self.stable.lock().expect("test mutex") = Some(tx);
-            Channels::from_infinite(rx, "stalled stable")
+            zslg::StableStream::new(Channels::from_infinite(rx, "stalled stable"), Some(from))
         }
 
         fn unstable_tail(&self) -> Channels<Result<Data, zslg::Error>> {
@@ -1487,7 +1489,7 @@ mod tests {
 
     /// Cancelling while the cold-start scan is still running must wake a
     /// `snapshot()` parked on `scanned`; the `run` guard calls `finish_scan`
-    /// on every exit, including `End::Cancelled`.
+    /// on every exit, including `AbortReason::Cancelled`.
     #[tokio::test(flavor = "multi_thread")]
     async fn cancelling_mid_scan_wakes_a_waiting_snapshot() {
         let store = inmemory();

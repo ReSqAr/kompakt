@@ -147,7 +147,7 @@ impl Replica for ReplicaService {
         }))
     }
 
-    fn subscribe_from(&self, from: Option<LogIndex>) -> Channels<Result<(LogIndex, Data), Error>> {
+    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::ordered::ReplicaStream {
         self.replica_log.subscribe_from(from)
     }
 

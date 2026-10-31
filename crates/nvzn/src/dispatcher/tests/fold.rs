@@ -46,50 +46,6 @@ async fn dispatcher_routes_by_tenant_prefix() {
 }
 
 #[tokio::test]
-async fn dispatcher_skips_replayed_entries() {
-    let store = inmemory();
-    let (mut log, _writer, syncer, handle) = user_dispatcher(&store).await;
-
-    let replayed = testsupport::data_id(1, 1);
-    log.append_at(0, replayed, payload(tenant_id(), &[new_user(1, "first")]));
-    // note: this may never happen in real life: the stable log of zslg is append-only and in particular any item in the stable log is immutable
-    log.append_at(0, replayed, payload(tenant_id(), &[new_user(1, "second")]));
-    log.append_at(
-        1,
-        testsupport::data_id(2, 2),
-        payload(
-            tenant_id(),
-            &[event::Event::Pinged(testsupport::PingedV1 {
-                id: UserId(1),
-                ts: 7,
-            })],
-        ),
-    );
-    syncer.sync().await.unwrap();
-    // Read once the fold has committed index 1 (the ping), not just the first
-    // user: the two may land in separate commits.
-    let at_ping = Some(zslg::LogIndex::from_bytes(1u64.to_be_bytes()));
-    for _ in 0..500 {
-        if store.read().unwrap().watermark().unwrap().index == at_ping {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-
-    let user = committed_user(&store, 1).await.unwrap();
-
-    assert_eq!(user.name, "first");
-    assert_eq!(user.last_ping, Some(7));
-
-    let txn = store.read().unwrap();
-    assert_eq!(
-        txn.watermark().unwrap().index,
-        Some(zslg::LogIndex::from_bytes(1u64.to_be_bytes()))
-    );
-    handle.abort();
-}
-
-#[tokio::test]
 async fn dispatcher_watermark_event_advances_hlc() {
     let store = inmemory();
     let log = TestLog::new();
@@ -171,7 +127,6 @@ async fn dispatcher_watermark_covers_exactly_the_applied_prefix() {
     let d1 = testsupport::data_id(20, 20);
     log.append_at(0, d0, payload(tenant_id(), &[new_user(1, "one")]));
     log.append_at(1, d1, payload(tenant_id(), &[new_user(2, "two")]));
-    log.append_at(1, d1, payload(tenant_id(), &[new_user(3, "replay")]));
     log.watermark(30);
     syncer.sync().await.unwrap();
     assert!(committed_user(&store, 2).await.is_some());
@@ -498,7 +453,10 @@ async fn fold_loop_stops_when_cancelled_without_folding() {
     drop((writer, reader));
 
     log.append(payload(tenant_id(), &[new_user(1, "unfolded")]));
-    let tail = log.reader().subscribe_stable_log(LogIndex::ZERO);
+    let tail = log
+        .reader()
+        .subscribe_stable_log(LogIndex::ZERO)
+        .into_channels();
     log.disconnect();
 
     let cancel = CancellationToken::new();
@@ -548,6 +506,7 @@ async fn an_upstream_cancel_stops_an_idle_fold_and_cancels_its_subscribers() {
     let tail = log
         .reader()
         .subscribe_stable_log(LogIndex::ZERO)
+        .into_channels()
         .until(&cancellation);
     let never = CancellationToken::new();
     let fold =
@@ -571,6 +530,11 @@ async fn an_upstream_cancel_stops_an_idle_fold_and_cancels_its_subscribers() {
     .await
     .unwrap()
     .unwrap();
-    assert_eq!(end, Err(crossbeam_combinators::End::Cancelled));
+    assert_eq!(
+        end,
+        Err(crossbeam_combinators::End::Aborted {
+            reason: crossbeam_combinators::AbortReason::Cancelled,
+        })
+    );
     drop(log);
 }

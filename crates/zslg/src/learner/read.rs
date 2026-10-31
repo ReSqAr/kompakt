@@ -20,7 +20,7 @@
 //! the frontier is read, so an append racing it is duplicated (filtered by
 //! index) rather than lost.
 //!
-//! That cut is not made once. [`Channels::resume_on_fault`] re-makes it every
+//! That cut is not made once. [`Channels::resume_on_abort`] re-makes it every
 //! time the fan-out hangs up on this consumer for falling behind, so a slow
 //! reader never sees an error — it silently drops back into replay from its own
 //! cursor. Which is the whole reason the cursor is one monotone value rather
@@ -31,11 +31,10 @@
 //! clamp lives in memory and starts unarmed at every open, and the compaction
 //! that physically drops covered entries runs asynchronously, so what a scan
 //! sees is not guaranteed to be the clean prefix the clamp describes — a gap
-//! may appear anywhere, not just as a leading one. Rather than reading a purge floor and splitting on it, the replay
-//! discovers gaps from the data — scan until an index jumps, fill `[expected,
-//! jump)` from the archive, emit the jump-triggering entry, repeat — and a
-//! running guard (`emit_checked`) rejects any residual gap or HLC regression
-//! instead of forwarding it.
+//! may appear anywhere, not just as a leading one. The scan is an
+//! `OrderedChannel<StrictlyMonotone<LogIndex>>`; `stitch` fills each forward
+//! gap from the archive and verifies the fill, returning a `Gapless` channel.
+//! A consumer-side HLC guard rejects a regression before forwarding.
 //!
 //! `unstable_tail` is the other side of the watermark and has no such
 //! machinery: it is a one-shot scan of everything the local store holds above
@@ -60,7 +59,9 @@ use crate::learner::QuorumReadDebouncer;
 use crate::meta::{Data, StableLogEvent, UnstableEvent};
 use crate::metrics::{self, ReadEntrySource, ReadSource};
 use crate::raft::EvictionStatus;
-use crossbeam_combinators::{Cancellation, Channels, Ranged, Tail};
+use crossbeam_combinators::{
+    Cancellation, Channels, End, OrderedChannel, Ranged, StrictlyMonotone, Tail,
+};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -147,9 +148,12 @@ impl Reader for GatedReader {
         self.inner.hlc_now()
     }
 
-    fn subscribe_stable_log(&self, from: LogIndex) -> Channels<Result<StableLogEvent, Error>> {
+    fn subscribe_stable_log(&self, from: LogIndex) -> crate::StableStream {
         if !self.ready() {
-            return Channels::from_vec(vec![Err(self.not_ready())]);
+            return crate::ordered::stable_stream(
+                Channels::from_vec(vec![Err(self.not_ready())]),
+                from,
+            );
         }
         self.inner.subscribe_stable_log(from)
     }
@@ -181,7 +185,7 @@ pub(in crate::learner) struct ReaderImpl {
     archive: Arc<dyn StableArchiveReader>,
     debouncer: Arc<QuorumReadDebouncer>,
     /// Bound to every stream handed out, so node shutdown ends them with
-    /// [`End::Cancelled`](crossbeam_combinators::End::Cancelled) even while a consumer
+    /// [`AbortReason::Cancelled`](crossbeam_combinators::AbortReason::Cancelled) even while a consumer
     /// is parked in `recv` on a quiet log.
     shutdown: Cancellation,
     /// The node's clock, the one its writes are minted from (`hlc_now`).
@@ -266,112 +270,81 @@ impl HistoricalReplay {
         ch
     }
 
-    /// Three-phase blocking pipeline: drain `range()` until a gap, fill the
-    /// gap from the archive, then emit the gap-trigger item. Repeats until
-    /// either `until` is reached or the consumer drops.
+    /// Scan the stable log, stitching archive ranges into every gap.
+    ///
+    /// The scan is `StrictlyMonotone`: a forward jump is a gap, not a fault.
+    /// The fallback reads `[gap.expected, gap.got)` from the archive; `stitch`
+    /// buffers the gap-triggering entry and verifies that the fill is exactly
+    /// contiguous before returning a `Gapless` stream.
     async fn run(self, until: LogIndex) {
-        let mut this = self;
-        loop {
-            // Phase 1: drain range() through emit_checked until a gap.
-            let phase1_tx = this.tx.clone();
-            let (replay, gap) = match tokio::task::spawn_blocking(move || {
-                let ch = this.stable_log.range(this.expected, until);
-                for item in ch.into_iter() {
-                    let (idx, data) = match item {
-                        Ok(v) => v,
-                        Err(e) => {
-                            let _ = this.tx.send(Err(e));
-                            return (this, None);
-                        }
-                    };
-                    if idx > this.expected {
-                        return (this, Some((idx, data)));
+        let handle = tokio::runtime::Handle::current();
+        let archive = Arc::clone(&self.archive);
+        let stable_log = Arc::clone(&self.stable_log);
+        let tx = self.tx.clone();
+        let mut last_hlc = self.last_hlc;
+        let start = self.expected;
+
+        let scan = stable_log.range(start, until).map(|item| {
+            if item.is_ok() {
+                metrics::read_entry(ReadEntrySource::StableLog);
+            }
+            item
+        });
+        let ordered = OrderedChannel::<_, StrictlyMonotone<LogIndex>>::new(scan, Some(start));
+
+        let fallback_archive = Arc::clone(&archive);
+        let stitched = ordered.stitch(move |gap| {
+            let bounds = ArchiveBounds {
+                from: ArchiveLowerBound::FromIndex(gap.expected),
+                until: ArchiveUpperBound::IndexExclusive(gap.got),
+            };
+            match handle.block_on(fallback_archive.stream(bounds)) {
+                Ok(arch) => arch.map(|item| {
+                    if item.is_ok() {
+                        metrics::read_entry(ReadEntrySource::ObjectStore);
                     }
-                    this.emit_checked(idx, data, ReadEntrySource::StableLog);
-                }
-                (this, None)
-            })
-            .await
-            .to_storage("range drain panicked")
-            {
-                Ok(v) => v,
-                Err(e) => {
-                    let _ = phase1_tx.send(Err(e));
-                    return;
-                }
-            };
-            this = replay;
-            let Some((gap_idx, gap_data)) = gap else {
-                return;
-            };
+                    item.map(|entry| (entry.global_index, entry.data))
+                }),
+                Err(e) => Channels::from_vec(vec![Err(e)]),
+            }
+        });
 
-            // Phase 2: fill [expected, gap_idx) from archive.
-            let arch = match this
-                .archive
-                .stream(ArchiveBounds {
-                    from: ArchiveLowerBound::FromIndex(this.expected),
-                    until: ArchiveUpperBound::IndexExclusive(gap_idx),
-                })
-                .await
-            {
-                Ok(ch) => ch,
-                Err(e) => {
-                    let _ = this.tx.send(Err(e));
-                    return;
-                }
-            };
-            let phase2_tx = this.tx.clone();
-            let replay = match tokio::task::spawn_blocking(move || {
-                for item in arch.into_iter() {
-                    let entry = match item {
-                        Ok(e) => e,
-                        Err(e) => {
-                            let _ = this.tx.send(Err(e));
-                            return this;
+        let result = tokio::task::spawn_blocking(move || {
+            let mut ch = stitched.into_channels();
+            loop {
+                match ch.recv() {
+                    Ok(Ok((idx, data))) => {
+                        let hlc = data.data_id.hlc();
+                        assert!(
+                            last_hlc.is_none_or(|prev| hlc >= prev),
+                            "HistoricalReplay: HLC regressed from {:?} to {:?}",
+                            last_hlc,
+                            hlc
+                        );
+                        last_hlc = Some(hlc);
+                        if tx.send(Ok((idx, data))).is_err() {
+                            return;
                         }
-                    };
-                    this.emit_checked(entry.global_index, entry.data, ReadEntrySource::ObjectStore);
+                    }
+                    Ok(Err(e)) => {
+                        let _ = tx.send(Err(e));
+                        return;
+                    }
+                    Err(End::Complete) => return,
+                    Err(End::Aborted { reason }) => {
+                        let _ = tx.send(Err(Error::StreamTruncated {
+                            what: reason.to_string(),
+                        }));
+                        return;
+                    }
                 }
-                this
-            })
-            .await
-            .to_storage("archive drain panicked")
-            {
-                Ok(v) => v,
-                Err(e) => {
-                    let _ = phase2_tx.send(Err(e));
-                    return;
-                }
-            };
-            this = replay;
-
-            // Phase 3: emit the item that triggered the gap.
-            this.emit_checked(gap_idx, gap_data, ReadEntrySource::StableLog);
+            }
+        })
+        .await
+        .to_storage("historical replay consumer panicked");
+        if let Err(e) = result {
+            let _ = self.tx.send(Err(e));
         }
-    }
-
-    fn emit_checked(&mut self, idx: LogIndex, data: Data, source: ReadEntrySource) {
-        if idx < self.expected {
-            return;
-        }
-        assert_eq!(
-            idx,
-            self.expected,
-            "emit_checked: gap from {} to {} — caller must fill",
-            self.expected.raw(),
-            idx.raw()
-        );
-        let hlc = data.data_id.hlc();
-        assert!(
-            self.last_hlc.is_none_or(|prev| hlc >= prev),
-            "HistoricalReplay: HLC regressed from {:?} to {:?}",
-            self.last_hlc,
-            hlc
-        );
-        self.expected = LogIndex::next_after(Some(idx));
-        self.last_hlc = Some(hlc);
-        metrics::read_entry(source);
-        let _ = self.tx.send(Ok((idx, data)));
     }
 }
 
@@ -467,7 +440,7 @@ impl Ranged<StableCut> for StableSeam {
 /// subscriber queue is deep gets hung up on by the fan-out, which arrives as
 /// [`End::Aborted`](crossbeam_combinators::End::Aborted) *after* every event
 /// already queued — the in-band lag signal (the fan-out).
-/// [`Channels::resume_on_fault`] hands that verdict back and this closure
+/// [`Channels::resume_on_abort`] hands that verdict back and this closure
 /// answers it the way §20 prescribes for an infinite stream: resume from the
 /// last position. The caller sees one seamless stream; falling behind costs
 /// latency, not data.
@@ -498,7 +471,7 @@ fn resyncing_tail(
     let weak_stable_log = Arc::downgrade(&stable_log);
     drop((archive, stable_log));
 
-    Channels::resume_on_fault((), move |(), previous| {
+    Channels::resume_on_abort((), move |(), previous| {
         // Declining is the only termination a consumer ever observes, and it
         // reaches them as the *previous* segment's `Aborted` — under the live
         // fan-out's label, which points at the wrong culprit. Hence the lines.
@@ -690,7 +663,7 @@ fn resyncing_unstable_tail(
     let weak_stable_log = Arc::downgrade(&stable_log);
     drop((local_store, stable_log));
 
-    Channels::resume_on_fault((), move |(), previous| {
+    Channels::resume_on_abort((), move |(), previous| {
         // As in `resyncing_tail`: declining is the only termination a consumer
         // observes, under the previous segment's label, hence the lines.
         let Some(local_store) = weak_local_store.upgrade() else {
@@ -750,9 +723,13 @@ impl Reader for ReaderImpl {
         self.clock.now()
     }
 
-    fn subscribe_stable_log(&self, from: LogIndex) -> Channels<Result<StableLogEvent, Error>> {
+    fn subscribe_stable_log(&self, from: LogIndex) -> crate::StableStream {
         metrics::read_request(ReadSource::Stable);
-        resyncing_tail(self.archive.clone(), self.stable_log.clone(), from).until(&self.shutdown)
+        crate::ordered::stable_stream(
+            resyncing_tail(self.archive.clone(), self.stable_log.clone(), from)
+                .until(&self.shutdown),
+            from,
+        )
     }
 
     fn unstable_tail(&self) -> Channels<Result<Data, Error>> {
@@ -1049,6 +1026,7 @@ mod tests {
         );
         let mut stream = reader
             .subscribe_stable_log(LogIndex::ZERO)
+            .into_channels()
             .filter_map(|item| match item {
                 Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
                 Ok(StableLogEvent::Watermark(_)) => None,
@@ -1101,6 +1079,7 @@ mod tests {
 
         let mut stream = reader
             .subscribe_stable_log(LogIndex(1))
+            .into_channels()
             .filter_map(|item| match item {
                 Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
                 Ok(StableLogEvent::Watermark(_)) => None,
@@ -1197,6 +1176,7 @@ mod tests {
         // filled from the archive), 3,4 from the local log.
         let mut stream = reader
             .subscribe_stable_log(LogIndex(0))
+            .into_channels()
             .filter_map(|item| match item {
                 Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
                 Ok(StableLogEvent::Watermark(_)) => None,
@@ -1445,6 +1425,7 @@ mod tests {
 
         let mut stream = reader
             .subscribe_stable_log(LogIndex::ZERO)
+            .into_channels()
             .filter_map(|item| match item {
                 Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
                 Ok(StableLogEvent::Watermark(_)) => None,
@@ -1618,6 +1599,7 @@ mod tests {
         let (_dir, reader) = scripted_reader(stable_log, store, handle).await;
         let mut stream = reader
             .subscribe_stable_log(LogIndex(0))
+            .into_channels()
             .filter_map(|item| match item {
                 Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
                 Ok(StableLogEvent::Watermark(_)) => None,
@@ -1673,6 +1655,7 @@ mod tests {
         let (_dir, reader) = scripted_reader(stable_log, store, handle).await;
         let mut stream = reader
             .subscribe_stable_log(LogIndex(0))
+            .into_channels()
             .filter_map(|item| match item {
                 Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
                 Ok(StableLogEvent::Watermark(_)) => None,
@@ -1949,7 +1932,7 @@ mod tests {
         assert!(matches!(stream.recv(), Ok(Err(crate::Error::NotReady(_)))));
     }
 
-    /// Node shutdown ends a quiet unstable subscription with `End::Cancelled`.
+    /// Node shutdown ends a quiet unstable subscription with `AbortReason::Cancelled`.
     #[tokio::test(flavor = "multi_thread")]
     async fn shutdown_cancels_a_quiet_unstable_subscription() {
         let (handle, shutdown) = crossbeam_combinators::CancelHandle::new();
@@ -1971,7 +1954,12 @@ mod tests {
             .await
             .expect("shutdown did not wake the subscription")
             .expect("recv panicked");
-        assert_eq!(end, crossbeam_combinators::End::Cancelled);
+        assert_eq!(
+            end,
+            crossbeam_combinators::End::Aborted {
+                reason: crossbeam_combinators::AbortReason::Cancelled,
+            }
+        );
     }
 
     #[derive(Debug, Clone)]
@@ -2146,7 +2134,7 @@ mod tests {
     }
 
     /// Node shutdown ends a stable-log subscription parked on a log that has
-    /// gone quiet with `End::Cancelled`. Nothing else would wake it: the reader
+    /// gone quiet with `AbortReason::Cancelled`. Nothing else would wake it: the reader
     /// still holds the stable log, so its fan-out never hangs up.
     #[tokio::test(flavor = "multi_thread")]
     async fn shutdown_cancels_a_quiet_stable_log_subscription() {
@@ -2186,7 +2174,12 @@ mod tests {
             .await
             .expect("shutdown did not wake the subscription")
             .expect("recv panicked");
-        assert_eq!(end, crossbeam_combinators::End::Cancelled);
+        assert_eq!(
+            end,
+            crossbeam_combinators::End::Aborted {
+                reason: crossbeam_combinators::AbortReason::Cancelled,
+            }
+        );
         drop(stable_log);
     }
 

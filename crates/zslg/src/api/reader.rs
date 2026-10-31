@@ -33,7 +33,7 @@
 use crate::Error;
 use crate::hlc::Hlc;
 use crate::ids::LogIndex;
-use crate::meta::{Data, StableLogEvent, UnstableEvent};
+use crate::meta::{Data, UnstableEvent};
 use crossbeam_combinators::Channels;
 
 #[async_trait::async_trait]
@@ -64,7 +64,7 @@ pub trait Reader: Send + Sync + 'static {
     /// replay from its own cursor and rejoins the live tail, as often as
     /// necessary. What the caller observes is one gapless, index-ordered
     /// stream; falling behind costs latency, not data.
-    fn subscribe_stable_log(&self, from: LogIndex) -> Channels<Result<StableLogEvent, Error>>;
+    fn subscribe_stable_log(&self, from: LogIndex) -> crate::StableStream;
 
     /// One-shot scan of entries strictly above the watermark. Emitting one at or
     /// below it would duplicate `stable_tail` (CLAUDE.md §12).
@@ -82,6 +82,6 @@ pub trait Reader: Send + Sync + 'static {
     /// Infinite: a consumer that falls behind is resynced silently (replay
     /// everything above the watermark, then live), so any termination is
     /// [`End::Aborted`](crossbeam_combinators::End::Aborted), and node shutdown is
-    /// [`End::Cancelled`](crossbeam_combinators::End::Cancelled).
+    /// [`AbortReason::Cancelled`](crossbeam_combinators::AbortReason::Cancelled).
     fn subscribe_unstable_tail(&self) -> Channels<Result<UnstableEvent, Error>>;
 }

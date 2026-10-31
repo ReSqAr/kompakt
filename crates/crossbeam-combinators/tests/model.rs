@@ -12,8 +12,18 @@
 //! `try_recv` and `recv` to the same result, which is the contract the routing
 //! rewrites must preserve.
 
-use crossbeam_combinators::{Channels, End, Feed, Ranged, Tail, blend_chain};
+use crossbeam_combinators::{AbortReason, Channels, End, Feed, Ranged, Tail, blend_chain};
 use proptest::prelude::*;
+
+/// A segment with items already queued, then a disconnect without a close.
+fn aborted(items: Vec<u64>) -> Channels<u64> {
+    let (tx, rx) = crossbeam_channel::bounded(items.len().max(1));
+    for item in items {
+        tx.send(item).unwrap();
+    }
+    drop(tx);
+    Channels::from_infinite(rx, "aborted")
+}
 
 #[derive(Debug, Clone)]
 enum Node {
@@ -140,8 +150,8 @@ proptest! {
         let (got_try, end_try) = collect_try(&node);
         let (got_recv, end_recv) = collect_recv(&node);
 
-        prop_assert_eq!(end_try, End::Closed);
-        prop_assert_eq!(end_recv, End::Closed);
+        prop_assert_eq!(end_try, End::Complete);
+        prop_assert_eq!(end_recv, End::Complete);
 
         let mut want_sorted = want.clone();
         let mut try_sorted = got_try.clone();
@@ -165,26 +175,47 @@ proptest! {
         let (got_try, end_try) = collect_try(&node);
         let (got_recv, end_recv) = collect_recv(&node);
 
-        prop_assert_eq!(end_try, End::Aborted { what: "aborted" });
-        prop_assert_eq!(end_recv, End::Aborted { what: "aborted" });
+        prop_assert_eq!(end_try, End::Aborted { reason: AbortReason::ProducerGone { what: "aborted" } });
+        prop_assert_eq!(end_recv, End::Aborted { reason: AbortReason::ProducerGone { what: "aborted" } });
         prop_assert!(is_multiset_subset(&got_try, &want));
         prop_assert!(is_multiset_subset(&got_recv, &want));
     }
 
     #[test]
-    fn resume_on_fault_concatenates_segments(segments in prop::collection::vec(prop::collection::vec(0u64..100, 0..5), 0..6)) {
-        let mut ch = Channels::resume_on_fault(0usize, {
+    fn resume_on_abort_concatenates_aborted_segments(segments in prop::collection::vec(prop::collection::vec(0u64..100, 0..5), 0..6)) {
+        let mut ch = Channels::resume_on_abort(0usize, {
             let segments = segments.clone();
             move |next, _previous| {
                 let segment = segments.get(*next)?;
                 *next += 1;
-                Some(Channels::from_vec(segment.clone()))
+                Some(aborted(segment.clone()))
             }
         });
         let got: Vec<u64> = std::iter::from_fn(|| ch.recv().ok()).collect();
-        let want: Vec<u64> = segments.into_iter().flatten().collect();
+        let want: Vec<u64> = segments.iter().flatten().copied().collect();
         prop_assert_eq!(got, want);
-        prop_assert_eq!(ch.end_reason(), End::Closed);
+        if segments.is_empty() {
+            prop_assert_eq!(ch.end_reason(), End::Complete);
+        } else {
+            prop_assert_eq!(
+                ch.end_reason(),
+                End::Aborted {
+                    reason: AbortReason::ProducerGone { what: "aborted" }
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn take_while_is_the_matching_prefix(
+        items in prop::collection::vec(0u64..100, 0..20),
+        cut in 0u64..100,
+    ) {
+        let mut ch = Channels::from_vec(items.clone()).take_while(move |v| *v < cut);
+        let got: Vec<u64> = std::iter::from_fn(|| ch.recv().ok()).collect();
+        let want: Vec<u64> = items.iter().copied().take_while(|v| *v < cut).collect();
+        prop_assert_eq!(&got, &want);
+        prop_assert_eq!(ch.end_reason(), End::Complete);
     }
 
     #[test]
@@ -195,7 +226,7 @@ proptest! {
         while let Some(batch) = ch.ready_batch(batch_size) {
             got.extend(batch);
         }
-        prop_assert_eq!(ch.end_reason(), End::Closed);
+        prop_assert_eq!(ch.end_reason(), End::Complete);
 
         let mut want_sorted = want.clone();
         let mut got_sorted = got.clone();

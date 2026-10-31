@@ -56,7 +56,7 @@ impl<T> Feed<T> {
 
     /// Declare the stream complete: everything meant to be sent has been sent.
     /// This closes before the data sender drops, so the consumer sees
-    /// `End::Closed` after draining.
+    /// `End::Complete` after draining.
     pub fn close(self) {
         let Self { tx, closer } = self;
         closer.close();
@@ -69,6 +69,7 @@ impl<T> Feed<T> {
 mod tests {
     use super::*;
     use crate::End;
+    use crate::channel::AbortReason;
 
     #[test]
     fn close_yields_closed_after_draining() {
@@ -78,7 +79,7 @@ mod tests {
         feed.close();
         assert_eq!(ch.recv(), Ok(1));
         assert_eq!(ch.recv(), Ok(2));
-        assert_eq!(ch.recv(), Err(End::Closed));
+        assert_eq!(ch.recv(), Err(End::Complete));
     }
 
     #[test]
@@ -87,7 +88,12 @@ mod tests {
         assert!(feed.send(1));
         drop(feed);
         assert_eq!(ch.recv(), Ok(1));
-        assert_eq!(ch.recv(), Err(End::Aborted { what: "test" }));
+        assert_eq!(
+            ch.recv(),
+            Err(End::Aborted {
+                reason: AbortReason::ProducerGone { what: "test" }
+            })
+        );
     }
 
     #[test]
@@ -98,7 +104,12 @@ mod tests {
             panic!("scan blew up");
         });
         assert!(handle.join().is_err());
-        assert_eq!(ch.recv(), Err(End::Aborted { what: "scan" }));
+        assert_eq!(
+            ch.recv(),
+            Err(End::Aborted {
+                reason: AbortReason::ProducerGone { what: "scan" }
+            })
+        );
     }
 
     #[test]
@@ -119,7 +130,12 @@ mod tests {
     fn a_feed_discarded_before_it_runs_aborts() {
         let (feed, mut ch) = Feed::<u32>::channel(4, "never ran");
         drop(feed);
-        assert_eq!(ch.recv(), Err(End::Aborted { what: "never ran" }));
+        assert_eq!(
+            ch.recv(),
+            Err(End::Aborted {
+                reason: AbortReason::ProducerGone { what: "never ran" }
+            })
+        );
     }
 
     /// A consumer parked in `recv` is woken by a later `Feed::send`, and the
@@ -133,7 +149,7 @@ mod tests {
             feed.close();
         });
         assert_eq!(ch.recv(), Ok(7));
-        assert_eq!(ch.recv(), Err(End::Closed));
+        assert_eq!(ch.recv(), Err(End::Complete));
         producer.join().unwrap();
     }
 }

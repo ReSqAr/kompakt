@@ -19,7 +19,7 @@ use crate::api::{
 };
 use crate::error::Error;
 use crate::ids::{LogIndex, NodeId, PeerAddr};
-use crate::meta::{Data, ReplicaStatus};
+use crate::meta::ReplicaStatus;
 use crate::network::client::{RpcClient, Target};
 use crate::network::messages::{
     RpcFrame, RpcRaftFrame, RpcRaftRequest, RpcReplicaFrame, RpcReplicaRequest, RpcRequest,
@@ -133,10 +133,10 @@ impl Replica for TcpPeerClient {
         }
     }
 
-    fn subscribe_from(&self, from: Option<LogIndex>) -> Channels<Result<(LogIndex, Data), Error>> {
+    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::ordered::ReplicaStream {
         match &self.target {
             Target::Registered(node_id) => self.rpc_client.subscribe_from(*node_id, from),
-            Target::Direct(_) => Channels::from_vec(vec![]),
+            Target::Direct(_) => crate::ordered::replica_stream(Channels::from_vec(vec![]), from),
         }
     }
 
