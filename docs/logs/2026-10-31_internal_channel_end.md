@@ -48,3 +48,45 @@ part of `End`'s identity or an exception.
 4. How do `chain`, `merge`, `Guarded` and `resume_on_fault` compose a consumer
    stop? (They already compose `Cancelled`; that is the precedent.)
 5. Only after this: `OrderedChannel` at trait boundaries.
+
+## Update after Q1
+
+- The user treats `Cancelled` as the exception, so the working model is:
+  `End` is producer/integrity-first; cancellation is a consumer-side stop that
+  currently shares the type.
+- My stronger belief now: removing `Cancelled` from `End` is possible, but only
+  by introducing a second consumer-visible terminal type (`Stop`/`Recv`) or an
+  outermost `Cancellable`. It does not reduce the number of concepts; it moves
+  the consumer stop out of `End`.
+- `take_while` is a different case from cancellation. Its bound is a **clean
+  completion of the derived stream**, whereas cancellation is a **stop request
+  with possible missing items**. That distinction is why `take_while` might use
+  `Closed` while `Cancelled` cannot.
+- If the caller must distinguish "bound reached" from "source closed early",
+  that is a domain completeness check, not necessarily a channel verdict. The
+  domain already models this with in-band terminals.
+
+## Predicted answer to Q2
+
+I expect the user to reject S3 (mapping cancellation to `Closed`) because it
+loses the stop contract and changes merge/chain behavior. I expect either:
+
+- keep `Cancelled` as the exception (S4), and keep `take_while` out of the
+  channel verdict or handle it at the call site; or
+- choose S1 if they want the clean two-level model and are willing to pay the
+  wide diff.
+
+My recommendation will be S4 unless the user explicitly wants to remove the
+exception as a design goal: S1 is coherent but expensive, and the exception is
+semantically real. The cheaper win is to stop trying to put the `take_while`
+bound into `End`.
+
+## Next likely questions
+
+1. Does `take_while` need to be a `Channels` method, or a consumer-side loop
+   that returns `Bound`/`ShortRead`?
+2. If it stays a method, does it report `Closed` for the bound, and leave
+   short-read detection to the domain?
+3. If `Cancelled` stays, does `End` need a small doc/name overhaul even without
+   a new variant?
+4. Only after this: `OrderedChannel` at trait boundaries.

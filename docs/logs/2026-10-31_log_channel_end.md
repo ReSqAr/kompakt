@@ -68,3 +68,77 @@ If `End` stays producer/integrity-only, `take_while` needs one of:
 - no `take_while` at all, keeping the loop at the call site.
 
 This is deliberately not decided before Q1.
+
+## Q1 — Provisional resolution
+
+Status: `Cancelled` is the exception. `End` should be read as a
+producer/integrity verdict first; cancellation is a consumer-side stop that
+happens to live in the same return type.
+
+This does not yet say whether that exception is acceptable or should move.
+
+## Q2 — Can `Cancelled` be removed from `End`?
+
+Status: open.
+
+The direct answer is: it can move, but it cannot disappear. Cancellation is a
+consumer action, not a producer outcome. Something still has to carry it.
+
+Options:
+
+### S1 — Split the return type
+
+```text
+  End  = Closed | Aborted { what }          producer verdict
+  Stop = End(End) | Cancelled | Bounded     consumer-visible stop
+  recv() -> Result<T, Stop>
+```
+
+- `End` becomes producer-only; `Cancelled` and `take_while`'s bound both live
+  in `Stop`.
+- The exception is gone from `End`, but the same information is one level up.
+- Wide diff: every `recv`/`end_reason` caller and every composite source
+  (`chain`, `merge`, `Guarded`, `resume_on_fault`) must learn `Stop`.
+- Composition still needs to distinguish `Cancelled` (hard stop) from `Bounded`
+  (clean end of a bounded source) and `End::Closed` (clean producer close).
+
+### S2 — Outermost-only `Cancellable`
+
+```text
+  End stays { Closed, Aborted, Cancelled }
+  until() returns Cancellable<T>, not Channels<T>
+  Cancellable::recv() -> Result<T, CancelledOr<End>>
+```
+
+- Cancellation is type-level "outermost only"; it cannot be merged or chained.
+- `End` is untouched internally, but `Cancelled` still exists in the wrapper.
+- Breaks `until` as a graph combinator; every `until` call site is a boundary
+  change.
+
+### S3 — Map cancellation to `Closed`; caller checks the handle
+
+- `until` drops the source and reports `Closed`; the caller already owns the
+  `Cancellation` and can ask `is_cancelled()`.
+- Smallest type change, but `Closed` no longer distinguishes "producer
+  completed" from "consumer cancelled"; composites would treat cancellation as
+  a clean branch and keep survivors.
+- Only safe if `until` is enforced as the outermost layer.
+
+### S4 — Keep the exception
+
+- `Cancelled` stays in `End`; `take_while` gets no new `End` variant.
+- The bound is either handled at the call site or carried in-band by the domain
+  (`nvzn::FoldItem::ReplayDone`, `zslg::WindowItem` terminals).
+
+Recommendation to discuss: S1 is the only option that actually removes the
+exception from `End` without lying about the producer. S2/S3 move or hide it.
+S4 is the status quo, and the domain already has in-band terminals for bounded
+completion.
+
+## Q3 — If `End` stays producer/integrity, does `take_while` belong in `Channels`?
+
+Status: blocked on Q2.
+
+A bounded read may be a consumer loop that returns its own completion, not a
+channel combinator. That would keep `End` small and put "did I reach the cut?"
+next to the predicate that defines the cut.
