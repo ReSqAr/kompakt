@@ -331,6 +331,9 @@ where
         let inner = Channels {
             source: Box::new(stitched),
         };
+        // `StitchSource` already returns a gapless sequence. The outer
+        // Gapless check is deliberate defence-in-depth: do not remove it as
+        // "redundant" without preserving the same guarantee another way.
         OrderedChannel::<T, Gapless<K>>::new(inner, self.start)
     }
 }
@@ -513,7 +516,21 @@ where
                 }
                 PrimaryStep::Gap => {
                     self.primary = Some(primary);
-                    Poll::Filtered
+                    // A fallback can be born with no live leaves, e.g.
+                    // `chain_all([])`. `recv` would then see leaf_count 0 and
+                    // read the empty fallback's Complete as the stream's end,
+                    // silently dropping the buffered item. Close it through the
+                    // same path as a drained fallback so coverage is checked.
+                    let Some(mut fallback) = self.fallback_source.take() else {
+                        return Poll::Filtered;
+                    };
+                    if fallback.leaf_count() == 0 {
+                        let end = fallback.end_reason();
+                        self.fallback_end(end)
+                    } else {
+                        self.fallback_source = Some(fallback);
+                        Poll::Filtered
+                    }
                 }
                 PrimaryStep::Failed => Poll::Dead,
             },
@@ -569,7 +586,20 @@ where
                         self.primary = Some(primary);
                         // The fallback is now active; drain it on the next
                         // iteration rather than polling the primary past the
-                        // buffered gap-triggering item.
+                        // buffered gap-triggering item. If it has no live
+                        // leaves, close it now so its Complete cannot be read
+                        // as the stitched stream's end.
+                        let Some(mut fallback) = self.fallback_source.take() else {
+                            continue;
+                        };
+                        if fallback.leaf_count() == 0 {
+                            let end = fallback.end_reason();
+                            return match self.fallback_end(end) {
+                                Poll::Got(item) => Some(item),
+                                _ => None,
+                            };
+                        }
+                        self.fallback_source = Some(fallback);
                         continue;
                     }
                     PrimaryStep::Failed => return None,
@@ -626,7 +656,8 @@ mod tests {
 
     impl Successor for u64 {
         fn next(self) -> Self {
-            self.saturating_add(1)
+            self.checked_add(1)
+                .unwrap_or_else(|| panic!("test key exhausted"))
         }
     }
 
@@ -778,6 +809,21 @@ mod tests {
         assert_eq!(ch.recv(), Ok(Some(3)));
         assert_eq!(ch.recv(), Ok(Some(4)));
         assert_eq!(ch.recv(), Err(End::Complete));
+    }
+
+    #[test]
+    fn stitch_with_empty_fallback_aborts_instead_of_completing() {
+        let mut ch = strict(vec![1, 4, 5], Some(1))
+            .stitch(|_| Channels::chain_all(Vec::<Channels<u64>>::new()));
+        assert_eq!(ch.recv(), Ok(1));
+        assert_eq!(
+            ch.recv(),
+            Err(End::Aborted {
+                reason: AbortReason::OrderViolation {
+                    what: "stitch fallback"
+                }
+            })
+        );
     }
 
     #[test]

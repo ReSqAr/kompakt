@@ -46,8 +46,8 @@ Deviations:
   runtime-agnostic.
 - No-key fallback items pass through without advancing coverage; this carries
   archive error items while the endpoint check still applies.
-- Gap metrics are deferred; `subscription_purge_gaps` is retained but unused,
-  and `subscription_reorder` still fires on an order violation.
+- Gap metrics are removed; `subscription_reorder` still fires on an order
+  violation.
 - The old nvzn duplicate-index fold tests and zslg order-classifier tests are
   removed because the new contracts make those inputs unrepresentable.
 
@@ -69,6 +69,7 @@ Deviations:
 
 - Optional `metrics` feature for accepted gaps.
 - Extend `OrderedChannel` to HLC/window `LocalStoreView` boundaries.
-- Revisit `take_while` use in nvzn's live scan if the short-read distinction can
-  be carried by a domain terminal.
+- `take_while` has no production users; nvzn's live scan keeps its manual break
+  because it needs the cut-vs-source-close distinction. Keep it as a crate
+  primitive or reconsider it separately.
 - Run the full workspace/clippy matrix before merging.

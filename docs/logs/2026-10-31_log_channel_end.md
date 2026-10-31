@@ -1166,5 +1166,5 @@ follow once the ordered type is in use.
 - `LocalStoreView` HLC/window boundaries remain plain `Channels` for now.
 - The nvzn duplicate-index fold tests and zslg order-classifier tests are gone:
   those inputs are unrepresentable under the new strict/gapless contracts.
-  `subscription_purge_gaps` remains defined but unused until the optional
-  metrics feature; `subscription_reorder` still fires on an order violation.
+  The old purge-gap metric was removed; `subscription_reorder` still fires on
+  an order violation.

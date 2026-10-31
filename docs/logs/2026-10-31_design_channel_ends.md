@@ -330,9 +330,9 @@ zslg/nvzn:
 - **Public API break.** `End::Closed` becomes `End::Complete`; `Cancelled` moves
   under `AbortReason`; `resume_on_fault` becomes `resume_on_abort`. Downstream
   crates in this workspace update in the same change.
-- **Metrics.** `subscription_purge_gaps` is temporarily not emitted at the
-  ordered boundaries. Correctness is unaffected. A later optional `metrics`
-  feature can add a counter/observer additively.
+- **Metrics.** The old purge-gap counter is removed. Correctness is
+  unaffected. A later optional `metrics` feature can add an observer/counter
+  additively.
 - **Performance.** Key extraction and policy checks are per keyed item, static
   dispatch. `stitch` buffers one item. No extra copies otherwise.
 - **Dependencies/unsafe.** None added.
@@ -351,8 +351,7 @@ The first implementation covers:
 - nvzn's zslg reader stubs and live seam updated.
 
 The HLC/window `LocalStoreView` boundaries remain plain `Channels` for now;
-`subscription_purge_gaps` is retained but unused until the optional metrics
-feature.
+Gap metrics are removed until the optional metrics feature.
 
 ## 16. Deferred
 

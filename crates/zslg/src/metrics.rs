@@ -636,14 +636,6 @@ metrics!(logs; {
         "log_subscription_reconnects_total"
         "Subscription reconnects (learner side). Sustained rate = flaky \
          link or replica restarts.";
-    custom  subscription_purge_gaps LOG_SUBSCRIPTION_PURGE_GAPS_TOTAL
-        "log_subscription_purge_gaps_total" Counter None
-        "Purge-induced gaps observed while a learner's subscription \
-         resumed across indices a replica had already purged (benign — \
-         the data is in a snapshot and is recovered via the stable log; \
-         sync_quorum gates on the stable log so reads do not see the \
-         gap). Sustained rate = a learner persistently lagging snapshot \
-         load behind the purge grace period.";
     counter subscription_reorder LOG_SUBSCRIPTION_REORDERS_TOTAL
         "log_subscription_reorders_total"
         "Subscription streams closed because a replica's delivered index \
@@ -651,9 +643,7 @@ metrics!(logs; {
          gapless and single-writer and is read in index order, so this \
          should always be zero: any non-zero value means local \
          replica-log corruption on the serving replica, which warrants \
-         the wipe + new NodeId procedure. Distinct from \
-         log_subscription_purge_gaps_total, which counts benign FORWARD \
-         jumps across purged indices.";
+         the wipe + new NodeId procedure.";
     custom  subscription_messages LOG_SUBSCRIPTION_MESSAGES_TOTAL
         "log_subscription_messages_total" Counter None
         "Records received via log subscription (learner side). \
@@ -681,17 +671,6 @@ pub(crate) fn log_index_frontier(log_type: LogType, index: u64) {
         LABEL_LOG_TYPE => log_type.as_str(),
     )
     .set(lossy_f64(index));
-}
-
-#[allow(
-    dead_code,
-    reason = "reserved for the optional ordered-channel metrics feature"
-)]
-pub(crate) fn subscription_purge_gaps(count: u64) {
-    if count == 0 {
-        return;
-    }
-    metrics::counter!(LOG_SUBSCRIPTION_PURGE_GAPS_TOTAL).increment(count);
 }
 
 pub(crate) fn subscription_messages(count: usize) {
