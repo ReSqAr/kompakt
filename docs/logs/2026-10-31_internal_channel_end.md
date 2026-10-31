@@ -163,3 +163,35 @@ forget vs discarded task).
    `ProducerGone`.
 2. Whether `End::Complete` is the final name, or `Finished`/`Done`.
 3. Then `OrderedChannel` at trait boundaries.
+
+## Update after Q6
+
+- `End` is settled: `Complete | Aborted { reason }`, with the five public
+  `AbortReason` variants. The top level is ok/not-ok; the reason carries the
+  detail.
+- `take_while -> Complete`; `Cancelled` and `CancelHandleDropped` are aborts,
+  not clean ends.
+- The next topic is `OrderedChannel`. The key question is whether it is a
+  checked view (reports order events) or a policy-enforcing channel (drops
+  duplicates, handles gaps, stops on regression). The latter is what could
+  replace `detect_purge_gap` and `classify_order`.
+- I expect the user to prefer naming the invariant in the type, but the
+  enforcement policy still needs runtime configuration because the learner and
+  the server writer disagree about backwards indices. A single
+  `OrderedChannel<T>` with `OrderPolicy` is the likely compromise.
+
+## Predicted answer to Q7
+
+The user will want the policy-enforcing form at the boundary, with the invariant
+visible in the name. They may accept one type plus a policy, or ask for a
+marker type parameter for gapless. I should ask which contract they want before
+designing the API.
+
+## Next likely questions
+
+1. Which boundaries get `OrderedChannel` first: `Replica::subscribe_from`,
+   `Reader::subscribe_stable_log`, or both?
+2. What is the policy split: gapless vs monotone/purge-tolerant?
+3. Does a violation become `End::Aborted(RoutingViolation)` or an
+   `OrderEvent`?
+4. How do metrics/logging attach without pushing domain policy into the crate?

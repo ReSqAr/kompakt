@@ -283,3 +283,56 @@ should the public enum expose only reasons a caller can act on
 (`ProducerGone`, `Cancelled`, `CancelHandleDropped`), with the internal
 `ConsumerGone`/`RoutingViolation` folded into `ProducerGone { what }`; or should
 every current abort source have its own variant?
+
+## Q5/Q6 — Resolution
+
+Status: settled.
+
+```text
+  End = Complete
+      | Aborted { reason: AbortReason }
+
+  AbortReason =
+      ProducerGone { what }       data channel disconnected without close
+    | Cancelled                   Cancellation fired
+    | CancelHandleDropped         handle dropped without firing
+    | ConsumerGone { what }       liveness guard lost
+    | RoutingViolation { what }   internal ordinal invariant broken
+```
+
+All five reasons are public. `what` names the producer/guard/leaf. `Complete`
+replaces `Closed` as the only clean end; `take_while` ends `Complete`.
+`chain`/`merge` only need `Complete` vs `Aborted`; code that cares about
+shutdown matches `AbortReason::Cancelled`.
+
+## Q7 — What is `OrderedChannel` at the trait boundary?
+
+Status: open.
+
+`OrderedChannel` is the next topic. The boundary candidates are the traits that
+already promise order:
+
+```text
+  Replica::subscribe_from         index-ordered, resumable
+  Reader::subscribe_stable_log    gapless, index-ordered
+  StableLogSnapshot::range        index-ordered range
+```
+
+The contract choice:
+
+1. **Checked view.** `OrderedChannel<T>` yields items plus an `OrderEvent`
+   (duplicate, gap, regression); the consumer decides what to do. It replaces
+   assertions such as `emit_checked`, but not `detect_purge_gap` /
+   `classify_order`.
+2. **Policy-enforcing.** `OrderedChannel<T>` owns a policy (gapless vs
+   monotone), drops duplicates, tolerates or rejects gaps, and stops on
+   regression; an observer callback feeds metrics. It replaces
+   `detect_purge_gap` and `classify_order`, but cannot replace
+   `HistoricalReplay`'s gap-fill (there a gap is control flow, not an error).
+3. **Type-level policy.** `OrderedChannel<T, Gapless>` vs
+   `OrderedChannel<T, Monotone>`; stronger naming, more combinations and
+   generic plumbing.
+
+Working recommendation: one `OrderedChannel<T>` with a policy value and an
+observer, used only at the subscription boundaries. Keep `HistoricalReplay`'s
+gap-fill producer-side. Do not multiply channel types for every combination.
