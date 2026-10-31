@@ -376,3 +376,31 @@ domain keys but makes the successor a runtime choice.
 3. `stitch` coverage verification.
 4. `retry_on_fault` final name.
 5. Implementation sequencing.
+
+## Update after Q21
+
+- The user's `From<&T>` idea is close but not sufficient: no `Option`, and the
+  contract is wrong for non-positional items. `Key<T>` with
+  `fn key(item: &T) -> Option<Self>` is the right trait.
+- This removes the key closure from `OrderedChannel`: `K: Key<T>` names the key
+  and its extraction. Same `T`, different keys still works because each `K`
+  implements `Key<T>`.
+- `Successor` stays a trait on `K`, only for `Gapless`/`stitch`.
+- Trait structure is now: `Key<T>` (public), `Successor` (public), policy
+  markers + private `Policy<K>`.
+- The main risk is context-dependent extraction; a newtype key covers it
+  without polluting the common API.
+
+## Predicted answer to Q22
+
+The user will accept `K: Key<T>` because they proposed a trait bound and dislike
+adding the key to the item. They may want a closure escape hatch for
+context-dependent keys; I should mention it as a later option, not the default.
+
+## Next likely questions
+
+1. Final `Key<T>` signature (`&T` vs `&mut T`, `Option<K>`).
+2. `Gap<K>` and fallback signature.
+3. `stitch` coverage verification.
+4. `retry_on_fault` final name.
+5. Implementation sequencing.

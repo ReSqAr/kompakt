@@ -756,3 +756,51 @@ Proposed structure:
 If a key ever needs context-dependent successor semantics, wrap the key in a
 newtype and implement `Successor` for that; do not add a second closure to the
 common case.
+
+## Q21 — `K: From<&T>` or a key trait?
+
+Status: leaning.
+
+`From<&T>` is too weak for this use:
+
+- it is infallible, but `Watermark`/error items have no key; extraction must
+  return `Option<K>`;
+- it is a total conversion, which is the wrong contract for "this item
+  participates in the order";
+- it cannot capture context, and it is a std trait chosen for a domain concept
+  that deserves its own name.
+
+The trait version of the idea is:
+
+```text
+  pub trait Key<T>: Copy + Ord + Send + 'static {
+      fn key(item: &T) -> Option<Self>;
+  }
+```
+
+`K` implements `Key<T>`, not the other way around. This still supports the same
+`T = Data` with different keys: `Hlc` and `(Hlc, DataId)` each implement
+`Key<Data>`. If one `(T, K)` pair needs a second extraction rule, wrap the key
+in a newtype; do not add a closure to the common path.
+
+Then `OrderedChannel<T, K, P>` needs no stored key closure:
+
+```text
+  K: Key<T>          extraction
+  K: Ord             StrictlyMonotone / NonDecreasing
+  K: Successor       Gapless / stitch
+  P: Policy<K>       private check/advance trait
+```
+
+This is more type-level than the closure constructor: the key is a named
+concept, and the extraction rule is part of its implementation.
+
+## Q22 — Keep the closure constructor?
+
+Status: blocked on Q21.
+
+If `Key<T>` is accepted, remove the closure parameter. If we need
+context-dependent extraction, provide an explicit escape hatch later rather
+than making every ordered channel carry a closure.
+
+Recommendation: `K: Key<T>`; no closure on the common path.
