@@ -925,8 +925,10 @@ impl<Ev> Inner<Ev> {
     fn serves(&self, d: DataId) -> bool {
         let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         match &state.coverage {
-            Coverage::NotStarted | Coverage::Overflowed { .. } => false,
+            Coverage::NotStarted => false,
+            // Overflowed too: a snapshot then serves store@F, which has it.
             _ if state.folded.covers(d) => true,
+            Coverage::Overflowed { .. } => false,
             Coverage::Scanning { held, .. } | Coverage::Complete { held, .. } => {
                 held.contains_key(&d)
             }
@@ -1121,6 +1123,34 @@ mod tests {
                 .await,
             Wait::TimedOut
         );
+    }
+
+    /// Overflowed, an entry the fold has passed is in store@F, which is what
+    /// a snapshot serves: the wait answers at once, though the view has not
+    /// recovered.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn wait_for_sees_a_folded_entry_while_overflowed() {
+        let (store, log, reader) = rig().await;
+        let live = reader
+            .live_started::<Users>(LiveLimits {
+                max_held_events: 2,
+                max_held_bytes: usize::MAX,
+            })
+            .unwrap();
+        for (i, ms) in [10u64, 11, 12].into_iter().enumerate() {
+            let id = u128::try_from(i).unwrap();
+            log.push_unstable_at(data_id(ms, ms), blob(&[new_user(id, "x")]));
+        }
+        settle(&live, |l| coverage(l) == "overflowed").await;
+        let d = data_id(10, 10);
+        set_f(&store, d);
+        let inner = Arc::clone(&live.inner);
+        tokio::task::spawn_blocking(move || inner.retire_now())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(coverage(&live), "overflowed", "F is below `until`");
+        assert_eq!(live.wait_for(d, SHORT).await, Wait::Seen);
     }
 
     /// Not started yet: the stable snapshot is served, and a wait that ends

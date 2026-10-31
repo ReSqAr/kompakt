@@ -195,10 +195,10 @@ impl<Ev: WithWireFormat> Reader<Ev> {
     ///
     /// Returns at once and starts itself once the fold has caught up
     /// ([`sync`](Self::sync)): until then it serves the stable snapshot and
-    /// [`Live::wait_for`] waits for the start (or times out). An empty `S`
-    /// never starts. Starting opens the unstable tail and scans the stable log
-    /// from the store's watermark up to the stable one (the first snapshots
-    /// wait for that, once).
+    /// [`Live::wait_for`] waits through the start. An empty `S` never starts.
+    /// Starting opens the unstable tail and scans the stable log from the
+    /// store's watermark up to the stable one (the first snapshots wait for
+    /// that, once).
     ///
     /// Needs a tokio runtime (it spawns its tasks); fails like
     /// [`snapshot`](Self::snapshot) once the fold has stopped.
