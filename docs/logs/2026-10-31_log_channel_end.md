@@ -336,3 +336,64 @@ The contract choice:
 Working recommendation: one `OrderedChannel<T>` with a policy value and an
 observer, used only at the subscription boundaries. Keep `HistoricalReplay`'s
 gap-fill producer-side. Do not multiply channel types for every combination.
+
+## Q7 — Resolution: enforce, policy owns duplicates
+
+Status: settled direction.
+
+`OrderedChannel` enforces a policy. It does **not** silently drop duplicates;
+whether a duplicate is allowed or a violation is part of the policy.
+
+Closed policy set (no user-defined policies for now):
+
+```text
+  Contiguous       key == next(expected)   gaps, duplicates = violation
+  StrictMonotone   key > previous          gaps allowed, duplicates/regression = violation
+  NonDecreasing    key >= previous         gaps allowed, duplicates allowed, regression = violation
+```
+
+"Enforce" means the channel aborts with an order-violation reason; it never
+filters items on its own. A caller that wants to drop duplicates does so
+explicitly after the channel.
+
+## Q8 — Order violation reason and typed position
+
+Status: open.
+
+Add an abort reason:
+
+```text
+  OrderViolation { what, kind }
+  kind = Gap | Duplicate | Regression
+```
+
+`End` is not generic, so the typed `expected`/`got` cannot live in
+`AbortReason` without making the whole end type generic. The proposed hook is
+an observer:
+
+```text
+  OrderEvent<K> =
+      Gap { expected, got }
+    | Duplicate { expected, got }
+    | Regression { expected, got }
+```
+
+The observer sees the typed event; `End` carries only the kind. The domain uses
+the observer for metrics and for the replay cursor.
+
+## Q8b — HistoricalReplay decomposition
+
+The replay should be expressible with existing primitives:
+
+```text
+  stable-log scan with Contiguous policy
+      -> gap => End::Aborted(OrderViolation { kind: Gap })
+      -> resume_on_fault inspects the reason
+      -> builds archive.range(expected, got).chain(scan-from-got)
+      -> repeats until the scan reaches its bound
+```
+
+The domain supplies the key, the archive range, and the cursor; the crate
+supplies ordering enforcement and `resume_on_fault`. This removes the bespoke
+`HistoricalReplay` loop if the typed gap position is available to the resumer
+(observer/state), and leaves `blend_chain` for the live handoff.

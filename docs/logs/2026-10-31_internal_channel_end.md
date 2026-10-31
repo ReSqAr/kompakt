@@ -195,3 +195,34 @@ designing the API.
 3. Does a violation become `End::Aborted(RoutingViolation)` or an
    `OrderEvent`?
 4. How do metrics/logging attach without pushing domain policy into the crate?
+
+## Update after Q7
+
+- `OrderedChannel` enforces; duplicates are policy, not an implicit filter.
+  The closed policy set is `Contiguous`, `StrictMonotone`, `NonDecreasing`.
+- The order violation becomes an `AbortReason` so `resume_on_fault` can inspect
+  it. The typed `expected`/`got` needs a home outside `End` because `End` is not
+  generic: an `OrderEvent<K>` observer/shared state is the likely answer.
+- This decomposition is promising for `HistoricalReplay`: `Contiguous` scan
+  reports a gap, `resume_on_fault` fills from the archive, then resumes the
+  scan. That is a real reuse win, not a bespoke loop.
+- Open: does the observer/shared state make the cursor coupling too implicit?
+  Could `resume_on_fault` accept a richer fault object instead of `End`? That
+  would be a different generic design.
+
+## Predicted answer to Q8
+
+The user will accept `AbortReason::OrderViolation` plus an observer for typed
+positions, because they asked for reusable primitives rather than the bespoke
+replay loop. They may want the gap event to be part of the resume state rather
+than a shared observer. The next question should test that coupling.
+
+## Next likely questions
+
+1. Does `resume_on_fault` need a richer fault type than `End` so the gap
+   position is first-class, or is an observer/state enough?
+2. Is `Contiguous` the policy for the stable-log scan, with `StrictMonotone`
+   for the live/replica streams?
+3. Where does the HLC monotonicity check live: a second key, a policy hook, or
+   a domain filter?
+4. Then implementation.
