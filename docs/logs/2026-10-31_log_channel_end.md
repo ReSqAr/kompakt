@@ -804,3 +804,49 @@ context-dependent extraction, provide an explicit escape hatch later rather
 than making every ordered channel carry a closure.
 
 Recommendation: `K: Key<T>`; no closure on the common path.
+
+## Q22 — Resolution: `K: Key<T>`, no constructor closure
+
+Status: settled.
+
+```text
+  pub trait Key<T>: Copy + Ord + Send + 'static {
+      fn key(item: &T) -> Option<Self>;
+  }
+```
+
+`K` implements `Key<T>`. There is no key closure on `OrderedChannel`; the type
+names the key. The same item type with different keys is expressed by different
+`K` implementations. A second extraction rule for the same `(T, K)` pair is not
+expected; a key newtype could cover it later if it ever appears.
+
+## Q23 — What read surface does `OrderedChannel` expose?
+
+Status: open.
+
+The existing enforcement sites do not all use `recv`:
+
+```text
+  learner integrate_loop     ready_batch
+  server subscribe writer    ready_batch
+  nvzn fold                  recv / try_recv
+  stable read                recv / into_iter
+```
+
+If `OrderedChannel` only exposes `recv`, it cannot replace the `ready_batch`
+sites without rewriting those loops and losing batching.
+
+Options:
+
+1. **Full read surface.** Delegate `recv`, `try_recv`, `ready_batch`,
+   `end_reason`, `into_stream` to the inner channel. Order enforcement lives in
+   the wrapped source, so batching sees the same checks.
+2. **Minimal surface.** `recv`/`try_recv` only; callers adapt. Simpler type,
+   but the `ready_batch` enforcement sites cannot use it as-is.
+3. **Validate then erase.** `OrderedChannel` is only a boundary validator;
+   after validation it converts to `Channels<T>` and the full surface is
+   available there. Typed gaps/`stitch` happen before erasure.
+
+Recommendation: 1 for the boundary type, because the point is to replace
+existing enforcement without changing the consumer loops. `ReadyBatch` may need
+to become generic or be duplicated if it is tied to `Channels`.

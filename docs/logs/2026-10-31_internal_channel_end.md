@@ -404,3 +404,28 @@ context-dependent keys; I should mention it as a later option, not the default.
 3. `stitch` coverage verification.
 4. `retry_on_fault` final name.
 5. Implementation sequencing.
+
+## Update after Q22
+
+- `K: Key<T>` is settled; no closure. This makes `OrderedChannel<T,K,P>`
+  self-contained and puts the key concept in the type.
+- The remaining practical question is whether `OrderedChannel` is a drop-in
+  read surface. The learner and server writer use `ready_batch`; a `recv`-only
+  type would force a rewrite at exactly the sites we want to simplify.
+- I expect full delegation, with `ReadyBatch` made generic or reused. The order
+  check is in the source, so batching and `try_recv` see the same policy.
+
+## Predicted answer to Q23
+
+The user will choose the full read surface, because the goal is replacing
+existing enforcement code, not adding a parallel API. If they choose minimal,
+the ordered channel is limited to recv-driven boundaries and the `ready_batch`
+sites stay hand-checked.
+
+## Next likely questions
+
+1. Full surface vs minimal.
+2. `Gap<K>` and fallback signature.
+3. `stitch` coverage verification.
+4. `retry_on_fault` final name.
+5. Implementation sequencing.
