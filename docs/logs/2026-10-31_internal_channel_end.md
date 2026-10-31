@@ -90,3 +90,35 @@ bound into `End`.
 3. If `Cancelled` stays, does `End` need a small doc/name overhaul even without
    a new variant?
 4. Only after this: `OrderedChannel` at trait boundaries.
+
+## Update after Q2 direction
+
+- The flat `End = Closed | Aborted { reason }` is now the leading core model.
+  It makes composition cheap and keeps the cancellation distinction in
+  `AbortReason::Cancelled`; no `Stop` type is needed.
+- The type-level channel family is attractive for invariants but I expect it
+  to lose on composition and API surface. The likely compromise is:
+  - one `Channels<T>` core;
+  - one `OrderedChannel<T>` at trait boundaries, with an `OrderPolicy`;
+  - no `Cancellable<T>` type, because `AbortReason::Cancelled` is enough and
+    `until` must compose.
+- The unresolved consequence is `Closed` ambiguity: producer close vs
+  `take_while` bound. I expect the user to accept this because the caller that
+  installed the bound already knows, and domain completeness is already an
+  in-band terminal. If not, `take_while` must expose its own result.
+
+## Predicted answer to Q4
+
+The user will accept `take_while -> Closed` for the generic channel, because
+they explicitly said "map completed to closed." The interesting follow-up is
+then whether `AbortReason` is a flat enum or a richer reason type.
+
+## Next likely questions
+
+1. Is `AbortReason { Producer { what }, Cancelled }` enough, or does a dropped
+   unfired cancellation handle need its own reason?
+2. Is `OrderedChannel` a boundary newtype (trait returns) or a method on
+   `Channels`? The earlier boundary discussion says trait returns.
+3. Does `OrderedChannel` use a policy value or a type parameter for
+   gapless/monotone?
+4. Then `OrderedChannel` implementation planning.

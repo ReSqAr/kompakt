@@ -142,3 +142,60 @@ Status: blocked on Q2.
 A bounded read may be a consumer loop that returns its own completion, not a
 channel combinator. That would keep `End` small and put "did I reach the cut?"
 next to the predicate that defines the cut.
+
+## Q2 — Direction under consideration
+
+Status: leaning, not settled.
+
+The flat form is:
+
+```text
+  End = Closed
+      | Aborted { reason: AbortReason }
+
+  AbortReason = Producer { what }
+              | Cancelled
+
+  take_while bound  -> Closed
+  cancellation      -> Aborted { reason: Cancelled }
+```
+
+This is the S3 direction, but with the reason retained. `End` becomes a
+clean/unclean bit plus a cause; composition only needs two arms, and callers
+that care about shutdown can still match `AbortReason::Cancelled`.
+
+The open consequence: `Closed` no longer distinguishes "the producer closed"
+from "a `take_while` bound cut the stream short." A full-load consumer cannot
+tell the difference from `End` alone. The caller that installed the bound knows;
+a generic consumer does not.
+
+## Q3 — Type-level invariants
+
+Status: leaning, not settled.
+
+The type-level direction names invariants:
+
+```text
+  Channels<T>                 no extra promise
+  Cancellable<T>              until() bound
+  OrderedChannel<T>           monotone position
+  GaplessOrderedChannel<T>    contiguous position
+```
+
+The appeal is that misuse becomes a type error. The cost is combinatorial:
+`Cancellable<OrderedChannel<T>>`, `Cancellable<GaplessOrderedChannel<T>>`, and
+every combinator must either be duplicated or generic over the wrapper.
+
+Working recommendation: keep the **core** as one `Channels<T>` with the flat
+`End`, and use at most one boundary type, `OrderedChannel<T>` with an
+`OrderPolicy` (monotone vs gapless). Do not make cancellation a channel type;
+`AbortReason::Cancelled` already carries it, and `until` must still compose
+with merge/chain. This keeps the invariant naming without the matrix.
+
+## Q4 — Does `take_while` need to report a distinct bound outcome?
+
+Status: blocked on Q2.
+
+If `take_while -> Closed` is acceptable, no new verdict is needed. If callers
+must distinguish "bound reached" from "source closed early," the distinction
+belongs in the operator's result or an in-band domain terminal, not in `End`.
