@@ -122,3 +122,16 @@ then whether `AbortReason` is a flat enum or a richer reason type.
 3. Does `OrderedChannel` use a policy value or a type parameter for
    gapless/monotone?
 4. Then `OrderedChannel` implementation planning.
+
+## Update after Q4
+
+- I was wrong about the full-load `take_while` objection. A bounded stream is
+  complete by construction; later source errors are unreachable. The only
+  failure is a caller using a bound when its contract was "everything", which
+  is a predicate/contract bug that `End::Complete` cannot detect either.
+- So `take_while -> Closed` is the right generic channel behavior. `Closed`
+  becomes "clean end of this stream", not "producer closed".
+- The remaining detail is `AbortReason` and specifically the dropped-unfired
+  cancellation handle. That is a reason-shape question, not an `End` taxonomy
+  question.
+- Then `OrderedChannel` at trait boundaries.

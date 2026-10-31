@@ -199,3 +199,42 @@ Status: blocked on Q2.
 If `take_while -> Closed` is acceptable, no new verdict is needed. If callers
 must distinguish "bound reached" from "source closed early," the distinction
 belongs in the operator's result or an in-band domain terminal, not in `End`.
+
+## Q4 — Resolution: `take_while` maps to `Closed`
+
+Status: settled.
+
+The earlier objection was wrong. `take_while` is a consumer-chosen bound:
+once the predicate declines, the derived stream is complete, and the source is
+dropped immediately. A later source error is unreachable — the consumer cannot
+receive it, because the source is no longer read.
+
+The "full-load consumer" case is not a channel-verdict problem. If a consumer's
+contract is "load everything" but it installs a `take_while`, its predicate is
+wrong. `End::Complete` would only report that the predicate fired — something
+the caller already knows — and would not prove the cut was the correct
+completeness boundary.
+
+Consequences:
+
+- `Channels::take_while` ends `End::Closed`; no `Complete`/`Bound` variant.
+- `Closed` means "this stream ended cleanly", not "the producer called close".
+  A producer close and a consumer bound are both clean ends.
+- Domain completeness remains a domain check or an in-band terminal
+  (`nvzn::FoldItem::ReplayDone`, `zslg::WindowItem`).
+
+## Q5 — What is the `AbortReason` shape?
+
+Status: open.
+
+With `End = Closed | Aborted { reason }`, the next question is what `reason`
+must distinguish:
+
+```text
+  Producer { what }     data channel disconnected without close
+  Cancelled             a Cancellation fired
+```
+
+Open edge: an unfired `CancelHandle` dropped yields `Aborted` today. Is that
+`Cancelled` (wrong: nothing was requested), `Producer { what: "cancellation" }`
+(misleading: no producer), or a third reason such as `CancelHandleDropped`?
