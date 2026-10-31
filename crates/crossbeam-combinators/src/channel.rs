@@ -2,7 +2,7 @@
 //!
 //! A `Channels<T>` owns a private tree of sources: a leaf (one crossbeam
 //! receiver), a concurrent merge, a sequential chain, a guard raced against a
-//! liveness signal or [`Cancellation`], a lazy `unfold`, and pull-time
+//! liveness signal or [`Cancellation`], a lazy `resume_on_fault`, and pull-time
 //! `map`/`filter_map`. The tree is invisible through one blocking interface.
 //!
 //! `recv` blocks on `Select::ready` over all live leaves; `try_recv` drains
@@ -45,9 +45,10 @@
 //!
 //! [`Channels::merge`] selects across two sources and drops a dead branch as
 //! soon as it dies, releasing whatever its closures captured. [`Channels::chain`]
-//! runs phases in order and condemns the chain on an abort. [`Channels::unfold`]
-//! produces resumable segments lazily, handing each segment's verdict to the
-//! caller. [`Channels::filter_map`], [`Channels::map`] and
+//! runs phases in order and condemns the chain on an abort.
+//! [`Channels::resume_on_fault`] rebuilds resumable segments lazily, handing
+//! each segment's verdict to the caller. [`Channels::filter_map`],
+//! [`Channels::map`] and
 //! [`Channels::until`] transform and bound a stream at pull time.
 //!
 //! The write half lives next door: [`crate::Feed`] for one producer and
@@ -935,19 +936,24 @@ impl Cancellation {
     }
 }
 
-// ── Unfold<S, T> ───────────────────────────────────────────────────────
+// ── ResumeOnFault<S, T> ───────────────────────────────────────────────
 
-/// [`ChainState`]'s unbounded, lazy sibling: when the current segment ends,
-/// `next` produces the following one from the running state.
+/// [`ChainState`]'s resumable, lazy sibling: when the current segment ends,
+/// `next` may produce the following one from the running state.
 ///
 /// The difference that matters is the verdict. `ChainState` lets an aborted
 /// phase condemn the whole chain, so a truncated replay cannot launder itself
-/// behind later items. `Unfold` cannot make that call on the caller's behalf —
-/// for some streams an ending segment IS the control signal — so it **hands the
-/// previous segment's [`End`] to `next`** and lets the caller decide: continue,
-/// or decline by returning `None`. A resuming consumer whose fan-out hangs up
-/// on an overrun subscriber uses that verdict as the cue to replay from its
-/// durable cursor and resubscribe.
+/// behind later items. This source cannot make that call on the caller's
+/// behalf — for some streams an ending segment IS the control signal — so it
+/// **hands the previous segment's [`End`] to `next`** and lets the caller
+/// decide: resume, or decline by returning `None`. A stable tail whose fan-out
+/// hangs up on an overrun subscriber uses that verdict as the cue to replay
+/// from its durable cursor and resubscribe.
+///
+/// The library does not decide that a fault is recoverable. A panic still
+/// closes the producer as [`End::Aborted`], and only the closure — which knows
+/// the cursor and the durable source — can decide whether to resume. A clean
+/// [`End::Closed`] or a [`Cancellation`] can be declined the same way.
 ///
 /// A segment is materialised eagerly — at construction, and again the instant
 /// its predecessor dies — never lazily inside `register`, and never while a
@@ -955,9 +961,9 @@ impl Cancellation {
 /// space by `leaf_count()` *at poll time*, against a registration built before
 /// `Select::ready` blocked, so the count has to hold across that whole window,
 /// not merely during registration. A segment swapped in mid-window would
-/// misalign every index to its right. `Unfold` is the one source whose leaf
-/// count is meant to change, which is why the rule is written down here.
-struct Unfold<S, T> {
+/// misalign every index to its right. This is the one source whose leaf count
+/// is meant to change, which is why the rule is written down here.
+struct ResumeOnFault<S, T> {
     state: S,
     #[allow(clippy::type_complexity, reason = "one boxed closure, named inline")]
     next: Box<dyn FnMut(&mut S, Option<End>) -> Option<Channels<T>> + Send>,
@@ -967,7 +973,7 @@ struct Unfold<S, T> {
     last_end: Option<End>,
 }
 
-impl<S: Send + 'static, T: Send + 'static> Unfold<S, T> {
+impl<S: Send + 'static, T: Send + 'static> ResumeOnFault<S, T> {
     /// Pull the next segment. Idempotent once `next` has declined: it is only
     /// called while `current` is `None`, and a declining `next` is asked again
     /// on the following pull — a caller that wants to stay finished says so by
@@ -977,7 +983,7 @@ impl<S: Send + 'static, T: Send + 'static> Unfold<S, T> {
     }
 }
 
-impl<S: Send + 'static, T: Send + 'static> Source<T> for Unfold<S, T> {
+impl<S: Send + 'static, T: Send + 'static> Source<T> for ResumeOnFault<S, T> {
     fn register<'a>(&'a mut self, sel: &mut Select<'a>) -> usize {
         self.current.as_mut().map_or(0, |src| src.register(sel))
     }
@@ -986,7 +992,7 @@ impl<S: Send + 'static, T: Send + 'static> Source<T> for Unfold<S, T> {
             Some(src) => {
                 debug_assert!(
                     ordinal < src.leaf_count(),
-                    "ordinal {ordinal} out of range for unfold segment with {} leaves",
+                    "ordinal {ordinal} out of range for resume-on-fault segment with {} leaves",
                     src.leaf_count()
                 );
                 match src.poll(ordinal) {
@@ -1161,29 +1167,30 @@ impl<T: Send + 'static> Channels<T> {
         ch
     }
 
-    /// Segments produced lazily and without bound: each time the current one
-    /// ends, `next` is handed the running state and that segment's [`End`], and
-    /// returns the following segment — or `None` to finish the stream.
+    /// Rebuild the stream after an unexpected end: each time the current
+    /// segment ends, `next` is handed the running state and that segment's
+    /// [`End`], and may return the next segment — or `None` to finish.
     ///
-    /// This is [`chain`](Self::chain) generalised. The verdict is the reason it
-    /// is a separate combinator rather than a loop over `chain`: an aborted
-    /// segment condemns a chain, whereas here `next` decides, because for some
-    /// streams a segment ending IS the signal to build the next one.
-    pub fn unfold<S, F>(state: S, next: F) -> Channels<T>
+    /// This is [`chain`](Self::chain)'s resumable sibling. A chain condemns the
+    /// rest on an abort; here the caller chooses, because for a stable tail a
+    /// hung-up subscription is the signal to replay from a cursor and
+    /// resubscribe. The library makes no policy: a panic is still
+    /// [`End::Aborted`], and `next` decides whether that fault is recoverable.
+    pub fn resume_on_fault<S, F>(state: S, next: F) -> Channels<T>
     where
         S: Send + 'static,
         F: FnMut(&mut S, Option<End>) -> Option<Channels<T>> + Send + 'static,
     {
-        let mut unfold = Unfold {
+        let mut source = ResumeOnFault {
             state,
             next: Box::new(next),
             current: None,
             last_end: None,
         };
         // Eagerly, so `leaf_count()` is accurate before the first `register`.
-        unfold.advance();
+        source.advance();
         Channels {
-            source: Box::new(unfold),
+            source: Box::new(source),
         }
     }
 
@@ -1226,14 +1233,32 @@ impl<T: Send + 'static> Channels<T> {
         }
     }
 
+    /// Fixed phases in order. Only the front phase is registered; when it
+    /// closes cleanly the next one is pulled. An [`End::Aborted`] or
+    /// [`End::Cancelled`] phase ends the chain there and drops the remaining
+    /// phases, exactly like [`chain`](Self::chain).
+    ///
+    /// An empty phase list is an empty [`End::Closed`] stream. A single phase
+    /// is returned as-is.
     #[must_use]
-    pub fn chain(self, next: Channels<T>) -> Channels<T> {
-        let mut phases = VecDeque::new();
-        phases.push_back(self.source);
-        phases.push_back(next.source);
+    pub fn chain_all<I>(phases: I) -> Channels<T>
+    where
+        I: IntoIterator<Item = Channels<T>>,
+    {
+        let mut phases: VecDeque<Box<dyn Source<T>>> =
+            phases.into_iter().map(|ch| ch.source).collect();
+        if phases.len() == 1 {
+            let source = phases.pop_front().expect("checked one phase");
+            return Channels { source };
+        }
         Channels {
             source: Box::new(ChainState::Active { phases }),
         }
+    }
+
+    #[must_use]
+    pub fn chain(self, next: Channels<T>) -> Channels<T> {
+        Self::chain_all([self, next])
     }
 
     pub fn filter_map<U, F>(self, f: F) -> Channels<U>
@@ -1455,11 +1480,11 @@ mod tests {
         assert_eq!(ch.recv(), Err(End::Closed));
     }
 
-    /// `unfold` is `chain`'s unbounded sibling: segments are produced lazily,
-    /// one at a time, until `next` declines.
+    /// `resume_on_fault` is `chain`'s resumable sibling: segments are produced
+    /// lazily, one at a time, until `next` declines.
     #[test]
-    fn unfold_produces_segments_until_next_declines() {
-        let mut ch = Channels::unfold(0u32, |n, _prev| {
+    fn resume_on_fault_produces_segments_until_next_declines() {
+        let mut ch = Channels::resume_on_fault(0u32, |n, _prev| {
             (*n < 3).then(|| {
                 *n = n.saturating_add(1);
                 Channels::from_vec(vec![*n * 10, *n * 10 + 1])
@@ -1470,14 +1495,14 @@ mod tests {
     }
 
     /// The load-bearing difference from `chain`, which an aborted phase
-    /// condemns: `unfold` hands the verdict to `next` and lets it decide. A
-    /// resuming consumer (a stable tail, where a hung-up subscription IS the
-    /// lag signal) continues; anything else can decline.
+    /// condemns: `resume_on_fault` hands the verdict to `next` and lets it
+    /// decide. A resuming consumer (a stable tail, where a hung-up
+    /// subscription IS the lag signal) continues; anything else can decline.
     #[test]
-    fn unfold_hands_the_previous_end_to_next_and_may_continue_past_an_abort() {
+    fn resume_on_fault_hands_the_previous_end_to_next_and_may_continue_past_an_abort() {
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
         let s = seen.clone();
-        let mut ch = Channels::unfold(0u32, move |n, prev| {
+        let mut ch = Channels::resume_on_fault(0u32, move |n, prev| {
             s.lock().unwrap().push(prev);
             *n = n.saturating_add(1);
             match *n {
@@ -1496,7 +1521,7 @@ mod tests {
         assert_eq!(
             got,
             vec![7, 8],
-            "an aborted segment does not condemn the unfold"
+            "an aborted segment does not end the resumable stream"
         );
         assert_eq!(
             *seen.lock().unwrap(),
@@ -2189,6 +2214,53 @@ mod tests {
         assert_eq!(ch.recv(), Ok(2));
         assert_eq!(ch.recv(), Ok(3));
         assert_eq!(ch.recv(), Err(End::Closed));
+    }
+
+    #[test]
+    fn chain_all_empty_is_a_closed_stream() {
+        let mut ch: Channels<u32> = Channels::chain_all([]);
+        assert_eq!(ch.recv(), Err(End::Closed));
+        assert_eq!(ch.end_reason(), End::Closed);
+    }
+
+    #[test]
+    fn chain_all_single_phase_is_that_stream() {
+        let mut ch = Channels::chain_all([Channels::from_vec(vec![1u32, 2])]);
+        assert_eq!(ch.recv(), Ok(1));
+        assert_eq!(ch.recv(), Ok(2));
+        assert_eq!(ch.recv(), Err(End::Closed));
+    }
+
+    #[test]
+    fn chain_all_runs_phases_in_order_and_skips_empty_ones() {
+        let mut ch = Channels::chain_all([
+            Channels::from_vec(vec![1u32]),
+            Channels::from_vec(Vec::new()),
+            Channels::from_vec(vec![2]),
+        ]);
+        assert_eq!(ch.recv(), Ok(1));
+        assert_eq!(ch.recv(), Ok(2));
+        assert_eq!(ch.recv(), Err(End::Closed));
+    }
+
+    /// Like `chain`, `chain_all` condemns the rest of the phases on an abort:
+    /// the third phase's item must never reach the consumer.
+    #[test]
+    fn chain_all_aborts_and_drops_the_remaining_phases() {
+        let (tx_b, rx_b) = crossbeam_channel::bounded(4);
+        tx_b.send(2u32).unwrap();
+        drop(tx_b);
+        let (tx_c, rx_c) = crossbeam_channel::bounded::<u32>(4);
+        drop(tx_c);
+        let mut ch = Channels::chain_all([
+            Channels::from_vec(vec![1]),
+            Channels::from_infinite(rx_b, "middle"),
+            closed(rx_c),
+        ]);
+        assert_eq!(ch.recv(), Ok(1));
+        assert_eq!(ch.recv(), Ok(2));
+        assert_eq!(ch.recv(), Err(End::Aborted { what: "middle" }));
+        assert_eq!(ch.end_reason(), End::Aborted { what: "middle" });
     }
 
     /// `drain_first` must not starve one side: `ready_batch` takes only its head

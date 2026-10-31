@@ -20,11 +20,12 @@
 //! the frontier is read, so an append racing it is duplicated (filtered by
 //! index) rather than lost.
 //!
-//! That cut is not made once. [`Channels::unfold`] re-makes it every time the
-//! fan-out hangs up on this consumer for falling behind, so a slow reader never
-//! sees an error — it silently drops back into replay from its own cursor.
-//! Which is the whole reason the cursor is one monotone value rather than a
-//! captured frontier plus a start index: it has to survive across cycles.
+//! That cut is not made once. [`Channels::resume_on_fault`] re-makes it every
+//! time the fan-out hangs up on this consumer for falling behind, so a slow
+//! reader never sees an error — it silently drops back into replay from its own
+//! cursor. Which is the whole reason the cursor is one monotone value rather
+//! than a captured frontier plus a start index: it has to survive across
+//! cycles.
 //!
 //! `HistoricalReplay` cannot trust the local scan to be contiguous. The retire
 //! clamp lives in memory and starts unarmed at every open, and the compaction
@@ -464,11 +465,12 @@ impl Ranged<StableCut> for StableSeam {
 ///
 /// **Falling behind is not an error here.** A consumer slower than its
 /// subscriber queue is deep gets hung up on by the fan-out, which arrives as
-/// [`End::Aborted`](crossbeam_combinators::End::Aborted) *after* every event already queued — the in-band lag signal
-/// (the fan-out). [`Channels::unfold`] hands that verdict
-/// back and this closure answers it the way §20 prescribes for an infinite
-/// stream: resume from the last position. The caller sees one seamless stream;
-/// falling behind costs latency, not data.
+/// [`End::Aborted`](crossbeam_combinators::End::Aborted) *after* every event
+/// already queued — the in-band lag signal (the fan-out).
+/// [`Channels::resume_on_fault`] hands that verdict back and this closure
+/// answers it the way §20 prescribes for an infinite stream: resume from the
+/// last position. The caller sees one seamless stream; falling behind costs
+/// latency, not data.
 ///
 /// Two orderings inside the cycle carry the whole correctness argument:
 ///
@@ -496,7 +498,7 @@ fn resyncing_tail(
     let weak_stable_log = Arc::downgrade(&stable_log);
     drop((archive, stable_log));
 
-    Channels::unfold((), move |(), previous| {
+    Channels::resume_on_fault((), move |(), previous| {
         // Declining is the only termination a consumer ever observes, and it
         // reaches them as the *previous* segment's `Aborted` — under the live
         // fan-out's label, which points at the wrong culprit. Hence the lines.
@@ -688,7 +690,7 @@ fn resyncing_unstable_tail(
     let weak_stable_log = Arc::downgrade(&stable_log);
     drop((local_store, stable_log));
 
-    Channels::unfold((), move |(), previous| {
+    Channels::resume_on_fault((), move |(), previous| {
         // As in `resyncing_tail`: declining is the only termination a consumer
         // observes, under the previous segment's label, hence the lines.
         let Some(local_store) = weak_local_store.upgrade() else {

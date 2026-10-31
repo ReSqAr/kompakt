@@ -11,7 +11,7 @@
 //!   Feed::channel(cap, what) ────────▶ Channels<T>
 //!     send(item)                         recv() / try_recv() / ready_batch()
 //!     close()        ⇒ End::Closed       filter_map / map / merge / chain /
-//!     drop()         ⇒ End::Aborted      unfold / until / into_stream
+//!     drop()         ⇒ End::Aborted      resume_on_fault / until / into_stream
 //!   Fanout<T>::subscribe() ───────────▶ Channels<T>  (hang up on lag)
 //! ```
 //!

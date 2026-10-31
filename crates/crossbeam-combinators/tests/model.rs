@@ -172,8 +172,8 @@ proptest! {
     }
 
     #[test]
-    fn unfold_concatenates_segments(segments in prop::collection::vec(prop::collection::vec(0u64..100, 0..5), 0..6)) {
-        let mut ch = Channels::unfold(0usize, {
+    fn resume_on_fault_concatenates_segments(segments in prop::collection::vec(prop::collection::vec(0u64..100, 0..5), 0..6)) {
+        let mut ch = Channels::resume_on_fault(0usize, {
             let segments = segments.clone();
             move |next, _previous| {
                 let segment = segments.get(*next)?;
