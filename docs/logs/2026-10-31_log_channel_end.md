@@ -923,3 +923,35 @@ The remaining piece of `stitch`:
 
 Open: should the fallback return `Channels<T>` (stitch verifies it) or an
 already-ordered `OrderedChannel<T, Gapless<K>>` (less checking, more ceremony)?
+
+## Q26 — Resolution: fallback returns `Channels<T>`
+
+Status: settled.
+
+```text
+  Gap<K> = { expected: K, got: K }
+  fallback: FnMut(Gap<K>) -> Channels<T>
+  fallback covers [expected, got) exclusive
+  stitch buffers the primary item at got
+  stitch verifies exact coverage
+  fallback abort propagates
+```
+
+The fallback does not return an ordered wrapper. `stitch` has to verify the
+range endpoints regardless, so an ordered fallback would add ceremony without
+removing the check. A short, overlong, or internally gapped fallback aborts with
+an order-violation reason.
+
+## Q27 — Final name for `resume_on_fault`
+
+Status: open naming.
+
+```text
+  retry_on_fault      action + trigger; reads well at reconnect/rebuild sites
+  resume_on_abort     most precise with Complete | Aborted; longer
+  resume_on_fault     current name
+  retry               too broad
+```
+
+Recommendation: `retry_on_fault`. It names the trigger and the action, and it
+no longer has anything to do with gaps.

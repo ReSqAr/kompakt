@@ -456,3 +456,26 @@ would still require endpoint/coverage checks, so it buys little.
 3. `stitch` verification and abort reason.
 4. `retry_on_fault` final name.
 5. Implementation sequencing.
+
+## Update after Q26
+
+- Fallback is `Channels<T>`; `stitch` buffers the `got` item, verifies
+  `[expected, got)`, propagates fallback aborts, and returns
+  `OrderedChannel<T, Gapless<K>>`.
+- The design is nearly complete. The only public-name decision left is
+  `retry_on_fault` vs `resume_on_abort`/`resume_on_fault`.
+- After that we can write the design doc: `End`, `OrderedChannel`, `Key`,
+  `Successor`, policy markers, `stitch`, projection, full read surface, and the
+  zslg replay migration.
+
+## Predicted answer to Q27
+
+The user suggested `retry_on_fault`/`retry`, and the new `Aborted` vocabulary
+makes `resume_on_abort` attractive. I expect `retry_on_fault` as the compromise:
+it says what triggers the retry without tying the public name to an enum
+variant.
+
+## Next likely questions
+
+1. Final public name.
+2. Then design doc sign-off; implementation sequence after that.
