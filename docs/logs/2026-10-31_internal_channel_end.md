@@ -550,3 +550,23 @@ the callback as the carrier of typed end, not as an observability hook.
 ## Next step
 
 Once Q31 is settled, write the design doc and ask for sign-off.
+
+## Update after Q31
+
+- No gap metrics hook in `OrderedChannel`; no `on_gap`, no metrics layer now.
+- This drops `subscription_purge_gaps` at the replica subscription sites until
+  an optional metrics feature. Correctness is unaffected; observability has a
+  known gap.
+- A future feature can add a counter/observer additively. Do not shape the core
+  around metrics now.
+- With this, the interview is essentially complete; the design doc can be
+  written after the final defer/now check.
+
+## Predicted answer to Q32
+
+The user will defer. They already said "drop them for the moment" and "optional
+metrics feature"; a metrics layer now is a distraction from the core design.
+
+## Next step
+
+Write `docs/logs/2026-10-31_design_channel_ends.md` and ask for sign-off.

@@ -1115,3 +1115,33 @@ them. The ordered channel needs a gap hook:
 
 This is observability, not control flow. It keeps gap counting out of the
 consumer's order logic and does not reintroduce the typed-end callback.
+
+## Q31 — Resolution: drop gap metrics for now
+
+Status: settled direction.
+
+`OrderedChannel` does not carry an `on_gap` observer or any metrics hook. It
+enforces the policy and nothing else.
+
+Consequence: the `subscription_purge_gaps` counter at the replica subscription
+sites goes silent until a metrics feature exists. That is a known, temporary
+observability gap, not a correctness gap. The ordered channel still accepts
+forward gaps; it just does not report them.
+
+A future optional `metrics` feature can add a narrow `GapCounter` handle or an
+observer without changing the policy/key design. Do not add a metrics layer to
+the core now: it is orthogonal and would put a callback/generic back into
+`OrderedChannel` before the API has settled.
+
+## Q32 — Accept the temporary metric gap?
+
+Status: final check.
+
+Options:
+
+1. Defer, lose `subscription_purge_gaps` at these sites for now.
+2. Add a minimal `gap_count()` counter now, no callback, no typed event.
+3. Build the optional metrics feature now.
+
+Recommendation: 1. The enforcement change is already large; metrics should
+follow once the ordered type is in use.
