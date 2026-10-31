@@ -238,3 +238,48 @@ must distinguish:
 Open edge: an unfired `CancelHandle` dropped yields `Aborted` today. Is that
 `Cancelled` (wrong: nothing was requested), `Producer { what: "cancellation" }`
 (misleading: no producer), or a third reason such as `CancelHandleDropped`?
+
+## Q5 — Resolution: top-level ok/not-ok, fine-grained reason
+
+Status: settled direction.
+
+`Closed` is renamed because it names the producer's action, not the stream's
+outcome. The top-level type becomes:
+
+```text
+  End = Complete
+      | Aborted { reason: AbortReason }
+```
+
+- `Complete` = the stream ended cleanly, at whatever boundary owns it: producer
+  close, all phases/branches complete, or a `take_while` bound.
+- `Aborted` = the stream did not complete cleanly. The detail lives in
+  `AbortReason`.
+
+This is different from the rejected `End::Complete`: there it was a third
+variant beside `Closed` and `Aborted`, so "complete" competed with "closed".
+Here it replaces `Closed` and is the only clean end.
+
+Proposed reason set:
+
+```text
+  ProducerGone { what }      data channel disconnected without close
+  Cancelled                  Cancellation fired
+  CancelHandleDropped        handle dropped without firing
+  ConsumerGone { what }      liveness guard lost (e.g. into_stream consumer)
+  RoutingViolation { what }  internal ordinal invariant broken
+```
+
+`take_while` ends `Complete`; `until` fired ends `Aborted(Cancelled)`; an
+unfired handle dropped ends `Aborted(CancelHandleDropped)`. The top-level match
+in `chain`/`merge` only needs `Complete` vs `Aborted`.
+
+## Q6 — What exactly belongs in `AbortReason`?
+
+Status: open.
+
+The proposed set above is a first cut. The open question is granularity:
+should the public enum expose only reasons a caller can act on
+(`ProducerGone`, `Cancelled`, `CancelHandleDropped`), with the internal
+`ConsumerGone`/`RoutingViolation` folded into `ProducerGone { what }`; or should
+every current abort source have its own variant?

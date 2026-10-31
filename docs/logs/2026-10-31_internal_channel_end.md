@@ -135,3 +135,31 @@ then whether `AbortReason` is a flat enum or a richer reason type.
   cancellation handle. That is a reason-shape question, not an `End` taxonomy
   question.
 - Then `OrderedChannel` at trait boundaries.
+
+## Update after Q5
+
+- The user wants the top level to be only ok/not-ok, with a fine-grained reason
+  inside `Aborted`. That settles the shape:
+  `End = Complete | Aborted { reason }`.
+- `Complete` now replaces `Closed`; it is not the rejected extra variant. The
+  earlier failure was that `Complete` competed with `Closed`; now it is the only
+  clean end.
+- `AbortReason` is where cancellation, producer loss, dropped handles and
+  internal invariants live. `take_while` does not appear there.
+- Composition is simple again: `Complete` is clean, any `Aborted` is terminal.
+
+## Predicted answer to Q6
+
+The user will want enough reasons to explain the stop without pretending the
+library can distinguish a panic from a dropped producer. I expect a small set:
+producer gone, cancelled, cancel-handle dropped, and perhaps liveness guard
+lost. Internal routing violations may stay as a `what` label rather than a
+public variant. I should not over-model indistinguishable cases (panic vs
+forget vs discarded task).
+
+## Next likely questions
+
+1. Exact public `AbortReason` variants and whether `what` stays on
+   `ProducerGone`.
+2. Whether `End::Complete` is the final name, or `Finished`/`Done`.
+3. Then `OrderedChannel` at trait boundaries.
