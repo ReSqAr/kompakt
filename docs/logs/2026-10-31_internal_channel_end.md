@@ -506,3 +506,28 @@ duplicates expected?" decides it.
 1. Are backwards/duplicate items expected or corruption?
 2. Then finalize the trait boundary list.
 3. Then design doc.
+
+## Update after Q28
+
+- The learner/server disagreement is resolved by the seam: `subscribe_from` is
+  strictly increasing with forward gaps only. The learner's duplicate tolerance
+  is stale. The correct policy is `StrictlyMonotone<LogIndex>` at the trait
+  boundary; both consumers share it.
+- This is the “unrepresentable” outcome: no consumer-specific policy, no
+  `detect_purge_gap`, no `classify_order`. Duplicates/backwards abort; forward
+  gaps are allowed.
+- `Reader::subscribe_stable_log` can be `Gapless`, because `HistoricalReplay`
+  fills the gaps. The raw stable-log range is `StrictlyMonotone`; HLC/DataId
+  windows are strictly monotone on the composite key.
+- The only remaining detail is how accepted gaps feed metrics. An observer for
+  gaps is acceptable because it is observability, not typed end/control.
+
+## Predicted answer to Q29
+
+The user will accept a gap observer or a simple count handle; they rejected the
+callback as the carrier of typed end, not as a metrics hook.
+
+## Next likely questions
+
+1. Gap observer shape.
+2. Then design doc sign-off.

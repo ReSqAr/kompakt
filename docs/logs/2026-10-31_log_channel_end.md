@@ -1008,3 +1008,62 @@ Options:
 Recommendation: 2 unless the trait contract is genuinely strict. The policy is
 a consumer choice; the type-level invariant can live where the consumer knows
 which trade-off it wants.
+
+## Q28 — Resolution: the trait contract is strict, not consumer-specific
+
+Status: settled.
+
+`ReplicaSeam` already makes the disagreement obsolete:
+
+```text
+  history: [next_after(from), cut]     inclusive of cut
+  above:   live items > cut            (filters <= cut)
+  chain:   history, then live
+```
+
+There is no overlap and no duplicate: the history covers through `cut`, the live
+tail starts above it, and each fan-out event is delivered once. The only
+deviation is a **forward gap** when the replica purged entries between two
+surviving indices.
+
+Therefore:
+
+```text
+  Replica::subscribe_from
+      -> OrderedChannel<..., StrictlyMonotone<LogIndex>>
+```
+
+- `StrictlyMonotone` allows forward gaps and rejects duplicates/backwards.
+- The learner's `detect_purge_gap` duplicate tolerance is stale. The server's
+  "backwards is corruption" is the correct contract.
+- Both consumers use the same ordered type; `detect_purge_gap` and
+  `classify_order` disappear. A duplicate/backwards item aborts with
+  `OrderViolation` instead of being silently ignored or forwarded.
+- There is no policy choice at the consumer. That is the point: the source trait
+  promises strict monotonicity, so the ambiguity is unrepresentable.
+
+Other boundaries:
+
+```text
+  Reader::subscribe_stable_log       Gapless<LogIndex>     (HistoricalReplay fills gaps)
+  StableLogSnapshot::range           StrictlyMonotone<LogIndex> if wrapped
+  LocalStoreView::stream_above_hlc   StrictlyMonotone<(Hlc, DataId)>
+  LocalStoreView::stream_window_ordered
+                                     StrictlyMonotone<(Hlc, DataId)>
+```
+
+## Q29 — How do benign forward gaps feed metrics?
+
+Status: open detail.
+
+`StrictlyMonotone` accepts forward gaps. The server/learner still want to count
+them (`subscription_purge_gaps`). The ordered channel must expose the accepted
+gap without making it control flow:
+
+```text
+  observer: FnMut(Gap<K>)       gap only, accepted
+  violations: End::Aborted(OrderViolation)   never a gap
+```
+
+This is observability, not the typed-end callback that was rejected. It keeps
+the gap count out of the consumer's order logic.
