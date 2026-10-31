@@ -259,3 +259,31 @@ that before committing.
 3. How do `chain`/`merge`/`Guard` lift a plain `Channels<T>` into a typed D
    when composing with an ordered one?
 4. Then implementation sequencing.
+
+## Update after Q10
+
+- This is a better decomposition: a gap is a **repair signal**, not an abort.
+  `OrderedChannel` detects it; `fill_gaps` consumes it and inserts the fallback
+  range; `resume_on_fault` stays for real aborts.
+- It also reduces the typed-end problem: `OrderedEnd<K>` can stay on the ordered
+  boundary type, and `fill_gaps` is the projection to `Channels<T>`. We may not
+  need `Channels<T,D>` or a generic `End` at all for the replay use case.
+- My recommendation shifts: prefer `fill_gaps` over "gap -> Aborted ->
+  resume_on_fault". It expresses the normal path and keeps `Aborted` for
+  faults.
+- The generic D/E options remain possible for strict ordered boundaries, but
+  they are no longer required to make HistoricalReplay work.
+
+## Predicted answer to Q10
+
+The user will like `fill_gaps` / `stitch` as the named concept, because it
+separates "the stream is ordered" from "the stream has a hole". The remaining
+question is the name and the fallback contract, not whether the pattern exists.
+
+## Next likely questions
+
+1. `fill_gaps` vs `stitch` vs `splice`: which concept name?
+2. Does `fill_gaps` return `Channels<T>` or keep a typed order end until the
+   caller explicitly erases it?
+3. How does `fill_gaps` handle the gap-triggering item and fallback coverage?
+4. Then implementation sequencing.

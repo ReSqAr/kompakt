@@ -501,3 +501,51 @@ Status: open detail.
 With D, the gap detail is in `End<OrderDetail<K>>`; no side channel. The
 interface work is mostly making `chain`/`resume_on_fault`/`Ranged` generic over
 D, and projecting to plain `Channels` where the seam only needs an end.
+
+## Q10 — Gap as control flow, not as an abort
+
+Status: direction under consideration.
+
+A gap is not the same kind of event as a producer disappearing:
+
+```text
+  Aborted        the stream failed; items may be missing
+  Gap            the stream is ordered, but this range was not present
+```
+
+For `HistoricalReplay`, a gap is expected and recoverable: the archive is the
+fallback for a purged range. Expressing it as `Aborted` + `resume_on_fault`
+works mechanically, but makes a normal repair look like a fault and conflates
+the gap with producer failure.
+
+The better expression is a dedicated adapter:
+
+```text
+  OrderedChannel<T,K>::fill_gaps(fallback)
+      -> Channels<T>
+
+  fallback: FnMut(Gap<K>) -> Channels<T>
+  Gap<K> = { expected: K, got: K }
+```
+
+It consumes the ordered stream; on a gap it reads the fallback for
+`[expected, got)`, emits those items, then continues with the primary item at
+`got`. The result is a normal `Channels<T>` and can be `chain`ed or blended with
+the live stream.
+
+This also removes the need to put typed order detail into `Channels<T>`:
+`OrderedEnd<K>` stays on the ordered boundary type, and `fill_gaps` is the
+projection that consumes it. `resume_on_fault` remains for actual aborts, not
+for gaps.
+
+Open details:
+
+- Name: `fill_gaps`, `stitch`, `splice`, `repair`.
+- Does `OrderedChannel` buffer the gap-triggering item so `fill_gaps` can emit
+  it after the fallback, or does the fallback contract include `got`?
+- Does `fill_gaps` verify that the fallback covered exactly `[expected, got)`,
+  or does it trust the fallback plus the next primary item?
+- Can the fallback itself abort? It should propagate that as an abort, not
+  silently drop the gap.
+- Does `fill_gaps` return `Channels<T>` with the normal `End`, or retain order
+  detail for a later composer?
