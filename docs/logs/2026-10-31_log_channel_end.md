@@ -850,3 +850,76 @@ Options:
 Recommendation: 1 for the boundary type, because the point is to replace
 existing enforcement without changing the consumer loops. `ReadyBatch` may need
 to become generic or be duplicated if it is tied to `Channels`.
+
+## Q24 — Move `K` into the policy?
+
+Status: leaning yes.
+
+```text
+  OrderedChannel<T, P>
+
+  P = Gapless<K>
+    | StrictlyMonotone<K>
+    | NonDecreasing<K>
+
+  trait OrderPolicy { type Key; ... }   sealed; no user policies
+  P::Key: Key<T>
+```
+
+This ties the key and the policy together: there is no
+`OrderedChannel<T, K, P>` where `K` and `P` disagree. The type reads as one
+concept:
+
+```text
+  OrderedChannel<StableLogEvent, StrictlyMonotone<LogIndex>>
+```
+
+`stitch` becomes a clean one-way transition:
+
+```text
+  OrderedChannel<T, StrictlyMonotone<K>>
+      .stitch(fallback)
+      -> OrderedChannel<T, Gapless<K>>
+```
+
+Cost: `K` is no longer a standalone parameter, so the caller names the full
+policy type, and inference has to pick the `Key<T>` implementation from it.
+That is consistent with “the user has to name the concept”.
+
+Recommendation: yes, move `K` into the policy.
+
+## Q25 — Full read surface and projection
+
+Status: settled direction.
+
+Both:
+
+```text
+  OrderedChannel<T, P>
+      recv / try_recv / ready_batch / end_reason   delegate to inner
+      into_channels()                              explicit projection
+```
+
+The order check lives in the wrapped source, so `ready_batch` sees exactly the
+same policy as `recv`. Because the ordered type reuses `End`, projection is
+trivial: `into_channels` returns the inner `Channels<T>` with no end mapping.
+The caller then opts out of the typed order guarantee.
+
+`map`/`filter_map` are not part of the read surface; a consumer that needs them
+projects to `Channels<T>` first. `into_stream` can delegate if cheap.
+
+## Q26 — `Gap<K>` and fallback signature
+
+Status: open.
+
+The remaining piece of `stitch`:
+
+```text
+  Gap<K> = { expected: K, got: K }
+  fallback: FnMut(Gap<K>) -> Channels<T>
+  fallback covers [expected, got) exclusive
+  stitch buffers the primary item at got
+```
+
+Open: should the fallback return `Channels<T>` (stitch verifies it) or an
+already-ordered `OrderedChannel<T, Gapless<K>>` (less checking, more ceremony)?

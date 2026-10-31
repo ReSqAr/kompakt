@@ -429,3 +429,30 @@ sites stay hand-checked.
 3. `stitch` coverage verification.
 4. `retry_on_fault` final name.
 5. Implementation sequencing.
+
+## Update after Q24-Q25
+
+- K likely moves into the policy: `OrderedChannel<T, StrictlyMonotone<K>>`.
+  This names one concept and prevents K/P mismatch.
+- Full read surface is accepted: delegate `recv`, `try_recv`, `ready_batch`,
+  `end_reason` to the inner channel. The order check is in the source, so
+  batching sees it.
+- Projection is accepted and cheap because `End` is reused: `into_channels`
+  returns the inner `Channels<T>` with no end mapping.
+- The next concrete API is `Gap<K>` and the fallback type. I expect
+  `Channels<T>` with verification, because archive ranges are ordinary
+  channels and `stitch` must verify coverage anyway.
+
+## Predicted answer to Q26
+
+The user will choose `Channels<T>` for the fallback: fewer wrappers, and
+`stitch` has to verify the range regardless. Returning an ordered channel
+would still require endpoint/coverage checks, so it buys little.
+
+## Next likely questions
+
+1. Fallback `Channels<T>` vs ordered channel.
+2. `Gap<K>` fields and whether the buffered item is exposed.
+3. `stitch` verification and abort reason.
+4. `retry_on_fault` final name.
+5. Implementation sequencing.
