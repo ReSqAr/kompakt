@@ -2,8 +2,8 @@
 //!
 //! One call, one TCP connection. The client never writes after the handshake;
 //! the server pushes `SubscribeStreamItem` frames. The reader loop decodes them
-//! into a `crossbeam_channel::Sender`, and the caller drains the resulting
-//! `Channel` in a `spawn_blocking` thread.
+//! into the `Feed` of a `Channel::produce_async`, and the caller drains the
+//! resulting `Channel` in a `spawn_blocking` thread.
 //!
 //! When the connection breaks the channel simply disconnects — the caller
 //! (ReplicationSubscriber) owns reopen.
@@ -18,7 +18,7 @@ use crate::meta::Data;
 use crate::network::client::{RpcClient, Target};
 use crate::network::framing::{TcpFrameStream, adopt_blocking};
 use crate::network::messages::SubscribeStreamItem;
-use crossbeam_combinators::Channel;
+use crossbeam_combinators::{Channel, Feed, Infinite};
 
 /// How long the reader waits for the consumer to make room before declaring it
 /// wedged and ending the connection.
@@ -56,69 +56,68 @@ pub(in crate::network) fn open_subscribe(
     from: Option<LogIndex>,
     capacity: std::num::NonZeroUsize,
     cancel: CancellationToken,
-) -> Channel<Result<(LogIndex, Data), Error>, crossbeam_combinators::Infinite> {
-    let (out_tx, out_rx) =
-        crossbeam_channel::bounded::<Result<(LogIndex, Data), Error>>(capacity.get());
+) -> Channel<Result<(LogIndex, Data), Error>, Infinite> {
+    Channel::produce_async(
+        capacity.get(),
+        "client subscribe stream",
+        move |out_tx| async move {
+            let Some(rpc) = client.upgrade() else {
+                return; // node shutting down — channel disconnects
+            };
+            // Race the dial too: `connect_timeout` bounds it, but a cancelled node
+            // should not spend that bound adopting a connection it is about to tear
+            // down.
+            let dialed = tokio::select! {
+                d = rpc.dial_subscribe_stream(&target, from) => d,
+                () = cancel.cancelled() => {
+                    drop(rpc);
+                    return;
+                }
+            };
+            drop(rpc);
+            // Report setup failures rather than just disconnecting; the channel is
+            // empty here, so the send always lands. A bare disconnect would make a
+            // peer we cannot *connect to* indistinguishable from a stream that ended
+            // mid-flight, and the subscriber would log "stream ended" for as long as
+            // the peer stayed unreachable — the symptom, never the cause.
+            let (sink, stream) = match dialed {
+                Ok(pair) => pair,
+                Err(e) => {
+                    let _ = out_tx.send(Err(e));
+                    return;
+                }
+            };
+            let (blk_sink, blk_stream, raw) = match adopt_blocking(sink, stream) {
+                Ok(t) => t,
+                Err(e) => {
+                    let _ = out_tx.send(Err(e));
+                    return;
+                }
+            };
+            drop(blk_sink); // subscribe is uni-directional — client never writes
 
-    let ch = Channel::from_infinite(out_rx, "client subscribe stream");
-    tokio::spawn(async move {
-        let Some(rpc) = client.upgrade() else {
-            return; // node shutting down — channel disconnects
-        };
-        // Race the dial too: `connect_timeout` bounds it, but a cancelled node
-        // should not spend that bound adopting a connection it is about to tear
-        // down.
-        let dialed = tokio::select! {
-            d = rpc.dial_subscribe_stream(&target, from) => d,
-            () = cancel.cancelled() => {
-                drop(rpc);
-                return;
+            let reader =
+                tokio::task::spawn_blocking(move || subscribe_reader_loop(blk_stream, out_tx));
+            // Join off the reactor; on cancel, force the socket read to return so the
+            // blocking loop exits, *then* join it. The shutdown is the fix, not the
+            // race: a `select!` that merely stopped awaiting would drop `raw` — the
+            // last handle able to unblock that thread — and leak it for good.
+            let join = async move {
+                let _ = reader.await;
+            };
+            tokio::pin!(join);
+            tokio::select! {
+                () = cancel.cancelled() => {
+                    let _ = raw.shutdown(std::net::Shutdown::Both);
+                    join.await;
+                }
+                () = &mut join => {}
             }
-        };
-        drop(rpc);
-        // Report setup failures rather than just disconnecting; the channel is
-        // empty here, so the send always lands. A bare disconnect would make a
-        // peer we cannot *connect to* indistinguishable from a stream that ended
-        // mid-flight, and the subscriber would log "stream ended" for as long as
-        // the peer stayed unreachable — the symptom, never the cause.
-        let (sink, stream) = match dialed {
-            Ok(pair) => pair,
-            Err(e) => {
-                let _ = out_tx.send(Err(e));
-                return;
-            }
-        };
-        let (blk_sink, blk_stream, raw) = match adopt_blocking(sink, stream) {
-            Ok(t) => t,
-            Err(e) => {
-                let _ = out_tx.send(Err(e));
-                return;
-            }
-        };
-        drop(blk_sink); // subscribe is uni-directional — client never writes
-
-        let reader = tokio::task::spawn_blocking(move || subscribe_reader_loop(blk_stream, out_tx));
-        // Join off the reactor; on cancel, force the socket read to return so the
-        // blocking loop exits, *then* join it. The shutdown is the fix, not the
-        // race: a `select!` that merely stopped awaiting would drop `raw` — the
-        // last handle able to unblock that thread — and leak it for good.
-        let join = async move {
-            let _ = reader.await;
-        };
-        tokio::pin!(join);
-        tokio::select! {
-            () = cancel.cancelled() => {
-                let _ = raw.shutdown(std::net::Shutdown::Both);
-                join.await;
-            }
-            () = &mut join => {}
-        }
-        let _ = raw.shutdown(std::net::Shutdown::Both);
-        // The subscriber sees `End::Aborted`, backs off, and resumes from its
-        // durable cursor.
-    });
-
-    ch
+            let _ = raw.shutdown(std::net::Shutdown::Both);
+            // The subscriber sees `Aborted(ProducerGone)`, backs off, and resumes
+            // from its durable cursor.
+        },
+    )
 }
 
 /// Hand one record to the consumer, **waiting** while it is merely behind.
@@ -144,7 +143,7 @@ pub(in crate::network) fn open_subscribe(
 /// indefinitely. [`CONSUMER_STALL_TIMEOUT`] bounds it, and a stall is reported
 /// separately from a shed — "stuck" and "slow" call for different responses.
 fn send_or_stall(
-    out: &crossbeam_channel::Sender<Result<(LogIndex, Data), Error>>,
+    out: &Feed<Result<(LogIndex, Data), Error>, Infinite>,
     item: (LogIndex, Data),
 ) -> Result<(), ()> {
     match out.send_timeout(Ok(item), CONSUMER_STALL_TIMEOUT) {
@@ -174,7 +173,7 @@ fn send_or_stall(
 
 fn subscribe_reader_loop(
     mut stream: TcpFrameStream,
-    out: crossbeam_channel::Sender<Result<(LogIndex, Data), Error>>,
+    out: Feed<Result<(LogIndex, Data), Error>, Infinite>,
 ) {
     while let Some(decoded) = stream.next_frame_raw_blocking::<SubscribeStreamItem>() {
         match decoded {
@@ -223,7 +222,7 @@ mod tests {
     /// drain of ~200 records/s against a 1.7M backlog.
     #[test]
     fn a_slow_consumer_does_not_end_the_stream() {
-        let (tx, rx) = crossbeam_channel::bounded(1);
+        let (tx, mut rx) = Feed::<_, Infinite>::channel(1, "test");
         // Fill it, so the next send has nowhere to go.
         send_or_stall(&tx, item(0)).unwrap();
 
@@ -250,7 +249,7 @@ mod tests {
     /// A gone consumer is the one genuinely terminal case.
     #[test]
     fn a_disconnected_consumer_ends_the_stream() {
-        let (tx, rx) = crossbeam_channel::bounded(1);
+        let (tx, rx) = Feed::<_, Infinite>::channel(1, "test");
         drop(rx);
         assert!(send_or_stall(&tx, item(0)).is_err());
     }
@@ -264,8 +263,8 @@ mod tests {
         // Verified against the real constant would take 30s; assert the policy
         // shape instead — a full channel with a live receiver is neither Ok nor
         // Disconnected, so `send_timeout` is the only thing that can end it.
-        let (tx, _rx) = crossbeam_channel::bounded::<Result<(LogIndex, Data), Error>>(1);
-        tx.send(Ok(item(0))).unwrap();
+        let (tx, _rx) = Feed::<Result<(LogIndex, Data), Error>, Infinite>::channel(1, "test");
+        assert!(tx.send(Ok(item(0))).is_ok());
         assert!(
             tx.send_timeout(Ok(item(1)), std::time::Duration::from_millis(50))
                 .is_err(),

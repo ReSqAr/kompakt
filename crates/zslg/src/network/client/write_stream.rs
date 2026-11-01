@@ -12,8 +12,6 @@
 
 use std::sync::Weak;
 
-use crossbeam_channel::Sender;
-
 use crate::api::{StampedWrite, WriteOutcome};
 use crate::error::Error;
 use crate::meta::Data;
@@ -22,7 +20,7 @@ use crate::network::client::{RpcClient, Target};
 use crate::network::framing::{TcpFrameSink, TcpFrameStream, adopt_blocking};
 use crate::network::messages::WriteOutcome as WireWriteOutcome;
 use crate::network::messages::{RpcReplicaRequest, RpcRequest, WriteStreamResponse};
-use crossbeam_combinators::{Channel, Finite, Infinite};
+use crossbeam_combinators::{Channel, Feed, Finite, Infinite};
 
 /// Open a write stream to `target` over **one** connection. Drives writes off
 /// `input`, yielding their outcomes. See [`Replica::write`](crate::api::Replica::write).
@@ -40,10 +38,7 @@ pub(in crate::network) fn open_write(
 ) -> Channel<Result<WriteOutcome, Error>, Infinite> {
     // cap ≥ the in-flight window (the writer's permit pool), so the reader's outcome
     // sends never fill.
-    let (out_tx, out_rx) = crossbeam_channel::bounded::<Result<WriteOutcome, Error>>(cap);
-
-    let ch = Channel::from_infinite(out_rx, "client write stream");
-    tokio::spawn(async move {
+    Channel::produce_async(cap, "client write stream", move |out_tx| async move {
         let Some(rpc) = client.upgrade() else {
             let _ = out_tx.send(Err(Error::Shutdown));
             return; // node shutting down
@@ -87,9 +82,7 @@ pub(in crate::network) fn open_write(
             let _ = closer.shutdown(std::net::Shutdown::Both);
         });
         tokio::task::spawn_blocking(move || reader_loop(blk_stream, out_tx));
-    });
-
-    ch
+    })
 }
 
 /// Blocking writer loop: pull writes off `input` and frame them onto the socket,
@@ -128,7 +121,7 @@ fn write_req(data: Data) -> RpcRequest {
 
 /// Blocking reader loop: decode responses (with the per-frame HLC-drift verdict) and
 /// resolve each into `out`. Ends on decode error / EOF, or when the consumer drops.
-fn reader_loop(mut stream: TcpFrameStream, out: Sender<Result<WriteOutcome, Error>>) {
+fn reader_loop(mut stream: TcpFrameStream, out: Feed<Result<WriteOutcome, Error>, Infinite>) {
     // The drift verdict lets a skewed frame fail as its own write instead of tearing
     // the connection down.
     while let Some(Ok((resp, drift))) = stream.next_frame_raw_blocking::<WriteStreamResponse>() {
@@ -142,7 +135,7 @@ fn reader_loop(mut stream: TcpFrameStream, out: Sender<Result<WriteOutcome, Erro
 /// drift frame (its HLC exceeded the skew limit) fails only that write. Returns
 /// `Err` if the consumer has dropped the output.
 fn resolve_response(
-    out: &crossbeam_channel::Sender<Result<WriteOutcome, Error>>,
+    out: &Feed<Result<WriteOutcome, Error>, Infinite>,
     resp: WriteStreamResponse,
     drift: Option<Error>,
 ) -> Result<(), ()> {
@@ -195,7 +188,7 @@ mod tests {
 
     #[test]
     fn drift_response_fails_only_its_own_write() {
-        let (out, rx) = crossbeam_channel::unbounded();
+        let (out, mut rx) = Feed::<_, Infinite>::channel(8, "test");
         let drift = Some(Error::HlcDriftTooLarge {
             peer: Hlc(0),
             local: Hlc(0),
@@ -213,7 +206,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             rx.try_recv(),
-            Ok(Ok(WriteOutcome::Failed {
+            Some(Ok(WriteOutcome::Failed {
                 error: Error::HlcDriftTooLarge { .. },
                 ..
             }))
@@ -222,7 +215,7 @@ mod tests {
 
     #[test]
     fn answered_response_maps_to_outcome() {
-        let (out, rx) = crossbeam_channel::unbounded();
+        let (out, mut rx) = Feed::<_, Infinite>::channel(8, "test");
         resolve_response(
             &out,
             WriteStreamResponse {
@@ -236,7 +229,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             rx.try_recv(),
-            Ok(Ok(WriteOutcome::Failed {
+            Some(Ok(WriteOutcome::Failed {
                 error: Error::Rpc(_),
                 ..
             }))
@@ -245,7 +238,7 @@ mod tests {
 
     #[test]
     fn resolving_into_a_dropped_consumer_reports_shutdown() {
-        let (out, rx) = crossbeam_channel::unbounded();
+        let (out, rx) = Feed::<_, Infinite>::channel(8, "test");
         drop(rx);
         let res = resolve_response(
             &out,
