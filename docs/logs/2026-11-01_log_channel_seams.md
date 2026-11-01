@@ -1,0 +1,226 @@
+# Channel seams — decision log
+
+Process: `/home/agent/nlnr/docs/iaic.md`. Branch `channel-extraction`, base
+`08a1dd3`. Status: interview; docs only, no code changes.
+
+Input: post-round review feedback on `crossbeam-combinators`, `zslg`, and
+`nvzn`, 2026-11-01. The previous design and review are
+`2026-10-31_design_channel_polish.md` and
+`2026-11-01_post_channel_polish.md`.
+
+## Scope
+
+The crate owns the transport; `zslg` and `nvzn` should declare a data pipeline
+(source, cut, keys, metrics) and no channel mechanics. This round removes the
+remaining mechanics and makes the important invariants type-checked where the
+cost is justified.
+
+## Settled — problems the round must fix
+
+### S1. The split-HLC watermark test is timing-dependent
+
+`stable_log::tests::a_watermark_never_covers_an_hlc_group_split_across_batches`
+drains with `try_recv()` after `append(..).await`. With the threaded fan-out the
+last events may not have arrived yet. Receive the expected count with a timeout;
+keep the "nothing else arrives" assertion only where order guarantees it.
+
+### S2. `HistoricalReplay` is old framing
+
+It uses `tokio::spawn` + `spawn_blocking` + a second hand-closed channel just to
+return `range(...).stitch(archive)`. The lazy form is
+`OrderedChannel::new(range).stitch(archive).into_channel()` with no task.
+The HLC `assert!` should be a second ordered check (`NonDecreasing<Hlc>`) that
+ends the stream as an order violation. The fallback's `block_on` then runs on
+the consuming thread, so the consumer must not be a tokio worker; a synchronous
+archive read would remove that constraint.
+
+### S3. The seam is assembled three ways
+
+`blend_chain` (replica), hand-written `open()` + `range(cut).chain(live)`
+(stable and unstable resync), and `range(..).merge(tail)` (nvzn). `above` is
+written four times as "drop items whose key is at or below the cut". This is
+evidence that `blend_chain` has the wrong shape, not that the callers are
+wrong.
+
+### S4. The producer constructor is hand-written nine times
+
+Bounded channel + `Channel::from` + `spawn_blocking` + manual `closer.close()`
+at: `stream_above_hlc`, `stream_window_ordered`, `StableLogSnapshot::range`,
+archive `stream`, `pump_range`, `read_snapshot`, the merge feeder, the
+coordinator prime channel, and `HistoricalReplay`. `Feed` exists for exactly
+this and has no production users.
+
+### S5. The fan-out owner is hand-written four times
+
+Each owner stores `(tx, registry, shutdown)` in three fields, writes
+`Drop { shutdown.cancel() }`, and repeats
+`NonZeroUsize::new(1024).unwrap_or(MIN)`. Producers use
+`let _ = tx.send(..)`, which silently ignores a stopped fan-out.
+
+### S6. Resync state is forced into locks and atomics
+
+`resume_on_abort` and the combinators take `Fn`, so the stable cursor is an
+`AtomicU64` shared with a `filter_map`, and `WatermarkGate` holds a `Mutex`.
+A channel is consumed by one thread; `FnMut` state would remove both.
+
+### S7. Small duplicates
+
+`replica/log.rs::empty_historic()` re-implements `Channel::empty()`.
+
+## Open questions
+
+### Q1. Does the finite/infinite distinction become part of the type?
+
+Candidate: `Channel<T, Kind = Finite>` (or a separate `Infinite<T>` newtype).
+`Infinite` has an abort-only read surface; `resume_on_abort` accepts only
+`Infinite`; `Ranged::range` promises `Finite`. This makes the previous
+`Channel::empty()` bug unrepresentable. The cost is kind propagation through
+every combinator and every consumer that matches `End::Complete`.
+
+### Q2. What is the seam type's shape?
+
+Candidate: `Seam` returns a `Segment { live, cut }` with `.chain(range)` /
+`.merge(range)`; the cut is readable. If the item implements `Key` and the cut
+is `Option<K>`, `above` is crate-provided. `cut()` requires the subscription
+proof and `open` is not overridable.
+
+### Q3. What does resync look like?
+
+Candidate: `resync(make_seam, on_resync)` for the skeleton; a resumable ordered
+channel for streams with a position, keeping the cursor and dropping at/below
+it. This replaces both resyncing tails and the `AtomicU64`.
+
+### Q4. Does the fan-out owner come back?
+
+Earlier rounds explicitly removed a `Fanout` wrapper. A new owner type would
+own shutdown-on-drop and default caps, and `send` would report consumer-gone.
+This reverses that earlier decision; it is open.
+
+### Q5. Scope and order
+
+The feedback ranks A–F. Do we take the whole set in this round, or split into a
+mechanical round (producer constructor, fan-out owner, HistoricalReplay, test)
+and a later type-system round (finite/infinite, seam, resync)?
+
+## Decisions
+
+### D1. No default kind; every channel names it explicitly
+
+`Channel<T, Kind>` has no default type parameter. Every construction site,
+combinator, signature, and test double names `Finite` or `Infinite`. The
+choice is part of the declaration, not an implicit guess; aliases may reduce
+noise but must not hide which kind a value is.
+
+### D2. One seam trait; `above` stays required
+
+Adopt the `Seam` shape: `subscribe() -> Live<Item>`, `cut(&Live) -> Cut`,
+`above(Live, Cut) -> Live`; a free `open(&seam) -> Segment<Item, Cut>` that
+cannot be overridden; and `Segment::cut/chain/merge`. Keep **one** trait and
+make `above` required. The crate supplies `filter_above::<K>()` for seams whose
+cut is `Option<K>`; unstable and nvzn pass a closure because their cut is `Hlc`
+and their key is `DataId`. No second `KeyedSeam`.
+
+### D3. `next(cursor)` owns the resume position; no generic dedup
+
+`Resumable` advances the cursor, but it does not filter items. The factory
+receives the last emitted key and starts after it; whether that is inclusive or
+exclusive, and how an HLC group is handled, is the seam's rule. The ordered
+policy remains the safety net. A crate-level "drop keys <= cursor" would bake in
+an assumption that is wrong for HLC groups and custom cuts.
+
+### D4. No dedicated resync hook
+
+The factory receives `(cursor, previous: End)` from the resume loop. zslg can
+log or measure inside that closure. No `Resync` value, no required callback; the
+hook was not needed.
+
+### D5. Sources implement `Recv`; channels are one implementation; pumps are explicit
+
+`Channel` is already a boxed source, not a crossbeam receiver. A computed source
+(`Resumable`, `HistoricalReplay`) should implement the public read interface
+directly, not be a receiver plus a producer task. A pump adaptor moves a
+blocking source onto a thread chosen by the caller and feeds a `Channel`; the
+tokio feature supplies the `spawn_blocking` convenience. `produce_blocking` is
+the write-side dual of the same idea. Open: whether the pump preserves the
+source's exact `End`.
+
+### D6. `Resumable` is `Recv`, not `Source`
+
+`Source` is the crate-private select/poll leaf used by `Channel`. `Resumable`
+owns a cursor and a resync loop, so it implements the public `Recv` surface
+directly; it is not a `Source` and is not boxed into a `Channel` implicitly.
+`Channel`/`OrderedChannel` are `Recv` implementations that are `Source`-backed.
+A caller that needs a `Channel` pumps the `Recv` explicitly.
+
+### D7. Spawn policy is a marker trait
+
+`pump` and the `produce_*` constructors take a zero-sized spawn policy
+implementing a `Spawn` trait (`TokioBlocking`, `StdThread`, `CurrentThread` for
+tests), not a closure. The tokio policy is feature-gated. The caller chooses the
+thread construct at the type level.
+
+### D8. Exact `End` propagation is crate-internal
+
+The close signal widens to `Option<AbortReason>` so the crate's pumps/adapters
+can forward `OrderViolation`, `Cancelled`, and the rest. `Closer::abort` and
+`Feed::abort` are crate-internal. External users can only `close()` (Complete)
+or drop (ProducerGone); they cannot fabricate an abort reason.
+
+### D9. `produce_async` is the async primitive; the archive `stream` becomes sync
+
+Accepted. `produce_async` returns a `Channel` immediately, runs the async body
+on a spawn policy, closes on normal completion, and aborts on panic. The archive
+`stream` does not need to await before returning: its opens are the async work,
+and its item type already carries `Result<_, Error>`, so an open failure is the
+first item. `StableArchiveReader::stream` becomes
+`fn stream(..) -> ArchiveStream`, and `HistoricalReplay` drops `block_on`.
+The only requirement is a runtime handle for the spawned task; the current
+`block_on` has the same requirement, just hidden.
+
+## Open questions (continued)
+
+### Q6. How much of the read surface does `Recv` carry?
+
+A `Recv` can be read-only (`recv`/`try_recv`/`end_reason`) with all composition
+on `Channel`, or it can carry the single-source lazy combinators
+(`map`/`filter_map`/`take_until`/`take_while`/`chain`/`until`) so a
+`Resumable` stays lazy through a scan, leaving `merge` and async boundaries as
+the explicit pump points.
+
+### D10. `Recv` carries the lazy single-source combinators
+
+`Recv` carries `map`, `filter_map`, `take_until`, `take_while`, `chain`, and
+`until`, returning lazy `Recv` adapters. A `Resumable` therefore composes
+through a scan without a pump. `merge` stays the multi-source operation that
+needs `Source`/a `Channel` (or an explicit pump), because a blocking `recv`
+cannot wait on two sources without a thread. `ready_batch` is a `Recv` default
+over a generic batch type; that is an implementation detail, not a separate
+design fork.
+
+## Open questions (continued)
+
+### Q7. What is the fan-out owner's shape?
+
+Candidate: `let (fanout, registry) = broadcast(what, config)` where `Fanout`
+owns `tx` + `Shutdown`, `publish(&self, item) -> bool` reports consumer-gone,
+and `Drop` cancels. The reader side is a cloneable `Registry`/`KeyedRegistry`.
+A config struct carries the data/register/subscriber caps (with defaults) and
+the overflow policy. This reverses the earlier "no `Fanout` wrapper" decision.
+
+### D11. Keep the fan-out split
+
+Construction returns `(fanout, registry)`: the producer-side `Fanout` owns
+`tx` + `Shutdown`; the reader side is the independent, cloneable
+`Registry`/`KeyedRegistry`. The owner does not expose `subscribe`.
+
+### D12. `OverflowPolicy` is explicit
+
+`FanoutConfig` may default the three capacities, but `OverflowPolicy` is a
+required argument. `Block` vs `Shed` is a semantic choice, not sizing.
+
+### D13. Try the producer-side wrapper
+
+Reintroduce a fan-out owner type on the producer side. The earlier "no
+`Fanout` wrapper" was about hiding the three parts; this wrapper is the
+producer half, with the registry still independent. If it does not earn its
+keep, it can be removed again.
