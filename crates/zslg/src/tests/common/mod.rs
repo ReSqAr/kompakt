@@ -351,7 +351,7 @@ pub(crate) async fn replica_write<R: Replica + ?Sized>(
     replica: &R,
     data: Data,
 ) -> Result<RaftState, Error> {
-    let mut outcomes = replica.write(Channel::from_vec(vec![StampedWrite::now(data)]));
+    let mut outcomes = replica.write(Channel::once(StampedWrite::now(data)));
     // The channel blocks on the replica's pipeline, so it must not be pulled on the
     // reactor.
     let first = tokio::task::spawn_blocking(move || outcomes.recv())

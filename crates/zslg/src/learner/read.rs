@@ -151,7 +151,7 @@ impl Reader for GatedReader {
     fn subscribe_stable_log(&self, from: LogIndex) -> crate::StableStream {
         if !self.ready() {
             return crate::ordered::stable_stream(
-                Channel::from_vec(vec![Err(self.not_ready())]),
+                Channel::once(Err(self.not_ready())).chain(Channel::aborted("gated reader")),
                 from,
             );
         }
@@ -160,14 +160,14 @@ impl Reader for GatedReader {
 
     fn unstable_tail(&self) -> Channel<Result<Data, Error>> {
         if !self.ready() {
-            return Channel::from_vec(vec![Err(self.not_ready())]);
+            return Channel::once(Err(self.not_ready()));
         }
         self.inner.unstable_tail()
     }
 
     fn subscribe_unstable_tail(&self) -> Channel<Result<UnstableEvent, Error>> {
         if !self.ready() {
-            return Channel::from_vec(vec![Err(self.not_ready())]);
+            return Channel::once(Err(self.not_ready())).chain(Channel::aborted("gated reader"));
         }
         self.inner.subscribe_unstable_tail()
     }
@@ -305,7 +305,7 @@ impl HistoricalReplay {
                     }
                     item.map(|entry| (entry.global_index, entry.data))
                 }),
-                Err(e) => Channel::from_vec(vec![Err(e)]),
+                Err(e) => Channel::once(Err(e)),
             }
         });
 
@@ -414,12 +414,10 @@ impl Ranged<StableCut> for StableSeam {
         // contract in `api/reader.rs`. A hang-up can eat a `Watermark` event, so
         // re-emitting the current one per cycle is what stops a consumer that
         // fell behind once from sitting on a stale watermark forever.
-        let watermark = Channel::from_vec(
-            cut.watermark
-                .map(|hlc| Ok(StableLogEvent::Watermark(hlc)))
-                .into_iter()
-                .collect(),
-        );
+        let watermark = match cut.watermark {
+            Some(hlc) => Channel::once(Ok(StableLogEvent::Watermark(hlc))),
+            None => Channel::empty(),
+        };
 
         replay.chain(watermark)
     }
@@ -502,7 +500,7 @@ fn resyncing_tail(
             stable_log,
             at,
         };
-        let (live, cut) = seam.open();
+        let (segment, cut) = seam.blend(&seam);
         if previous.is_some() {
             // Only a hung-up (or exhausted) previous cycle brings us back here.
             metrics::stable_read_resync();
@@ -521,7 +519,7 @@ fn resyncing_tail(
             watermark = ?cut.watermark,
             "stable tail: opening a segment"
         );
-        Some(seam.range(cut).chain(live))
+        Some(segment)
     })
     .filter_map(move |item| match item {
         // One comparison filters the captured frontier and drops the replay's
@@ -624,7 +622,7 @@ impl Ranged<Option<Hlc>> for UnstableSeam {
     type Item = Result<UnstableStep, Error>;
 
     fn range(&self, cut: Option<Hlc>) -> Channel<Self::Item> {
-        let opening = Channel::from_vec(vec![Ok(UnstableStep::Opened(cut))]);
+        let opening = Channel::once(Ok(UnstableStep::Opened(cut)));
         let scan = self
             .local_store
             .stream_above_hlc(cut)
@@ -691,7 +689,7 @@ fn resyncing_unstable_tail(
             local_store,
             stable_log,
         };
-        let (live, cut) = seam.open();
+        let (segment, cut) = seam.blend(&seam);
         if previous.is_some() {
             metrics::unstable_read_resync();
             tracing::warn!(
@@ -701,7 +699,7 @@ fn resyncing_unstable_tail(
                  the unstable window"
             );
         }
-        Some(seam.range(cut).chain(live))
+        Some(segment)
     })
     .filter_map(move |step| match step {
         Ok(step) => gate.admit(step).map(Ok),
@@ -1232,8 +1230,8 @@ mod tests {
             let end_hlc = entries.last().map(|(_, d)| d.data_id.hlc());
             let (events_tx, events_registry, events_shutdown) = crossbeam_combinators::broadcast(
                 "stable log subscription",
-                std::num::NonZeroUsize::new(1024).unwrap_or(std::num::NonZeroUsize::MIN),
-                std::num::NonZeroUsize::new(1024).unwrap_or(std::num::NonZeroUsize::MIN),
+                crate::unit::nonzero(1024),
+                crate::unit::nonzero(1024),
                 std::num::NonZeroUsize::new(capacity).expect("capacity > 0"),
                 crossbeam_combinators::OverflowPolicy::Shed,
             );
@@ -1302,9 +1300,7 @@ mod tests {
             unimplemented!("scripted stable log is read-only")
         }
         fn subscribe_events(&self) -> Channel<crate::meta::StableLogEvent> {
-            self.events_registry
-                .subscribe()
-                .unwrap_or_else(|_| Channel::aborted("stable log subscription"))
+            self.events_registry.subscribe_infinite()
         }
         fn watch_watermark(&self) -> tokio::sync::watch::Receiver<Option<Hlc>> {
             self.watermark.subscribe()

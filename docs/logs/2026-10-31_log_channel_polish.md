@@ -914,3 +914,22 @@ caller choice, not a crate policy. `broadcast`/`keyed` return
 `Sender<T>`/`Channel<T>`, and a user with a large payload can set
 `T = Arc<Payload>`. This removes the per-subscriber `(*event).clone()` adapters
 in `zslg`/`nvzn`; their payloads are already cheap (`Bytes`/`Copy`).
+
+## Q20 — Seam follow-up: the domain declares, the crate transports
+
+Two questions were still being answered at the call sites: what a failed
+subscription means, and how a resuming seam is assembled.
+
+- `subscribe_infinite` makes the first a crate decision. A consumer whose
+  contract is infinite cannot receive `Complete` from a failed registration; a
+  `Full` or `Closed` registry yields `Aborted(ProducerGone { what })` under the
+  fan-out's own label. `subscribe` stays for callers (nvzn) that must map
+  `Full` to a domain error.
+- `Tail::blend` returns `(segment, cut)`. `blend_chain` is its `.0`; the
+  resuming tails use the cut for metrics/logging without re-implementing
+  `range(cut).chain(live)`.
+- `GatedReader` chains `Channel::aborted` after its terminal `NotReady` error
+  for the two infinite streams, so the gate cannot end them cleanly.
+- `Feed::channel` now has production users at every blocking scan whose sender
+  is not shared. `Channel::from` remains only for the adapters that clone the
+  sender into a nested task.

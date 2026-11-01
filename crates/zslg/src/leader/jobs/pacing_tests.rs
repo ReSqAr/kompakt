@@ -293,7 +293,7 @@ impl LocalStoreView for FailingWindowStore {
         let n = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         let _ = self.done.send(n);
         crate::ordered::window_stream(
-            Channel::from_vec(vec![Err(Error::Storage("pacing test: window read".into()))]),
+            Channel::once(Err(Error::Storage("pacing test: window read".into()))),
             "pacing test window",
         )
     }

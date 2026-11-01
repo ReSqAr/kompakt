@@ -15,6 +15,7 @@
 //! | 3 | Remote-node connections | `RemoteRouter` (`router::remote`) |
 //! | 4 | Routing (this module) | `PeerRouter` |
 
+use crate::Error;
 use crate::api::{
     AddMemberOutcome, LivenessProbe, RaftMembership, RaftTransport, Replica, ReplicaClient, Router,
     StampedWrite, WriteOutcome,
@@ -22,7 +23,6 @@ use crate::api::{
 use crate::ids::{LogIndex, NodeId, PeerAddr};
 use crate::meta::ReplicaStatus;
 use crate::raft::TypeConfig;
-use crate::{Data, Error};
 use crossbeam_combinators::Channel;
 use futures::stream::BoxStream;
 use openraft::error::{InstallSnapshotError, RaftError};
@@ -91,12 +91,8 @@ impl Replica for ErrorTransport {
     }
 
     fn subscribe_from(&self, from: Option<LogIndex>) -> crate::ordered::ReplicaStream {
-        let (tx, rx) = crossbeam_channel::bounded::<Result<(LogIndex, Data), Error>>(1);
-        drop(tx);
-        // Node is shutting down: a deliberately empty stream, so close it.
-        let (ch, closer) = Channel::from(rx, "shutdown stub");
-        closer.close();
-        crate::ordered::replica_stream(ch, from)
+        // Node is shutting down: a deliberately empty, already-complete stream.
+        crate::ordered::replica_stream(Channel::empty(), from)
     }
 
     async fn fetch_status(&self) -> Result<ReplicaStatus, crate::Error> {

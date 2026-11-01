@@ -197,8 +197,7 @@ fn run_replica(weak: Weak<Coordinator>, node: NodeId, mut ids_rx: Receiver<DataI
         // Both finite-by-drop rather than by declaration: the prime set is fully
         // sent above, and the fan is replaced wholesale on reopen. Nothing reads
         // this stream's verdict — an un-acked write is resent from `pending`.
-        let (prime_ch, prime_closer) = Channel::from(prime_rx, "coordinator prime");
-        prime_closer.close();
+        let prime_ch = Channel::closed(prime_rx);
         // Infinite: replaced wholesale on reopen, never completed.
         let ids_ch = Channel::from_infinite(ids_rx, "coordinator fan");
         let prime_stamped = prime_ch.filter_map(|data| Some(StampedWrite::now(data)));
@@ -562,7 +561,7 @@ mod tests {
             unimplemented!()
         }
         fn subscribe_from(&self, _: Option<LogIndex>) -> crate::ordered::ReplicaStream {
-            crate::ordered::replica_stream(Channel::from_vec(vec![]), None)
+            crate::ordered::replica_stream(Channel::empty(), None)
         }
         async fn subscribe_status(
             &self,

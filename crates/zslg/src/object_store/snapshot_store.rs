@@ -55,7 +55,7 @@ use crate::meta::SnapshotEntry;
 use crate::metrics::{self, ObjectStoreOp, OpState};
 use crate::object_store::CompressionLevel;
 use crate::object_store::framing;
-use crossbeam_combinators::Channel;
+use crossbeam_combinators::{Channel, Feed};
 
 const SNAPSHOT_PREFIX: &str = "snapshots";
 
@@ -299,8 +299,7 @@ impl SnapshotStore for RemoteSnapshotStore {
 
         let sync_reader = SyncIoBridge::new(StreamReader::new(byte_stream));
         let cancel = self.cancel.clone();
-        let (tx, rx) = crossbeam_channel::bounded(SNAPSHOT_READ_CHANNEL_CAP);
-        let (ch, closer) = Channel::from(rx, "read_snapshot");
+        let (feed, ch) = Feed::channel(SNAPSHOT_READ_CHANNEL_CAP, "read_snapshot");
         tokio::task::spawn_blocking(move || {
             let res = crate::object_store::framing::decode_framed_records_streaming::<
                 SnapshotEntry,
@@ -308,8 +307,9 @@ impl SnapshotStore for RemoteSnapshotStore {
             >(sync_reader, |entry: SnapshotEntry| {
                 // Send first, *then* check for cancellation: the blocking send is
                 // the backpressure, and checking before it would spin.
-                tx.send(Ok(entry))
-                    .map_err(|_| Error::Storage("snapshot read: consumer dropped".into()))?;
+                if !feed.send(Ok(entry)) {
+                    return Err(Error::Storage("snapshot read: consumer dropped".into()));
+                }
                 if cancel.is_cancelled() {
                     return Err(Error::Storage("snapshot read cancelled".into()));
                 }
@@ -319,11 +319,11 @@ impl SnapshotStore for RemoteSnapshotStore {
                 // Unconditional, cancelled or not — see the header. It cannot wedge
                 // shutdown: a consumer either drains to close or drops its receiver,
                 // and the latter makes this fail fast.
-                let _ = tx.send(Err(e));
+                let _ = feed.send(Err(e));
             }
-            // Reached only on the normal path: a panic drops `closer` instead,
+            // Reached only on the normal path: a panic drops `feed` instead,
             // leaving the consumer with `End::Aborted`.
-            closer.close();
+            feed.close();
         });
         Ok(ch)
     }

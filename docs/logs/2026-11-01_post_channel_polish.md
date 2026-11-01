@@ -1,7 +1,7 @@
 # Post — channel polish
 
-Implementation: squashed commit `8f3e545` on `channel-extraction`.
-Design: `2026-10-31_design_channel_polish.md`.
+Implementation: `8f3e545` plus the seam follow-up commit on
+`channel-extraction`. Design: `2026-10-31_design_channel_polish.md`.
 
 ## 1. Code review
 
@@ -93,7 +93,40 @@ Deviations forced by the implementation:
   `Copy`, so the per-subscriber clone is cheap. A future expensive payload can
   use `T = Arc<Payload>` at the call site.
 
-## 4. What is next
+## 4. Seam audit
+
+The channel *mechanics* are crate-owned; the domain names the pipeline. A
+follow-up pass closed the places where the old framing still leaked:
+
+- **Subscription failure is a crate decision.** Four `zslg` sites repeated
+  `registry.subscribe().unwrap_or_else(|_| Channel::aborted("..."))`, including
+  a second copy of the fan-out's label. `Registry::subscribe_infinite` and
+  `KeyedRegistry::subscribe_infinite` own that mapping and use the fan-out's own
+  `what`; a site can no longer substitute `Channel::empty()` and turn an
+  infinite source's failure into a clean `Complete`.
+- **History-then-live is a crate decision.** The two resuming tails opened the
+  seam by hand and rebuilt `range(cut).chain(live)`, bypassing `blend_chain`
+  only because they also needed the cut for logging. `Tail::blend` returns the
+  segment **and** the cut, so the loops keep their metrics while the seam's one
+  ordering rule stays in `blend.rs`.
+- **Infinite streams never complete on a gate.** `GatedReader`'s stable and
+  unstable subscriptions emitted a terminal error and then `Complete`; they now
+  chain `Channel::aborted`, matching the contract the docs state.
+- **Completion has one constructor.** `Channel::from(..) + Closer::close()`
+  for an already-finished stream became `Channel::empty` / `Channel::closed` /
+  `Channel::once`; the blocking scan producers (`pump_range`,
+  `StableLogSnapshot::range`, both local-store scans, `read_snapshot`) now use
+  `Feed::channel`, which pairs the sender with its close proof. `Channel::from`
+  remains only at the genuine adapter sites that share a sender with a nested
+  task (the archive stream, `HistoricalReplay`, the merge feeder).
+
+What remains in `zslg`/`nvzn` is domain pipeline, not channel plumbing: which
+source, which cut, which key, and the metric/log hook around it. The resuming
+loop, the cursor, and the watermark gate are domain policy; the transport
+(subscribe failure, history/live order, completion vs abort, close discipline)
+is the crate's.
+
+## 5. What is next
 
 - Optional producer-side observer for shed events; the subscriber log is the
   only signal today.

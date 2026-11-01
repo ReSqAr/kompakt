@@ -122,7 +122,7 @@ use crate::ids::LogIndex;
 use crate::meta::{Data, SnapshotEntry, StableLogEvent};
 use crate::metrics::{self, LogType, OpState};
 use crossbeam_combinators::Channel;
-use crossbeam_combinators::{OverflowPolicy, Registry, Shutdown, Wakes, broadcast};
+use crossbeam_combinators::{Feed, OverflowPolicy, Registry, Shutdown, Wakes, broadcast};
 
 // ── key codec ───────────────────────────────────────────────────────────────
 //
@@ -434,8 +434,8 @@ impl StableLog {
 
         let (events_tx, events_registry, events_shutdown) = broadcast(
             "stable log subscription",
-            std::num::NonZeroUsize::new(1024).unwrap_or(std::num::NonZeroUsize::MIN),
-            std::num::NonZeroUsize::new(1024).unwrap_or(std::num::NonZeroUsize::MIN),
+            crate::unit::nonzero(1024),
+            crate::unit::nonzero(1024),
             subscriber_queue_capacity,
             OverflowPolicy::Shed,
         );
@@ -724,9 +724,7 @@ impl crate::api::StableLogSnapshot for StableLog {
     }
 
     fn subscribe_events(&self) -> Channel<StableLogEvent> {
-        self.events_registry
-            .subscribe()
-            .unwrap_or_else(|_| Channel::aborted("stable log subscription"))
+        self.events_registry.subscribe_infinite()
     }
 
     fn watch_watermark(&self) -> watch::Receiver<Option<Hlc>> {
@@ -741,8 +739,7 @@ impl crate::api::StableLogSnapshot for StableLog {
         // `[from, until)` — the half-open index window, streamed off a blocking
         // scan through a bounded channel.
         let storage = Arc::clone(&self.storage);
-        let (tx, rx) = crossbeam_channel::bounded::<Result<(LogIndex, Data), Error>>(32);
-        let (ch, closer) = Channel::from(rx, "StableLogSnapshot::range");
+        let (feed, ch) = Feed::channel(32, "StableLogSnapshot::range");
         tokio::task::spawn_blocking(move || {
             let mut decode_err: Option<Error> = None;
             let scan = for_each_entry(
@@ -756,7 +753,7 @@ impl crate::api::StableLogSnapshot for StableLog {
                 &mut |idx, payload| match postcard::from_bytes::<Data>(payload)
                     .to_codec("decode stable entry")
                 {
-                    Ok(d) => tx.send(Ok((idx, d))).is_ok(),
+                    Ok(d) => feed.send(Ok((idx, d))),
                     Err(e) => {
                         decode_err = Some(e);
                         false
@@ -764,13 +761,13 @@ impl crate::api::StableLogSnapshot for StableLog {
                 },
             );
             if let Err(e) = scan {
-                let _ = tx.send(Err(e));
+                let _ = feed.send(Err(e));
             } else if let Some(e) = decode_err {
-                let _ = tx.send(Err(e));
+                let _ = feed.send(Err(e));
             }
-            // Normal path only: a panic drops `closer` and the consumer sees
+            // Normal path only: a panic drops `feed` and the consumer sees
             // `End::Aborted` instead of a clean end.
-            closer.close();
+            feed.close();
         });
         ch
     }

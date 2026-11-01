@@ -112,6 +112,20 @@ impl<T: Clone + Send + 'static> Registry<T> {
     pub fn subscribe(&self) -> Result<Channel<T>, RegistryError> {
         subscribe(&self.register, &self.state, (), self.sub_cap, self.what)
     }
+
+    /// A subscriber stream for a source that is **infinite by contract**.
+    ///
+    /// [`subscribe`](Self::subscribe) fails; this cannot, because a consumer of
+    /// an infinite stream has no clean end to interpret. `Full` and `Closed`
+    /// both yield a stream that ends immediately as
+    /// [`Aborted(ProducerGone { what })`](crate::AbortReason::ProducerGone)
+    /// carrying this fan-out's label, which is the cue to retry rather than to
+    /// stop.
+    #[must_use]
+    pub fn subscribe_infinite(&self) -> Channel<T> {
+        self.subscribe()
+            .unwrap_or_else(|_| Channel::aborted(self.what))
+    }
 }
 
 /// The keyed subscribe side.
@@ -138,6 +152,17 @@ impl<K: Eq + Copy + Send + 'static, T: Clone + Send + 'static> KeyedRegistry<K, 
     /// full, `Closed` if the fan-out is gone.
     pub fn subscribe(&self, key: K) -> Result<Channel<T>, RegistryError> {
         subscribe(&self.register, &self.state, key, self.sub_cap, self.what)
+    }
+
+    /// A subscriber stream for a source that is **infinite by contract**.
+    ///
+    /// As [`Registry::subscribe_infinite`]: `Full` and `Closed` both yield a
+    /// stream that ends immediately `Aborted(ProducerGone { what })` under this
+    /// fan-out's label, never `Complete`.
+    #[must_use]
+    pub fn subscribe_infinite(&self, key: K) -> Channel<T> {
+        self.subscribe(key)
+            .unwrap_or_else(|_| Channel::aborted(self.what))
     }
 }
 
@@ -538,6 +563,48 @@ mod tests {
             sub.recv(),
             Err(End::Aborted {
                 reason: AbortReason::ProducerGone { what: "test" }
+            })
+        ));
+        drop(tx);
+    }
+
+    #[test]
+    fn subscribe_infinite_aborts_instead_of_completing() {
+        let (tx, registry, mut shutdown) =
+            broadcast::<u32>("infinite", cap(4), cap(4), cap(4), OverflowPolicy::Shed);
+        shutdown.cancel();
+        shutdown.wait();
+
+        let mut sub = registry.subscribe_infinite();
+        assert!(matches!(
+            sub.recv(),
+            Err(End::Aborted {
+                reason: AbortReason::ProducerGone { what: "infinite" }
+            })
+        ));
+        drop(tx);
+    }
+
+    #[test]
+    fn keyed_subscribe_infinite_uses_the_fanout_label() {
+        let (tx, registry, mut shutdown) = keyed(
+            "keyed infinite",
+            |n: &u32| Some(n % 2),
+            cap(4),
+            cap(4),
+            cap(4),
+            OverflowPolicy::Shed,
+        );
+        shutdown.cancel();
+        shutdown.wait();
+
+        let mut sub = registry.subscribe_infinite(0);
+        assert!(matches!(
+            sub.recv(),
+            Err(End::Aborted {
+                reason: AbortReason::ProducerGone {
+                    what: "keyed infinite"
+                }
             })
         ));
         drop(tx);

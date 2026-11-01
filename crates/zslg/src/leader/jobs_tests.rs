@@ -476,7 +476,7 @@ async fn leader_loop_compacts_manifest() {
             .snapshot_store
             .write_snapshot(
                 meta.snapshot_id,
-                crossbeam_combinators::Channel::from_vec(vec![Ok::<_, crate::Error>(entry)]),
+                crossbeam_combinators::Channel::once(Ok::<_, crate::Error>(entry)),
                 CompressionLevel::fast(),
                 crate::metrics::ObjectStoreReason::SnapshotCreate,
             )

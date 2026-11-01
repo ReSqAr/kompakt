@@ -166,10 +166,10 @@ pub(in crate::leader) async fn create_snapshot_entry(
             let start_hlc = first.data_id.hlc();
             end_hlc_tracker.store(start_hlc.raw(), Ordering::Relaxed);
 
-            let head = Channel::from_vec(vec![Ok(SnapshotEntry {
+            let head = Channel::once(Ok(SnapshotEntry {
                 global_index: LogIndex(next_index_start),
                 data: first,
-            })]);
+            }));
 
             let index = Arc::new(AtomicU64::new(next_index_start.saturating_add(1)));
             let seen_terminal = terminal.clone();

@@ -49,7 +49,7 @@ use crate::ids::{DataId, LogIndex};
 use crate::meta::Data;
 use crate::metrics::{self, FlushTrigger, LogType, OpState};
 use crossbeam_combinators::{
-    Channel, OverflowPolicy, Ranged, Registry, Shutdown, Tail, blend_chain, broadcast,
+    Channel, Feed, OverflowPolicy, Ranged, Registry, Shutdown, Tail, blend_chain, broadcast,
 };
 
 /// Fallback sizing for [`ReplicaLogStore::open_with_flush`], the
@@ -586,10 +586,9 @@ impl ReplicaLogStore {
 
         let (live_tx, live_registry, live_shutdown) = broadcast(
             "replica live tail",
-            std::num::NonZeroUsize::new(1024).unwrap_or(std::num::NonZeroUsize::MIN),
-            std::num::NonZeroUsize::new(1024).unwrap_or(std::num::NonZeroUsize::MIN),
-            std::num::NonZeroUsize::new(subscribe_channel_capacity)
-                .unwrap_or(std::num::NonZeroUsize::MIN),
+            crate::unit::nonzero(1024),
+            crate::unit::nonzero(1024),
+            crate::unit::nonzero(subscribe_channel_capacity),
             OverflowPolicy::Shed,
         );
         Ok(Self {
@@ -684,26 +683,20 @@ impl ReplicaLogStore {
         crate::ordered::replica_stream(blend_chain(&seam, &seam), from)
     }
 
-    /// An empty historic phase: complete by construction, so it is closed
-    /// rather than aborted — the window *was* fully served, it just held
-    /// nothing.
+    /// An empty historic phase: complete by construction — the window *was*
+    /// fully served, it just held nothing.
     fn empty_historic() -> Channel<Result<(LogIndex, Data), Error>> {
-        let (tx, rx) = crossbeam_channel::bounded(1);
-        drop(tx);
-        let (ch, closer) = Channel::from(rx, "replica historic tail");
-        closer.close();
-        ch
+        Channel::empty()
     }
 
     /// The historical catch-up phase of a subscription: a **finite** scan of
-    /// `[from, to]`. Fire-and-forget `spawn_blocking`, so the `Closer` is what
+    /// `[from, to]`. Fire-and-forget `spawn_blocking`, so the `Feed` is what
     /// distinguishes "the window was fully served" from "the scan died" — a
     /// panic here would otherwise truncate a subscriber's catch-up and still look
     /// like a clean handoff to the live tail.
     fn pump_range(&self, from: LogIndex, to: LogIndex) -> Channel<Result<(LogIndex, Data), Error>> {
         debug_assert!(from <= to);
-        let (tx, rx) = crossbeam_channel::bounded(self.subscribe_channel_capacity);
-        let (ch, closer) = Channel::from(rx, "replica historic tail");
+        let (feed, ch) = Feed::channel(self.subscribe_channel_capacity, "replica historic tail");
         let storage = Arc::clone(&self.storage);
         tokio::task::spawn_blocking(move || {
             // PINNING RULE: `payload` is borrowed from the iterator's pinned
@@ -712,14 +705,14 @@ impl ReplicaLogStore {
             // where the value outlives the iterator.
             let scan = for_each_entry(&storage, from, to, &mut |idx, data_id, payload| {
                 let blob = bytes::Bytes::copy_from_slice(payload);
-                tx.send(Ok((idx, Data { data_id, blob }))).is_ok()
+                feed.send(Ok((idx, Data { data_id, blob })))
             });
             if let Err(e) = scan {
-                let _ = tx.send(Err(e));
+                let _ = feed.send(Err(e));
             }
-            // Normal path only: a panic in the scan drops `closer`, so the
+            // Normal path only: a panic in the scan drops `feed`, so the
             // chained subscription reports `End::Aborted` instead of a clean end.
-            closer.close();
+            feed.close();
         });
         ch
     }
@@ -795,11 +788,7 @@ impl Tail for ReplicaSeam {
     type Cut = Option<LogIndex>;
 
     fn subscribe(&self) -> Channel<Self::Item> {
-        let live = self
-            .log
-            .live_registry
-            .subscribe()
-            .unwrap_or_else(|_| Channel::aborted("replica live tail"));
+        let live = self.log.live_registry.subscribe_infinite();
         #[cfg(test)]
         subscribe_handoff_pause();
         live.map(Ok)

@@ -43,6 +43,23 @@ pub trait Tail {
         let cut = self.cut();
         (self.above(live, cut), cut)
     }
+
+    /// History up to the cut, then the live half — plus the cut, for a caller
+    /// that has to log or measure the segment it just opened.
+    ///
+    /// This is [`blend_chain`] with the cut still in hand. Use it whenever a
+    /// resuming loop needs both: opening the two halves by hand and calling
+    /// `range(...).chain(live)` repeats the seam's one ordering rule outside
+    /// the crate.
+    fn blend<R>(&self, ranged: &R) -> (Channel<Self::Item>, Self::Cut)
+    where
+        Self: Sized,
+        Self::Item: Send + 'static,
+        R: Ranged<Self::Cut, Item = Self::Item>,
+    {
+        let (live, cut) = self.open();
+        (ranged.range(cut).chain(live), cut)
+    }
 }
 
 /// The history that covers everything up to a cut.
@@ -63,8 +80,7 @@ where
     R: Ranged<T::Cut, Item = T::Item>,
     T::Item: Send + 'static,
 {
-    let (live, cut) = tail.open();
-    ranged.range(cut).chain(live)
+    tail.blend(ranged).0
 }
 
 #[cfg(test)]
@@ -157,6 +173,18 @@ mod tests {
             history: vec![1, 2],
         };
         assert_eq!(drain(blend_chain(&seam, &seam)), vec![1, 2, 11, 12]);
+    }
+
+    #[test]
+    fn blend_returns_the_segment_and_its_cut() {
+        let seam = Scripted {
+            seen: Arc::new(Mutex::new(Vec::new())),
+            live: vec![11, 12],
+            history: vec![1, 2],
+        };
+        let (segment, cut) = seam.blend(&seam);
+        assert_eq!(cut, 10);
+        assert_eq!(drain(segment), vec![1, 2, 11, 12]);
     }
 
     #[test]

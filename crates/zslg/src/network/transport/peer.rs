@@ -126,9 +126,9 @@ impl Replica for TcpPeerClient {
             Target::Direct(addr) => {
                 // A direct-dialed peer (join-time transport, before its NodeId is
                 // known) never accepts writes: yield one terminal error.
-                Channel::from_vec(vec![Err(Error::Rpc(format!(
+                Channel::once(Err(Error::Rpc(format!(
                     "direct-dialed peer {addr:?} does not accept writes (join-time transport)"
-                )))])
+                ))))
             }
         }
     }
@@ -136,7 +136,7 @@ impl Replica for TcpPeerClient {
     fn subscribe_from(&self, from: Option<LogIndex>) -> crate::ordered::ReplicaStream {
         match &self.target {
             Target::Registered(node_id) => self.rpc_client.subscribe_from(*node_id, from),
-            Target::Direct(_) => crate::ordered::replica_stream(Channel::from_vec(vec![]), from),
+            Target::Direct(_) => crate::ordered::replica_stream(Channel::empty(), from),
         }
     }
 

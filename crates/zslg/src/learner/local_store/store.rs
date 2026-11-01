@@ -34,7 +34,7 @@ use crate::learner::local_store::key::{
     DATA_PRIMARY_WIDTH, decode_data_key, encode_cursor_key, encode_data_key,
 };
 use bytes::Bytes;
-use crossbeam_combinators::{OverflowPolicy, Registry, Shutdown, broadcast};
+use crossbeam_combinators::{Feed, OverflowPolicy, Registry, Shutdown, broadcast};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tracing::error;
@@ -122,8 +122,8 @@ pub(in crate::learner::local_store) async fn create_local_store(
         {
             let (tx, registry, shutdown) = broadcast(
                 "unstable tail subscription",
-                std::num::NonZeroUsize::new(1024).unwrap_or(std::num::NonZeroUsize::MIN),
-                std::num::NonZeroUsize::new(1024).unwrap_or(std::num::NonZeroUsize::MIN),
+                crate::unit::nonzero(1024),
+                crate::unit::nonzero(1024),
                 config.unstable_subscriber_queue_capacity,
                 OverflowPolicy::Shed,
             );
@@ -260,18 +260,16 @@ impl LocalStore {
 impl crate::api::LocalStoreView for LocalStore {
     fn stream_above_hlc(&self, threshold: Option<Hlc>) -> crate::ordered::LocalStoreStream {
         let storage = self.storage.clone();
-        let (tx, rx) =
-            crossbeam_channel::bounded::<Result<WindowItem, Error>>(STREAM_CHANNEL_CAPACITY);
-        let (ch, closer) = Channel::from(rx, "stream_above_hlc");
+        let (feed, ch) = Feed::channel(STREAM_CHANNEL_CAPACITY, "stream_above_hlc");
         tokio::task::spawn_blocking(move || {
             let start = match threshold {
                 None => Bound::Unbounded,
                 Some(wm) => Bound::Excluded(DataId::from_parts(wm, NodeId::MAX, u64::MAX)),
             };
-            stream_scan(&storage, (start, Bound::Unbounded), &tx, None);
-            // Only on the normal path: a panic here drops `closer` instead, and
+            stream_scan(&storage, (start, Bound::Unbounded), &feed, None);
+            // Only on the normal path: a panic here drops `feed` instead, and
             // the consumer sees `End::Aborted` rather than a clean end.
-            closer.close();
+            feed.close();
         });
         // Uncapped, so the terminal is always `Complete` and carries nothing
         // this caller needs.
@@ -292,16 +290,15 @@ impl crate::api::LocalStoreView for LocalStore {
         max_entries: Option<std::num::NonZeroUsize>,
     ) -> crate::ordered::WindowStream {
         let storage = self.storage.clone();
-        let (tx, rx) = crossbeam_channel::bounded(STREAM_CHANNEL_CAPACITY);
-        let (ch, closer) = Channel::from(rx, "stream_window_ordered");
+        let (feed, ch) = Feed::channel(STREAM_CHANNEL_CAPACITY, "stream_window_ordered");
         tokio::task::spawn_blocking(move || {
             let start = match above {
                 None => Bound::Unbounded,
                 Some(a) => Bound::Excluded(DataId::from_parts(a, NodeId::MAX, u64::MAX)),
             };
             let end = Bound::Included(DataId::from_parts(upto, NodeId::MAX, u64::MAX));
-            stream_scan(&storage, (start, end), &tx, max_entries);
-            closer.close();
+            stream_scan(&storage, (start, end), &feed, max_entries);
+            feed.close();
         });
         window_stream(ch, "local store window")
     }
@@ -311,9 +308,7 @@ impl crate::api::LocalStoreView for LocalStore {
     }
 
     fn subscribe_unstable(&self) -> Channel<Data> {
-        self.unstable_registry
-            .subscribe()
-            .unwrap_or_else(|_| Channel::aborted("unstable tail subscription"))
+        self.unstable_registry.subscribe_infinite()
     }
 
     async fn subscription_cursor(&self, upstream: NodeId) -> Result<Option<LogIndex>, Error> {
@@ -815,7 +810,7 @@ fn commit_batch(
 fn stream_scan(
     storage: &Storage,
     range: (Bound<DataId>, Bound<DataId>),
-    tx: &crossbeam_channel::Sender<Result<WindowItem, Error>>,
+    feed: &crossbeam_combinators::Feed<Result<WindowItem, Error>>,
     max_entries: Option<std::num::NonZeroUsize>,
 ) {
     let mut sent: usize = 0;
@@ -839,7 +834,7 @@ fn stream_scan(
                 capped = true;
                 return false;
             }
-            if tx.send(Ok(WindowItem::Entry(d))).is_err() {
+            if !feed.send(Ok(WindowItem::Entry(d))) {
                 consumer_gone = true;
                 return false;
             }
@@ -854,7 +849,7 @@ fn stream_scan(
         },
     );
     if let Err(e) = scan {
-        let _ = tx.send(Err(e));
+        let _ = feed.send(Err(e));
         return;
     }
     if consumer_gone {
@@ -866,7 +861,7 @@ fn stream_scan(
         Some(hlc) => WindowItem::TruncatedAt(hlc),
         None => WindowItem::Complete,
     };
-    let _ = tx.send(Ok(terminal));
+    let _ = feed.send(Ok(terminal));
 }
 
 /// Periodically fsync the local store when it has writes that aren't on disk
