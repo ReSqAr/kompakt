@@ -35,7 +35,8 @@ domain declares sources, keys, cuts, fallbacks, policies (overflow, stall),
   `watch` + `Wakes` pair, no `AtomicU64`/`Mutex` holding channel state, no
   in-band terminal item (`WindowItem`).
 - No read path that drops a verdict: `Channel` has no `IntoIterator` (D25),
-  and `ready_batch` returns `Result<ReadyBatch, K::End>` (D28).
+  and `ready_batch` returns `Result<ReadyBatch, K::End>` (D28); the lossy
+  `into_stream` bridge is removed (D29).
 - No `block_on`; `HistoricalReplay` and the archive are lazy declarations.
 - Returning `Channel::empty()` for a subscription does not compile.
 - A window that stops short of its bound aborts (no trailing-gap hole).
@@ -120,7 +121,9 @@ subscription in production and finite vectors in tests) is generic over
 `K: Kind` and reads `K::End`. Every read path returns the verdict (D28):
 `recv -> Result<T, K::End>`, `ready_batch(max) -> Result<ReadyBatch<'_, T>,
 K::End>`; `try_recv -> Option<T>` is the non-blocking poll and `end_reason`
-remains for a stream already known to have stopped. `OrderedChannel<T, P, K>` and `Feed<T, K>` carry
+remains for a stream already known to have stopped. There is no async
+`Stream` bridge (D29): an async caller drains with `recv` on
+`spawn_blocking`. `OrderedChannel<T, P, K>` and `Feed<T, K>` carry
 the kind too. `Channel` has no `IntoIterator` (D25).
 
 **Internal contract.** `Source` still reports `End`; an infinite wrapper maps
@@ -603,6 +606,7 @@ observers, and the fold's correctness does not depend on them.
 | Chunk splitter (one scan → many snapshots) | Raft commits sit between chunks (D24) |
 | `IntoIterator` for `Channel` | drops the verdict; hid a compaction data-loss path (D25) |
 | Unbounded `covers` | an open bound has no end to check (D26.5) |
+| Keep `into_stream` | drops the verdict; no production user (D29) |
 
 ## 15. Testing
 
@@ -621,6 +625,8 @@ observers, and the fold's correctness does not depend on them.
 - Producers: a finite body must return `Closed`; a panic aborts.
 - `compile_fail`: `for x in channel` on a `Channel` (a `ReadyBatch` stays an
   iterator).
+- Test modules and `examples/write_tracker` move from `into_stream` to
+  `spawn_blocking` + `recv`.
 - `Segment`: open order, `chain` vs `merge`, `filter_above*`.
 - `Resumable`/`resync`: resume only on `ProducerGone`; `Cancelled` and
   `OrderViolation` end; `after` passed exactly; decline ends with previous
@@ -645,7 +651,8 @@ observers, and the fold's correctness does not depend on them.
 Each slice is green (tests, clippy, fmt) before the next.
 
 1. **Mechanical.** Split-HLC test fix; `FnMut` combinators; remove
-   `IntoIterator`; `take_at_least`; `produce_*` with `Closed`, and
+   `IntoIterator` and `into_stream`; `ready_batch` returns the verdict;
+   `take_at_least`; `produce_*` with `Closed`, and
    `Feed::send_timeout` (pre-kind: plain `Channel`); migrate producer sites and
    audit remaining `from`/`from_infinite`; snapshot window via
    `take_at_least` and `write_snapshot` metadata, `WindowItem` deleted;

@@ -510,4 +510,10 @@ socket writers that returned on `None` without `end_reason`
 must now name what an end means; the three loops that already checked get
 simpler. "No read path drops a verdict" holds by construction.
 
-`into_stream`: remove if no production user — pending; see below.
+### D29. `into_stream` is removed
+
+The async `Stream` bridge drops the verdict and has no production user in this
+workspace (tests and `examples/write_tracker` only). An async caller drains
+with `recv` on `spawn_blocking` — what the bridge did internally, minus the
+second hop. The `tokio` feature stays for `produce_*`, `defer_async`,
+`Level::changed` and `Cancellation::from_token`.
