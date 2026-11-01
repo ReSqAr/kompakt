@@ -594,3 +594,13 @@ without one), `ordered`/`also`/`covers` (three roles), a generic window clip
   log loader (§9.7) is named in slice 2.
 - §11 names the shared resume `Source`; §15 gains loader tests; the closure
   list in §5.3 includes producer bodies and `defer_async`.
+
+### D35. Final wording fixes; internal model rewritten
+
+- §5.3's position-reader list includes `also::<Q>` and `stitch`'s `Gap<Pos>`;
+  `DedupByKey` holds a `Pos`, not a closure (only `FilterMap`/`TakeWhile` store
+  `FnMut`); §11 says "kind-generic producers instead of per-kind constructors".
+- The internal model is rewritten to the current design only; its earlier
+  sections described the pre-review architecture (free `open` + `Live`, public
+  `Recv`/`pump`, fan-out owning the registry, `bool` sends, infinite-only
+  `subscribe`, construction-time `defer_async` handle). History stays here.

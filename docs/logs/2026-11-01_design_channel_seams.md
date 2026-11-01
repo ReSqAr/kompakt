@@ -179,9 +179,9 @@ count. `NonZeroUsize` leaves no zero rule
 to define.
 
 Every combinator that reads a position names it by a `Key<T>` type, never by a
-closure (D32, D33): `ordered::<P>`, `covers`, `take_at_least::<Pos>`,
-`filter_above::<Pos>`, `dedup_by_key::<Pos>` and `Resumable` read the key the
-same way, and the key type is visible in the signature. Closures remain only
+closure (D32, D33): `ordered::<P>`, `also::<Q>`, `covers`, `stitch` (its
+`Gap<Pos>`), `take_at_least::<Pos>`, `filter_above::<Pos>`,
+`dedup_by_key::<Pos>` and `Resumable` read the key the same way, and the key type is visible in the signature. Closures remain only
 for transformations (`map`, `filter_map`), bound predicates (`take_while`,
 `take_until` — e.g. the archive's `not_above`, nvzn's `at_or_after_cut` with
 its watermark rule), and lifecycle bodies and factories (producer bodies,
@@ -193,8 +193,9 @@ its watermark rule), and lifecycle bodies and factories (producer bodies,
 `OrderedChannel` carries only order-preserving operations (`until`, `covers`,
 `also`, `stitch`); anything else goes through `into_channel()`.
 
-Closures are `FnMut + Send` (D16): `FilterMap`/`TakeWhile`/`DedupByKey` store
-`Box<dyn FnMut + Send>` instead of `Arc<dyn Fn + Send + Sync>`.
+Closures are `FnMut + Send` (D16): `FilterMap` and `TakeWhile` store
+`Box<dyn FnMut + Send>` instead of `Arc<dyn Fn + Send + Sync>`; `DedupByKey`
+holds no closure, only the last `Pos`.
 
 ### 5.4 Domain boundaries
 
@@ -606,7 +607,8 @@ observers, and the fold's correctness does not depend on them.
 - The kind parameter on every signature (D1): verbose by design.
 - `defer_async`'s hand-off wait: one private `Source` state.
 - `also` as a runtime-only second policy, so the type names one order.
-- `Kind::Proof` so one constructor serves both kinds; two `Feed` kinds.
+- `Kind::Proof`: kind-generic producers (`produce_blocking`, `produce_async`,
+  `defer_async`) instead of per-kind constructors; two `Feed` kinds.
 - `Level` holds a mutex plus private `Wakes`, with a tokio-gated async wait:
   two notification paths behind one setter.
 
