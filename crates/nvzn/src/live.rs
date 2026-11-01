@@ -1467,7 +1467,7 @@ mod tests {
         fn subscribe_stable_log(&self, from: LogIndex) -> zslg::StableStream {
             let (tx, rx) = crossbeam_channel::bounded(1);
             *self.stable.lock().expect("test mutex") = Some(tx);
-            zslg::StableStream::new(Channel::from_infinite(rx, "stalled stable"), Some(from))
+            zslg::StableStream::new(Channel::from_infinite(rx, "stalled stable"), from.before())
         }
 
         fn unstable_tail(&self) -> Channel<Result<Data, zslg::Error>> {

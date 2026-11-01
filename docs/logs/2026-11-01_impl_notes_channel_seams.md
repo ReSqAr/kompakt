@@ -88,3 +88,10 @@ post-implementation doc. Not a design doc; the design is
 - **Two buffers disappear with the forwarding hops**: the merge feeder's
   `SNAPSHOT_WRITE_FORWARDER_CAP` and the replay's `STREAM_CHANNEL_CAP`. Entries
   now flow straight from `read_snapshot`'s channel to the consumer.
+- **The inclusive-to-exclusive hazard (D36) bit exactly where predicted.**
+  nvzn's three stable-stream test doubles passed `Some(from)` — an inclusive
+  start — to `StableStream::new`, whose second argument is now `after`. Every
+  fold/supervisor/live/reader test, and btrb's live-write test through nvzn's
+  `testing` double, then skipped index `from` and stopped with
+  `SubscriptionAborted`. Fixed with `from.before()` (`LogIndex::before`, the
+  inverse of `next_after`).

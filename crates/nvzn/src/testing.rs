@@ -298,7 +298,7 @@ impl zslg::Reader for TestReader {
             senders.lock().expect("test mutex").push(tx);
         }
 
-        zslg::StableStream::new(Channel::from_infinite(rx, "test-log"), Some(from))
+        zslg::StableStream::new(Channel::from_infinite(rx, "test-log"), from.before())
     }
 
     fn unstable_tail(&self) -> Channel<Result<Data, zslg::Error>> {

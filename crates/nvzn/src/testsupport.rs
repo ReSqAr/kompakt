@@ -457,7 +457,7 @@ impl zslg::Reader for ScriptedReader {
             .expect("test mutex")
             .take()
             .expect("a scripted reader serves one subscription");
-        zslg::StableStream::new(Channel::from_infinite(rx, "scripted"), Some(from))
+        zslg::StableStream::new(Channel::from_infinite(rx, "scripted"), from.before())
     }
 
     fn unstable_tail(&self) -> Channel<Result<Data, zslg::Error>> {
