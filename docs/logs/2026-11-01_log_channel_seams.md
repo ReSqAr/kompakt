@@ -570,3 +570,15 @@ deleted in slice 1:
 Not merged: `Fanout`/`Level` (every item with a pacing thread vs latest value
 without one), `ordered`/`also`/`covers` (three roles), a generic window clip
 (one caller).
+
+### D33. G2 completed: keyed combinators take no closures
+
+- `dedup_by_key::<K>()` reads `Key<T>` (it held a `Box<dyn FnMut>` key; the
+  loader's closure was exactly `LogIndex: Key<Result<SnapshotEntry, Error>>`).
+- `filter_above::<K>(cut)` is a combinator on either kind: it is each seam's
+  `above` and the archive's `skip_below` (§9.3), and with `dedup_by_key` it
+  spells the stable log loader (§9.7) with one exclusive start.
+- The claim is narrowed to what holds: position-reading combinators use
+  `Key<T>`; closures remain for transformations, bound predicates (`not_above`,
+  nvzn's `at_or_after_cut` with its watermark rule) and lifecycle factories
+  (`make`, `stitch`'s fallback).

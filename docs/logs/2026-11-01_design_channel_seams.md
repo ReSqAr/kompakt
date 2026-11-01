@@ -1,6 +1,6 @@
 # Channel seams — design
 
-Process: IAIC. Decision log: `2026-11-01_log_channel_seams.md` (D1–D32).
+Process: IAIC. Decision log: `2026-11-01_log_channel_seams.md` (D1–D33).
 Internal model: `2026-11-01_internal_channel_seams.md`. Branch
 `channel-extraction`. The last polish round of the extraction (D17).
 
@@ -157,7 +157,7 @@ public type never lies (D26.8).
 
 | combinator | kind rule |
 | --- | --- |
-| `map`, `filter_map`, `dedup_by_key`, `until` | preserves |
+| `map`, `filter_map`, `dedup_by_key::<K>`, `filter_above::<K>`, `until` | preserves |
 | `take_while`, `take_until`, `take_at_least` | → `Finite` (a consumer bound is completion) |
 | `chain` | only on `Finite`: `Finite.chain(K) -> K`; `chain_all` of finite phases |
 | `merge` | `Infinite` if either side is |
@@ -174,10 +174,13 @@ push the total past `n` — that is the intent (D24). A `None`-key item (an
 `Err`) passes through and does not count. `NonZeroUsize` leaves no zero rule
 to define.
 
-A position is always named by a `Key<T>` type, never by a closure (D32):
-`ordered::<P>`, `covers`, `take_at_least::<K>`, `filter_above::<K>` and
-`Resumable` all read the key the same way, and the key type is visible in the
-signature. `take_until` and `take_at_least` are thin layers over `take_while`,
+Every combinator that reads a position names it by a `Key<T>` type, never by a
+closure (D32, D33): `ordered::<P>`, `covers`, `take_at_least::<K>`,
+`filter_above::<K>`, `dedup_by_key::<K>` and `Resumable` read the key the same
+way, and the key type is visible in the signature. Closures remain only for
+transformations (`map`, `filter_map`), bound predicates (`take_while`,
+`take_until` — e.g. the archive's `not_above`, nvzn's `at_or_after_cut` with
+its watermark rule), and lifecycle factories (`make`, `stitch`'s fallback). `take_until` and `take_at_least` are thin layers over `take_while`,
 whose `FnMut` predicate carries their state — one private `Source` (D32).
 
 `OrderedChannel` carries only order-preserving operations (`until`, `covers`,
@@ -317,8 +320,10 @@ the subscription.
 
 ### 7.2 `above` helpers
 
-One helper (D32): `filter_above::<K: Key<Item>>(live, cut: Option<K>)` drops
-live items whose key is `<= cut`. Stable and replica use `K = LogIndex`;
+One combinator (D32, D33): `filter_above::<K: Key<T>>(cut: Option<K>)` on
+`Channel<T, K>` of either kind drops items whose key is `<= cut` (no-key items
+pass). On the live side it is each seam's `above`; on the finite side the
+archive uses it to skip entries at or below its start (§9.3). Stable and replica use `K = LogIndex`;
 unstable and nvzn use `K = Hlc`, via `Key` impls that read `data_id.hlc()`
 from `UnstableStep` and `FoldItem`. Each seam's `above` is one line.
 
@@ -457,7 +462,7 @@ fn stream(&self, bounds: ArchiveBounds) -> ArchiveStream {   // no longer async
             })
         }))
         .take_while(not_above(bounds))     // Err items pass; the first entry ≥ until ends
-        .filter_map(skip_below(bounds))    // only drops entries ≤ bounds.after
+        .filter_above::<LogIndex>(bounds.after)   // drops entries ≤ bounds.after
         .ordered::<Contiguous<LogIndex>>(bounds.after, "archive tiling");
     let ch = match bounds.until {
         IndexExclusive(until) => ch.covers(..until, "archive window"),
@@ -469,7 +474,8 @@ fn stream(&self, bounds: ArchiveBounds) -> ArchiveStream {   // no longer async
 
 `ArchiveStream` stays `OrderedChannel<Result<SnapshotEntry, Error>,
 Contiguous<LogIndex>, Finite>`. `read_snapshot` stays async (11 callers);
-`StableArchiveReader::stream` becomes synchronous. `ArchiveBounds` becomes
+`StableArchiveReader::stream` becomes synchronous. `not_above` stays a bound
+predicate (a closure), not a position filter. `ArchiveBounds` becomes
 `{ after: Option<LogIndex>, until: ArchiveUpperBound }`; `ArchiveLowerBound` is
 deleted (a one-variant enum would add nothing, D30).
 
@@ -535,6 +541,19 @@ as a named struct, so the metrics sizes survive (D30 refines D27).
 
 `WindowItem`, the `terminal` mutex, the `end_hlc` and `index` atomics, and the
 scan's `finishing`/`capped` state go.
+
+### 9.7 Stable log loader
+
+```rust
+entries                                                     // snapshot entries to append
+    .dedup_by_key::<LogIndex>()                             // overlapping re-append
+    .filter_above::<LogIndex>(end_index)                    // drop the already-stored prefix
+    .ordered::<Contiguous<LogIndex>>(end_index, "stable log loader")
+```
+
+`StableLog::append` today spells the same three steps with two closures (the
+key and a `< start` filter). With `after = end_index` the filter and the order
+check share one exclusive start, and every position is a `Key` type.
 
 ## 10. nvzn
 
@@ -649,7 +668,8 @@ observers, and the fold's correctness does not depend on them.
 - Producers: a finite body must return `Closed`; close/panic verdicts for
   both constructors in both kinds; `send_timeout`. `defer_async` in both kinds.
 - `take_while`/`take_until`/`take_at_least` share one `Source`; `filter_above`
-  for `LogIndex` and `Hlc` keys.
+  for `LogIndex` and `Hlc` keys on both kinds; `dedup_by_key::<K>` with no-key
+  items passing.
 - `defer_async`: lazy start (no spawn before first poll), verdict delegation,
   phases open sequentially in `chain_all`.
 - `covers`: reached, short, empty-window both ways, aborted source keeps reason.
