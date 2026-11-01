@@ -340,3 +340,12 @@ Resumable::<T, P>::new(after: Option<P::Key>,
   its own scan bound.
 - `Opening` replaces D4's `End` / the draft's `Option<AbortReason>`: with D18
   the factory runs only on the first open or after `ProducerGone`.
+
+### D20. No `Live` proof token (answers R3)
+
+`Seam::subscribe` is implemented outside the crate, so `Live` would have to be
+constructible there — and is then forgeable. The guarantee is D14:
+`Segment::open` is the only assembly point and fixes subscribe → cut → above,
+range. The `Seam` methods are hooks the crate calls; the module docs say so.
+`subscribe` returns `Channel<Item, Infinite>`, `cut(&self) -> Cut`. No sealing
+trick: it would also stop zslg from implementing the trait.
