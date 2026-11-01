@@ -379,3 +379,18 @@ Channel::chain_all(covering.map(|m| Channel::defer_async(move || async move {
   local scan that stops short of `until` now aborts instead of ending early.
 - Gone from the archive: `expected`/`last_hlc`/`open_failed`, the nested
   `spawn_blocking`, the HLC `assert!`, the hand-written "not fully tiled" check.
+
+### D22. Network client bridges use an infinite `produce_async` (extra pick-up A)
+
+`subscribe_stream.rs` and `write_stream.rs` hand-build infinite producers
+(`bounded` + `Channel::from_infinite` + `tokio::spawn`). They become producer
+sites 10 and 11:
+
+```rust
+Channel::produce_async_infinite(cap, what, |feed: Feed<T, Infinite>| async move { .. })
+```
+
+`Feed<T, Infinite>` has no `close()`: return and panic both end the stream
+`ProducerGone`. `Feed::send_timeout` is exposed so `CONSUMER_STALL_TIMEOUT`
+(domain policy: a wedged consumer must release the socket) stays in zslg; only
+the wiring moves. `Feed` therefore carries the kind, like `Channel`.
