@@ -501,3 +501,13 @@ observers); `read_snapshot` does the GET in its async body and decodes through
   round; other `watch`-only values are later candidates.
 - The audit confirms D22/D24/D25's site lists; the `compile_fail` test targets
   `Channel`, not `ReadyBatch`.
+
+### D28. `ready_batch` returns the verdict
+
+`ready_batch(max) -> Result<ReadyBatch<'_, T>, K::End>`, like `recv`. The two
+socket writers that returned on `None` without `end_reason`
+(`network/client/write_stream.rs:100`, `network/server/stream_handler.rs:143`)
+must now name what an end means; the three loops that already checked get
+simpler. "No read path drops a verdict" holds by construction.
+
+`into_stream`: remove if no production user — pending; see below.

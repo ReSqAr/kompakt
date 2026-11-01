@@ -34,7 +34,8 @@ domain declares sources, keys, cuts, fallbacks, policies (overflow, stall),
 - No hand-written fan-out owner (`tx`/`registry`/`shutdown` + `Drop`), no
   `watch` + `Wakes` pair, no `AtomicU64`/`Mutex` holding channel state, no
   in-band terminal item (`WindowItem`).
-- No read path that drops a verdict: `Channel` has no `IntoIterator` (D25).
+- No read path that drops a verdict: `Channel` has no `IntoIterator` (D25),
+  and `ready_batch` returns `Result<ReadyBatch, K::End>` (D28).
 - No `block_on`; `HistoricalReplay` and the archive are lazy declarations.
 - Returning `Channel::empty()` for a subscription does not compile.
 - A window that stops short of its bound aborts (no trailing-gap hole).
@@ -116,8 +117,10 @@ Channel<T, Infinite> recv -> Result<T, AbortReason>  // ending is always an erro
 No default kind (D1): every signature, constructor and test double names it.
 Kind-generic code (combinators, `integrate_loop`, which takes an infinite
 subscription in production and finite vectors in tests) is generic over
-`K: Kind` and reads `K::End`. `end_reason`, `ready_batch`, `try_recv`,
-`into_stream` exist for both. `OrderedChannel<T, P, K>` and `Feed<T, K>` carry
+`K: Kind` and reads `K::End`. Every read path returns the verdict (D28):
+`recv -> Result<T, K::End>`, `ready_batch(max) -> Result<ReadyBatch<'_, T>,
+K::End>`; `try_recv -> Option<T>` is the non-blocking poll and `end_reason`
+remains for a stream already known to have stopped. `OrderedChannel<T, P, K>` and `Feed<T, K>` carry
 the kind too. `Channel` has no `IntoIterator` (D25).
 
 **Internal contract.** `Source` still reports `End`; an infinite wrapper maps
