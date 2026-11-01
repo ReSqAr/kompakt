@@ -582,3 +582,15 @@ without one), `ordered`/`also`/`covers` (three roles), a generic window clip
   `Key<T>`; closures remain for transformations, bound predicates (`not_above`,
   nvzn's `at_or_after_cut` with its watermark rule) and lifecycle factories
   (`make`, `stitch`'s fallback).
+
+### D34. Consistency pass after D32–D33
+
+- Naming: `K` is always the kind; a position type read by a combinator is
+  `Pos: Key<T>` (`filter_above::<Pos>`, `take_at_least::<Pos>`,
+  `dedup_by_key::<Pos>`, `covers` on `Contiguous<Pos>`). D32/D33 had reused `K`
+  for both.
+- Slices: key-typed `filter_above`/`dedup_by_key` and the window's `Hlc` key
+  move to slice 1 (the archive and the loader need them in slice 2); the stable
+  log loader (§9.7) is named in slice 2.
+- §11 names the shared resume `Source`; §15 gains loader tests; the closure
+  list in §5.3 includes producer bodies and `defer_async`.

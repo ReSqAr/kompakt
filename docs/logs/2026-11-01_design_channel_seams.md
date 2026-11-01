@@ -77,8 +77,9 @@ for x in channel drops the verdict (compaction merge feeder)
   ingress/drift, replica commit outcomes end by sender refcount, not by a
   producer body; they are not producer sites.
 - **Windows are open at both ends** `(after, until)`: every start is an
-  exclusive `after: Option<K>` (D19, D26.3) — stable `range`, archive lower
-  bound, `Gap`, resume cursor; every end is an exclusive `until`.
+  exclusive `after: Option<Pos>` (D19, D26.3) — stable `range`,
+  `ArchiveBounds.after`, `Gap`, the resume cursor, the loader; every end is an
+  exclusive `until`.
 - Public API breaks are fine: zslg/nvzn migrate in the same change.
 
 ## 4. Architecture
@@ -120,6 +121,9 @@ Channel<T, Infinite> recv -> Result<T, AbortReason>  // ending is always an erro
 ```
 
 No default kind (D1): every signature, constructor and test double names it.
+Naming in this doc: `K` is always the kind; a position type read by a
+combinator is `Pos: Key<T>`; policy markers keep their own parameter
+(`Contiguous<LogIndex>`).
 Kind-generic code (combinators, `integrate_loop`, which takes an infinite
 subscription in production and finite vectors in tests) is generic over
 `K: Kind` and reads `K::End`. Every read path returns the verdict (D28):
@@ -132,8 +136,8 @@ remains for a stream already known to have stopped. There is no async
 `ChannelIter` and its export, the `futures` and `tokio-stream` dependencies
 (the `tokio` feature becomes `["dep:tokio", "dep:tokio-util"]`), and
 `tokio-stream` in zslg and the workspace once `write_tracker` is migrated.
-`Guarded` stays: `until` uses it. `OrderedChannel<T, P, K>` and `Feed<T, K>` carry
-the kind too. `Channel` has no `IntoIterator` (D25).
+`Guarded` stays: `until` uses it. `OrderedChannel<T, P, K>` and `Feed<T, K>`
+carry the kind too.
 
 **Internal contract.** `Source` still reports `End`; an infinite wrapper maps
 an inner `Complete` to `Aborted(ProducerGone)` behind a `debug_assert!`, so the
@@ -157,7 +161,7 @@ public type never lies (D26.8).
 
 | combinator | kind rule |
 | --- | --- |
-| `map`, `filter_map`, `dedup_by_key::<K>`, `filter_above::<K>`, `until` | preserves |
+| `map`, `filter_map`, `dedup_by_key::<Pos>`, `filter_above::<Pos>`, `until` | preserves |
 | `take_while`, `take_until`, `take_at_least` | → `Finite` (a consumer bound is completion) |
 | `chain` | only on `Finite`: `Finite.chain(K) -> K`; `chain_all` of finite phases |
 | `merge` | `Infinite` if either side is |
@@ -166,22 +170,25 @@ public type never lies (D26.8).
 | `covers`, `also` | on `OrderedChannel` (§9.1) |
 
 An infinite stream never reaches a `chain` argument, so the API does not offer
-it. `take_at_least::<K: Key<T>>(n: NonZeroUsize)` yields at least `n` keyed
-items, then finishes the current key
-group and stops at the first item with a different key (that item is dropped,
-as in `take_while`). `n` counts keyed items, not groups, so the last group may
-push the total past `n` — that is the intent (D24). A `None`-key item (an
-`Err`) passes through and does not count. `NonZeroUsize` leaves no zero rule
+it. `take_at_least::<Pos: Key<T>>(n: NonZeroUsize)` yields at least `n` keyed
+items, then finishes the current key group and stops at the first item with a
+different key (that item is dropped, as in `take_while`). `n` counts keyed
+items, not groups, so the last group may push the total past `n` — that is
+the intent (D24). A `None`-key item (an `Err`) passes through and does not
+count. `NonZeroUsize` leaves no zero rule
 to define.
 
 Every combinator that reads a position names it by a `Key<T>` type, never by a
-closure (D32, D33): `ordered::<P>`, `covers`, `take_at_least::<K>`,
-`filter_above::<K>`, `dedup_by_key::<K>` and `Resumable` read the key the same
-way, and the key type is visible in the signature. Closures remain only for
-transformations (`map`, `filter_map`), bound predicates (`take_while`,
+closure (D32, D33): `ordered::<P>`, `covers`, `take_at_least::<Pos>`,
+`filter_above::<Pos>`, `dedup_by_key::<Pos>` and `Resumable` read the key the
+same way, and the key type is visible in the signature. Closures remain only
+for transformations (`map`, `filter_map`), bound predicates (`take_while`,
 `take_until` — e.g. the archive's `not_above`, nvzn's `at_or_after_cut` with
-its watermark rule), and lifecycle factories (`make`, `stitch`'s fallback). `take_until` and `take_at_least` are thin layers over `take_while`,
-whose `FnMut` predicate carries their state — one private `Source` (D32).
+its watermark rule), and lifecycle bodies and factories (producer bodies,
+`defer_async`, `make`, `stitch`'s fallback).
+
+`take_until` and `take_at_least` are thin layers over `take_while`, whose
+`FnMut` predicate carries their state — one private `Source` (D32).
 
 `OrderedChannel` carries only order-preserving operations (`until`, `covers`,
 `also`, `stitch`); anything else goes through `into_channel()`.
@@ -221,7 +228,7 @@ both end `ProducerGone` (D22). A panic always drops the feed:
 produce_blocking        stream_above_hlc, stream_window, StableLog::range,
                         replica pump_range, read_snapshot's decode (the GET
                         stays in read_snapshot's async body)
-produce_async::<_, Infinite>  client subscribe_stream, client write_stream
+produce_async (Infinite) client subscribe_stream, client write_stream
 declarations instead    archive stream (§9.3), compaction merge feeder (§9.5),
                         HistoricalReplay (§9.4)
 ```
@@ -318,14 +325,15 @@ order (subscribe before cut) is the seam's whole correctness argument:
 anything at or below the cut is in `range`, anything above it is already on
 the subscription.
 
-### 7.2 `above` helpers
+### 7.2 `filter_above`
 
-One combinator (D32, D33): `filter_above::<K: Key<T>>(cut: Option<K>)` on
-`Channel<T, K>` of either kind drops items whose key is `<= cut` (no-key items
+One combinator (D32, D33): `filter_above::<Pos: Key<T>>(cut: Option<Pos>)`, on
+a channel of either kind, drops items whose key is `<= cut` (no-key items
 pass). On the live side it is each seam's `above`; on the finite side the
-archive uses it to skip entries at or below its start (§9.3). Stable and replica use `K = LogIndex`;
-unstable and nvzn use `K = Hlc`, via `Key` impls that read `data_id.hlc()`
-from `UnstableStep` and `FoldItem`. Each seam's `above` is one line.
+archive and the stable log loader use it to skip what lies at or below their
+start (§9.3, §9.7). Stable and replica use `Pos = LogIndex`; unstable and nvzn
+use `Pos = Hlc`, via `Key` impls that read `data_id.hlc()` from `UnstableStep`
+and `FoldItem`. Each seam's `above` is one line.
 
 ### 7.3 The four uses
 
@@ -378,11 +386,11 @@ Resumable::<T, P>::new(what: &'static str, after: Option<P::Key>,
 ```
 
 Each segment is `Segment::open(&seam).chain()`; `what` labels the order check
-and a first-open decline. `after` is always exclusive: `None` = from the beginning; first open passes
-the caller's, a resync the last emitted key. No dedup (D3): the factory starts
-after `after`; the policy check (`first > after` for `StrictlyIncreasing`,
-`== Successor::next_after(after)` for `Contiguous`) catches a factory that
-starts wrong; `NonDecreasing` also requires the first key `> after`.
+and a first-open decline. `after` is always exclusive: `None` = from the
+beginning; the first open passes the caller's, a resync the last emitted key.
+No dedup (D3): the factory starts after `after`; the policy check
+(`first > after` for `StrictlyIncreasing`, `== Successor::next_after(after)`
+for `Contiguous`) catches a factory that starts wrong; `NonDecreasing` also requires the first key `> after`.
 `Successor` becomes `fn next_after(prev: Option<Self>) -> Self`.
 
 ### 8.3 `resync` for streams without a position
@@ -394,8 +402,8 @@ resync(what: &'static str, make: impl FnMut(Opening) -> Option<S>) -> Channel<T,
 Same loop, no cursor: `resync` and `Resumable` share one private resume
 `Source` whose cursor is optional, so the D18 rule exists once (D32). The two
 public constructors stay because their signatures differ. The unstable tail
-uses it; `WatermarkGate` becomes plain
-`FnMut` state in the trailing `filter_map`, reading `Level::get`.
+uses it; `WatermarkGate` becomes plain `FnMut` state in the trailing
+`filter_map`, reading `Level::get`.
 
 ### 8.4 Stable boundary
 
@@ -404,8 +412,9 @@ Reader::subscribe_stable_log(after: Option<LogIndex>) -> StableStream
 ```
 
 Aligned with `Replica::subscribe_from(Option<LogIndex>)` and with
-`StableLogSnapshot::range(after: Option<LogIndex>, until)` (D26.3). `resyncing_tail`
-becomes `Resumable::new("stable log", after, |after, opening| { upgrade; log; Some(StableSeam{..}) })`
+`StableLogSnapshot::range(after: Option<LogIndex>, until)` (D26.3).
+`resyncing_tail` becomes
+`Resumable::new("stable log", after, |after, opening| { upgrade; log; Some(StableSeam { .. }) })`
 plus `.until(&shutdown)`. The `AtomicU64` cursor, the outer cursor filter and
 `stable_stream` disappear.
 
@@ -414,8 +423,8 @@ plus `.until(&shutdown)`. The `AtomicU64` cursor, the outer cursor filter and
 ### 9.1 `covers(..until)` (D21)
 
 ```rust
-impl<T, K: Successor + Key<T>> OrderedChannel<T, Contiguous<K>, Finite> {
-    pub fn covers(self, range: RangeTo<K>, what: &'static str) -> Self;
+impl<T, Pos: Successor + Key<T>> OrderedChannel<T, Contiguous<Pos>, Finite> {
+    pub fn covers(self, range: RangeTo<Pos>, what: &'static str) -> Self;
 }
 impl<T, P: OrderPolicy, K: Kind> OrderedChannel<T, P, K> {
     pub fn also<Q: OrderPolicy>(self, after: Option<Q::Key>, what: &'static str) -> Self
@@ -587,7 +596,8 @@ observers, and the fold's correctness does not depend on them.
 **Essential, and where it lives.**
 
 - Seam order (subscribe → cut) — `Segment::open`, one place.
-- Resume rule and cursor — `Resumable`, one state machine (§8.2).
+- Resume rule and cursor — one private resume `Source` behind `Resumable` and
+  `resync` (§8.2, §8.3).
 - Order and completeness — policies + `covers`, per item and at the end.
 - Fan-out pacing (`Block`/`Shed`) — the distribution thread.
 
@@ -668,7 +678,7 @@ observers, and the fold's correctness does not depend on them.
 - Producers: a finite body must return `Closed`; close/panic verdicts for
   both constructors in both kinds; `send_timeout`. `defer_async` in both kinds.
 - `take_while`/`take_until`/`take_at_least` share one `Source`; `filter_above`
-  for `LogIndex` and `Hlc` keys on both kinds; `dedup_by_key::<K>` with no-key
+  for `LogIndex` and `Hlc` keys on both kinds; `dedup_by_key::<Pos>` with no-key
   items passing.
 - `defer_async`: lazy start (no spawn before first poll), verdict delegation,
   phases open sequentially in `chain_all`.
@@ -679,7 +689,8 @@ observers, and the fold's correctness does not depend on them.
   iterator).
 - Test modules and `examples/write_tracker` move from `into_stream` to
   `spawn_blocking` + `recv`; the `into_stream` and `drain_into` tests go.
-- `Segment`: open order, `chain` vs `merge`, `filter_above*`.
+- `Segment`: open order, `chain` vs `merge`; each seam's `above` via
+  `filter_above`.
 - `Resumable`/`resync`: resume only on `ProducerGone`; `Cancelled` and
   `OrderViolation` end; `after` passed exactly; decline ends with previous
   reason.
@@ -692,6 +703,8 @@ observers, and the fold's correctness does not depend on them.
 - Archive: tiled, gap, short, unbounded, HLC regression, open error.
 - Compaction merge: an aborted source fails the merge.
 - Snapshot window: below cap, exact cap (one empty follow-up), capped.
+- Stable log loader: overlapping re-append deduplicated, stored prefix
+  skipped, gap rejected.
 - `HistoricalReplay`: mid gap stitched, trailing gap aborts, HLC regression
   aborts.
 - Stable/unstable resync: cursor continuity, shutdown ends (no resync).
@@ -705,7 +718,9 @@ Each slice is green (tests, clippy, fmt) before the next.
 1. **Mechanical.** Split-HLC test fix; `FnMut` combinators; remove
    `IntoIterator` and `into_stream` with their dead surface and dependencies
    (D31); `ready_batch` returns the verdict;
-   `take_until`/`take_at_least` over `FnMut` `take_while`; `produce_blocking`
+   `take_until`/`take_at_least` over `FnMut` `take_while`; key-typed
+   `filter_above::<Pos>` and `dedup_by_key::<Pos>`, `Key<Result<Data, Error>>`
+   for `Hlc` (the window); `produce_blocking`
    with `Closed`, pre-kind `produce_async` for the network bridges,
    `Feed::send_timeout` (pre-kind: plain `Channel`); migrate producer sites and
    audit remaining `from`/`from_infinite`; snapshot window via
@@ -714,16 +729,15 @@ Each slice is green (tests, clippy, fmt) before the next.
 2. **Completeness + archive.** Exclusive starts everywhere (`after`, `Gap`,
    `range`, `ArchiveBounds.after`), `Successor::next_after`; `covers`, `also`;
    `defer_async`; archive declaration; compaction merge feeder; lazy
-   `HistoricalReplay`.
+   `HistoricalReplay`; stable log loader as a declaration (§9.7).
 3. **Kinds + seam.** `Kind`, `Channel<T, K>`, `Feed<T, K>`,
    `OrderedChannel<T, P, K>`, kind rules, `Kind::Proof` (producers and
    `defer_async` become kind-generic), `Key<T>` for `Hlc` on the unstable and
-   nvzn items, `compile_fail` tests; `Seam` +
-   `Segment::open` + `filter_above*`, end to end on the replica path; then all
+   nvzn items, `compile_fail` tests; `Seam` + `Segment::open`, each seam's
+   `above` via `filter_above`, end to end on the replica path; then all
    signatures in zslg/nvzn.
 4. **Resumption.** `Opening`, one resume `Source` behind `Resumable` and
-   `resync`;
-   `subscribe_stable_log(after)`; stable/unstable/nvzn migrated; delete
+   `resync`; `subscribe_stable_log(after)`; stable/unstable/nvzn migrated; delete
    `Tail`/`Ranged`/`blend_chain`, `resume_on_abort`'s public form if unused,
    `stable_stream`.
 
