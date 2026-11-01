@@ -1638,7 +1638,7 @@ mod tests {
         assert!(
             matches!(
                 end,
-                End::Aborted {
+                crossbeam_combinators::End::Aborted {
                     reason: crossbeam_combinators::AbortReason::OrderViolation {
                         what: "archive window"
                     }
