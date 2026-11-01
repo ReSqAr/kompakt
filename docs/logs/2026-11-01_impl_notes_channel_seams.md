@@ -61,3 +61,30 @@ post-implementation doc. Not a design doc; the design is
   test helper, since examples cannot use test code.
 
 ## Slice 2
+- **D18 lands in slice 2, not slice 4.** The lazy `HistoricalReplay` now
+  propagates an order violation as the stream's abort (the old one converted
+  it into an `Err` item and closed cleanly). Today's stable resync loop
+  resumed on any abort, so an order violation would have spun it. Both resync
+  closures now decline unless the previous end is `ProducerGone` (a small
+  `resumable` helper); slice 4 moves the rule into the crate.
+- **`Contiguous` from `None` now has a defined first key.** Before, a missing
+  start meant "no expectation" for the first item; with exclusive `after`,
+  `None` means "from the beginning", so `Successor::next_after(None)` is owed.
+  No production site relied on the old meaning (every contiguous boundary
+  passes a start).
+- **`ObjectStoreArchiveReader` captures `Handle::current()` at construction**
+  rather than taking a handle parameter: every constructor call is already in
+  a runtime, so the explicit handle (D26.7) lives in the struct without
+  threading it through four call sites. The compaction merge reads
+  `Handle::current()` inside its async fn for the same reason.
+- **The archive's tiling failure changes shape.** "Not fully tiled" used to be
+  an `Err(StableLogGap)` item; it is now `Aborted(OrderViolation { "archive
+  window" })` from `covers`, surfacing as `StreamTruncated` at the zslg
+  boundary. Tests asserting the old error text are updated.
+- **`stitch` keeps its own fallback endpoint check.** The design said the
+  archive's `covers` replaces "the fallback's hand endpoint check"; that check
+  lives in the crate's `StitchSource`, not in zslg, and stays as the generic
+  guarantee for any fallback. zslg has no hand check left.
+- **Two buffers disappear with the forwarding hops**: the merge feeder's
+  `SNAPSHOT_WRITE_FORWARDER_CAP` and the replay's `STREAM_CHANNEL_CAP`. Entries
+  now flow straight from `read_snapshot`'s channel to the consumer.

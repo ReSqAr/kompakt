@@ -499,7 +499,7 @@ mod tests {
 
     async fn collect_log(log: &StableLog) -> Vec<(u64, Hlc, DataId, Bytes)> {
         let entries: Vec<(LogIndex, Data)> = log
-            .range(LogIndex(0), LogIndex(1_000))
+            .range(None, LogIndex(1_000))
             .items()
             .filter_map(|r| r.ok())
             .collect();

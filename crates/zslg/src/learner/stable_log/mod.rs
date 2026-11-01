@@ -644,12 +644,13 @@ impl crate::api::StableLogSnapshot for StableLog {
         // Serialize the frontier/watermark read-modify-write against
         // `record_end_hlc`; held across the blocking task.
         let _g = self.write_lock.lock().await;
-        let start = LogIndex::next_after(*self.end_index.lock());
+        // The loader (§9.7): an overlapping re-append is deduplicated, the
+        // stored prefix skipped, and the rest must continue the log exactly.
+        let end = *self.end_index.lock();
         let entries = entries
             .dedup_by_key::<LogIndex>()
-            .filter_above::<LogIndex>(*self.end_index.lock());
-        let entries =
-            crossbeam_combinators::OrderedChannel::named(entries, Some(start), "stable log loader");
+            .filter_above::<LogIndex>(end)
+            .ordered::<crossbeam_combinators::Contiguous<LogIndex>>(end, "stable log loader");
         let appender = BatchAppender {
             rx: entries,
             storage: Arc::clone(&self.storage),
@@ -711,9 +712,14 @@ impl crate::api::StableLogSnapshot for StableLog {
         self.watermark_level.clone()
     }
 
-    fn range(&self, from: LogIndex, until: LogIndex) -> Channel<Result<(LogIndex, Data), Error>> {
-        // `[from, until)` — the half-open index window, streamed off a blocking
-        // scan through a bounded channel.
+    fn range(
+        &self,
+        after: Option<LogIndex>,
+        until: LogIndex,
+    ) -> Channel<Result<(LogIndex, Data), Error>> {
+        // `(after, until)`, scanned as the inclusive `[from, until)` storage
+        // takes, off a blocking scan through a bounded channel.
+        let from = LogIndex::next_after(after);
         let storage = Arc::clone(&self.storage);
         Channel::produce_blocking(32, "StableLogSnapshot::range", move |feed| {
             let mut decode_err: Option<Error> = None;
@@ -888,7 +894,7 @@ mod tests {
         }
 
         let all: Vec<(u64, u64)> = log
-            .range(LogIndex(0), LogIndex(5))
+            .range(None, LogIndex(5))
             .items()
             .filter_map(|r| r.ok().map(|(i, d)| (i.raw(), d.data_id.hlc().raw())))
             .collect();
@@ -898,7 +904,7 @@ mod tests {
         // An HLC threshold drops exactly the index prefix at or below it.
         log.set_purge_threshold(Hlc(200)).expect("purge");
         let kept: Vec<u64> = log
-            .range(LogIndex(0), LogIndex(5))
+            .range(None, LogIndex(5))
             .items()
             .filter_map(|r| r.ok().map(|(i, _)| i.raw()))
             .collect();
@@ -1003,7 +1009,7 @@ mod tests {
 
         let reopened = open_at(path).await;
         let live: Vec<u64> = reopened
-            .range(LogIndex(0), LogIndex(3))
+            .range(None, LogIndex(3))
             .items()
             .filter_map(|r| r.ok().map(|(i, _)| i.raw()))
             .collect();
@@ -1194,7 +1200,7 @@ mod tests {
 
         assert_eq!(log.end_index(), Some(LogIndex(1)), "frontier unchanged");
         let entries: Vec<(LogIndex, Data)> = log
-            .range(LogIndex(0), LogIndex(10))
+            .range(None, LogIndex(10))
             .items()
             .filter_map(|r| r.ok())
             .collect();
@@ -1231,7 +1237,7 @@ mod tests {
         assert_eq!(log.end_index(), Some(LogIndex(4)));
 
         let entries: Vec<(LogIndex, Data)> = log
-            .range(LogIndex(0), LogIndex(10))
+            .range(None, LogIndex(10))
             .items()
             .filter_map(|r| r.ok())
             .collect();
@@ -1333,7 +1339,7 @@ mod tests {
             .expect("ok");
         }
         let entries: Vec<(crate::ids::LogIndex, crate::meta::Data)> = log
-            .range(LogIndex(0), LogIndex(5))
+            .range(None, LogIndex(5))
             .items()
             .filter_map(|r| r.ok())
             .collect();

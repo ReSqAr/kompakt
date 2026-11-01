@@ -233,7 +233,11 @@ mod tests {
         setter.set(4);
         assert_eq!(fresh.changed().await, Ok(()));
         drop(setter);
-        assert_eq!(level.changed().await, Ok(()), "the move to 4 is still unseen");
+        assert_eq!(
+            level.changed().await,
+            Ok(()),
+            "the move to 4 is still unseen"
+        );
         assert_eq!(level.changed().await, Err(LevelGone));
     }
 }

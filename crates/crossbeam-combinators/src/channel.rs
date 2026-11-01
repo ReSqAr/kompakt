@@ -1323,6 +1323,137 @@ where
     }
 }
 
+// ── Deferred<T> ────────────────────────────────────────────────────────
+
+/// A phase whose producer starts on first use: [`Channel::defer_async`].
+///
+/// Until the future resolves, the source registers the hand-off receiver, so
+/// it stays selectable (an enclosing merge or chain does not block). The
+/// future is spawned the first time the source is registered or drained —
+/// never at construction — so a `chain_all` of deferred phases opens them one
+/// at a time. Dropping the source while it waits aborts the task.
+#[cfg(feature = "tokio")]
+struct Deferred<T> {
+    state: DeferredState<T>,
+}
+
+#[cfg(feature = "tokio")]
+enum DeferredState<T> {
+    Waiting {
+        handoff: Receiver<Channel<T>>,
+        start: Option<Box<dyn FnOnce() -> tokio::task::AbortHandle + Send>>,
+        task: Option<tokio::task::AbortHandle>,
+    },
+    Running(Box<dyn Source<T>>),
+    Ended(End),
+}
+
+#[cfg(feature = "tokio")]
+const DEFERRED: &str = "defer_async";
+
+#[cfg(feature = "tokio")]
+impl<T: Send + 'static> Deferred<T> {
+    fn ensure_started(&mut self) {
+        if let DeferredState::Waiting { start, task, .. } = &mut self.state
+            && let Some(start) = start.take()
+        {
+            *task = Some(start());
+        }
+    }
+
+    /// Take the resolved channel if it is there. `true` when the state moved.
+    fn try_resolve(&mut self) -> bool {
+        let DeferredState::Waiting { handoff, .. } = &self.state else {
+            return false;
+        };
+        match handoff.try_recv() {
+            Ok(ch) => {
+                self.state = DeferredState::Running(ch.source);
+                true
+            }
+            Err(TryRecvError::Empty) => false,
+            Err(TryRecvError::Disconnected) => {
+                self.state = DeferredState::Ended(End::Aborted {
+                    reason: AbortReason::ProducerGone { what: DEFERRED },
+                });
+                true
+            }
+        }
+    }
+}
+
+#[cfg(feature = "tokio")]
+impl<T: Send + 'static> Source<T> for Deferred<T> {
+    fn register<'a>(&'a mut self, sel: &mut Select<'a>) -> usize {
+        self.ensure_started();
+        match &mut self.state {
+            DeferredState::Waiting { handoff, .. } => {
+                sel.recv(handoff);
+                1
+            }
+            DeferredState::Running(src) => src.register(sel),
+            DeferredState::Ended(_) => 0,
+        }
+    }
+
+    fn poll(&mut self, ordinal: usize) -> Poll<T> {
+        match &mut self.state {
+            DeferredState::Waiting { .. } => {
+                if !self.try_resolve() {
+                    return Poll::Empty;
+                }
+                match self.state {
+                    // Resolved: the new leaves are registered on the next round.
+                    DeferredState::Running(_) => Poll::Filtered,
+                    _ => Poll::Dead,
+                }
+            }
+            DeferredState::Running(src) => src.poll(ordinal),
+            DeferredState::Ended(_) => Poll::Dead,
+        }
+    }
+
+    fn drain_first(&mut self) -> Option<T> {
+        self.ensure_started();
+        self.try_resolve();
+        match &mut self.state {
+            DeferredState::Running(src) => src.drain_first(),
+            _ => None,
+        }
+    }
+
+    fn leaf_count(&self) -> usize {
+        match &self.state {
+            DeferredState::Waiting { .. } => 1,
+            DeferredState::Running(src) => src.leaf_count(),
+            DeferredState::Ended(_) => 0,
+        }
+    }
+
+    fn end_reason(&mut self) -> End {
+        match &mut self.state {
+            // Asked before the phase ended: fail closed, as a leaf does.
+            DeferredState::Waiting { .. } => End::Aborted {
+                reason: AbortReason::ProducerGone { what: DEFERRED },
+            },
+            DeferredState::Running(src) => src.end_reason(),
+            DeferredState::Ended(end) => *end,
+        }
+    }
+}
+
+#[cfg(feature = "tokio")]
+impl<T> Drop for Deferred<T> {
+    fn drop(&mut self) {
+        if let DeferredState::Waiting {
+            task: Some(task), ..
+        } = &self.state
+        {
+            task.abort();
+        }
+    }
+}
+
 // ── Channel<T> ────────────────────────────────────────────────────────
 
 /// The read half of a pipeline: see the module docs.
@@ -1425,6 +1556,42 @@ impl<T: Send + 'static> Channel<T> {
         let (tx, rx) = crossbeam_channel::bounded(1);
         drop(tx);
         Self::from_infinite(rx, what)
+    }
+
+    /// A phase whose channel comes from an async opener, started on first use.
+    ///
+    /// Nothing runs at construction: the first time the stream is read (or
+    /// registered by an enclosing merge/chain), `open` is spawned on `handle`,
+    /// and the stream then delegates to the channel it resolves to, verdict
+    /// included. In a `chain_all` only the front phase is read, so deferred
+    /// phases open one at a time. Dropping the stream before it resolves
+    /// aborts the task; a task that ends without resolving reads as
+    /// `Aborted(ProducerGone { what: "defer_async" })`.
+    #[cfg(feature = "tokio")]
+    #[must_use]
+    pub fn defer_async<F, Fut>(handle: &tokio::runtime::Handle, open: F) -> Self
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Channel<T>> + Send + 'static,
+    {
+        let (tx, handoff) = crossbeam_channel::bounded(1);
+        let handle = handle.clone();
+        let start: Box<dyn FnOnce() -> tokio::task::AbortHandle + Send> = Box::new(move || {
+            handle
+                .spawn(async move {
+                    let _ = tx.send(open().await);
+                })
+                .abort_handle()
+        });
+        Self {
+            source: Box::new(Deferred {
+                state: DeferredState::Waiting {
+                    handoff,
+                    start: Some(start),
+                    task: None,
+                },
+            }),
+        }
     }
 
     /// A complete, finite stream: everything is already here, so it closes
@@ -2789,6 +2956,88 @@ mod tests {
     fn from_vec_empty_disconnects_immediately() {
         let mut ch: Channel<u32> = Channel::from_vec(vec![]);
         assert_eq!(ch.recv(), Err(End::Complete));
+    }
+
+    // ── defer_async ────────────────────────────────────────────────────
+
+    #[cfg(feature = "tokio")]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn defer_async_starts_on_first_read_and_delegates_the_verdict() {
+        let opened = Arc::new(AtomicUsize::new(0));
+        let handle = tokio::runtime::Handle::current();
+        let o = Arc::clone(&opened);
+        let ch = Channel::defer_async(&handle, move || async move {
+            o.fetch_add(1, Ordering::SeqCst);
+            Channel::from_vec(vec![1u32, 2])
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        assert_eq!(
+            opened.load(Ordering::SeqCst),
+            0,
+            "nothing runs at construction"
+        );
+        let got = tokio::task::spawn_blocking(move || {
+            let mut ch = ch;
+            let items: Vec<u32> = std::iter::from_fn(|| ch.recv().ok()).collect();
+            (items, ch.end_reason())
+        })
+        .await
+        .unwrap();
+        assert_eq!(got, (vec![1, 2], End::Complete));
+        assert_eq!(opened.load(Ordering::SeqCst), 1);
+    }
+
+    #[cfg(feature = "tokio")]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn deferred_phases_in_a_chain_open_one_at_a_time() {
+        let open = Arc::new(AtomicUsize::new(0));
+        let max_open = Arc::new(AtomicUsize::new(0));
+        let handle = tokio::runtime::Handle::current();
+        let phases: Vec<Channel<u32>> = (0..3u32)
+            .map(|i| {
+                let (open, max_open) = (Arc::clone(&open), Arc::clone(&max_open));
+                Channel::defer_async(&handle, move || async move {
+                    let now = open.fetch_add(1, Ordering::SeqCst) + 1;
+                    max_open.fetch_max(now, Ordering::SeqCst);
+                    let ch = Channel::from_vec(vec![i]);
+                    open.fetch_sub(1, Ordering::SeqCst);
+                    ch
+                })
+            })
+            .collect();
+        let got = tokio::task::spawn_blocking(move || {
+            let mut ch = Channel::chain_all(phases);
+            std::iter::from_fn(|| ch.recv().ok()).collect::<Vec<_>>()
+        })
+        .await
+        .unwrap();
+        assert_eq!(got, vec![0, 1, 2]);
+        assert_eq!(
+            max_open.load(Ordering::SeqCst),
+            1,
+            "never two openers at once"
+        );
+    }
+
+    #[cfg(feature = "tokio")]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_deferred_opener_that_dies_aborts_the_phase() {
+        let handle = tokio::runtime::Handle::current();
+        let ch: Channel<u32> = Channel::defer_async(&handle, || async { panic!("open blew up") });
+        let end = tokio::task::spawn_blocking(move || {
+            let mut ch = ch;
+            ch.recv()
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            end,
+            Err(End::Aborted {
+                reason: AbortReason::ProducerGone {
+                    what: "defer_async"
+                }
+            })
+        );
     }
 
     // ── until / Cancellation ───────────────────────────────────────────

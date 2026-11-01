@@ -49,10 +49,9 @@
 
 use crate::Error;
 use crate::api::{
-    ArchiveBounds, ArchiveLowerBound, ArchiveUpperBound, Clock, LocalStoreView, Reader,
-    StableArchiveReader, StableLogSnapshot,
+    ArchiveBounds, ArchiveUpperBound, Clock, LocalStoreView, Reader, StableArchiveReader,
+    StableLogSnapshot,
 };
-use crate::error::ToStorage;
 use crate::hlc::Hlc;
 use crate::ids::{LogIndex, NodeId};
 use crate::learner::QuorumReadDebouncer;
@@ -60,7 +59,7 @@ use crate::meta::{Data, StableLogEvent, UnstableEvent};
 use crate::metrics::{self, ReadEntrySource, ReadSource};
 use crate::raft::EvictionStatus;
 use crossbeam_combinators::{
-    Cancellation, Channel, End, OrderedChannel, Ranged, StrictlyIncreasing, Tail,
+    Cancellation, Channel, End, Gap, NonDecreasing, Ranged, StrictlyIncreasing, Tail,
 };
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -173,8 +172,6 @@ impl Reader for GatedReader {
     }
 }
 
-const STREAM_CHANNEL_CAP: usize = 64;
-
 pub(in crate::learner) struct ReaderImpl {
     local_store: Arc<dyn LocalStoreView>,
     stable_log: Arc<dyn StableLogSnapshot>,
@@ -223,129 +220,60 @@ impl ReaderImpl {
 
 // ── Historical replay ─────────────────────────────────────────────────────
 
-/// Replays a bounded index window as one gapless, HLC-monotonic stream,
-/// filling from the archive whatever the local scan skips (module header).
-struct HistoricalReplay {
+/// Replays `(after, until)` as one gapless, HLC-monotonic stream, filling from
+/// the archive whatever the local scan skips (module header):
+///
+/// ```text
+///   scan (after, until) ─ StrictlyIncreasing ─ stitch(archive) ─ Contiguous
+///     ─ covers(..until) ─ also NonDecreasing<Hlc>
+/// ```
+///
+/// Lazy, on the consumer's thread: a gap opens its archive read on first use,
+/// a trailing gap or an HLC regression ends the stream `Aborted`.
+fn historical_replay(
     archive: Arc<dyn StableArchiveReader>,
-    stable_log: Arc<dyn StableLogSnapshot>,
-    /// Next index the merged stream must emit.
-    expected: LogIndex,
-    /// HLC of the last emitted entry (for monotonicity guard).
-    last_hlc: Option<Hlc>,
-    /// Output channel — the stream's sending half.
-    tx: crossbeam_channel::Sender<Result<(LogIndex, Data), Error>>,
-}
-
-impl HistoricalReplay {
-    /// Return a stream that replays `[from_idx, until)` gaplessly.
-    fn stream(
-        archive: Arc<dyn StableArchiveReader>,
-        stable_log: Arc<dyn StableLogSnapshot>,
-        from_idx: LogIndex,
-        until: LogIndex,
-    ) -> crossbeam_combinators::Channel<Result<(LogIndex, Data), Error>> {
-        let (tx, rx) = crossbeam_channel::bounded(STREAM_CHANNEL_CAP);
-        let replay = Self {
-            archive,
-            stable_log,
-            expected: from_idx,
-            last_hlc: None,
-            tx,
-        };
-        let (ch, closer) = crossbeam_combinators::Channel::from(rx, "HistoricalReplay");
-        let from_raw = from_idx.raw();
-        tokio::spawn(async move {
-            replay.run(until).await;
-            // Finite: the replay covers a bounded index window, so a clean close
-            // is what tells a consumer the window was fully served. An
-            // `Aborted` labelled `HistoricalReplay` without this line means the
-            // task was dropped before it could close.
-            tracing::debug!(
-                from = from_raw,
-                until = until.raw(),
-                "stable tail: historical replay window served"
-            );
-            closer.close();
-        });
-        ch
-    }
-
-    /// Scan the stable log, stitching archive ranges into every gap.
-    ///
-    /// The scan is `StrictlyIncreasing`: a forward jump is a gap, not a fault.
-    /// The fallback reads `[gap.expected, gap.got)` from the archive; `stitch`
-    /// buffers the gap-triggering entry and verifies that the fill is exactly
-    /// contiguous before returning a `Contiguous` stream.
-    async fn run(self, until: LogIndex) {
-        let handle = tokio::runtime::Handle::current();
-        let archive = Arc::clone(&self.archive);
-        let stable_log = Arc::clone(&self.stable_log);
-        let tx = self.tx.clone();
-        let mut last_hlc = self.last_hlc;
-        let start = self.expected;
-
-        let scan = stable_log.range(start, until).map(|item| {
+    stable_log: &dyn StableLogSnapshot,
+    after: Option<LogIndex>,
+    until: LogIndex,
+) -> Channel<Result<(LogIndex, Data), Error>> {
+    stable_log
+        .range(after, until)
+        .map(|item| {
             if item.is_ok() {
                 metrics::read_entry(ReadEntrySource::StableLog);
             }
             item
-        });
-        let ordered = OrderedChannel::<_, StrictlyIncreasing<LogIndex>>::new(scan, Some(start));
-
-        let fallback_archive = Arc::clone(&archive);
-        let stitched = ordered.stitch(move |gap| {
-            let bounds = ArchiveBounds {
-                from: ArchiveLowerBound::FromIndex(gap.expected),
-                until: ArchiveUpperBound::IndexExclusive(gap.got),
-            };
-            match handle.block_on(fallback_archive.stream(bounds)) {
-                Ok(arch) => arch.into_channel().map(|item| {
+        })
+        .ordered::<StrictlyIncreasing<LogIndex>>(after, "stable scan")
+        .stitch(move |gap: Gap<LogIndex>| {
+            archive
+                .stream(ArchiveBounds {
+                    after: gap.after,
+                    until: ArchiveUpperBound::IndexExclusive(gap.got),
+                })
+                .into_channel()
+                .map(|item| {
                     if item.is_ok() {
                         metrics::read_entry(ReadEntrySource::ObjectStore);
                     }
                     item.map(|entry| (entry.global_index, entry.data))
-                }),
-                Err(e) => Channel::once(Err(e)),
-            }
-        });
-
-        let result = tokio::task::spawn_blocking(move || {
-            let mut ch = stitched.into_channel();
-            loop {
-                match ch.recv() {
-                    Ok(Ok((idx, data))) => {
-                        let hlc = data.data_id.hlc();
-                        assert!(
-                            last_hlc.is_none_or(|prev| hlc >= prev),
-                            "HistoricalReplay: HLC regressed from {:?} to {:?}",
-                            last_hlc,
-                            hlc
-                        );
-                        last_hlc = Some(hlc);
-                        if tx.send(Ok((idx, data))).is_err() {
-                            return;
-                        }
-                    }
-                    Ok(Err(e)) => {
-                        let _ = tx.send(Err(e));
-                        return;
-                    }
-                    Err(End::Complete) => return,
-                    Err(End::Aborted { reason }) => {
-                        let _ = tx.send(Err(Error::StreamTruncated {
-                            what: reason.to_string(),
-                        }));
-                        return;
-                    }
-                }
-            }
+                })
         })
-        .await
-        .to_storage("historical replay consumer panicked");
-        if let Err(e) = result {
-            let _ = self.tx.send(Err(e));
-        }
-    }
+        .covers(..until, "historical replay")
+        .also::<NonDecreasing<Hlc>>(None, "historical replay HLC")
+        .into_channel()
+}
+
+/// Whether a resync loop may open another segment after `previous`: on the
+/// first open, and after `ProducerGone` — never after a stop request or a
+/// contract violation, which a new cycle would only repeat.
+fn resumable(previous: Option<End>) -> bool {
+    matches!(
+        previous,
+        None | Some(End::Aborted {
+            reason: crossbeam_combinators::AbortReason::ProducerGone { .. }
+        })
+    )
 }
 
 // ── Resyncing tail ─────────────────────────────────────────────────────────
@@ -402,10 +330,11 @@ impl Ranged<StableCut> for StableSeam {
     type Item = Result<StableLogEvent, Error>;
 
     fn range(&self, cut: StableCut) -> Channel<Self::Item> {
-        let replay = HistoricalReplay::stream(
+        // `at` is the first index wanted; the replay takes the exclusive start.
+        let replay = historical_replay(
             Arc::clone(&self.archive),
-            Arc::clone(&self.stable_log),
-            self.at,
+            self.stable_log.as_ref(),
+            self.at.before(),
             LogIndex::next_after(cut.frontier),
         )
         .map(|item| item.map(|(index, data)| StableLogEvent::Appended { index, data }));
@@ -470,6 +399,11 @@ fn resyncing_tail(
     drop((archive, stable_log));
 
     Channel::resume_on_abort((), move |(), previous| {
+        // Only a hang-up or a dead producer is repaired by a fresh cycle; a
+        // cancellation or an order violation ends the stream as it is (D18).
+        if !resumable(previous) {
+            return None;
+        }
         // Declining is the only termination a consumer ever observes, and it
         // reaches them as the *previous* segment's `Aborted` — under the live
         // fan-out's label, which points at the wrong culprit. Hence the lines.
@@ -667,6 +601,9 @@ fn resyncing_unstable_tail(
     drop((local_store, stable_log));
 
     Channel::resume_on_abort((), move |(), previous| {
+        if !resumable(previous) {
+            return None;
+        }
         // As in `resyncing_tail`: declining is the only termination a consumer
         // observes, under the previous segment's label, hence the lines.
         let Some(local_store) = weak_local_store.upgrade() else {
@@ -1130,7 +1067,7 @@ mod tests {
         // (the engine clamps them out of `range` immediately); 3,4 retained.
         stable_log.set_purge_threshold(Hlc(102)).expect("purge");
         let local_only: Vec<u64> = stable_log
-            .range(LogIndex(0), LogIndex(5))
+            .range(None, LogIndex(5))
             .items()
             .map(|r| r.expect("ok").0.raw())
             .collect();
@@ -1301,7 +1238,7 @@ mod tests {
         }
         fn range(
             &self,
-            from: LogIndex,
+            after: Option<LogIndex>,
             until: LogIndex,
         ) -> Channel<Result<(LogIndex, Data), crate::Error>> {
             self.ranges
@@ -1311,7 +1248,7 @@ mod tests {
                 .lock()
                 .expect("lock")
                 .iter()
-                .filter(|(i, _)| *i >= from && *i < until)
+                .filter(|(i, _)| after.is_none_or(|a| *i > a) && *i < until)
                 .cloned()
                 .map(Ok)
                 .collect();

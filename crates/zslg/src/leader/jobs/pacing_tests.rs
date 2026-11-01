@@ -331,7 +331,11 @@ impl StableLogSnapshot for EmptyStableLog {
     fn watermark(&self) -> crossbeam_combinators::Level<Option<Hlc>> {
         unimplemented!("pacing tests never watch the stable-log watermark")
     }
-    fn range(&self, _from: LogIndex, _until: LogIndex) -> Channel<Result<(LogIndex, Data), Error>> {
+    fn range(
+        &self,
+        _after: Option<LogIndex>,
+        _until: LogIndex,
+    ) -> Channel<Result<(LogIndex, Data), Error>> {
         unimplemented!("pacing tests never range the stable log")
     }
     fn set_purge_threshold(&self, _hlc_threshold: Hlc) -> Result<(), Error> {

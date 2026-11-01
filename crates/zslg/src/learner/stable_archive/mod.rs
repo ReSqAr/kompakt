@@ -12,29 +12,27 @@
 use std::sync::Arc;
 
 use crate::api::{
-    ArchiveBounds, ArchiveLowerBound, ArchiveUpperBound, RaftStateView, SnapshotStore,
-    StableArchiveReader,
+    ArchiveBounds, ArchiveUpperBound, RaftStateView, SnapshotStore, StableArchiveReader,
 };
-use crate::error::Error;
 use crate::hlc::Hlc;
 use crate::ids::LogIndex;
-use crate::meta::SnapshotMetadata;
-use crossbeam_combinators::Channel;
-
-/// Depth of the channel handed back by [`stream`](ObjectStoreArchiveReader::stream).
-/// Matches the snapshot-store read channel: the consumer drains on its own
-/// blocking thread, and a full channel back-pressures the forwarding task.
-const ARCHIVE_STREAM_CHANNEL_CAP: usize = 256;
+use crate::meta::{SnapshotEntry, SnapshotMetadata};
+use crate::ordered::ArchiveStream;
+use crossbeam_combinators::{Channel, Contiguous, NonDecreasing};
 
 /// Reads the archived (purged) prefix of the stable log from object-store
-/// snapshots. Holds the snapshot store (the object-store read point) and the
-/// raft state (the source of truth for which snapshots tile the history).
+/// snapshots. Holds the snapshot store (the object-store read point), the raft
+/// state (the source of truth for which snapshots tile the history), and the
+/// runtime the snapshot opens run on.
 pub(in crate::learner) struct ObjectStoreArchiveReader {
     snapshot_store: Arc<dyn SnapshotStore>,
     raft_state: Arc<dyn RaftStateView>,
+    runtime: tokio::runtime::Handle,
 }
 
 impl ObjectStoreArchiveReader {
+    /// Built inside a runtime: its handle is where the snapshot opens run,
+    /// whichever thread later reads the stream.
     #[must_use]
     pub(in crate::learner) fn new(
         snapshot_store: Arc<dyn SnapshotStore>,
@@ -43,15 +41,8 @@ impl ObjectStoreArchiveReader {
         Self {
             snapshot_store,
             raft_state,
+            runtime: tokio::runtime::Handle::current(),
         }
-    }
-}
-
-/// The lower bound resolved to a concrete inclusive index.
-fn lower_index(from: ArchiveLowerBound) -> LogIndex {
-    match from {
-        ArchiveLowerBound::Earliest => LogIndex::ZERO,
-        ArchiveLowerBound::FromIndex(idx) => idx,
     }
 }
 
@@ -59,20 +50,19 @@ fn lower_index(from: ArchiveLowerBound) -> LogIndex {
 /// definition of "which snapshots hold this window", shared by the loader and
 /// the reader.
 ///
-/// A snapshot must hold an entry at or above the lower bound (`end_index >=
-/// from`); the upper bound prunes snapshots wholly at or above the cap
-/// (`start_index < until` for an index bound). Because index order == HLC order
-/// in the stable log, the index bound is exact.
+/// A snapshot must hold an entry above `after` (`end_index > after`); the
+/// upper bound prunes snapshots wholly at or above the cap (`start_index <
+/// until` for an index bound). Because index order == HLC order in the stable
+/// log, the index bound is exact.
 #[must_use]
 fn covering_snapshots(
     manifest: &[SnapshotMetadata],
     bounds: ArchiveBounds,
 ) -> Vec<SnapshotMetadata> {
-    let from = lower_index(bounds.from);
     let mut snaps: Vec<SnapshotMetadata> = manifest
         .iter()
         .filter(|m| {
-            m.end_index >= from
+            bounds.after.is_none_or(|after| m.end_index > after)
                 && match bounds.until {
                     ArchiveUpperBound::Unbounded => true,
                     ArchiveUpperBound::IndexExclusive(until) => m.start_index < until,
@@ -84,135 +74,45 @@ fn covering_snapshots(
     snaps
 }
 
-/// Where an entry sits relative to the requested window.
-enum Placement {
-    /// Below the lower bound — already served elsewhere; skip it.
-    Below,
-    /// Inside the window — forward it.
-    Within,
-    /// At or above the upper bound — the window is done (entries are ordered).
-    Above,
-}
-
-fn place(index: LogIndex, bounds: ArchiveBounds) -> Placement {
-    if index < lower_index(bounds.from) {
-        return Placement::Below;
-    }
-    match bounds.until {
-        ArchiveUpperBound::Unbounded => Placement::Within,
-        ArchiveUpperBound::IndexExclusive(until) => {
-            if index < until {
-                Placement::Within
-            } else {
-                Placement::Above
-            }
-        }
+/// Whether an item is still inside the window's upper bound. `Err` items pass:
+/// they end the consumer's read themselves.
+fn not_above(until: ArchiveUpperBound) -> impl FnMut(&Result<SnapshotEntry, crate::Error>) -> bool {
+    move |item| match (item, until) {
+        (Ok(entry), ArchiveUpperBound::IndexExclusive(until)) => entry.global_index < until,
+        _ => true,
     }
 }
 
-#[async_trait::async_trait]
 impl StableArchiveReader for ObjectStoreArchiveReader {
-    async fn stream(&self, bounds: ArchiveBounds) -> Result<crate::ordered::ArchiveStream, Error> {
+    /// ```text
+    ///   covering snapshots ─ defer_async(read_snapshot) each ─ chain_all
+    ///     ─ take_while(below until) ─ filter_above(after)
+    ///     ─ Contiguous from after ─ covers(..until) ─ also NonDecreasing<Hlc>
+    /// ```
+    fn stream(&self, bounds: ArchiveBounds) -> ArchiveStream {
         let covering =
             covering_snapshots(&self.raft_state.snapshot().manifest_state.manifest, bounds);
-        let from_idx = lower_index(bounds.from);
-        let snapshot_store = self.snapshot_store.clone();
-        let (tx, rx) = crossbeam_channel::bounded(ARCHIVE_STREAM_CHANNEL_CAP);
-        let (ch_out, closer) = Channel::from(rx, "stable_archive::stream");
-
-        // Every exit is a `break`, so the single `closer.close()` below is
-        // unconditional and `tx` — still owned by this scope — drops after it.
-        // A panic is the only way past the close, which is exactly when the
-        // consumer should see `End::Aborted` rather than a clean end.
-        tokio::spawn(async move {
-            let mut expected: Option<LogIndex> = None;
-            let mut last_hlc: Option<Hlc> = None;
-            // A failed open has already sent a terminal error; without this the
-            // tiling check below would send a second one behind it.
-            let mut open_failed = false;
-            for meta in covering {
-                let mut ch = match snapshot_store
+        let phases = covering.into_iter().map(|meta| {
+            let store = Arc::clone(&self.snapshot_store);
+            Channel::defer_async(&self.runtime, move || async move {
+                store
                     .read_snapshot(
                         meta.snapshot_id,
                         crate::metrics::ObjectStoreReason::ArchiveRead,
                     )
                     .await
-                {
-                    Ok(ch) => ch,
-                    Err(e) => {
-                        let _ = tx.send(Err(e));
-                        open_failed = true;
-                        break;
-                    }
-                };
-                let inner_tx = tx.clone();
-                let spawn_res = tokio::task::spawn_blocking(move || {
-                    let mut exp = expected;
-                    let mut hlc = last_hlc;
-                    let mut above = false;
-                    loop {
-                        match ch.recv() {
-                            Ok(Ok(entry)) => {
-                                match place(entry.global_index, bounds) {
-                                    Placement::Above => {
-                                        above = true;
-                                        break;
-                                    }
-                                    Placement::Below => continue,
-                                    Placement::Within => {
-                                        let idx = entry.global_index;
-                                        let entry_hlc = entry.data.data_id.hlc();
-                                        assert!(
-                                            hlc.is_none_or(|prev| entry_hlc >= prev),
-                                            "archive stream: HLC regressed to {entry_hlc:?} at index {idx:?} after {hlc:?}"
-                                        );
-                                        exp = Some(LogIndex::next_after(Some(idx)));
-                                        hlc = Some(entry_hlc);
-                                        if inner_tx.send(Ok(entry)).is_err() {
-                                            return (exp, hlc, true);
-                                        }
-                                    }
-                                }
-                            }
-                            Ok(Err(e)) => {
-                                let _ = inner_tx.send(Err(e));
-                                return (exp, hlc, true);
-                            }
-                            Err(_disconnected) => break,
-                        }
-                    }
-                    (exp, hlc, above)
-                })
-                .await;
-                let (next_expected, next_hlc, above_seen) = match spawn_res {
-                    Ok(r) => r,
-                    Err(join_error) => {
-                        let _ = tx.send(Err(Error::Storage(format!(
-                            "archive stream reader panicked: {join_error}"
-                        ))));
-                        (expected, last_hlc, true)
-                    }
-                };
-                expected = next_expected;
-                last_hlc = next_hlc;
-                if above_seen {
-                    break;
-                }
-            }
-            if !open_failed
-                && let ArchiveUpperBound::IndexExclusive(until) = bounds.until
-                && expected != Some(until)
-            {
-                let _ = tx.send(Err(Error::StableLogGap(format!(
-                    "archive stream: window below index {} not fully tiled (reached {:?})",
-                    until.raw(),
-                    expected.map(LogIndex::raw),
-                ))));
-            }
-            closer.close();
+                    .unwrap_or_else(|e| Channel::once(Err(e)))
+            })
         });
-
-        Ok(crate::ordered::archive_stream(ch_out, from_idx))
+        let ch = Channel::chain_all(phases)
+            .take_while(not_above(bounds.until))
+            .filter_above::<LogIndex>(bounds.after)
+            .ordered::<Contiguous<LogIndex>>(bounds.after, "archive tiling");
+        let ch = match bounds.until {
+            ArchiveUpperBound::IndexExclusive(until) => ch.covers(..until, "archive window"),
+            ArchiveUpperBound::Unbounded => ch,
+        };
+        ch.also::<NonDecreasing<Hlc>>(None, "archive HLC")
     }
 }
 
@@ -220,7 +120,6 @@ impl StableArchiveReader for ObjectStoreArchiveReader {
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "test code")]
 mod tests {
     use super::*;
-    use crate::hlc::Hlc;
     use crate::ids::SnapshotId;
 
     fn meta(start: u64, end: u64) -> SnapshotMetadata {
@@ -240,8 +139,8 @@ mod tests {
             .collect()
     }
 
-    fn bounds(from: ArchiveLowerBound, until: ArchiveUpperBound) -> ArchiveBounds {
-        ArchiveBounds { from, until }
+    fn bounds(after: Option<LogIndex>, until: ArchiveUpperBound) -> ArchiveBounds {
+        ArchiveBounds { after, until }
     }
 
     /// A contiguous manifest given out of order is returned sorted by start
@@ -255,43 +154,31 @@ mod tests {
         assert_eq!(
             ids(&covering_snapshots(
                 &manifest,
-                bounds(ArchiveLowerBound::Earliest, ArchiveUpperBound::Unbounded),
+                bounds(None, ArchiveUpperBound::Unbounded),
             )),
             vec![(0, 4), (5, 9), (10, 14)],
         );
 
-        // `from` at a snapshot's end_index still includes it (inclusive end);
-        // the earlier snapshot (end 4 < 5) is pruned.
+        // After 4: the snapshot ending at 4 holds nothing above it and is
+        // pruned; the one starting at 5 is kept.
         assert_eq!(
             ids(&covering_snapshots(
                 &manifest,
-                bounds(
-                    ArchiveLowerBound::FromIndex(LogIndex(5)),
-                    ArchiveUpperBound::Unbounded,
-                ),
+                bounds(Some(LogIndex(4)), ArchiveUpperBound::Unbounded,),
             )),
             vec![(5, 9), (10, 14)],
         );
 
-        // A `from` beyond every snapshot → nothing.
+        // After the last index any snapshot holds → nothing.
         assert!(
             covering_snapshots(
                 &manifest,
-                bounds(
-                    ArchiveLowerBound::FromIndex(LogIndex(15)),
-                    ArchiveUpperBound::Unbounded,
-                ),
+                bounds(Some(LogIndex(14)), ArchiveUpperBound::Unbounded,),
             )
             .is_empty()
         );
         // Empty manifest → nothing.
-        assert!(
-            covering_snapshots(
-                &[],
-                bounds(ArchiveLowerBound::Earliest, ArchiveUpperBound::Unbounded),
-            )
-            .is_empty()
-        );
+        assert!(covering_snapshots(&[], bounds(None, ArchiveUpperBound::Unbounded),).is_empty());
     }
 
     /// An `IndexExclusive` upper bound prunes snapshots whose first index is
@@ -305,10 +192,7 @@ mod tests {
         assert_eq!(
             ids(&covering_snapshots(
                 &manifest,
-                bounds(
-                    ArchiveLowerBound::Earliest,
-                    ArchiveUpperBound::IndexExclusive(LogIndex(7)),
-                ),
+                bounds(None, ArchiveUpperBound::IndexExclusive(LogIndex(7)),),
             )),
             vec![(0, 4), (5, 9)],
         );
@@ -317,10 +201,7 @@ mod tests {
         assert_eq!(
             ids(&covering_snapshots(
                 &manifest,
-                bounds(
-                    ArchiveLowerBound::Earliest,
-                    ArchiveUpperBound::IndexExclusive(LogIndex(5)),
-                ),
+                bounds(None, ArchiveUpperBound::IndexExclusive(LogIndex(5)),),
             )),
             vec![(0, 4)],
         );

@@ -78,10 +78,14 @@ pub(crate) trait StableLogSnapshot: Send + Sync + 'static {
     #[must_use]
     fn watermark(&self) -> crossbeam_combinators::Level<Option<Hlc>>;
 
+    /// The stored entries in `(after, until)`, ascending; `after: None` starts
+    /// at the first index. The scan closes when it reaches `until` or the end of
+    /// what is stored, whichever is first — gaps (a retired prefix) are the
+    /// caller's to fill.
     #[must_use]
     fn range(
         &self,
-        from: LogIndex,
+        after: Option<LogIndex>,
         until: LogIndex,
     ) -> Channel<Result<(LogIndex, Data), crate::Error>>;
 

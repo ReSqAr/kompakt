@@ -14,8 +14,8 @@ use crate::ids::{DataId, LogIndex};
 use crate::meta::{Data, SnapshotEntry, StableLogEvent};
 
 impl Successor for LogIndex {
-    fn next(self) -> Self {
-        Self::next_after(Some(self))
+    fn next_after(prev: Option<Self>) -> Self {
+        Self::next_after(prev)
     }
 }
 
@@ -46,6 +46,20 @@ impl Key<Result<Data, Error>> for DataId {
     }
 }
 
+/// An archive entry's HLC: index order implies HLC order, guarded by `also`.
+impl Key<Result<SnapshotEntry, Error>> for Hlc {
+    fn key(item: &Result<SnapshotEntry, Error>) -> Option<Self> {
+        item.as_ref().ok().map(|entry| entry.data.data_id.hlc())
+    }
+}
+
+/// A replayed stable-log entry's HLC, guarded the same way.
+impl Key<Result<(LogIndex, Data), Error>> for Hlc {
+    fn key(item: &Result<(LogIndex, Data), Error>) -> Option<Self> {
+        item.as_ref().ok().map(|(_, data)| data.data_id.hlc())
+    }
+}
+
 /// A local-store entry's HLC group: what a snapshot chunk must not split.
 impl Key<Result<Data, Error>> for Hlc {
     fn key(item: &Result<Data, Error>) -> Option<Self> {
@@ -58,12 +72,12 @@ impl Key<Result<Data, Error>> for Hlc {
 pub(crate) type ReplicaStream =
     OrderedChannel<Result<(LogIndex, Data), Error>, StrictlyIncreasing<LogIndex>>;
 
-/// Wrap a replica stream with the strict policy and its cursor.
+/// Wrap a replica stream with the strict policy, after the subscriber's cursor.
 pub(crate) fn replica_stream(
     ch: Channel<Result<(LogIndex, Data), Error>>,
-    from: Option<LogIndex>,
+    after: Option<LogIndex>,
 ) -> ReplicaStream {
-    OrderedChannel::named(ch, Some(LogIndex::next_after(from)), "replica subscription")
+    OrderedChannel::named(ch, after, "replica subscription")
 }
 
 /// The stable-log read: gapless indices, replaying from `from` inclusive.
@@ -84,18 +98,11 @@ pub(crate) fn local_store_stream(
     OrderedChannel::named(ch, None, what)
 }
 
-/// Wrap an archive stream with its `Contiguous` contract.
-pub(crate) fn archive_stream(
-    ch: Channel<Result<SnapshotEntry, Error>>,
-    from: LogIndex,
-) -> ArchiveStream {
-    OrderedChannel::named(ch, Some(from), "archive stream")
-}
-
-/// Wrap a stable-log stream with the gapless policy and its inclusive start.
+/// Wrap a stable-log stream with the gapless policy, from its inclusive start
+/// (the subscription takes `from` until it takes `after`).
 pub(crate) fn stable_stream(
     ch: Channel<Result<StableLogEvent, Error>>,
     from: LogIndex,
 ) -> StableStream {
-    OrderedChannel::named(ch, Some(from), "stable log stream")
+    OrderedChannel::named(ch, from.before(), "stable log stream")
 }

@@ -485,7 +485,7 @@ async fn covered_entries(c: &Churn, via: NodeId) -> usize {
         .await
         .expect("load manifest");
     let entries: Vec<(LogIndex, Data)> = verify
-        .range(LogIndex(0), LogIndex(1_000))
+        .range(None, LogIndex(1_000))
         .items()
         .filter_map(|r| r.ok())
         .collect();

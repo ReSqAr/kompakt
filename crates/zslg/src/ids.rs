@@ -254,6 +254,14 @@ impl LogIndex {
         }
     }
 
+    /// The exclusive start that names this index as the first one wanted:
+    /// the index before it, or `None` for the very first. The inverse of
+    /// [`next_after`](Self::next_after) — `next_after(i.before()) == i`.
+    #[must_use]
+    pub fn before(self) -> Option<LogIndex> {
+        self.0.checked_sub(1).map(LogIndex)
+    }
+
     #[must_use]
     pub fn from_bytes(bytes: [u8; 8]) -> Self {
         Self(u64::from_be_bytes(bytes))

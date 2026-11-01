@@ -215,7 +215,7 @@ async fn snapshot_round_trip_through_object_store() {
     assert_eq!(learner_stable.end_hlc(), Some(Hlc(300)));
     assert_eq!(learner_stable.end_index(), Some(LogIndex(2)));
     let stable_entries: Vec<(crate::ids::LogIndex, crate::meta::Data)> = learner_stable
-        .range(LogIndex(0), LogIndex(3))
+        .range(None, LogIndex(3))
         .items()
         .filter_map(|r| r.ok())
         .collect();
@@ -369,7 +369,7 @@ async fn second_snapshot_extends_stable_log_via_load() {
     assert_eq!(learner_stable.end_hlc(), Some(Hlc(210)));
 
     let entries: Vec<(crate::ids::LogIndex, crate::meta::Data)> = learner_stable
-        .range(LogIndex(0), LogIndex(4))
+        .range(None, LogIndex(4))
         .items()
         .filter_map(|r| r.ok())
         .collect();
@@ -485,7 +485,7 @@ async fn invariant_stable_order_is_hlc_order() {
     .expect("load");
 
     let stable_entries: Vec<(LogIndex, Data)> = learner_stable
-        .range(LogIndex(0), LogIndex(100))
+        .range(None, LogIndex(100))
         .items()
         .filter_map(|r| r.ok())
         .collect();

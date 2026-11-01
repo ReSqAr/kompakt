@@ -70,8 +70,6 @@ pub(crate) use replica_client::ReplicaClient;
 pub(crate) use router::Router;
 pub(crate) use snapshot_store::{CleanupReport, EntryMeta, SnapshotStore, SnapshotWrite};
 pub(crate) use spare_selection::{CandidateInfo, SpareSelector};
-pub(crate) use stable_archive::{
-    ArchiveBounds, ArchiveLowerBound, ArchiveUpperBound, StableArchiveReader,
-};
+pub(crate) use stable_archive::{ArchiveBounds, ArchiveUpperBound, StableArchiveReader};
 pub(crate) use stable_log::StableLogSnapshot;
 pub(crate) use state_replicator::{ReplicatedRaftState, StateReplicator};

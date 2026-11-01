@@ -14,8 +14,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use crate::api::{
-    ArchiveBounds, ArchiveLowerBound, ArchiveUpperBound, RaftStateView, StableArchiveReader,
-    StableLogSnapshot,
+    ArchiveBounds, ArchiveUpperBound, RaftStateView, StableArchiveReader, StableLogSnapshot,
 };
 use crate::error::Error;
 use crate::ids::LogIndex;
@@ -32,22 +31,16 @@ pub(in crate::learner) async fn integrate_manifest(
     // its own blocking thread (CLAUDE.md §8), commits contiguous batches, and
     // refuses an input that jumps past `end + 1`, so a missing or partial
     // snapshot cannot land as a durable gap (docs/STABLE_LOG_GAP_FIX.md).
-    let from = match stable_log.end_index() {
-        Some(end) => ArchiveLowerBound::FromIndex(LogIndex::next_after(Some(end))),
-        None => ArchiveLowerBound::Earliest,
-    };
     // Debug, not info: this runs on every raft-state change, which on an idle
     // cluster is every cutoff tick.
     debug!(
         manifest_entries = manifest_state.manifest.len(),
         "integrating stable-log manifest from object store",
     );
-    let rx = archive
-        .stream(ArchiveBounds {
-            from,
-            until: ArchiveUpperBound::Unbounded,
-        })
-        .await?;
+    let rx = archive.stream(ArchiveBounds {
+        after: stable_log.end_index(),
+        until: ArchiveUpperBound::Unbounded,
+    });
     stable_log.append(rx.into_channel()).await?;
 
     // Completeness (belt to `append`'s gap fence): `append` returning Ok proves
@@ -376,7 +369,7 @@ mod tests {
         assert_eq!(log.end_index(), Some(LogIndex(9)));
         assert_eq!(log.end_hlc(), Some(Hlc(200)), "watermark advances");
         let indices: Vec<u64> = log
-            .range(LogIndex(0), LogIndex(100))
+            .range(None, LogIndex(100))
             .items()
             .filter_map(|r| r.ok().map(|(i, _)| i.raw()))
             .collect();
@@ -574,7 +567,7 @@ mod tests {
 
         // The log is complete and contiguous: every index 0..=9 present.
         let indices: Vec<u64> = log
-            .range(LogIndex(0), LogIndex(100))
+            .range(None, LogIndex(100))
             .items()
             .filter_map(|r| r.ok().map(|(i, _)| i.raw()))
             .collect();
