@@ -517,3 +517,20 @@ workspace (tests and `examples/write_tracker` only). An async caller drains
 with `recv` on `spawn_blocking` — what the bridge did internally, minus the
 second hop. The `tokio` feature stays for `produce_*`, `defer_async`,
 `Level::changed` and `Cancellation::from_token`.
+
+### D30. Consistency pass
+
+A full read of the design for consistency; refinements of earlier decisions:
+
+- **No finite `produce_async`.** After D21/D25 its callers (archive, merge
+  feeder) are `defer_async` declarations; with no caller it goes, like the sync
+  `defer`. Producers: `produce_blocking` and `produce_async_infinite`.
+- **`ArchiveLowerBound` is deleted.** D26.3's `After(Option<LogIndex>)` would be
+  a one-variant enum; `ArchiveBounds` carries `after: Option<LogIndex>`.
+- **`Resumable` and `resync` take a `what` label** for the order check and the
+  first-open decline (D26.8).
+- **The snapshot peek stays** (empty window → no upload; `StableLogBehindManifest`
+  is checked there); the first entry comes from it, so `SnapshotWrite` is
+  `{ count, last, stored_bytes, uncompressed_bytes }` (refines D27).
+- Wording: `defer_async`'s explicit handle in §3; `also` is defined for any
+  policy; `Level` is described as a mutex + `Wakes` core in §11.
