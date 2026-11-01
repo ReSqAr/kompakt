@@ -224,3 +224,53 @@ Reintroduce a fan-out owner type on the producer side. The earlier "no
 `Fanout` wrapper" was about hiding the three parts; this wrapper is the
 producer half, with the registry still independent. If it does not earn its
 keep, it can be removed again.
+
+## Review round (design restarted after review)
+
+The first design draft was reviewed before sign-off. The review found one
+false premise (D6: a `Resumable` that is a `Source` would expose the private
+select model — it would not; `Source` stays private either way, and
+`ResumeOnAbort` is already a private `Source` holding a `FnMut`) and several
+contradictions. The interview restarts on those points; D1–D13 stand unless a
+decision below reverses them.
+
+Review concerns, as open questions:
+
+- R1. Drop `Recv` / `pump` / spawn policies (D5–D7, D10)? A lazy `Recv` cannot
+  honour `until` while blocked, and nvzn's `Segment::merge` over a `Resumable`
+  range would need a pump thread again.
+- R2. `until` inside a resumed segment turns a shutdown into a resync.
+- R3. `Live` as a proof token is forgeable; `open` is the only real guarantee.
+- R4. The resume cursor means "next wanted" on the first call and "last
+  emitted" after a resync.
+- R5. The archive's own tiling (`expected`/`last_hlc`/`open_failed`) is
+  channel logic the design does not move; it needs a deferred phase.
+- R6. Missing IAIC sections: constraints, complexity budget, operations,
+  `Resumable` state diagram.
+- R7. Implementation order: widest churn first vs a thin slice first.
+- R8. Scope for the last polish round (Q5 was never answered).
+
+### D14. The seam is opened by `Segment::open`
+
+`open` becomes an associated constructor, `Segment::open(&seam)`, not a free
+function. The constructor is the one place subscribe-then-cut happens and is
+discoverable on the type it returns. Not `from`/`From`: that names a
+conversion, and opening a seam performs I/O and fixes an order.
+
+### D15. Fan-out sends return `Result`, not `bool`
+
+```rust
+impl<T> Fanout<T> {
+    pub fn publish(&self, item: T) -> Result<(), Stopped<T>>;
+    pub fn try_publish(&self, item: T) -> Result<(), TryPublishError<T>>;
+    pub fn shutdown(self);
+}
+pub struct Stopped<T>(pub T);
+pub enum TryPublishError<T> { Full(T), Stopped(T) }
+```
+
+The error names what actually happened: the distribution thread is gone
+(shutdown or panic). It is not "consumer gone" — a departed subscriber is shed
+or skipped inside the thread and never reaches the producer. The item is handed
+back, as crossbeam's `SendError` does. `#[must_use]` on `Result` replaces the
+silent `let _ = tx.send(..)`.

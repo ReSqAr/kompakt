@@ -164,3 +164,19 @@ config struct carries the three caps.
 - `FnMut` combinators affect `Channel`'s object-safety/`Box<dyn Source>` design.
   A `Source` is polled by one consumer, so `FnMut` should fit, but the current
   `filter_map`/`take_until`/`resume_on_abort` bounds must be checked.
+
+## Review round — model
+
+Review restarted the interview. Settled: D14 (`Segment::open`), D15 (`Result`
+sends). My ranking of the open review points by leverage:
+
+1. R1 `Recv`/pump — removes ~a third of the design; R2 and the nvzn merge
+   problem fall out of it. Expected answer: drop `Recv`, `Resumable` is a
+   private `Source`, combinators take `FnMut`.
+2. R8 scope — expected: full revised set, ordered so steps 1–2 stand alone.
+3. R2 cancel-vs-resume — expected: resumers never resume `Cancelled`/
+   `CancelHandleDropped`; node `until` sits outside.
+4. R4 cursor — expected: always "next expected" via `Successor`.
+5. R3 `Live` — expected: drop it; `Segment::open` is the guarantee.
+6. R5 archive — expected: `defer` + `chain_all` + two ordered checks.
+7. R6/R7 — doc structure; no decision needed beyond agreeing the order.
