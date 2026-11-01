@@ -213,3 +213,23 @@ post-implementation doc. Not a design doc; the design is
 - **Not reproduced on its own:** `three_node_tcp_write_round_trip` passed 12 of
   12 repeats with six CPU hogs running. The one failure seen in a full
   workspace run is unexplained; see the post doc.
+- **Second fan-out finding: drop-cancel discards queued refs** (reported on
+  review, `a_stopped_fold_ends_the_channel_after_its_last_ref`, 2 of 30 under
+  four CPU hogs; 1 of 60 here before the change, 0 of 40 after). `publish`
+  returns once an element is queued; `Shutdown` cancels, and the thread
+  prefers cancellation over queued data, so a clean fold stop could discard
+  the last ref after `sync()` had returned. Decision: a draining shutdown, not
+  an ack per publish (cost on every publish) and not a weaker test (the
+  contract is delivery). `Fanout::drain(grace)` closes the data queue, lets the
+  thread empty it, and cancels only after `grace` so a `Block` subscriber that
+  never reads cannot hold the caller. nvzn's `Subscribers::cancel_if` drains
+  (5 s) unless the recorded reason is a cancel, which still stops at once.
+  Tests: a slow reader keeps the queue full when the drain starts (`shutdown`
+  gets `[]`, `drain` all 30), and a stuck subscriber bounds the drain.
+- **Pitfall in my own verification:** a "negative check" that reverted the fix
+  failed to compile (an unused constant is an error here), the loop counted the
+  empty binary path as 60 failures, and I almost read it as a reproduction.
+  Check that the binary built before trusting a failure count.
+- **Stress timeout, not a failure:** one of six full-lib runs under six CPU
+  hogs hit the 400 s limit with `cluster_upholds_invariants_under_generated_faults`
+  unfinished (about 106 s unloaded). No assertion failed in any of the six.

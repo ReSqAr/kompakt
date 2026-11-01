@@ -767,11 +767,11 @@ impl ReplicaLogStore {
 
 /// The live subscription and the frontier it is anchored to.
 ///
-/// [`Tail::subscribe`] registers the fan-out before [`Tail::cut`] reads the
+/// [`Seam::subscribe`] registers the fan-out before [`Seam::cut`] reads the
 /// frontier. The flush loop advances the frontier before it broadcasts, so
 /// an entry broadcast before registration is at or below the cut and the
 /// historic scan serves it; one broadcast after registration is on the live
-/// tail. The overlap is filtered by [`Tail::above`]. Reversing the order
+/// tail. The overlap is filtered by [`Seam::above`]; [`Segment::open`] fixes the order. Reversing the order
 /// would lose entries committed between the snapshot and the registration.
 struct ReplicaSeam {
     log: Arc<ReplicaLogStore>,

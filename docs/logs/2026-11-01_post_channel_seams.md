@@ -104,6 +104,11 @@ Deviations (details in the impl notes):
   (`Fanout` numbers publishes; `subscribe` records the count; the thread
   withholds older elements) and a regression test that deadlocks the old
   code. It predates these slices, and a plain `cargo test` rarely hits it.
+- **A second fan-out hazard: drop-cancel discards queued elements.** `publish`
+  returns once an element is queued, and cancellation is preferred over
+  queued data, so a clean stop could lose the last ref. `Fanout::drain(grace)`
+  now delivers the queue first (bounded, so a stuck `Block` subscriber cannot
+  hold the caller); nvzn's fold uses it for every stop except a cancel.
 - **Verification traps.** A full disk (`target/debug/incremental` at 15 GB)
   produced spurious test failures and a spurious proptest seed; verification
   now runs with `CARGO_INCREMENTAL=0`. One full-workspace run timed out and
@@ -117,9 +122,6 @@ Deviations (details in the impl notes):
 
 - The one unexplained `three_node_tcp_write_round_trip` failure (see §3). If
   it recurs, run the cluster tests as their own target with the output kept.
-- `Fanout`'s drop-cancel is biased ahead of queued data: elements still in the
-  queue at drop may be discarded (slice 1 note). Decide whether any consumer
-  needs a draining shutdown.
 - `produce_async` bodies for the network bridges still own their socket
   shutdown by hand (the blocking read cannot be cancelled by a token); a crate
   helper for "blocking loop + force-close handle" would remove the repeated

@@ -2014,7 +2014,7 @@ mod tests {
         });
     }
 
-    /// `subscribe_stable_log(from)` replays history from `from` before going live.
+    /// `subscribe_stable_log(after)` replays history after `after` before going live.
     #[tokio::test]
     async fn subscribe_stable_log_from_replays_history() {
         let dir = tempfile::tempdir().expect("tempdir");

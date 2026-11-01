@@ -212,7 +212,7 @@ pub(crate) struct SnapshotConfig {
     /// produces one unbounded object that must be loaded monolithically.
     ///
     /// Soft because a chunk always runs to the end of the HLC it lands in
-    /// (`stream_window_ordered`), so the real count can exceed this slightly.
+    /// (`stream_window`), so the real count can exceed this slightly.
     pub(crate) max_snapshot_entries: std::num::NonZeroUsize,
 }
 

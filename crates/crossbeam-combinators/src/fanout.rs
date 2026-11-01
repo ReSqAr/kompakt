@@ -6,7 +6,8 @@
 //!   (fanout, registry)
 //!     │        └── cloneable subscribe side
 //!     └─────────── the producer: publish / try_publish / shutdown
-//!                  (owns the data sender and the thread; Drop cancels)
+//!                  (owns the data sender and the thread; Drop cancels,
+//!                  drain delivers what is queued first)
 //! ```
 //!
 //! The thread owns the subscriber set, so routing, registration and
@@ -116,7 +117,9 @@ pub enum TryPublishError<T> {
 /// The producer side of a fan-out: the data sender and the thread's lifecycle.
 ///
 /// Dropping it cancels the thread without joining; [`shutdown`](Self::shutdown)
-/// cancels and joins.
+/// cancels and joins. Both discard what is still queued: `publish` returns once
+/// an element is *queued*, not delivered. [`drain`](Self::drain) delivers it
+/// first.
 pub struct Fanout<T> {
     tx: Sender<(u64, T)>,
     shutdown: Shutdown,
@@ -149,6 +152,28 @@ impl<T> Fanout<T> {
         })
     }
 
+    /// Finish delivering what is queued, then stop. Blocking: from async code,
+    /// call it on the blocking pool.
+    ///
+    /// Dropping or [`shutdown`](Self::shutdown) cancel at once, and the thread
+    /// prefers cancellation over queued data, so an element `publish` already
+    /// returned for can be discarded undelivered. `drain` closes the data queue
+    /// instead and lets the thread empty it; every subscriber then ends
+    /// `ProducerGone` after its last element. A `Block` subscriber that never
+    /// reads would hold that forever, so the wait is bounded by `grace`: after
+    /// it the thread is cancelled as `shutdown` would.
+    pub fn drain(self, grace: std::time::Duration) {
+        let Self {
+            tx, mut shutdown, ..
+        } = self;
+        drop(tx);
+        if let Some(done) = shutdown.done.take() {
+            // The thread drops its end when it exits, which wakes this at once.
+            let _ = done.recv_timeout(grace);
+        }
+        shutdown.wait();
+    }
+
     /// Stop the distribution thread and wait for it. Blocking: from async code,
     /// call it on the blocking pool.
     pub fn shutdown(self) {
@@ -163,6 +188,8 @@ impl<T> Fanout<T> {
 struct Shutdown {
     signal: Option<Sender<()>>,
     join: Option<JoinHandle<()>>,
+    /// Disconnects when the thread exits; never carries a value.
+    done: Option<Receiver<()>>,
 }
 
 impl Shutdown {
@@ -370,6 +397,7 @@ where
         closed: Mutex::new(false),
         published: AtomicU64::new(0),
     });
+    let (done_tx, done_rx) = crossbeam_channel::bounded::<()>(0);
     let join = spawn(
         data_rx,
         register_rx,
@@ -377,12 +405,14 @@ where
         route,
         overflow,
         Arc::clone(&state),
+        done_tx,
     );
     let fanout = Fanout {
         tx: data_tx,
         shutdown: Shutdown {
             signal: Some(shutdown_tx),
             join: Some(join),
+            done: Some(done_rx),
         },
         state: Arc::clone(&state),
     };
@@ -396,6 +426,7 @@ fn spawn<K, T, F>(
     route: F,
     overflow: OverflowPolicy,
     state: Arc<State>,
+    done: Sender<()>,
 ) -> JoinHandle<()>
 where
     K: Eq + Copy + Send + 'static,
@@ -404,7 +435,10 @@ where
 {
     thread::Builder::new()
         .name("fanout".to_owned())
-        .spawn(move || run(data_rx, register_rx, shutdown_rx, route, overflow, state))
+        .spawn(move || {
+            run(data_rx, register_rx, shutdown_rx, route, overflow, state);
+            drop(done);
+        })
         .expect("spawn fan-out thread")
 }
 
@@ -759,6 +793,56 @@ mod tests {
                 .is_ok(),
             "a subscriber was handed elements published before it subscribed"
         );
+    }
+
+    /// `drain` delivers what `publish` already returned for; `shutdown` and
+    /// `Drop` may discard it. The subscriber reads slowly through a queue of
+    /// one, so most of the elements are still queued when the drain starts.
+    #[test]
+    fn drain_delivers_the_queue_then_ends_the_subscribers() {
+        let (fanout, registry) = broadcast::<u32>("drain", config(64, 4, 1), OverflowPolicy::Block);
+        let mut sub = registry.subscribe().unwrap();
+        let reader = std::thread::spawn(move || {
+            let mut got = Vec::new();
+            let end = loop {
+                match sub.recv() {
+                    Ok(v) => {
+                        got.push(v);
+                        std::thread::sleep(std::time::Duration::from_millis(2));
+                    }
+                    Err(end) => break end,
+                }
+            };
+            (got, end)
+        });
+        for v in 0..30 {
+            fanout.publish(v).unwrap();
+        }
+        fanout.drain(std::time::Duration::from_secs(10));
+        let (got, end) = reader.join().unwrap();
+        assert_eq!(got, (0..30).collect::<Vec<_>>(), "nothing queued was lost");
+        assert_eq!(end, AbortReason::ProducerGone { what: "drain" });
+    }
+
+    /// A subscriber that never reads cannot hold a drain past its grace.
+    #[test]
+    fn drain_gives_up_on_a_stuck_subscriber_after_the_grace() {
+        let (done_tx, done_rx) = crossbeam_channel::bounded(1);
+        std::thread::spawn(move || {
+            let (fanout, registry) =
+                broadcast::<u32>("stuck", config(8, 4, 1), OverflowPolicy::Block);
+            let _stuck = registry.subscribe().unwrap();
+            for v in 0..4 {
+                fanout.publish(v).unwrap();
+            }
+            let started = std::time::Instant::now();
+            fanout.drain(std::time::Duration::from_millis(200));
+            let _ = done_tx.send(started.elapsed());
+        });
+        let took = done_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("drain must return once the grace is spent");
+        assert!(took >= std::time::Duration::from_millis(150), "{took:?}");
     }
 
     #[test]

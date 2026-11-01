@@ -33,7 +33,8 @@
 //! history up to it, then continue live.
 //!
 //! The `tokio` feature adds [`Channel::produce_blocking`],
-//! [`Cancellation::from_token`] and [`Level::changed`]. The core is
+//! [`Channel::produce_async`], [`Channel::defer_async`],
+//! [`Cancellation::from_token`], [`Level::changed`] and [`Level::wait_for`]. The core is
 //! crossbeam-only.
 
 // Dev-dependencies used by feature-gated tests; keep the unused-dependency

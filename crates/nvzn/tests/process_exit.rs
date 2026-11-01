@@ -19,8 +19,7 @@
 //!
 //! Ignored because it hangs rather than fails: there is nothing to assert
 //! against until the wait itself is bounded (a `recv` with a deadline, or a
-//! liveness guard like the one [`Channel::into_stream`] already races
-//! against). Run it with `--ignored` under a timeout to check a fix.
+//! liveness guard such as `Channel::until` with a cancellation). Run it with `--ignored` under a timeout to check a fix.
 
 #![allow(unused_crate_dependencies, reason = "integration test")]
 

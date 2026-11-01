@@ -328,7 +328,7 @@ const CHURN_CAP: Duration = Duration::from_secs(120);
 /// Wait until the stalling store reports the pipeline reached the window read —
 /// or until the build ends without ever getting there.
 ///
-/// `entered` fires from inside `StallingLocalStore::stream_window_ordered`, and
+/// `entered` fires from inside `StallingLocalStore::stream_window`, and
 /// `build_snapshot` only reaches that call after its quorum wait *and* its
 /// post-quorum leadership re-check. Three earlier exits return without touching
 /// the store at all: `Error::QuorumUnreachable` on the 5 s quorum timeout,

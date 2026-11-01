@@ -51,6 +51,8 @@ impl Subscriptions {
 pub(crate) const PENDING_SUBSCRIBERS: usize = 1024;
 /// Per-subscriber stream depth.
 pub(crate) const SUBSCRIBER_CAPACITY: usize = 1024;
+/// How long a stopping fold waits for subscribers to take their queued refs.
+const DRAIN_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// The fold's side: the fan-out producer (until stopped) and the live-view
 /// cancellation.
@@ -92,11 +94,21 @@ impl Subscribers {
     }
 
     /// Stop the fan-out: subscriber streams end `ProducerGone`. Dropping
-    /// `Subscribers` stops it the same way.
+    /// `Subscribers` stops it at once, discarding what is queued.
+    ///
+    /// A stop that is not a cancel first delivers every ref already published
+    /// (they are committed; a subscriber is owed them), for at most
+    /// [`DRAIN_GRACE`] so a subscriber that never reads cannot hold the fold's
+    /// exit. A cancel stops at once.
     pub(super) fn cancel_if(&mut self, recorded: Option<StopReason>) {
+        let Some(fanout) = self.fanout.take() else {
+            return;
+        };
         if recorded == Some(StopReason::Cancelled) {
             self.cancel.cancel();
+            drop(fanout);
+        } else {
+            fanout.drain(DRAIN_GRACE);
         }
-        drop(self.fanout.take());
     }
 }

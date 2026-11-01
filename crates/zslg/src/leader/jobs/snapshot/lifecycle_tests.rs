@@ -566,7 +566,7 @@ async fn fenced_write_rejected_on_stale_generation() {
 /// leader during a leadership flap). The generation fence rejects it and the
 /// concurrent manifest entry + watermark survive.
 ///
-/// NOTE: Ignored post-Channel refactoring. The old async `stream_window_ordered`
+/// NOTE: Ignored post-Channel refactoring. The old async `stream_window`
 /// allowed async injection (foreign manifest commit) during the window-ordered
 /// read. The sync `Channel<T>` return type runs on the caller's thread — async
 /// injection from a tokio worker panics (`block_on` from within a runtime).
