@@ -150,9 +150,13 @@ public type never lies (D26.8).
 | `covers`, `also` | on `OrderedChannel` (§9.1) |
 
 An infinite stream never reaches a `chain` argument, so the API does not offer
-it. `take_at_least(n, key: FnMut(&T) -> Option<K>)` yields at least `n` keyed
-items, then finishes the current key group and stops (D24); a `None`-key item
-(an `Err`) passes through and does not count. `OrderedChannel` carries only
+it. `take_at_least(n: NonZeroUsize, key: FnMut(&T) -> Option<K>)` with
+`K: PartialEq` yields at least `n` keyed items, then finishes the current key
+group and stops at the first item with a different key (that item is dropped,
+as in `take_while`). `n` counts keyed items, not groups, so the last group may
+push the total past `n` — that is the intent (D24). A `None`-key item (an
+`Err`) passes through and does not count. `NonZeroUsize` leaves no zero rule
+to define. `OrderedChannel` carries only
 order-preserving operations (`until`, `covers`, `also`, `stitch`); anything
 else goes through `into_channel()`.
 
@@ -245,8 +249,16 @@ The core is synchronous (a mutex plus the private `Wakes`); only
 `changed().await` is behind the `tokio` feature. Replaces `StableLog.watermark`
 + `watermark_wakes` and the test double's pair: `StableLogSnapshot` exposes
 `watermark() -> Level<Option<Hlc>>` instead of `watch_watermark` and
-`watermark_moves`. Readers: `WatermarkGate`, unstable seam, `purge.rs`,
-`quorum.rs`.
+`watermark_moves`. `Level` (the reader) is `Clone`; the setter is single-owner.
+Readers: `WatermarkGate` (`get`), unstable seam (`changes`), `purge.rs` and
+`quorum.rs` (`watch.changed().await` → `level.changed().await`,
+`*watch.borrow()` → `level.get()`).
+
+Scope: `Level` replaces only the watermark's `watch` + `Wakes` pair this round.
+Other value-plus-notification sites that use tokio `watch` alone —
+`LocalStoreView::subscribe_integrated`, nvzn live changed/retired counters,
+the dispatcher watermark, the replica effective cutoff — stay as they are; they
+are candidates for a later round, not residue.
 
 ## 7. Seam
 
@@ -440,6 +452,7 @@ stable_log.range(after, until)                               // (after, until), 
     })                                                       // → Contiguous
     .covers(..until, "historical replay")                    // trailing gap now aborts
     .also::<NonDecreasing<Hlc>>(None, "historical replay HLC")
+    .into_channel()                                          // Seam::range returns a Channel
 ```
 
 One lazy expression on the consumer's thread: no task, no second channel, no
@@ -467,9 +480,23 @@ local_store.stream_window(lower, cutoff)                    // plain scan (lower
     .into_channel()
     .take_at_least(cap, |r| r.as_ref().ok().map(|d| d.data_id.hlc()))
     .map(index_from(next_index_start))                       // FnMut counter
-// write_snapshot(..) -> (count, first, last)
-// watermark = if count < cap { cutoff } else { last.hlc }
+// write_snapshot(..) -> Result<SnapshotWrite, Error>
+// watermark = if w.count < cap { cutoff } else { w.last.hlc }
 ```
+
+```rust
+pub struct SnapshotWrite {
+    pub count: usize,
+    pub first: Option<EntryMeta>,      // { index, hlc }; None for an empty write
+    pub last: Option<EntryMeta>,
+    pub stored_bytes: u64,             // metrics, as today's (count, stored, uncompressed)
+    pub uncompressed_bytes: u64,
+}
+```
+
+A named struct, not a tuple: the writer already returns stored and
+uncompressed sizes for metrics, and `first`/`last` are the snapshot's
+metadata.
 
 `WindowItem`, the `terminal` mutex, the `end_hlc` and `index` atomics, and the
 scan's `finishing`/`capped` state go. The empty-window path is unchanged (no
@@ -589,7 +616,8 @@ observers, and the fold's correctness does not depend on them.
   `also`: secondary violation aborts with its label; type unchanged.
 - `take_at_least`: below cap, exact cap, group finished past cap, `Err` items.
 - Producers: a finite body must return `Closed`; a panic aborts.
-- `compile_fail`: `for x in channel`.
+- `compile_fail`: `for x in channel` on a `Channel` (a `ReadyBatch` stays an
+  iterator).
 - `Segment`: open order, `chain` vs `merge`, `filter_above*`.
 - `Resumable`/`resync`: resume only on `ProducerGone`; `Cancelled` and
   `OrderViolation` end; `after` passed exactly; decline ends with previous

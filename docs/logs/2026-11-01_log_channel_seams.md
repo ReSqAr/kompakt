@@ -486,3 +486,18 @@ observers); `read_snapshot` does the GET in its async body and decodes through
 `produce_blocking`; `Seam::cut` being callable alone is an accepted trade-off;
 `.ordered` exists only on `Channel` (an `OrderedChannel` goes through
 `into_channel()`).
+
+### D27. Third review: detail fixes
+
+- `HistoricalReplay` ends with `.into_channel()` (`Seam::range` returns a
+  `Channel`).
+- `write_snapshot` returns `SnapshotWrite { count, first, last, stored_bytes,
+  uncompressed_bytes }`: a named struct keeps the metrics sizes and carries the
+  snapshot metadata D24 needs.
+- `take_at_least(n: NonZeroUsize, key)`, `K: PartialEq`; `n` counts keyed items,
+  so the last group may exceed `n`; the first item with a new key is dropped.
+- `Level` is `Clone`; `purge.rs`/`quorum.rs` move from `watch` to
+  `Level::changed().await`/`get()`. `Level` is scoped to the watermark this
+  round; other `watch`-only values are later candidates.
+- The audit confirms D22/D24/D25's site lists; the `compile_fail` test targets
+  `Channel`, not `ReadyBatch`.
