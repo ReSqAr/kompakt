@@ -394,3 +394,25 @@ Channel::produce_async_infinite(cap, what, |feed: Feed<T, Infinite>| async move 
 `ProducerGone`. `Feed::send_timeout` is exposed so `CONSUMER_STALL_TIMEOUT`
 (domain policy: a wedged consumer must release the socket) stays in zslg; only
 the wiring moves. `Feed` therefore carries the kind, like `Channel`.
+
+### D23. `Level<T>` replaces the `watch` + `Wakes` pair (extra pick-up B)
+
+The stable watermark is one value with two notification paths that every
+writer must move together, value first (three sites). One crate type owns that
+order:
+
+```rust
+let (setter, level) = Level::new(initial);
+setter.set(v);                             // value, then wake
+level.get() -> T;
+level.changes() -> Channel<(), Infinite>;  // blocking / selectable
+level.changed().await;                     // async, tokio feature
+```
+
+`Wakes` stops being public. Readers: `WatermarkGate`, the unstable seam,
+`purge.rs`, `quorum.rs`. Slice 1.
+
+### Interview closed
+
+R6 (missing sections) and R7 (order) need no decision: D17 fixes the order, and
+the design doc is rewritten against D1–D4, D8, D9, D11–D23.
