@@ -534,3 +534,20 @@ A full read of the design for consistency; refinements of earlier decisions:
   `{ count, last, stored_bytes, uncompressed_bytes }` (refines D27).
 - Wording: `defer_async`'s explicit handle in §3; `also` is defined for any
   policy; `Level` is described as a mutex + `Wakes` core in §11.
+
+### D31. D29's dead surface and dependencies go with it
+
+Removing `into_stream` (and `IntoIterator`, D25) strands code; all of it is
+deleted in slice 1:
+
+- crate `channel.rs`: `into_stream`, `STREAM_BRIDGE_CAP`, `drain_into` (only
+  its own test calls it), `ChannelIter`, `IntoIterator`, their tests;
+  `ordered.rs`: `into_stream`; `lib.rs`: the `ChannelIter` export, the
+  `into_stream` docs and `use futures as _`.
+- crate `Cargo.toml`: `futures` (optional and dev) and `tokio-stream`; the
+  `tokio` feature becomes `["dep:tokio", "dep:tokio-util"]`.
+- zslg: `examples/write_tracker` migrates to `spawn_blocking` + `recv`; then
+  the `tokio-stream` dependency and `lib.rs`'s `use tokio_stream as _` go.
+- workspace `Cargo.toml`: `tokio-stream` once no crate uses it.
+
+`Guarded` stays: `until` uses it.

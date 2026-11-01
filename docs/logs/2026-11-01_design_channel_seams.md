@@ -1,6 +1,6 @@
 # Channel seams — design
 
-Process: IAIC. Decision log: `2026-11-01_log_channel_seams.md` (D1–D30).
+Process: IAIC. Decision log: `2026-11-01_log_channel_seams.md` (D1–D31).
 Internal model: `2026-11-01_internal_channel_seams.md`. Branch
 `channel-extraction`. The last polish round of the extraction (D17).
 
@@ -125,7 +125,12 @@ subscription in production and finite vectors in tests) is generic over
 K::End>`; `try_recv -> Option<T>` is the non-blocking poll and `end_reason`
 remains for a stream already known to have stopped. There is no async
 `Stream` bridge (D29): an async caller drains with `recv` on
-`spawn_blocking`. `OrderedChannel<T, P, K>` and `Feed<T, K>` carry
+`spawn_blocking`. Its dead surface goes with it (D31): `into_stream` on
+`Channel` and `OrderedChannel`, `STREAM_BRIDGE_CAP`, `drain_into`,
+`ChannelIter` and its export, the `futures` and `tokio-stream` dependencies
+(the `tokio` feature becomes `["dep:tokio", "dep:tokio-util"]`), and
+`tokio-stream` in zslg and the workspace once `write_tracker` is migrated.
+`Guarded` stays: `until` uses it. `OrderedChannel<T, P, K>` and `Feed<T, K>` carry
 the kind too. `Channel` has no `IntoIterator` (D25).
 
 **Internal contract.** `Source` still reports `End`; an infinite wrapper maps
@@ -637,7 +642,7 @@ observers, and the fold's correctness does not depend on them.
 - `compile_fail`: `for x in channel` on a `Channel` (a `ReadyBatch` stays an
   iterator).
 - Test modules and `examples/write_tracker` move from `into_stream` to
-  `spawn_blocking` + `recv`.
+  `spawn_blocking` + `recv`; the `into_stream` and `drain_into` tests go.
 - `Segment`: open order, `chain` vs `merge`, `filter_above*`.
 - `Resumable`/`resync`: resume only on `ProducerGone`; `Cancelled` and
   `OrderViolation` end; `after` passed exactly; decline ends with previous
@@ -662,7 +667,8 @@ observers, and the fold's correctness does not depend on them.
 Each slice is green (tests, clippy, fmt) before the next.
 
 1. **Mechanical.** Split-HLC test fix; `FnMut` combinators; remove
-   `IntoIterator` and `into_stream`; `ready_batch` returns the verdict;
+   `IntoIterator` and `into_stream` with their dead surface and dependencies
+   (D31); `ready_batch` returns the verdict;
    `take_at_least`; `produce_blocking` with `Closed`, `produce_async_infinite`,
    `Feed::send_timeout` (pre-kind: plain `Channel`); migrate producer sites and
    audit remaining `from`/`from_infinite`; snapshot window via
