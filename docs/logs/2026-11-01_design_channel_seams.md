@@ -1,6 +1,6 @@
 # Channel seams — design
 
-Process: IAIC. Decision log: `2026-11-01_log_channel_seams.md` (D1–D33).
+Process: IAIC. Decision log: `2026-11-01_log_channel_seams.md` (D1–D34).
 Internal model: `2026-11-01_internal_channel_seams.md`. Branch
 `channel-extraction`. The last polish round of the extraction (D17).
 
