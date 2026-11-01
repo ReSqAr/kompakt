@@ -220,7 +220,7 @@ impl WriteTracker {
                 // The stream is gapless by contract, lag included: it
                 // re-enters historical replay from its own cursor rather than
                 // surfacing a `Lagged`. Nothing to resync here.
-                let mut stream = drain(r.subscribe_stable_log(LogIndex::ZERO).into_channel());
+                let mut stream = drain(r.subscribe_stable_log(None).into_channel());
                 loop {
                     tokio::select! {
                         item = stream.recv() => {
@@ -232,7 +232,7 @@ impl WriteTracker {
                                         "stable-log event stream failed; resubscribing"
                                     );
                                     stream = drain(
-                                        r.subscribe_stable_log(LogIndex::ZERO).into_channel(),
+                                        r.subscribe_stable_log(None).into_channel(),
                                     );
                                     continue;
                                 }
@@ -353,7 +353,7 @@ impl WriteTracker {
         let mut found: HashSet<DataId> = HashSet::new();
         let mut scan = drain(
             reader
-                .subscribe_stable_log(floor)
+                .subscribe_stable_log(floor.before())
                 .into_channel()
                 .filter_map(|item| match item {
                     Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),

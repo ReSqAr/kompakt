@@ -86,7 +86,7 @@ pub fn data_id(hlc_ms: u64, seed: u64) -> DataId {
 struct Shared {
     history: Vec<StableLogEvent>,
     unstable: Vec<Data>,
-    subscribed_from: Vec<LogIndex>,
+    subscribed_after: Vec<Option<LogIndex>>,
     next_index: u64,
     next_seed: u64,
 }
@@ -138,14 +138,14 @@ impl TestLog {
         })
     }
 
-    /// The `from` of every [`zslg::Reader::subscribe_stable_log`] served so
+    /// The `after` of every [`zslg::Reader::subscribe_stable_log`] served so
     /// far — what a test asserts on to show where a fold resumed.
     #[must_use]
-    pub fn subscribed_from(&self) -> Vec<LogIndex> {
+    pub fn subscribed_after(&self) -> Vec<Option<LogIndex>> {
         self.shared
             .lock()
             .expect("test mutex")
-            .subscribed_from
+            .subscribed_after
             .clone()
     }
 
@@ -278,14 +278,14 @@ impl zslg::Reader for TestReader {
         Hlc::from_bytes(next.saturating_sub(1).to_be_bytes())
     }
 
-    fn subscribe_stable_log(&self, from: LogIndex) -> zslg::StableStream {
+    fn subscribe_stable_log(&self, after: Option<LogIndex>) -> zslg::StableStream {
         let (tx, rx) = crossbeam_channel::bounded(4096);
 
         let mut shared = self.shared.lock().expect("test mutex");
-        shared.subscribed_from.push(from);
+        shared.subscribed_after.push(after);
         for ev in &shared.history {
             if let StableLogEvent::Appended { index, .. } = ev
-                && *index < from
+                && Some(*index) <= after
             {
                 continue;
             }
@@ -298,7 +298,7 @@ impl zslg::Reader for TestReader {
             senders.lock().expect("test mutex").push(tx);
         }
 
-        zslg::StableStream::new(Channel::from_infinite(rx, "test-log"), from.before())
+        zslg::StableStream::new(Channel::from_infinite(rx, "test-log"), after)
     }
 
     fn unstable_tail(&self) -> Channel<Result<Data, zslg::Error>, Finite> {

@@ -38,7 +38,7 @@ use crate::{
     ArcStore, Error, EventSet, Projection, ProjectionTypeId, Snapshot, Tenant, TenantId, Watermark,
     WithWireFormat, WriteTransactionImpl,
 };
-use crossbeam_combinators::{AbortReason, Channel, Finite, Infinite, Seam, Segment};
+use crossbeam_combinators::{AbortReason, Channel, Finite, Infinite, Key, Seam, Segment};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
@@ -488,10 +488,20 @@ enum FoldItem {
     ScanFailed(zslg::Error),
 }
 
+/// A live entry sits at its HLC; scan items and markers have no position here.
+impl Key<FoldItem> for Hlc {
+    fn key(item: &FoldItem) -> Option<Self> {
+        match item {
+            FoldItem::Live(data) => Some(data.data_id.hlc()),
+            _ => None,
+        }
+    }
+}
+
 /// The live subscription and the stable watermark it is anchored to.
 struct LiveSeam {
     reader: Arc<dyn zslg::Reader>,
-    from: LogIndex,
+    after: Option<LogIndex>,
     cancelled: crossbeam_combinators::Cancellation,
 }
 
@@ -521,10 +531,7 @@ impl Seam for LiveSeam {
     ) -> Channel<FoldItem, Infinite> {
         // Drop live entries the scan already covered. `Held` still dedups by
         // DataId above the cut; the seam does not rely on that for the overlap.
-        live.filter_map(move |item| match item {
-            FoldItem::Live(data) if cut.is_some_and(|w| data.data_id.hlc() <= w) => None,
-            other => Some(other),
-        })
+        live.filter_above::<Hlc>(cut)
     }
 
     /// The stable log up to the cut, then `ReplayDone`. The subscription is
@@ -535,7 +542,7 @@ impl Seam for LiveSeam {
             return Channel::empty();
         };
         self.reader
-            .subscribe_stable_log(self.from)
+            .subscribe_stable_log(self.after)
             .into_channel()
             .until(&self.cancelled)
             .take_until(move |item| matches!(item, Ok(ev) if at_or_after_cut(until, ev)))
@@ -664,10 +671,10 @@ pub(crate) fn begin<Ev: WithWireFormat>(
 ) -> Result<(), Error> {
     let inner = &live.inner;
     let f = inner.store.read()?.watermark()?;
-    let from = LogIndex::next_after(f.index);
+    let after = f.index;
     let seam = LiveSeam {
         reader: Arc::clone(reader),
-        from,
+        after,
         cancelled: cancelled.clone(),
     };
     // The seam opens the live tail first and reads the stable watermark
@@ -1463,10 +1470,10 @@ mod tests {
             self.watermark
         }
 
-        fn subscribe_stable_log(&self, from: LogIndex) -> zslg::StableStream {
+        fn subscribe_stable_log(&self, after: Option<LogIndex>) -> zslg::StableStream {
             let (tx, rx) = crossbeam_channel::bounded(1);
             *self.stable.lock().expect("test mutex") = Some(tx);
-            zslg::StableStream::new(Channel::from_infinite(rx, "stalled stable"), from.before())
+            zslg::StableStream::new(Channel::from_infinite(rx, "stalled stable"), after)
         }
 
         fn unstable_tail(

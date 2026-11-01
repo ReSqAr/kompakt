@@ -16,8 +16,8 @@ async fn dispatcher_resumes_from_the_stored_watermark() {
 
     let (_writer, _syncer, handle) = run(&store, &log, &["user"]).await;
     assert_eq!(
-        log.subscribed_from().last().copied(),
-        Some(LogIndex::next_after(Some(stored))),
+        log.subscribed_after().last().copied(),
+        Some(Some(stored)),
         "an unchanged config resumes above the stored watermark"
     );
     assert!(
@@ -49,8 +49,8 @@ async fn dispatcher_resets_and_refolds_when_the_config_changes() {
 
     let (_writer, _syncer, handle) = run(&store, &log, &["user", "todo"]).await;
     assert_eq!(
-        log.subscribed_from().last().copied(),
-        Some(LogIndex::ZERO),
+        log.subscribed_after().last().copied(),
+        Some(None),
         "a changed config refolds from the start"
     );
 

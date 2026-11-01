@@ -23,7 +23,6 @@ use crossbeam_combinators::Cancellation;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
-use zslg::LogIndex;
 
 impl Dispatcher {
     /// Start the fold, and return once it has replayed the stable log this
@@ -41,7 +40,7 @@ impl Dispatcher {
         let actual_config_hash =
             compute_config_hash(&self.registered_projection_types, &self.registered_indices)?;
 
-        let from = if let Some(stored_config_hash) = self.store.config_hash()? {
+        let after = if let Some(stored_config_hash) = self.store.config_hash()? {
             if stored_config_hash != actual_config_hash {
                 info!(
                     projection_types = self.registered_projection_types.len(),
@@ -51,16 +50,16 @@ impl Dispatcher {
                 metrics::store_reset();
                 self.store.reset()?;
                 self.store.set_config_hash(&actual_config_hash)?;
-                LogIndex::ZERO
+                None
             } else {
-                let from = LogIndex::next_after(self.log_index_watermark()?);
-                info!(log_index = ?from, "resuming from the stored watermark");
-                from
+                let after = self.log_index_watermark()?;
+                info!(after = ?after, "resuming after the stored watermark");
+                after
             }
         } else {
             info!("no stored projection config; folding the log from the start");
             self.store.set_config_hash(&actual_config_hash)?;
-            LogIndex::ZERO
+            None
         };
 
         let flush_interval = self.flush_interval;
@@ -70,14 +69,14 @@ impl Dispatcher {
         let mut folded = self.rx.clone();
         let gate_state = self.fold_state.clone();
         let replay_target = reader.stable_watermark();
-        info!(log_index = ?from, "subscribing to the stable log");
+        info!(after = ?after, "subscribing to the stable log");
         let store = self.store.clone();
         let cancel = fold_state.cancellation();
         // Bound to `cancel` so asking the fold to stop wakes it even while it
         // is parked on a quiet log; zslg binds its own shutdown the same way,
         // and either reaches the fold as `AbortReason::Cancelled`.
         let tail = reader
-            .subscribe_stable_log(from)
+            .subscribe_stable_log(after)
             .into_channel()
             .until(&Cancellation::from_token(&cancel));
         let inputs = self.fold_inputs();

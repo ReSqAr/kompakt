@@ -140,3 +140,48 @@ post-implementation doc. Not a design doc; the design is
 - **Not done in slice 3: the network bridges** (`subscribe_stream.rs`,
   `write_stream.rs`) still wire by hand rather than via
   `produce_async::<_, Infinite>`; see the open items in the post doc.
+
+## Slice 4
+
+- **`Resumable` is a unit-struct namespace, not a value.** `Resumable::new`
+  returns an `OrderedChannel<_, P, Infinite>`, so the type carries no state; it
+  exists to give the constructor the design's spelling
+  (`#[allow(clippy::new_ret_no_self)]`). A free function would read the same.
+- **The cursor lives in the resume source, the order check outside it.**
+  `Resumable` is `Channel::resume(..).ordered::<P>(after, what)`: the source
+  tracks the last key it emitted (`track: fn(&T, &mut C)`, a no-op for
+  `resync`'s `C = ()`), and the policy sees the stream across cycles, so a
+  factory that restarts at the wrong index is an `OrderViolation`, not a
+  silent repeat. No dedup anywhere (D3).
+- **The stable seam's `above` needs `after` as well as the frontier.** The old
+  outer `AtomicU64` filter also dropped live entries below the caller's start
+  (`from` past the frontier: live entries up to `from` would otherwise break
+  `Contiguous`). `StableSeam::above` is now
+  `filter_above::<LogIndex>(frontier.max(after))`, which carries that duty.
+- **Two new `Key` impls for the one-line `above`s:** `Hlc` for
+  `Result<UnstableStep, Error>` (zslg) and `Hlc` for `FoldItem` (nvzn). Only
+  live entries have a key; markers pass. Orphan-rule fine (local item type).
+- **`Reader::subscribe_stable_log(after: Option<LogIndex>)`** (D26.3) landed
+  with the inclusive→exclusive conversion at every site. Production callers got
+  *simpler*: the supervisor held `watermark: Option<LogIndex>` and used to
+  convert it to `next_after(..)`/`ZERO` for the call; it now passes the
+  watermark itself. nvzn's live range holds `after = f.index` likewise.
+  Tests: `LogIndex::ZERO`/`LogIndex(0)` → `None`, `LogIndex(1)` →
+  `Some(LogIndex(0))`; `write_tracker` passes `floor.before()`.
+- **`TestLog::subscribed_from()` became `subscribed_after()`** (a public
+  `testing` API, `Vec<Option<LogIndex>>`). A rename that breaks downstream
+  test code for the same reason as the trait: the number meant "first wanted",
+  now means "last seen".
+- **`StableStream::new(.., after)` call sites got simpler too:** the test
+  doubles pass `after` straight through; the `from.before()` workaround from
+  slice 2 is gone.
+- **Deleted:** `Tail`, `Ranged`, `blend_chain`, `blend.rs`, `Channel::
+  resume_on_abort`, `stable_stream`, `StableSeam`'s `AtomicU64` cursor and
+  outer filter, `resumable()`. The channel unit test for `resume_on_abort`'s
+  verdict hand-off went with it (its cases live in `resume.rs`: reopen after
+  `ProducerGone`, `Opening` passed through, first-open decline, cancel not
+  resumed, wrong restart caught); the model proptest now exercises `resync`.
+- **`Opening` instead of the previous `End`.** The factory used to receive the
+  whole previous `Option<End>`; it now sees `First` or
+  `AfterProducerGone { what }`, the only two cases the D18 rule lets through.
+  The warn logs print `what` instead of `?previous`.

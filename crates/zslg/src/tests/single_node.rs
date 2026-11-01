@@ -27,7 +27,6 @@ use crate::Error;
 use crate::ReplicaNode;
 use crate::hlc::Hlc;
 use crate::ids::DataId;
-use crate::ids::LogIndex;
 use crate::ids::NodeId;
 use crate::ids::PeerAddr;
 use crate::leader::CompactionTier;
@@ -232,7 +231,7 @@ async fn snapshot_creation_tick_promotes_into_stable_log() {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(25);
     let promoted = loop {
         let mut stream = reader
-            .subscribe_stable_log(LogIndex::ZERO)
+            .subscribe_stable_log(None)
             .into_channel()
             .filter_map(|item| match item {
                 Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),

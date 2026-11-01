@@ -100,12 +100,3 @@ pub(crate) fn local_store_stream(
 ) -> LocalStoreStream {
     OrderedChannel::named(ch, None, what)
 }
-
-/// Wrap a stable-log stream with the gapless policy, from its inclusive start
-/// (the subscription takes `from` until it takes `after`).
-pub(crate) fn stable_stream(
-    ch: Channel<Result<StableLogEvent, Error>, Infinite>,
-    from: LogIndex,
-) -> StableStream {
-    OrderedChannel::named(ch, from.before(), "stable log stream")
-}

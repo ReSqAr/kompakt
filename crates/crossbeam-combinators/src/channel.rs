@@ -2,7 +2,7 @@
 //!
 //! A `Channel<T>` owns a private tree of sources: a leaf (one crossbeam
 //! receiver), a concurrent merge, a sequential chain, a guard raced against a
-//! liveness signal or [`Cancellation`], a lazy `resume_on_abort`, a bounded
+//! liveness signal or [`Cancellation`], a lazy resume loop, a bounded
 //! `take_while`, and pull-time `map`/`filter_map`. The tree is invisible through
 //! one blocking interface.
 //!
@@ -25,7 +25,7 @@
 //! [`AbortReason::ProducerGone`]; a fired cancellation is
 //! [`AbortReason::Cancelled`]; a dropped unfired handle is
 //! [`AbortReason::CancelHandleDropped`]. The library never decides that an
-//! abort is recoverable — [`Channel::resume_on_abort`] hands it to the caller.
+//! abort is recoverable — [`crate::Resumable`] reopens only after `ProducerGone`.
 //!
 //! A `take_while` bound is a clean end of the derived stream. If the source
 //! ends before the bound, that is also `Complete`; bound-vs-short-read is a
@@ -43,21 +43,23 @@
 //! [`Channel::merge`] selects across two sources and drops a dead branch as
 //! soon as it dies, releasing whatever its closures captured. [`Channel::chain`]
 //! runs phases in order and condemns the chain on an abort.
-//! [`Channel::resume_on_abort`] rebuilds a stream after an abort, handing
-//! that abort to the caller. [`Channel::take_while`] ends at a consumer bound;
+//! [`crate::Resumable`] and [`crate::resync`] reopen a stream after its
+//! producer went away. [`Channel::take_while`] ends at a consumer bound;
 //! [`Channel::filter_map`], [`Channel::map`] and [`Channel::until`]
 //! transform and bound a stream at pull time.
 //!
 //! The write half lives next door: [`crate::Feed`] for one producer and
 //! [`crate::broadcast`]/[`crate::keyed`]/[`crate::Wakes`] for many. The seam
-//! ([`crate::Tail`], [`crate::Ranged`], [`crate::blend_chain`]) composes a live
-//! tail with a bounded history.
+//! ([`crate::Seam`], [`crate::Segment`]) composes a live tail with a bounded
+//! history.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crossbeam_channel::{Receiver, Select, TryRecvError};
+
+use crate::resume::Opening;
 
 use std::marker::PhantomData;
 
@@ -985,104 +987,105 @@ impl Cancellation {
     }
 }
 
-// ── ResumeOnAbort<S, T> ───────────────────────────────────────────────
+// ── Resume<T, C> ──────────────────────────────────────────────────────
 
-/// [`ChainState`]'s resumable sibling: after an **aborted** segment, `next` may
-/// produce the following one from the running state.
+/// The one resume loop behind [`crate::Resumable`] and [`crate::resync`]: a
+/// stream of segments, each opened by `make` from the cursor.
 ///
-/// `Complete` is final: a cleanly ended segment is not resumed. For an
-/// [`End::Aborted`], the source **hands the verdict to `next`** and lets the
-/// caller decide: resume, or decline by returning `None`. A stable tail whose
-/// fan-out hangs up on an overrun subscriber uses that verdict as the cue to
-/// replay from its durable cursor and resubscribe.
+/// The rule (D18): a new segment opens only after `Aborted(ProducerGone)` —
+/// the fan-out hang-up, or a dead producer that a fresh cycle repairs. Every
+/// other end (`Cancelled`, `OrderViolation`, ...) ends the stream unchanged,
+/// so a corrupt log cannot spin the loop and `until` is safe on either side.
+/// `make` may decline with `None`; a decline after a segment ends the stream
+/// with that segment's reason, a decline of the *first* open ends it
+/// `Aborted(ProducerGone { what })`, never `Complete`.
 ///
-/// The library does not decide that a fault is recoverable. A panic still
-/// closes the producer as [`End::Aborted`], and only the closure — which knows
-/// the cursor and the durable source — can decide whether to resume. A
-/// `Cancellation` arrives as an abort reason and can be declined the same way.
+/// The cursor `C` is updated from every item the segment emits (`track`), so
+/// `make` always sees the last emitted position. [`crate::resync`] has none
+/// (`C = ()`).
 ///
 /// A segment is materialised eagerly — at construction, and again the instant
 /// its predecessor dies — never lazily inside `register`, and never while a
 /// registration is outstanding. An enclosing [`MergeState`] splits the ordinal
 /// space by `leaf_count()` *at poll time*, against a registration built before
-/// `Select::ready` blocked, so the count has to hold across that whole window,
-/// not merely during registration. A segment swapped in mid-window would
-/// misalign every index to its right. This is the one source whose leaf count
-/// is meant to change, which is why the rule is written down here.
-struct ResumeOnAbort<S, T> {
-    state: S,
+/// `Select::ready` blocked, so the count has to hold across that whole window.
+/// A segment swapped in mid-window would misalign every index to its right.
+/// This is the one source whose leaf count is meant to change.
+struct Resume<T, C> {
+    what: &'static str,
+    cursor: C,
+    track: fn(&T, &mut C),
     #[allow(clippy::type_complexity, reason = "one boxed closure, named inline")]
-    next: Box<dyn FnMut(&mut S, Option<End>) -> Option<Channel<T, Infinite>> + Send>,
+    make: Box<dyn FnMut(&C, Opening) -> Option<Channel<T, Infinite>> + Send>,
     current: Option<Box<dyn Source<T>>>,
     /// The end of the segment before `current`, reported once by `end_reason`
-    /// when `next` finally declines.
+    /// when the stream stops.
     last_end: Option<End>,
 }
 
-impl<S: Send + 'static, T: Send + 'static> ResumeOnAbort<S, T> {
-    /// Pull the first segment. The closure sees `None`.
-    fn start(&mut self) {
-        self.current = (self.next)(&mut self.state, None).map(|ch| ch.source);
+impl<T: Send + 'static, C: Send + 'static> Resume<T, C> {
+    fn open(&mut self, opening: Opening) {
+        self.current = (self.make)(&self.cursor, opening).map(|ch| ch.source);
     }
 
-    /// Pull a segment after an abort. `Complete` never reaches this method.
-    fn resume(&mut self, end: End) {
+    /// The current segment is dead with `end`: open the next one if the rule
+    /// allows it.
+    fn ended(&mut self, end: End) {
         self.last_end = Some(end);
-        self.current = (self.next)(&mut self.state, Some(end)).map(|ch| ch.source);
+        self.current = None;
+        if let End::Aborted {
+            reason: AbortReason::ProducerGone { what },
+        } = end
+        {
+            self.open(Opening::AfterProducerGone { what });
+        }
     }
 }
 
-impl<S: Send + 'static, T: Send + 'static> Source<T> for ResumeOnAbort<S, T> {
+impl<T: Send + 'static, C: Send + 'static> Source<T> for Resume<T, C> {
     fn register<'a>(&'a mut self, sel: &mut Select<'a>) -> usize {
         self.current.as_mut().map_or(0, |src| src.register(sel))
     }
     fn poll(&mut self, ordinal: usize) -> Poll<T> {
-        match &mut self.current {
-            Some(src) => {
-                debug_assert!(
-                    ordinal < src.leaf_count(),
-                    "ordinal {ordinal} out of range for resume-on-abort segment with {} leaves",
-                    src.leaf_count()
-                );
-                match src.poll(ordinal) {
-                    Poll::Dead => {
-                        let end = src.end_reason();
-                        self.last_end = Some(end);
-                        self.current = None;
-                        if matches!(end, End::Complete) {
-                            return Poll::Dead;
-                        }
-                        self.resume(end);
-                        // Retry rather than Dead: the new segment (if any) has
-                        // not been registered yet, and an enclosing Chain/Merge
-                        // must not pop this source while it can still produce.
-                        match self.current {
-                            Some(_) => Poll::Filtered,
-                            None => Poll::Dead,
-                        }
-                    }
-                    other => other,
+        let Some(src) = &mut self.current else {
+            return Poll::Dead;
+        };
+        debug_assert!(
+            ordinal < src.leaf_count(),
+            "ordinal {ordinal} out of range for resume segment with {} leaves",
+            src.leaf_count()
+        );
+        match src.poll(ordinal) {
+            Poll::Got(v) => {
+                (self.track)(&v, &mut self.cursor);
+                Poll::Got(v)
+            }
+            Poll::Dead => {
+                let end = src.end_reason();
+                self.ended(end);
+                // Retry rather than Dead: the new segment (if any) has not
+                // been registered yet, and an enclosing Chain/Merge must not
+                // pop this source while it can still produce.
+                match self.current {
+                    Some(_) => Poll::Filtered,
+                    None => Poll::Dead,
                 }
             }
-            None => Poll::Dead,
+            other => other,
         }
     }
     fn drain_first(&mut self) -> Option<T> {
         loop {
             let src = self.current.as_mut()?;
             if let Some(v) = src.drain_first() {
+                (self.track)(&v, &mut self.cursor);
                 return Some(v);
             }
             if src.leaf_count() > 0 {
                 return None; // alive, just empty
             }
             let end = src.end_reason();
-            self.last_end = Some(end);
-            self.current = None;
-            if matches!(end, End::Complete) {
-                return None;
-            }
-            self.resume(end);
+            self.ended(end);
         }
     }
     fn leaf_count(&self) -> usize {
@@ -1091,13 +1094,11 @@ impl<S: Send + 'static, T: Send + 'static> Source<T> for ResumeOnAbort<S, T> {
     fn end_reason(&mut self) -> End {
         match &mut self.current {
             Some(src) => src.end_reason(),
-            // `next` declined: the last segment's own verdict is the stream's.
-            // Declining the first open is still an abort: the stream is
-            // infinite, and a clean end would claim a finish it never had.
+            // The last segment's own verdict is the stream's; with none, the
+            // first open was declined, which is still an abort (the stream is
+            // infinite, a clean end would claim a finish it never had).
             None => self.last_end.unwrap_or(End::Aborted {
-                reason: AbortReason::ProducerGone {
-                    what: "resume_on_abort",
-                },
+                reason: AbortReason::ProducerGone { what: self.what },
             }),
         }
     }
@@ -1626,29 +1627,24 @@ impl<T: Send + 'static> Channel<T, Infinite> {
         Self::from_infinite(rx, what)
     }
 
-    /// Rebuild the stream after an **abort**: `next` is called at start with
-    /// `None`, and again with the aborted segment's [`End`] after an
-    /// [`End::Aborted`] segment. It may return the next segment, or `None` to
-    /// finish. A [`End::Complete`] segment ends the stream; it is not resumed.
-    ///
-    /// This is [`chain`](Self::chain)'s resumable sibling. A chain condemns the
-    /// rest on an abort; here the caller chooses, because for a stable tail a
-    /// hung-up subscription is the signal to replay from a cursor and
-    /// resubscribe. The library makes no policy: a panic is still
-    /// [`End::Aborted`], and `next` decides whether that fault is recoverable.
-    pub fn resume_on_abort<S, F>(state: S, next: F) -> Channel<T, Infinite>
-    where
-        S: Send + 'static,
-        F: FnMut(&mut S, Option<End>) -> Option<Channel<T, Infinite>> + Send + 'static,
-    {
-        let mut source = ResumeOnAbort {
-            state,
-            next: Box::new(next),
+    /// The resume loop (see [`Resume`]); the public faces are
+    /// [`crate::Resumable`] and [`crate::resync`].
+    pub(crate) fn resume<C: Send + 'static>(
+        what: &'static str,
+        cursor: C,
+        track: fn(&T, &mut C),
+        make: impl FnMut(&C, Opening) -> Option<Channel<T, Infinite>> + Send + 'static,
+    ) -> Channel<T, Infinite> {
+        let mut source = Resume {
+            what,
+            cursor,
+            track,
+            make: Box::new(make),
             current: None,
             last_end: None,
         };
         // Eagerly, so `leaf_count()` is accurate before the first `register`.
-        source.start();
+        source.open(Opening::First);
         Channel::wrap(Box::new(source))
     }
 }
@@ -1919,21 +1915,6 @@ impl<T: Send + 'static, K: Kind> Iterator for ReadyBatch<'_, T, K> {
     }
 }
 
-/// Test support: an infinite channel holding `items`, whose producer is then
-/// gone — `Aborted(ProducerGone { what })` after the last item.
-#[cfg(test)]
-pub(crate) fn infinite_of<T: Send + 'static>(
-    items: Vec<T>,
-    what: &'static str,
-) -> Channel<T, Infinite> {
-    let (tx, rx) = crossbeam_channel::bounded(items.len().max(1));
-    for item in items {
-        let _ = tx.send(item);
-    }
-    drop(tx);
-    Channel::from_infinite(rx, what)
-}
-
 /// Test support: a finite channel holding `items` whose producer never closed
 /// — `Aborted(ProducerGone { what })` after the last item.
 #[cfg(test)]
@@ -1975,50 +1956,6 @@ mod tests {
         assert_eq!(ch.recv(), Ok(2));
         drop(tx);
         assert_eq!(ch.recv(), Err(End::Complete));
-    }
-
-    /// The load-bearing difference from `chain`, which an aborted phase
-    /// condemns: `resume_on_abort` hands the verdict to `next` and lets it
-    /// decide. A resuming consumer (a stable tail, where a hung-up
-    /// subscription IS the lag signal) continues; anything else can decline.
-    #[test]
-    fn resume_on_abort_hands_the_previous_end_to_next_and_may_continue_past_an_abort() {
-        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let s = seen.clone();
-        let mut ch = Channel::resume_on_abort(0u32, move |n, prev| {
-            s.lock().unwrap().push(prev);
-            *n = n.saturating_add(1);
-            match *n {
-                // An infinite segment whose sender drops: End::Aborted.
-                1 => {
-                    let (tx, rx) = crossbeam_channel::bounded(4);
-                    tx.send(7).unwrap();
-                    drop(tx);
-                    Some(Channel::from_infinite(rx, "seg"))
-                }
-                2 => Some(infinite_of(vec![8], "seg 2")),
-                _ => None,
-            }
-        });
-        let got: Vec<u32> = std::iter::from_fn(|| ch.recv().ok()).collect();
-        assert_eq!(
-            got,
-            vec![7, 8],
-            "an aborted segment does not end the resumable stream"
-        );
-        assert_eq!(
-            *seen.lock().unwrap(),
-            vec![
-                None,
-                Some(End::Aborted {
-                    reason: AbortReason::ProducerGone { what: "seg" }
-                }),
-                Some(End::Aborted {
-                    reason: AbortReason::ProducerGone { what: "seg 2" }
-                })
-            ],
-            "next sees no verdict first, then each segment's abort"
-        );
     }
 
     #[test]

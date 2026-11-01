@@ -33,7 +33,7 @@ use bytes::Bytes;
 use futures::StreamExt;
 
 use crate::StableLogEvent;
-use crate::ids::{DataId, LogIndex, NodeId};
+use crate::ids::{DataId, NodeId};
 use crate::meta::{RaftState, ReplicaMembership};
 use crate::tests::common::Cluster;
 
@@ -134,7 +134,7 @@ pub(crate) async fn assert_durability_chain_on(
             let seen = seen.clone();
             let want = want.clone();
             async move {
-                let mut stream = reader.subscribe_stable_log(LogIndex::ZERO).into_channel().filter_map(|item| {
+                let mut stream = reader.subscribe_stable_log(None).into_channel().filter_map(|item| {
                     match item {
                         Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
                         Ok(StableLogEvent::Watermark(_)) => None,

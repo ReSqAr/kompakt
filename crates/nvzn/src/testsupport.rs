@@ -347,8 +347,8 @@ impl zslg::Reader for FailingSyncReader {
         self.inner.hlc_now()
     }
 
-    fn subscribe_stable_log(&self, from: LogIndex) -> zslg::StableStream {
-        self.inner.subscribe_stable_log(from)
+    fn subscribe_stable_log(&self, after: Option<LogIndex>) -> zslg::StableStream {
+        self.inner.subscribe_stable_log(after)
     }
 
     fn unstable_tail(&self) -> Channel<Result<Data, zslg::Error>, crossbeam_combinators::Finite> {
@@ -452,14 +452,14 @@ impl zslg::Reader for ScriptedReader {
         self.stable_watermark().unwrap_or_else(|| hlc(0))
     }
 
-    fn subscribe_stable_log(&self, from: LogIndex) -> zslg::StableStream {
+    fn subscribe_stable_log(&self, after: Option<LogIndex>) -> zslg::StableStream {
         let rx = self
             .stable
             .lock()
             .expect("test mutex")
             .take()
             .expect("a scripted reader serves one subscription");
-        zslg::StableStream::new(Channel::from_infinite(rx, "scripted"), from.before())
+        zslg::StableStream::new(Channel::from_infinite(rx, "scripted"), after)
     }
 
     fn unstable_tail(&self) -> Channel<Result<Data, zslg::Error>, crossbeam_combinators::Finite> {

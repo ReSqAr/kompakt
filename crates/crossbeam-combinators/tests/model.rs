@@ -13,7 +13,7 @@
 //! rewrites must preserve.
 
 use crossbeam_combinators::{
-    AbortReason, Channel, End, Feed, Finite, Infinite, Ranged, Tail, blend_chain,
+    AbortReason, Channel, End, Feed, Finite, Infinite, Seam, Segment, resync,
 };
 use proptest::prelude::*;
 
@@ -185,19 +185,20 @@ proptest! {
     }
 
     #[test]
-    fn resume_on_abort_concatenates_aborted_segments(segments in prop::collection::vec(prop::collection::vec(0u64..100, 0..5), 0..6)) {
-        let mut ch = Channel::resume_on_abort(0usize, {
+    fn resync_concatenates_the_cycles(segments in prop::collection::vec(prop::collection::vec(0u64..100, 0..5), 0..6)) {
+        let mut next = 0usize;
+        let mut ch = resync("resync", {
             let segments = segments.clone();
-            move |next, _previous| {
-                let segment = segments.get(*next)?;
-                *next += 1;
-                Some(aborted(segment.clone()))
+            move |_opening| {
+                let segment = segments.get(next)?.clone();
+                next += 1;
+                Some(Cycle(segment))
             }
         });
         let got: Vec<u64> = std::iter::from_fn(|| ch.recv().ok()).collect();
         let want: Vec<u64> = segments.iter().flatten().copied().collect();
         prop_assert_eq!(got, want);
-        let what = if segments.is_empty() { "resume_on_abort" } else { "aborted" };
+        let what = if segments.is_empty() { "resync" } else { "aborted" };
         prop_assert_eq!(ch.end_reason(), AbortReason::ProducerGone { what });
     }
 
@@ -243,7 +244,7 @@ struct TestSeam {
     cut: u64,
 }
 
-impl Tail for TestSeam {
+impl Seam for TestSeam {
     type Item = u64;
     type Cut = u64;
 
@@ -258,14 +259,29 @@ impl Tail for TestSeam {
     fn above(&self, live: Channel<u64, Infinite>, cut: u64) -> Channel<u64, Infinite> {
         live.filter_map(move |v| (v > cut).then_some(v))
     }
-}
-
-impl Ranged<u64> for TestSeam {
-    type Item = u64;
 
     fn range(&self, cut: u64) -> Channel<u64, Finite> {
         assert_eq!(cut, self.cut);
         Channel::from_vec(self.history.clone())
+    }
+}
+
+/// A cycle whose history is `.0` and whose live tail hangs up at once.
+struct Cycle(Vec<u64>);
+
+impl Seam for Cycle {
+    type Item = u64;
+    type Cut = ();
+
+    fn subscribe(&self) -> Channel<u64, Infinite> {
+        aborted(Vec::new())
+    }
+    fn cut(&self) {}
+    fn above(&self, live: Channel<u64, Infinite>, (): ()) -> Channel<u64, Infinite> {
+        live
+    }
+    fn range(&self, (): ()) -> Channel<u64, Finite> {
+        Channel::from_vec(self.0.clone())
     }
 }
 
@@ -281,7 +297,7 @@ proptest! {
             history: history.clone(),
             cut,
         };
-        let mut ch = blend_chain(&seam, &seam);
+        let mut ch = Segment::open(&seam).chain();
         let got: Vec<u64> = std::iter::from_fn(|| ch.recv().ok()).collect();
         let want: Vec<u64> = history.into_iter().chain(live.into_iter().filter(|v| *v > cut)).collect();
         prop_assert_eq!(got, want);

@@ -28,7 +28,7 @@
 //! needs completeness verifies it against its own source of truth; the channel
 //! only reports the transport outcome.
 //!
-//! The seam ([`Tail`], [`Ranged`], [`blend_chain`]) is the
+//! The seam ([`Seam`], [`Segment`]) is the
 //! subscribe-then-cut pattern: open the live source, snapshot the cut, read the
 //! history up to it, then continue live.
 //!
@@ -45,16 +45,15 @@ use tokio as _;
 #[cfg(test)]
 use tokio_util as _;
 
-mod blend;
 mod channel;
 mod fanout;
 mod feed;
 mod kind;
 mod level;
 mod ordered;
+mod resume;
 mod seam;
 
-pub use blend::{Ranged, Tail, blend_chain};
 pub use channel::{AbortReason, CancelHandle, Cancellation, Channel, Closer, End, ReadyBatch};
 pub use fanout::{
     Fanout, FanoutConfig, KeyedRegistry, OverflowPolicy, Registry, RegistryError, Stopped,
@@ -66,4 +65,5 @@ pub use level::{Level, LevelGone, LevelSetter};
 pub use ordered::{
     Contiguous, Gap, Key, NonDecreasing, OrderPolicy, OrderedChannel, StrictlyIncreasing, Successor,
 };
+pub use resume::{Opening, Resumable, resync};
 pub use seam::{Seam, Segment};

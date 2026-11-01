@@ -20,7 +20,7 @@
 //! the frontier is read, so an append racing it is duplicated (filtered by
 //! index) rather than lost.
 //!
-//! That cut is not made once. [`Channel::resume_on_abort`] re-makes it every
+//! That cut is not made once. [`Resumable`] re-makes it every
 //! time the fan-out hangs up on this consumer for falling behind, so a slow
 //! reader never sees an error — it silently drops back into replay from its own
 //! cursor. Which is the whole reason the cursor is one monotone value rather
@@ -59,10 +59,10 @@ use crate::meta::{Data, StableLogEvent, UnstableEvent};
 use crate::metrics::{self, ReadEntrySource, ReadSource};
 use crate::raft::EvictionStatus;
 use crossbeam_combinators::{
-    Cancellation, Channel, End, Gap, NonDecreasing, Ranged, StrictlyIncreasing, Tail,
+    Cancellation, Channel, Contiguous, Finite, Gap, Infinite, Key, NonDecreasing, Opening,
+    Resumable, Seam, StrictlyIncreasing, resync,
 };
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Whether this node may serve client reads and writes.
 ///
@@ -147,26 +147,23 @@ impl Reader for GatedReader {
         self.inner.hlc_now()
     }
 
-    fn subscribe_stable_log(&self, from: LogIndex) -> crate::StableStream {
+    fn subscribe_stable_log(&self, after: Option<LogIndex>) -> crate::StableStream {
         if !self.ready() {
-            return crate::ordered::stable_stream(
-                Channel::once(Err(self.not_ready())).chain(Channel::aborted("gated reader")),
-                from,
-            );
+            return Channel::once(Err(self.not_ready()))
+                .chain(Channel::aborted("gated reader"))
+                .ordered(after, "stable log stream");
         }
-        self.inner.subscribe_stable_log(from)
+        self.inner.subscribe_stable_log(after)
     }
 
-    fn unstable_tail(&self) -> Channel<Result<Data, Error>, crossbeam_combinators::Finite> {
+    fn unstable_tail(&self) -> Channel<Result<Data, Error>, Finite> {
         if !self.ready() {
             return Channel::once(Err(self.not_ready()));
         }
         self.inner.unstable_tail()
     }
 
-    fn subscribe_unstable_tail(
-        &self,
-    ) -> Channel<Result<UnstableEvent, Error>, crossbeam_combinators::Infinite> {
+    fn subscribe_unstable_tail(&self) -> Channel<Result<UnstableEvent, Error>, Infinite> {
         if !self.ready() {
             return Channel::once(Err(self.not_ready())).chain(Channel::aborted("gated reader"));
         }
@@ -237,7 +234,7 @@ fn historical_replay(
     stable_log: &dyn StableLogSnapshot,
     after: Option<LogIndex>,
     until: LogIndex,
-) -> Channel<Result<(LogIndex, Data), Error>, crossbeam_combinators::Finite> {
+) -> Channel<Result<(LogIndex, Data), Error>, Finite> {
     stable_log
         .range(after, until)
         .map(|item| {
@@ -266,18 +263,6 @@ fn historical_replay(
         .into_channel()
 }
 
-/// Whether a resync loop may open another segment after `previous`: on the
-/// first open, and after `ProducerGone` — never after a stop request or a
-/// contract violation, which a new cycle would only repeat.
-fn resumable(previous: Option<End>) -> bool {
-    matches!(
-        previous,
-        None | Some(End::Aborted {
-            reason: crossbeam_combinators::AbortReason::ProducerGone { .. }
-        })
-    )
-}
-
 // ── Resyncing tail ─────────────────────────────────────────────────────────
 
 /// The frontier and watermark captured after the live subscription.
@@ -287,18 +272,19 @@ struct StableCut {
     watermark: Option<Hlc>,
 }
 
-/// One resync cycle: the live subscription and the durable window it continues.
+/// One resync cycle: the live subscription and the durable window it continues,
+/// both strictly after `after`.
 struct StableSeam {
     archive: Arc<dyn StableArchiveReader>,
     stable_log: Arc<dyn StableLogSnapshot>,
-    at: LogIndex,
+    after: Option<LogIndex>,
 }
 
-impl Tail for StableSeam {
+impl Seam for StableSeam {
     type Item = Result<StableLogEvent, Error>;
     type Cut = StableCut;
 
-    fn subscribe(&self) -> Channel<Self::Item, crossbeam_combinators::Infinite> {
+    fn subscribe(&self) -> Channel<Self::Item, Infinite> {
         self.stable_log.subscribe_events().map(Ok)
     }
 
@@ -315,32 +301,20 @@ impl Tail for StableSeam {
 
     fn above(
         &self,
-        live: Channel<Self::Item, crossbeam_combinators::Infinite>,
+        live: Channel<Self::Item, Infinite>,
         cut: Self::Cut,
-    ) -> Channel<Self::Item, crossbeam_combinators::Infinite> {
-        // Drop the live overlap with the replay at the cut. The outer cursor
-        // filter still advances across cycles; this keeps the seam correct on
-        // its own rather than relying on that downstream pass.
-        live.filter_map(move |item| match item {
-            Ok(StableLogEvent::Appended { index, .. })
-                if cut.frontier.is_some_and(|f| index <= f) =>
-            {
-                None
-            }
-            other => Some(other),
-        })
+    ) -> Channel<Self::Item, Infinite> {
+        // Drop the live overlap with the replay (at or below the frontier) and
+        // anything the caller already has (at or below `after`): the stream
+        // must continue exactly at `after`'s successor.
+        live.filter_above::<LogIndex>(cut.frontier.max(self.after))
     }
-}
 
-impl Ranged<StableCut> for StableSeam {
-    type Item = Result<StableLogEvent, Error>;
-
-    fn range(&self, cut: StableCut) -> Channel<Self::Item, crossbeam_combinators::Finite> {
-        // `at` is the first index wanted; the replay takes the exclusive start.
+    fn range(&self, cut: StableCut) -> Channel<Self::Item, Finite> {
         let replay = historical_replay(
             Arc::clone(&self.archive),
             self.stable_log.as_ref(),
-            self.at.before(),
+            self.after,
             LogIndex::next_after(cut.frontier),
         )
         .map(|item| item.map(|(index, data)| StableLogEvent::Appended { index, data }));
@@ -358,12 +332,12 @@ impl Ranged<StableCut> for StableSeam {
     }
 }
 
-/// One gapless, index-ordered stream from `from`, spliced out of repeated
-/// cycles of *replay the durable window, then follow the live tail*:
+/// One gapless, index-ordered stream strictly after `after`, spliced out of
+/// repeated cycles of *replay the durable window, then follow the live tail*:
 ///
 /// ```text
 ///   ┌──────────────────────────────────────────────┐
-///   │  subscribe · replay [cursor, frontier] · live │──┐
+///   │  subscribe · replay (cursor, frontier] · live │──┐
 ///   └──────────────────────────────────────────────┘  │
 ///                      ▲     hung up (fell behind)     │
 ///                      └───────────────────────────────┘
@@ -371,14 +345,13 @@ impl Ranged<StableCut> for StableSeam {
 ///
 /// **Falling behind is not an error here.** A consumer slower than its
 /// subscriber queue is deep gets hung up on by the fan-out, which arrives as
-/// [`End::Aborted`](crossbeam_combinators::End::Aborted) *after* every event
-/// already queued — the in-band lag signal (the fan-out).
-/// [`Channel::resume_on_abort`] hands that verdict back and this closure
-/// answers it the way §20 prescribes for an infinite stream: resume from the
-/// last position. The caller sees one seamless stream; falling behind costs
-/// latency, not data.
+/// `Aborted(ProducerGone)` *after* every event already queued — the in-band lag
+/// signal. [`Resumable`] answers it by reopening after the last emitted index,
+/// and only that: a cancellation or an order violation ends the stream. The
+/// caller sees one seamless stream; falling behind costs latency, not data.
 ///
-/// Two orderings inside the cycle carry the whole correctness argument:
+/// Two orderings inside the cycle carry the whole correctness argument
+/// (`Segment::open` fixes the first; `StableSeam::cut` the second):
 ///
 /// 1. **Subscribe before reading the frontier.** Everything at or below the
 ///    frontier is covered by the replay; everything above it must therefore be
@@ -388,90 +361,69 @@ impl Ranged<StableCut> for StableSeam {
 /// 2. **Read `end_hlc` before `end_index`.** The watermark emitted when the
 ///    replay finishes must not cover an entry the replay did not emit; taking
 ///    it first bounds it by the frontier that follows.
-///
-/// The cursor is the only mutable state: the replay's start index, the live
-/// filter, the duplicate suppressor across the seam, and the resume point after
-/// a hang-up, all in one value.
 fn resyncing_tail(
     archive: Arc<dyn StableArchiveReader>,
     stable_log: Arc<dyn StableLogSnapshot>,
-    from: LogIndex,
-) -> Channel<Result<StableLogEvent, Error>, crossbeam_combinators::Infinite> {
-    let cursor = Arc::new(AtomicU64::new(from.raw()));
-    let read_cursor = Arc::clone(&cursor);
-
+    after: Option<LogIndex>,
+) -> crate::StableStream {
     let weak_archive = Arc::downgrade(&archive);
     let weak_stable_log = Arc::downgrade(&stable_log);
     drop((archive, stable_log));
 
-    Channel::resume_on_abort((), move |(), previous| {
-        // Only a hang-up or a dead producer is repaired by a fresh cycle; a
-        // cancellation or an order violation ends the stream as it is (D18).
-        if !resumable(previous) {
-            return None;
-        }
-        // Declining is the only termination a consumer ever observes, and it
-        // reaches them as the *previous* segment's `Aborted` — under the live
-        // fan-out's label, which points at the wrong culprit. Hence the lines.
-        // Debug, not warn: the ordinary cause is the node being torn down.
-        let Some(archive) = weak_archive.upgrade() else {
-            tracing::debug!(
-                cursor = read_cursor.load(Ordering::Relaxed),
-                ?previous,
-                "stable tail: the archive reader has been dropped, so this \
-                 subscription cannot be resumed and ends here"
-            );
-            return None;
-        };
-        let Some(stable_log) = weak_stable_log.upgrade() else {
-            tracing::debug!(
-                cursor = read_cursor.load(Ordering::Relaxed),
-                ?previous,
-                "stable tail: the stable log has been dropped, so this \
-                 subscription cannot be resumed and ends here"
-            );
-            return None;
-        };
+    Resumable::new::<_, Contiguous<LogIndex>, _, _>(
+        "stable log stream",
+        after,
+        move |after, opening| {
+            // Declining is the only termination a consumer ever observes, and
+            // it reaches them as the *previous* segment's `Aborted` — under the
+            // live fan-out's label, which points at the wrong culprit. Hence
+            // the lines. Debug, not warn: the ordinary cause is the node being
+            // torn down.
+            let Some(archive) = weak_archive.upgrade() else {
+                tracing::debug!(
+                    ?after,
+                    ?opening,
+                    "stable tail: the archive reader has been dropped, so this \
+                     subscription cannot be resumed and ends here"
+                );
+                return None;
+            };
+            let Some(stable_log) = weak_stable_log.upgrade() else {
+                tracing::debug!(
+                    ?after,
+                    ?opening,
+                    "stable tail: the stable log has been dropped, so this \
+                     subscription cannot be resumed and ends here"
+                );
+                return None;
+            };
 
-        let at = LogIndex(read_cursor.load(Ordering::Relaxed));
-
-        let seam = StableSeam {
-            archive,
-            stable_log,
-            at,
-        };
-        let (segment, cut) = seam.blend(&seam);
-        if previous.is_some() {
-            // Only a hung-up (or exhausted) previous cycle brings us back here.
-            metrics::stable_read_resync();
-            tracing::warn!(
-                log_index = at.raw(),
-                gap = cut.frontier.map_or(0, |f| f.raw().saturating_sub(at.raw())),
-                ?previous,
-                "stable read fell behind its subscriber queue; replaying from \
-                 the durable log"
+            let seam = StableSeam {
+                archive,
+                stable_log,
+                after,
+            };
+            if let Opening::AfterProducerGone { what } = opening {
+                // Only a hung-up (or dead) previous cycle brings us back here.
+                metrics::stable_read_resync();
+                tracing::warn!(
+                    after = after.map(LogIndex::raw),
+                    gap = seam.stable_log.end_index().map_or(0, |f| f
+                        .raw()
+                        .saturating_sub(after.map_or(0, LogIndex::raw))),
+                    what,
+                    "stable read fell behind its subscriber queue; replaying from \
+                     the durable log"
+                );
+            }
+            tracing::debug!(
+                ?opening,
+                after = after.map(LogIndex::raw),
+                "stable tail: opening a segment"
             );
-        }
-        tracing::debug!(
-            cycle = if previous.is_some() { "resync" } else { "initial" },
-            log_index = at.raw(),
-            frontier = cut.frontier.map(LogIndex::raw),
-            watermark = ?cut.watermark,
-            "stable tail: opening a segment"
-        );
-        Some(segment)
-    })
-    .filter_map(move |item| match item {
-        // One comparison filters the captured frontier and drops the replay's
-        // duplicates: everything at or below the cursor has already been served.
-        Ok(StableLogEvent::Appended { index, data }) => {
-            (index.raw() >= cursor.load(Ordering::Relaxed)).then(|| {
-                cursor.store(LogIndex::next_after(Some(index)).raw(), Ordering::Relaxed);
-                Ok(StableLogEvent::Appended { index, data })
-            })
-        }
-        other => Some(other),
-    })
+            Some(seam)
+        },
+    )
 }
 
 // ── Resyncing unstable tail ────────────────────────────────────────────────
@@ -527,11 +479,21 @@ struct UnstableSeam {
     stable_log: Arc<dyn StableLogSnapshot>,
 }
 
-impl Tail for UnstableSeam {
+/// `UnstableStep::Entry` sits at its entry's HLC; the other steps have none.
+impl Key<Result<UnstableStep, Error>> for Hlc {
+    fn key(item: &Result<UnstableStep, Error>) -> Option<Self> {
+        match item {
+            Ok(UnstableStep::Entry(data)) => Some(data.data_id.hlc()),
+            _ => None,
+        }
+    }
+}
+
+impl Seam for UnstableSeam {
     type Item = Result<UnstableStep, Error>;
     type Cut = Option<Hlc>;
 
-    fn subscribe(&self) -> Channel<Self::Item, crossbeam_combinators::Infinite> {
+    fn subscribe(&self) -> Channel<Self::Item, Infinite> {
         self.local_store
             .subscribe_unstable()
             .map(|data| Ok(UnstableStep::Entry(data)))
@@ -549,24 +511,17 @@ impl Tail for UnstableSeam {
 
     fn above(
         &self,
-        live: Channel<Self::Item, crossbeam_combinators::Infinite>,
+        live: Channel<Self::Item, Infinite>,
         cut: Self::Cut,
-    ) -> Channel<Self::Item, crossbeam_combinators::Infinite> {
+    ) -> Channel<Self::Item, Infinite> {
         // Drop live entries at or below the cut: they are stable, and the
         // stable log — not the scan, which reads only above the cut — covers
         // them. `WatermarkGate` still handles the moving level; this
         // seam-local filter does not rely on it for the overlap at the cut.
-        live.filter_map(move |item| match item {
-            Ok(UnstableStep::Entry(data)) if cut.is_some_and(|w| data.data_id.hlc() <= w) => None,
-            other => Some(other),
-        })
+        live.filter_above::<Hlc>(cut)
     }
-}
 
-impl Ranged<Option<Hlc>> for UnstableSeam {
-    type Item = Result<UnstableStep, Error>;
-
-    fn range(&self, cut: Option<Hlc>) -> Channel<Self::Item, crossbeam_combinators::Finite> {
+    fn range(&self, cut: Option<Hlc>) -> Channel<Self::Item, Finite> {
         let opening = Channel::once(Ok(UnstableStep::Opened(cut)));
         let scan = self
             .local_store
@@ -601,7 +556,7 @@ impl Ranged<Option<Hlc>> for UnstableSeam {
 fn resyncing_unstable_tail(
     local_store: Arc<dyn LocalStoreView>,
     stable_log: Arc<dyn StableLogSnapshot>,
-) -> Channel<Result<UnstableEvent, Error>, crossbeam_combinators::Infinite> {
+) -> Channel<Result<UnstableEvent, Error>, Infinite> {
     let mut gate = WatermarkGate {
         level: stable_log.watermark(),
         emitted: None,
@@ -610,15 +565,12 @@ fn resyncing_unstable_tail(
     let weak_stable_log = Arc::downgrade(&stable_log);
     drop((local_store, stable_log));
 
-    Channel::resume_on_abort((), move |(), previous| {
-        if !resumable(previous) {
-            return None;
-        }
+    resync("unstable tail", move |opening| {
         // As in `resyncing_tail`: declining is the only termination a consumer
         // observes, under the previous segment's label, hence the lines.
         let Some(local_store) = weak_local_store.upgrade() else {
             tracing::debug!(
-                ?previous,
+                ?opening,
                 "unstable tail: the local store has been dropped, so this \
                  subscription ends here"
             );
@@ -626,28 +578,25 @@ fn resyncing_unstable_tail(
         };
         let Some(stable_log) = weak_stable_log.upgrade() else {
             tracing::debug!(
-                ?previous,
+                ?opening,
                 "unstable tail: the stable log has been dropped, so this \
                  subscription ends here"
             );
             return None;
         };
 
-        let seam = UnstableSeam {
-            local_store,
-            stable_log,
-        };
-        let (segment, cut) = seam.blend(&seam);
-        if previous.is_some() {
+        if let Opening::AfterProducerGone { what } = opening {
             metrics::unstable_read_resync();
             tracing::warn!(
-                ?cut,
-                ?previous,
+                what,
                 "unstable tail subscription fell behind its queue; rescanning \
                  the unstable window"
             );
         }
-        Some(segment)
+        Some(UnstableSeam {
+            local_store,
+            stable_log,
+        })
     })
     .filter_map(move |step| match step {
         Ok(step) => gate.admit(step).map(Ok),
@@ -673,16 +622,12 @@ impl Reader for ReaderImpl {
         self.clock.now()
     }
 
-    fn subscribe_stable_log(&self, from: LogIndex) -> crate::StableStream {
+    fn subscribe_stable_log(&self, after: Option<LogIndex>) -> crate::StableStream {
         metrics::read_request(ReadSource::Stable);
-        crate::ordered::stable_stream(
-            resyncing_tail(self.archive.clone(), self.stable_log.clone(), from)
-                .until(&self.shutdown),
-            from,
-        )
+        resyncing_tail(self.archive.clone(), self.stable_log.clone(), after).until(&self.shutdown)
     }
 
-    fn unstable_tail(&self) -> Channel<Result<Data, Error>, crossbeam_combinators::Finite> {
+    fn unstable_tail(&self) -> Channel<Result<Data, Error>, Finite> {
         metrics::read_request(ReadSource::Unstable);
         let local_store = self.local_store.clone();
         let stable_log = self.stable_log.clone();
@@ -703,9 +648,7 @@ impl Reader for ReaderImpl {
             .until(&self.shutdown)
     }
 
-    fn subscribe_unstable_tail(
-        &self,
-    ) -> Channel<Result<UnstableEvent, Error>, crossbeam_combinators::Infinite> {
+    fn subscribe_unstable_tail(&self) -> Channel<Result<UnstableEvent, Error>, Infinite> {
         metrics::read_request(ReadSource::UnstableSubscription);
         resyncing_unstable_tail(self.local_store.clone(), self.stable_log.clone())
             .until(&self.shutdown)
@@ -984,7 +927,7 @@ mod tests {
             Duration::from_millis(5),
         );
         let mut stream = reader
-            .subscribe_stable_log(LogIndex::ZERO)
+            .subscribe_stable_log(None)
             .into_channel()
             .filter_map(|item| match item {
                 Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
@@ -1037,7 +980,7 @@ mod tests {
         let reader = local_reader(local_log, stable_log.clone(), Duration::from_millis(5));
 
         let mut stream = reader
-            .subscribe_stable_log(LogIndex(1))
+            .subscribe_stable_log(Some(LogIndex(0)))
             .into_channel()
             .filter_map(|item| match item {
                 Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
@@ -1134,7 +1077,7 @@ mod tests {
         // object store (purged locally → the scan starts at 3, so [0,3) is
         // filled from the archive), 3,4 from the local log.
         let mut stream = reader
-            .subscribe_stable_log(LogIndex(0))
+            .subscribe_stable_log(None)
             .into_channel()
             .filter_map(|item| match item {
                 Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
@@ -1295,9 +1238,7 @@ mod tests {
         )
         .await;
 
-        let mut stream = reader
-            .subscribe_stable_log(LogIndex::ZERO)
-            .into_test_stream();
+        let mut stream = reader.subscribe_stable_log(None).into_test_stream();
 
         // Lap the ring many times over without polling the stream.
         for i in 1u64..12 {
@@ -1340,9 +1281,7 @@ mod tests {
         )
         .await;
 
-        let mut stream = reader
-            .subscribe_stable_log(LogIndex::ZERO)
-            .into_test_stream();
+        let mut stream = reader.subscribe_stable_log(None).into_test_stream();
 
         // Overrun the 4-deep queue, so the subscriber is hung up on ...
         for i in 1u64..8 {
@@ -1391,7 +1330,7 @@ mod tests {
         .await;
 
         let mut stream = reader
-            .subscribe_stable_log(LogIndex::ZERO)
+            .subscribe_stable_log(None)
             .into_channel()
             .filter_map(|item| match item {
                 Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
@@ -1437,9 +1376,7 @@ mod tests {
         )
         .await;
 
-        let mut stream = reader
-            .subscribe_stable_log(LogIndex::ZERO)
-            .into_test_stream();
+        let mut stream = reader.subscribe_stable_log(None).into_test_stream();
 
         // Lap the 2-deep ring, then drain everything it dropped.
         for i in 1u64..6 {
@@ -1567,7 +1504,7 @@ mod tests {
 
         let (_dir, reader) = scripted_reader(stable_log, store, handle).await;
         let mut stream = reader
-            .subscribe_stable_log(LogIndex(0))
+            .subscribe_stable_log(None)
             .into_channel()
             .filter_map(|item| match item {
                 Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
@@ -1622,14 +1559,15 @@ mod tests {
         handle.replace(covering_manifest(snap_id, 2));
 
         let (_dir, reader) = scripted_reader(stable_log, store, handle).await;
-        let mut ch = reader
-            .subscribe_stable_log(LogIndex(0))
-            .into_channel()
-            .filter_map(|item| match item {
-                Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
-                Ok(StableLogEvent::Watermark(_)) => None,
-                Err(e) => Some(Err(e)),
-            });
+        let mut ch =
+            reader
+                .subscribe_stable_log(None)
+                .into_channel()
+                .filter_map(|item| match item {
+                    Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
+                    Ok(StableLogEvent::Watermark(_)) => None,
+                    Err(e) => Some(Err(e)),
+                });
 
         // 0,1 (local) then 2 (archive) come through; then the untiled 3 ends
         // the stream: the archive's window is short, and a short window is not
@@ -2095,7 +2033,7 @@ mod tests {
             .expect("append");
 
         let reader = local_reader(local_log, stable_log.clone(), Duration::from_millis(5));
-        let mut stream = reader.subscribe_stable_log(LogIndex(0)).into_test_stream();
+        let mut stream = reader.subscribe_stable_log(None).into_test_stream();
 
         for expected in [0u64, 1] {
             let ev = tokio::time::timeout(Duration::from_secs(1), stream.next())
@@ -2136,7 +2074,7 @@ mod tests {
             Arc::new(RaftStateHandle::default()),
             shutdown,
         );
-        let mut tail = reader.subscribe_stable_log(LogIndex(0));
+        let mut tail = reader.subscribe_stable_log(None);
         let blocked = tokio::task::spawn_blocking(move || {
             loop {
                 // The one historical entry comes first; then the log is quiet.

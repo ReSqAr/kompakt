@@ -53,18 +53,20 @@ pub trait Reader: Send + Sync + 'static {
     fn hlc_now(&self) -> Hlc;
 
     /// Entries and watermark advances in causal order: a `Watermark` never
-    /// arrives before an `Appended` it covers. Replays historical entries from
-    /// `from` (inclusive), then follows live events.
+    /// arrives before an `Appended` it covers. Replays historical entries
+    /// strictly after `after` (`None`: from the first entry), then follows live
+    /// events.
     ///
-    /// `from` is required: the stable log is a complete history and a read of
+    /// `after` is required: the stable log is a complete history and a read of
     /// it is a position in that history, so there is no "only what is new"
-    /// mode. Knowing the consumer's position is also what makes the stream
+    /// mode. It is the last index the caller has already seen, which is what a
+    /// consumer holds; the first index it wants is `LogIndex::next_after(after)`. Knowing the consumer's position is also what makes the stream
     /// recoverable — **a slow consumer never sees a broadcast lag**. When the
     /// live ring laps this subscriber, the stream silently re-enters historical
     /// replay from its own cursor and rejoins the live tail, as often as
     /// necessary. What the caller observes is one gapless, index-ordered
     /// stream; falling behind costs latency, not data.
-    fn subscribe_stable_log(&self, from: LogIndex) -> crate::StableStream;
+    fn subscribe_stable_log(&self, after: Option<LogIndex>) -> crate::StableStream;
 
     /// One-shot scan of entries strictly above the watermark. Emitting one at or
     /// below it would duplicate `stable_tail` (CLAUDE.md §12).

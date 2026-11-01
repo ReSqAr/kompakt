@@ -453,10 +453,7 @@ async fn fold_loop_stops_when_cancelled_without_folding() {
     drop((writer, reader));
 
     log.append(payload(tenant_id(), &[new_user(1, "unfolded")]));
-    let tail = log
-        .reader()
-        .subscribe_stable_log(LogIndex::ZERO)
-        .into_channel();
+    let tail = log.reader().subscribe_stable_log(None).into_channel();
     log.disconnect();
 
     let cancel = CancellationToken::new();
@@ -504,7 +501,7 @@ async fn an_upstream_cancel_stops_an_idle_fold_and_cancels_its_subscribers() {
     let (upstream, cancellation) = CancelHandle::new();
     let tail = log
         .reader()
-        .subscribe_stable_log(LogIndex::ZERO)
+        .subscribe_stable_log(None)
         .into_channel()
         .until(&cancellation);
     let never = CancellationToken::new();
