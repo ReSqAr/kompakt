@@ -349,3 +349,33 @@ constructible there — and is then forgeable. The guarantee is D14:
 range. The `Seam` methods are hooks the crate calls; the module docs say so.
 `subscribe` returns `Channel<Item, Infinite>`, `cut(&self) -> Cut`. No sealing
 trick: it would also stop zslg from implementing the trait.
+
+### D21. The archive is a declaration: `defer_async` + `covers(..until)` (answers R5)
+
+```rust
+Channel::chain_all(covering.map(|m| Channel::defer_async(move || async move {
+        store.read_snapshot(m.id).await.unwrap_or_else(|e| Channel::once(Err(e)))
+    })))
+    .filter_map(within(bounds))                 // below → skip, above → end
+    .ordered::<Contiguous<LogIndex>>(after)     // tiling
+    .ordered::<NonDecreasing<Hlc>>(None)        // replaces the HLC assert!
+    .covers(..until)                            // must reach the window's end
+```
+
+- **`Channel::defer_async(|| fut)`** (tokio feature): on the first poll, spawn
+  the future (runtime handle captured at construction) and delegate to the
+  `Channel` it resolves to; the phase is selectable while it waits on the
+  hand-off. `chain_all` therefore opens one snapshot at a time.
+  `read_snapshot` stays `async` (11 callers unchanged); the open error becomes
+  the phase's first item. A synchronous `defer` is not added: no caller.
+- **`covers(..until)`** on a `Contiguous` channel: it ends `Complete` only if
+  the stream reached `until` (last key's successor `== until`, or an empty
+  window `next_after(after) == until`); otherwise
+  `Aborted(OrderViolation("short"))`. Named after the `RangeTo` it takes: the
+  exclusive upper bound matches every zslg window (`range(from, until)`,
+  `IndexExclusive(until)`), so no `until - 1` arithmetic.
+- `covers` applies to the archive, the stitch fallback (replacing its hand
+  endpoint check) and `HistoricalReplay` — closing the trailing-gap hole: a
+  local scan that stops short of `until` now aborts instead of ending early.
+- Gone from the archive: `expected`/`last_hlc`/`open_failed`, the nested
+  `spawn_blocking`, the HLC `assert!`, the hand-written "not fully tiled" check.

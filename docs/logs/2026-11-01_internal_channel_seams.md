@@ -178,5 +178,5 @@ sends). My ranking of the open review points by leverage:
    `CancelHandleDropped`; node `until` sits outside.
 4. R4 cursor — SETTLED D19 (always exclusive `after: Option<K>`, any policy; Opening enum).
 5. R3 `Live` — SETTLED D20 (dropped; Segment::open is the guarantee).
-6. R5 archive — expected: `defer` + `chain_all` + two ordered checks.
+6. R5 archive — SETTLED D21 (defer_async + covers(..until)).
 7. R6/R7 — doc structure; no decision needed beyond agreeing the order.
