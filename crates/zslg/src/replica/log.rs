@@ -514,7 +514,7 @@ pub(crate) struct ReplicaLogStore {
     storage: Arc<Storage>,
     frontier: Frontier,
     batch_builder: BatchBuilder,
-    live_tx: crossbeam_channel::Sender<Arc<(LogIndex, Data)>>,
+    live_tx: crossbeam_channel::Sender<(LogIndex, Data)>,
     live_registry: Registry<(LogIndex, Data)>,
     live_shutdown: Shutdown,
     /// Sync MPSC into the flush loop. crossbeam (not tokio): `submit` is called
@@ -799,8 +799,7 @@ impl Tail for ReplicaSeam {
             .log
             .live_registry
             .subscribe()
-            .map(|ch| ch.map(|entry| (*entry).clone()))
-            .unwrap_or_else(|_| Channel::empty());
+            .unwrap_or_else(|_| Channel::aborted("replica live tail"));
         #[cfg(test)]
         subscribe_handoff_pause();
         live.map(Ok)
@@ -1010,7 +1009,7 @@ fn flush_one_batch_blocking(
             metrics::replica_log_flushed();
             for (i, (index, data, guard)) in batch.staged.into_iter().enumerate() {
                 let data_id = data.data_id;
-                let _ = store.live_tx.send(Arc::new((index, data)));
+                let _ = store.live_tx.send((index, data));
                 metrics::replica_log_append_probe().finish(OpState::Success);
                 // `try_send`, never `send`: this runs on the replica's *single
                 // shared* flush thread, so blocking here for one slow connection
@@ -1789,7 +1788,7 @@ mod tests {
         }
         let ch = store.subscribe_from(None);
         let entries: Vec<_> = ch
-            .into_channels()
+            .into_channel()
             .into_iter()
             .take(5)
             .filter_map(|r| match r {
@@ -1848,7 +1847,7 @@ mod tests {
             // survive (5). The live tail is infinite, so bound the drain.
             let ch = store.subscribe_from(Some(LogIndex(3)));
             let entries: Vec<_> = ch
-                .into_channels()
+                .into_channel()
                 .into_iter()
                 .filter_map(|r| r.ok())
                 .take(5)
@@ -1870,7 +1869,7 @@ mod tests {
         {
             let ch = store.subscribe_from(Some(LogIndex(3)));
             let entries: Vec<_> = ch
-                .into_channels()
+                .into_channel()
                 .into_iter()
                 .filter_map(|r| r.ok())
                 .take(5)
@@ -1890,7 +1889,7 @@ mod tests {
             // start = 8 (next_after 7): only the frontier entry survives.
             let ch = store.subscribe_from(Some(LogIndex(7)));
             let entries: Vec<_> = ch
-                .into_channels()
+                .into_channel()
                 .into_iter()
                 .filter_map(|r| r.ok())
                 .take(1)

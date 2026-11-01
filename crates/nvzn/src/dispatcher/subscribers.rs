@@ -3,7 +3,7 @@
 //! ```text
 //!   Reader::subscribe_stable_log ──subscribe((tenant, type))──> KeyedRegistry
 //!                                                                    ▲
-//!   fold, after each commit: tx.send(Arc::new((tenant, type, id))) ──┘
+//!   fold, after each commit: tx.send((tenant, type, id)) ──┘
 //! ```
 //!
 //! The registry owns the distribution thread, the subscriber set, and the
@@ -54,14 +54,14 @@ pub(crate) const SUBSCRIBER_CAPACITY: usize = 1024;
 
 /// The fold's side: the data sender and the single shutdown owner.
 pub(crate) struct Subscribers {
-    tx: crossbeam_channel::Sender<Arc<SubscriptionItem>>,
+    tx: crossbeam_channel::Sender<SubscriptionItem>,
     shutdown: Shutdown,
     cancel: Arc<CancelHandle>,
 }
 
 impl Subscribers {
     pub(crate) fn new(
-        tx: crossbeam_channel::Sender<Arc<SubscriptionItem>>,
+        tx: crossbeam_channel::Sender<SubscriptionItem>,
         shutdown: Shutdown,
         cancel: Arc<CancelHandle>,
     ) -> Self {
@@ -76,7 +76,7 @@ impl Subscribers {
     /// backpressures the fold while a subscriber catches up.
     pub(super) fn publish(&mut self, written: &[(TenantId, ProjectionTypeId, ProjectionId)]) {
         for &(tenant, ptid, pid) in written {
-            let _ = self.tx.send(Arc::new((tenant, ptid, pid)));
+            let _ = self.tx.send((tenant, ptid, pid));
         }
     }
 

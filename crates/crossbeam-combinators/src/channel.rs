@@ -1427,8 +1427,6 @@ impl<T: Send + 'static> Channel<T> {
         ch
     }
 
-    /// A complete, finite stream: everything is already here, so it closes
-    /// itself and can never be `Aborted`.
     /// A closed, empty stream: `End::Complete` immediately.
     #[must_use]
     pub fn empty() -> Self {
@@ -1441,6 +1439,20 @@ impl<T: Send + 'static> Channel<T> {
         Self::from_vec(vec![item])
     }
 
+    /// An aborted, empty stream: `Aborted(ProducerGone { what })` immediately.
+    ///
+    /// Use this when a producer cannot be started (a closed registry, a full
+    /// registration queue) and the consumer contract is an infinite stream:
+    /// ending `Complete` would look like a deliberate finish.
+    #[must_use]
+    pub fn aborted(what: &'static str) -> Self {
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        drop(tx);
+        Self::from_infinite(rx, what)
+    }
+
+    /// A complete, finite stream: everything is already here, so it closes
+    /// itself and can never be `Aborted`.
     #[must_use]
     pub fn from_vec(items: Vec<T>) -> Self {
         let (tx, rx) = crossbeam_channel::bounded(items.len().max(1));
@@ -2580,6 +2592,17 @@ mod tests {
             ch.recv(),
             Err(End::Aborted {
                 reason: AbortReason::ProducerGone { what: "window" }
+            })
+        );
+    }
+
+    #[test]
+    fn aborted_is_producer_gone() {
+        let mut ch = Channel::<u32>::aborted("test");
+        assert_eq!(
+            ch.recv(),
+            Err(End::Aborted {
+                reason: AbortReason::ProducerGone { what: "test" }
             })
         );
     }

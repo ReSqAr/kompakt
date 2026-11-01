@@ -126,7 +126,7 @@ impl ReplicationSubscriber {
         let stream = self
             .upstream
             .subscribe_from(resume_from)
-            .into_channels()
+            .into_channel()
             .filter_map(move |item: Result<(LogIndex, Data), Error>| {
                 let (idx, data) = match item {
                     Ok(v) => v,

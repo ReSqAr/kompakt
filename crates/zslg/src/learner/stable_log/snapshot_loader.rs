@@ -48,7 +48,7 @@ pub(in crate::learner) async fn integrate_manifest(
             until: ArchiveUpperBound::Unbounded,
         })
         .await?;
-    stable_log.append(rx.into_channels()).await?;
+    stable_log.append(rx.into_channel()).await?;
 
     // Completeness (belt to `append`'s gap fence): `append` returning Ok proves
     // the stream ended, not that it covered the manifest. A snapshot that

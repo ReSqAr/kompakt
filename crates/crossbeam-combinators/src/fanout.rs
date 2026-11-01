@@ -89,7 +89,7 @@ impl Drop for Shutdown {
 
 /// The broadcast subscribe side.
 pub struct Registry<T> {
-    register: Sender<((), Sender<Arc<T>>)>,
+    register: Sender<((), Sender<T>)>,
     sub_cap: NonZeroUsize,
     what: &'static str,
     state: Arc<Mutex<bool>>,
@@ -106,17 +106,17 @@ impl<T> Clone for Registry<T> {
     }
 }
 
-impl<T: Send + Sync + 'static> Registry<T> {
+impl<T: Clone + Send + 'static> Registry<T> {
     /// A new subscriber stream; `Full` if the registration queue is full,
     /// `Closed` if the fan-out is gone.
-    pub fn subscribe(&self) -> Result<Channel<Arc<T>>, RegistryError> {
+    pub fn subscribe(&self) -> Result<Channel<T>, RegistryError> {
         subscribe(&self.register, &self.state, (), self.sub_cap, self.what)
     }
 }
 
 /// The keyed subscribe side.
 pub struct KeyedRegistry<K, T> {
-    register: Sender<(K, Sender<Arc<T>>)>,
+    register: Sender<(K, Sender<T>)>,
     sub_cap: NonZeroUsize,
     what: &'static str,
     state: Arc<Mutex<bool>>,
@@ -133,23 +133,23 @@ impl<K, T> Clone for KeyedRegistry<K, T> {
     }
 }
 
-impl<K: Eq + Copy + Send + 'static, T: Send + Sync + 'static> KeyedRegistry<K, T> {
+impl<K: Eq + Copy + Send + 'static, T: Clone + Send + 'static> KeyedRegistry<K, T> {
     /// A new subscriber stream for `key`; `Full` if the registration queue is
     /// full, `Closed` if the fan-out is gone.
-    pub fn subscribe(&self, key: K) -> Result<Channel<Arc<T>>, RegistryError> {
+    pub fn subscribe(&self, key: K) -> Result<Channel<T>, RegistryError> {
         subscribe(&self.register, &self.state, key, self.sub_cap, self.what)
     }
 }
 
 fn subscribe<K, T>(
-    register: &Sender<(K, Sender<Arc<T>>)>,
+    register: &Sender<(K, Sender<T>)>,
     state: &Mutex<bool>,
     key: K,
     sub_cap: NonZeroUsize,
     what: &'static str,
-) -> Result<Channel<Arc<T>>, RegistryError>
+) -> Result<Channel<T>, RegistryError>
 where
-    T: Send + Sync + 'static,
+    T: Clone + Send + 'static,
 {
     let (tx, rx) = crossbeam_channel::bounded(sub_cap.get());
     let closed = state.lock();
@@ -165,7 +165,7 @@ where
 
 struct Subscriber<K, T> {
     key: K,
-    tx: Sender<Arc<T>>,
+    tx: Sender<T>,
 }
 
 /// Spawn a broadcast fan-out.
@@ -178,9 +178,9 @@ pub fn broadcast<T>(
     register_cap: NonZeroUsize,
     sub_cap: NonZeroUsize,
     overflow: OverflowPolicy,
-) -> (Sender<Arc<T>>, Registry<T>, Shutdown)
+) -> (Sender<T>, Registry<T>, Shutdown)
 where
-    T: Send + Sync + 'static,
+    T: Clone + Send + 'static,
 {
     let (data_tx, data_rx) = crossbeam_channel::bounded(data_cap.get());
     let (register_tx, register_rx) = crossbeam_channel::bounded(register_cap.get());
@@ -217,10 +217,10 @@ pub fn keyed<K, T, F>(
     register_cap: NonZeroUsize,
     sub_cap: NonZeroUsize,
     overflow: OverflowPolicy,
-) -> (Sender<Arc<T>>, KeyedRegistry<K, T>, Shutdown)
+) -> (Sender<T>, KeyedRegistry<K, T>, Shutdown)
 where
     K: Eq + Copy + Send + 'static,
-    T: Send + Sync + 'static,
+    T: Clone + Send + 'static,
     F: Fn(&T) -> Option<K> + Send + 'static,
 {
     let (data_tx, data_rx) = crossbeam_channel::bounded(data_cap.get());
@@ -249,8 +249,8 @@ where
 }
 
 fn spawn<K, T, F>(
-    data_rx: Receiver<Arc<T>>,
-    register_rx: Receiver<(K, Sender<Arc<T>>)>,
+    data_rx: Receiver<T>,
+    register_rx: Receiver<(K, Sender<T>)>,
     shutdown_rx: Receiver<()>,
     route: F,
     overflow: OverflowPolicy,
@@ -258,7 +258,7 @@ fn spawn<K, T, F>(
 ) -> JoinHandle<()>
 where
     K: Eq + Copy + Send + 'static,
-    T: Send + Sync + 'static,
+    T: Clone + Send + 'static,
     F: Fn(&T) -> Option<K> + Send + 'static,
 {
     thread::Builder::new()
@@ -268,15 +268,15 @@ where
 }
 
 fn run<K, T, F>(
-    data_rx: Receiver<Arc<T>>,
-    register_rx: Receiver<(K, Sender<Arc<T>>)>,
+    data_rx: Receiver<T>,
+    register_rx: Receiver<(K, Sender<T>)>,
     shutdown_rx: Receiver<()>,
     route: F,
     overflow: OverflowPolicy,
     state: Arc<Mutex<bool>>,
 ) where
     K: Eq + Copy + Send + 'static,
-    T: Send + Sync + 'static,
+    T: Clone + Send + 'static,
     F: Fn(&T) -> Option<K> + Send + 'static,
 {
     let mut subscribers: Vec<Subscriber<K, T>> = Vec::new();
@@ -318,14 +318,14 @@ fn run<K, T, F>(
                     if !matches(subscriber) {
                         continue;
                     }
-                    if subscriber.tx.try_send(Arc::clone(&element)).is_err() {
+                    if subscriber.tx.try_send(element.clone()).is_err() {
                         dead.push(i);
                     }
                 }
                 remove_descending(&mut subscribers, dead);
             }
             OverflowPolicy::Block => {
-                let mut remaining: Vec<(usize, Sender<Arc<T>>)> = subscribers
+                let mut remaining: Vec<(usize, Sender<T>)> = subscribers
                     .iter()
                     .enumerate()
                     .filter(|(_, subscriber)| matches(subscriber))
@@ -334,7 +334,7 @@ fn run<K, T, F>(
                 let mut dead = Vec::new();
 
                 while !remaining.is_empty() {
-                    let senders: Vec<Sender<Arc<T>>> =
+                    let senders: Vec<Sender<T>> =
                         remaining.iter().map(|(_, tx)| tx.clone()).collect();
                     let mut sel = Select::new_biased();
                     let shutdown_op = sel.recv(&shutdown_rx);
@@ -358,7 +358,7 @@ fn run<K, T, F>(
                         .iter()
                         .position(|&i| i == op.index())
                         .expect("selected a send op");
-                    let sent = op.send(&senders[j], Arc::clone(&element));
+                    let sent = op.send(&senders[j], element.clone());
                     let (subscriber_index, _) = remaining.swap_remove(j);
                     if sent.is_err() {
                         dead.push(subscriber_index);
@@ -457,13 +457,13 @@ mod tests {
         let mut a = registry.subscribe().unwrap();
         let mut b = registry.subscribe().unwrap();
 
-        tx.send(Arc::new(1u32)).unwrap();
-        tx.send(Arc::new(2u32)).unwrap();
+        tx.send(1u32).unwrap();
+        tx.send(2u32).unwrap();
 
-        assert_eq!(*a.recv().unwrap(), 1);
-        assert_eq!(*a.recv().unwrap(), 2);
-        assert_eq!(*b.recv().unwrap(), 1);
-        assert_eq!(*b.recv().unwrap(), 2);
+        assert_eq!(a.recv().unwrap(), 1);
+        assert_eq!(a.recv().unwrap(), 2);
+        assert_eq!(b.recv().unwrap(), 1);
+        assert_eq!(b.recv().unwrap(), 2);
         shutdown.cancel();
         shutdown.wait();
     }
@@ -481,11 +481,11 @@ mod tests {
         let mut even = registry.subscribe(0).unwrap();
         let mut odd = registry.subscribe(1).unwrap();
 
-        tx.send(Arc::new(2u32)).unwrap();
-        tx.send(Arc::new(3u32)).unwrap();
+        tx.send(2u32).unwrap();
+        tx.send(3u32).unwrap();
 
-        assert_eq!(*even.recv().unwrap(), 2);
-        assert_eq!(*odd.recv().unwrap(), 3);
+        assert_eq!(even.recv().unwrap(), 2);
+        assert_eq!(odd.recv().unwrap(), 3);
         shutdown.cancel();
         shutdown.wait();
     }
@@ -496,10 +496,10 @@ mod tests {
             broadcast("test", cap(4), cap(4), cap(1), OverflowPolicy::Shed);
         let mut sub = registry.subscribe().unwrap();
 
-        tx.send(Arc::new(1u32)).unwrap();
-        tx.send(Arc::new(2u32)).unwrap();
+        tx.send(1u32).unwrap();
+        tx.send(2u32).unwrap();
 
-        assert_eq!(*sub.recv().unwrap(), 1);
+        assert_eq!(sub.recv().unwrap(), 1);
         assert!(matches!(
             sub.recv(),
             Err(End::Aborted {
@@ -516,11 +516,11 @@ mod tests {
             broadcast("test", cap(4), cap(4), cap(1), OverflowPolicy::Block);
         let mut sub = registry.subscribe().unwrap();
 
-        tx.send(Arc::new(1u32)).unwrap();
-        tx.send(Arc::new(2u32)).unwrap();
+        tx.send(1u32).unwrap();
+        tx.send(2u32).unwrap();
 
-        assert_eq!(*sub.recv().unwrap(), 1);
-        assert_eq!(*sub.recv().unwrap(), 2);
+        assert_eq!(sub.recv().unwrap(), 1);
+        assert_eq!(sub.recv().unwrap(), 2);
         shutdown.cancel();
         shutdown.wait();
     }
@@ -548,10 +548,10 @@ mod tests {
         let (tx, registry, mut shutdown) =
             broadcast("test", cap(4), cap(4), cap(4), OverflowPolicy::Shed);
         let mut sub = registry.subscribe().unwrap();
-        tx.send(Arc::new(7u32)).unwrap();
+        tx.send(7u32).unwrap();
         drop(tx);
 
-        assert_eq!(*sub.recv().unwrap(), 7);
+        assert_eq!(sub.recv().unwrap(), 7);
         assert!(matches!(
             sub.recv(),
             Err(End::Aborted {

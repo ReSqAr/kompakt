@@ -299,7 +299,7 @@ impl HistoricalReplay {
                 until: ArchiveUpperBound::IndexExclusive(gap.got),
             };
             match handle.block_on(fallback_archive.stream(bounds)) {
-                Ok(arch) => arch.into_channels().map(|item| {
+                Ok(arch) => arch.into_channel().map(|item| {
                     if item.is_ok() {
                         metrics::read_entry(ReadEntrySource::ObjectStore);
                     }
@@ -310,7 +310,7 @@ impl HistoricalReplay {
         });
 
         let result = tokio::task::spawn_blocking(move || {
-            let mut ch = stitched.into_channels();
+            let mut ch = stitched.into_channel();
             loop {
                 match ch.recv() {
                     Ok(Ok((idx, data))) => {
@@ -628,7 +628,7 @@ impl Ranged<Option<Hlc>> for UnstableSeam {
         let scan = self
             .local_store
             .stream_above_hlc(cut)
-            .into_channels()
+            .into_channel()
             .map(|item| {
                 item.map(|data| {
                     metrics::read_entry(ReadEntrySource::LocalStore);
@@ -747,7 +747,7 @@ impl Reader for ReaderImpl {
         let watermark = stable_log.end_hlc();
         local_store
             .stream_above_hlc(watermark)
-            .into_channels()
+            .into_channel()
             .map(|item| {
                 if item.is_ok() {
                     metrics::read_entry(ReadEntrySource::LocalStore);
@@ -1031,7 +1031,7 @@ mod tests {
         );
         let mut stream = reader
             .subscribe_stable_log(LogIndex::ZERO)
-            .into_channels()
+            .into_channel()
             .filter_map(|item| match item {
                 Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
                 Ok(StableLogEvent::Watermark(_)) => None,
@@ -1084,7 +1084,7 @@ mod tests {
 
         let mut stream = reader
             .subscribe_stable_log(LogIndex(1))
-            .into_channels()
+            .into_channel()
             .filter_map(|item| match item {
                 Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
                 Ok(StableLogEvent::Watermark(_)) => None,
@@ -1181,7 +1181,7 @@ mod tests {
         // filled from the archive), 3,4 from the local log.
         let mut stream = reader
             .subscribe_stable_log(LogIndex(0))
-            .into_channels()
+            .into_channel()
             .filter_map(|item| match item {
                 Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
                 Ok(StableLogEvent::Watermark(_)) => None,
@@ -1212,7 +1212,7 @@ mod tests {
         entries: std::sync::Mutex<Vec<(LogIndex, Data)>>,
         end_index: std::sync::Mutex<Option<LogIndex>>,
         end_hlc: std::sync::Mutex<Option<Hlc>>,
-        events_tx: crossbeam_channel::Sender<std::sync::Arc<StableLogEvent>>,
+        events_tx: crossbeam_channel::Sender<StableLogEvent>,
         events_registry: crossbeam_combinators::Registry<StableLogEvent>,
         events_shutdown: crossbeam_combinators::Shutdown,
         watermark: tokio::sync::watch::Sender<Option<Hlc>>,
@@ -1254,11 +1254,9 @@ mod tests {
         /// Raise the watermark and broadcast it, as a snapshot load does.
         fn push_watermark(&self, hlc: Hlc) {
             *self.end_hlc.lock().expect("lock") = Some(hlc);
-            let _ =
-                self.events_tx
-                    .send(std::sync::Arc::new(crate::meta::StableLogEvent::Watermark(
-                        hlc,
-                    )));
+            let _ = self
+                .events_tx
+                .send(crate::meta::StableLogEvent::Watermark(hlc));
             self.watermark.send_replace(Some(hlc));
             self.watermark_wakes.wake();
         }
@@ -1274,12 +1272,9 @@ mod tests {
                 .push((index, data.clone()));
             *self.end_index.lock().expect("lock") = Some(index);
             *self.end_hlc.lock().expect("lock") = Some(hlc);
-            let _ =
-                self.events_tx
-                    .send(std::sync::Arc::new(crate::meta::StableLogEvent::Appended {
-                        index,
-                        data,
-                    }));
+            let _ = self
+                .events_tx
+                .send(crate::meta::StableLogEvent::Appended { index, data });
         }
     }
 
@@ -1309,8 +1304,7 @@ mod tests {
         fn subscribe_events(&self) -> Channel<crate::meta::StableLogEvent> {
             self.events_registry
                 .subscribe()
-                .map(|ch| ch.map(|event| (*event).clone()))
-                .unwrap_or_else(|_| Channel::empty())
+                .unwrap_or_else(|_| Channel::aborted("stable log subscription"))
         }
         fn watch_watermark(&self) -> tokio::sync::watch::Receiver<Option<Hlc>> {
             self.watermark.subscribe()
@@ -1453,7 +1447,7 @@ mod tests {
 
         let mut stream = reader
             .subscribe_stable_log(LogIndex::ZERO)
-            .into_channels()
+            .into_channel()
             .filter_map(|item| match item {
                 Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
                 Ok(StableLogEvent::Watermark(_)) => None,
@@ -1627,7 +1621,7 @@ mod tests {
         let (_dir, reader) = scripted_reader(stable_log, store, handle).await;
         let mut stream = reader
             .subscribe_stable_log(LogIndex(0))
-            .into_channels()
+            .into_channel()
             .filter_map(|item| match item {
                 Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
                 Ok(StableLogEvent::Watermark(_)) => None,
@@ -1683,7 +1677,7 @@ mod tests {
         let (_dir, reader) = scripted_reader(stable_log, store, handle).await;
         let mut stream = reader
             .subscribe_stable_log(LogIndex(0))
-            .into_channels()
+            .into_channel()
             .filter_map(|item| match item {
                 Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
                 Ok(StableLogEvent::Watermark(_)) => None,

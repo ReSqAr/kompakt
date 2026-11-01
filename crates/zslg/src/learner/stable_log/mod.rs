@@ -357,7 +357,7 @@ pub(crate) struct StableLog {
     /// is never retired).
     frontier_hlc: Arc<SyncMutex<Option<Hlc>>>,
     /// Data plane: entries and watermarks, per-subscriber, on crossbeam.
-    events_tx: crossbeam_channel::Sender<Arc<StableLogEvent>>,
+    events_tx: crossbeam_channel::Sender<StableLogEvent>,
     events_registry: Registry<StableLogEvent>,
     events_shutdown: Shutdown,
     /// Control plane: the current watermark, level-triggered. Consumers that
@@ -491,7 +491,7 @@ struct BatchAppender {
     end_index: Arc<SyncMutex<Option<LogIndex>>>,
     end_hlc: Arc<SyncMutex<Option<Hlc>>>,
     frontier_hlc: Arc<SyncMutex<Option<Hlc>>>,
-    events_tx: crossbeam_channel::Sender<Arc<StableLogEvent>>,
+    events_tx: crossbeam_channel::Sender<StableLogEvent>,
     watermark: watch::Sender<Option<Hlc>>,
     watermark_wakes: Arc<Wakes>,
 }
@@ -594,11 +594,11 @@ impl BatchAppender {
             for (index, data) in committed {
                 let _ = self
                     .events_tx
-                    .send(Arc::new(StableLogEvent::Appended { index, data }));
+                    .send(StableLogEvent::Appended { index, data });
             }
             if let Some(wm) = new_watermark {
                 *self.end_hlc.lock() = Some(wm);
-                let _ = self.events_tx.send(Arc::new(StableLogEvent::Watermark(wm)));
+                let _ = self.events_tx.send(StableLogEvent::Watermark(wm));
                 self.watermark.send_replace(Some(wm));
                 self.watermark_wakes.wake();
                 metrics::stable_log_end_hlc_physical_ms(wm);
@@ -716,9 +716,7 @@ impl crate::api::StableLogSnapshot for StableLog {
         if advanced {
             metrics::stable_log_end_hlc_physical_ms(end_hlc);
             metrics::stable_log_end_advanced();
-            let _ = self
-                .events_tx
-                .send(Arc::new(StableLogEvent::Watermark(end_hlc)));
+            let _ = self.events_tx.send(StableLogEvent::Watermark(end_hlc));
             self.watermark.send_replace(Some(end_hlc));
             self.watermark_wakes.wake();
         }
@@ -728,8 +726,7 @@ impl crate::api::StableLogSnapshot for StableLog {
     fn subscribe_events(&self) -> Channel<StableLogEvent> {
         self.events_registry
             .subscribe()
-            .map(|ch| ch.map(|event| (*event).clone()))
-            .unwrap_or_else(|_| Channel::empty())
+            .unwrap_or_else(|_| Channel::aborted("stable log subscription"))
     }
 
     fn watch_watermark(&self) -> watch::Receiver<Option<Hlc>> {

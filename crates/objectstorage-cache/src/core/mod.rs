@@ -133,7 +133,7 @@ impl Core {
             evictor: Mutex::new(None),
         });
         inner.publish();
-        let channels = evictor::Channel {
+        let channels = evictor::Channels {
             wake,
             asks: asked,
             stop: stopped,

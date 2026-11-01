@@ -456,7 +456,7 @@ async fn fold_loop_stops_when_cancelled_without_folding() {
     let tail = log
         .reader()
         .subscribe_stable_log(LogIndex::ZERO)
-        .into_channels();
+        .into_channel();
     log.disconnect();
 
     let cancel = CancellationToken::new();
@@ -479,12 +479,11 @@ async fn fold_loop_stops_when_cancelled_without_folding() {
     );
 }
 
-/// A cancel from upstream reaches everything downstream of the fold as a
-/// cancel: the stable-log subscription ends `Cancelled` (zslg's node
-/// shutdown), so the fold stops cleanly as `StopReason::Cancelled`, and a
-/// `Reader::subscribe_stable_log` stream ends `Cancelled` — not the `Aborted`
-/// it gets when the fold stops for any other reason. The log stays quiet throughout:
-/// nothing but the cancel can wake the fold.
+/// A cancel from upstream stops the fold cleanly as `StopReason::Cancelled`.
+/// The fold's fan-out then stops as a producer, so its
+/// `Reader::subscribe_stable_log` streams end `ProducerGone`; a caller that
+/// wants `Cancelled` binds its own `Cancellation` with `until`. The log stays
+/// quiet throughout: nothing but the cancel can wake the fold.
 #[tokio::test]
 async fn an_upstream_cancel_stops_an_idle_fold_and_cancels_its_subscribers() {
     let log = TestLog::new();
@@ -506,7 +505,7 @@ async fn an_upstream_cancel_stops_an_idle_fold_and_cancels_its_subscribers() {
     let tail = log
         .reader()
         .subscribe_stable_log(LogIndex::ZERO)
-        .into_channels()
+        .into_channel()
         .until(&cancellation);
     let never = CancellationToken::new();
     let fold =

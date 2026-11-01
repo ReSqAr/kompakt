@@ -1,7 +1,7 @@
 # Post — channel polish
 
-Implementation: `4b1c706` and the preceding three commits on
-`channel-extraction`. Design: `2026-10-31_design_channel_polish.md`.
+Implementation: squashed commit `8f3e545` on `channel-extraction`.
+Design: `2026-10-31_design_channel_polish.md`.
 
 ## 1. Code review
 
@@ -38,9 +38,9 @@ Implemented as designed:
 - `Channel` rename; `Contiguous`/`StrictlyIncreasing`/`NonDecreasing`.
 - Typed local-store and archive boundaries; generic order errors.
 - `dedup_by_key` + `Contiguous` stable-log loader.
-- Threaded `(tx, registry, shutdown)` fan-out; `Block`/`Shed`; `Arc<T>`;
-  bounded data/register/subscriber queues; `Shutdown` one-shot + join; Tokio
-  bridge.
+- Threaded `(tx, registry, shutdown)` fan-out; `Block`/`Shed`; `T: Clone`
+  (the caller chooses `Arc` if wanted); bounded data/register/subscriber
+  queues; `Shutdown` one-shot + join; Tokio bridge.
 - `zslg` migrated to the tuple; `nvzn` to the keyed registry.
 - Lazy LiveSeam with `take_until` + sentinel error; no `Feed`/`pump`/`ScanEnded`.
 - `empty`, `once`, `take_until`, `dedup_by_key`; `take_while` retained.
@@ -61,8 +61,9 @@ Deviations forced by the implementation:
   observes `ProducerGone` and logs; a producer-side observer can be added later.
 - `LiveSeam` uses `StopReason::LiveStreamEnded` for a generic merged `End`;
   `ScanEnded` is gone.
-- The loader drops a **leading** below-start replay, preserving the overlapping
-  re-append contract; a later backward index is an order violation.
+- The loader drops any index below the start, wherever it appears, preserving
+  the overlapping re-append contract; a backward step at or above the start is
+  an order violation.
 - The zslg local-store overrun test moved to the crate-level `Shed` test: with a
   threaded fan-out, the consumer can drain between elements, so the old
   synchronous overrun timing is not a stable domain test.
@@ -87,6 +88,10 @@ Deviations forced by the implementation:
 - The remaining complexity is not channel plumbing; it is the live-view
   lifecycle (fold cancellation vs fan-out shutdown) and the one-thread-per-
   fan-out resource choice.
+- The fan-out is generic over `T: Clone`; it does not impose `Arc`. `zslg`'s
+  `Data`/`StableLogEvent` are `Bytes`-backed and `nvzn`'s written-ref triple is
+  `Copy`, so the per-subscriber clone is cheap. A future expensive payload can
+  use `T = Arc<Payload>` at the call site.
 
 ## 4. What is next
 

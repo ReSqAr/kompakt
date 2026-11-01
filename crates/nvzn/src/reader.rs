@@ -126,10 +126,11 @@ impl<Ev> Reader<Ev> {
 
     /// Every stable `P` committed from now on, deletions included, as a
     /// [`Ref`] to look up. The fold blocks on a subscriber that stops reading;
-    /// the channel ends only with the fold — with
-    /// [`AbortReason::Cancelled`](crossbeam_combinators::AbortReason::Cancelled) when the fold was
-    /// cancelled (its stop reason is [`StopReason::Cancelled`](crate::StopReason::Cancelled)),
-    /// `Aborted` when it stopped for any other reason.
+    /// the channel ends only with the fold, as
+    /// [`AbortReason::ProducerGone`](crossbeam_combinators::AbortReason::ProducerGone).
+    /// A caller that needs to distinguish a cancellation from a failure binds
+    /// its own [`Cancellation`](crossbeam_combinators::Cancellation) with
+    /// `until`.
     ///
     /// `P` must be over this tenant's events, as for
     /// [`register`](crate::AssociatedProjectorManager::register), and fails
@@ -177,11 +178,7 @@ impl<Ev> Reader<Ev> {
             Err(RegistryError::Full) => {
                 return Err(Error::TooManyPendingSubscriptions(PENDING_SUBSCRIBERS));
             }
-            Err(RegistryError::Closed) => {
-                let (tx, rx) = crossbeam_channel::bounded(1);
-                drop(tx);
-                Channel::from_infinite(rx, "nvzn-subscribe")
-            }
+            Err(RegistryError::Closed) => Channel::aborted("nvzn-subscribe"),
         };
         Ok(stream.map(|entry| Ref::new(entry.2)))
     }

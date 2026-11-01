@@ -533,7 +533,7 @@ impl Ranged<Option<Hlc>> for LiveSeam {
         };
         self.reader
             .subscribe_stable_log(self.from)
-            .into_channels()
+            .into_channel()
             .until(&self.cancelled)
             .chain(Channel::once(Err(zslg::Error::StreamTruncated {
                 what: "live scan ended before the cut".into(),

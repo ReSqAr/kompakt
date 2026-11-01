@@ -173,7 +173,7 @@ pub(in crate::leader) async fn create_snapshot_entry(
 
             let index = Arc::new(AtomicU64::new(next_index_start.saturating_add(1)));
             let seen_terminal = terminal.clone();
-            let tail = data.into_channels().filter_map(move |r| match r {
+            let tail = data.into_channel().filter_map(move |r| match r {
                 Ok(WindowItem::Entry(d)) => {
                     end_hlc_tracker.store(d.data_id.hlc().raw(), Ordering::Relaxed);
                     let idx = LogIndex(index.fetch_add(1, Ordering::Relaxed));

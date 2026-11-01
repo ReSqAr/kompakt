@@ -300,7 +300,7 @@ where
     /// Give up the type-level order guarantee and keep the already-checked
     /// channel.
     #[must_use]
-    pub fn into_channels(self) -> Channel<T> {
+    pub fn into_channel(self) -> Channel<T> {
         self.inner
     }
 
@@ -752,7 +752,7 @@ mod tests {
     #[test]
     fn batch_and_projection_keep_the_order_source() {
         let ordered = strict(vec![1, 2, 3], Some(1));
-        let mut ch = ordered.into_channels();
+        let mut ch = ordered.into_channel();
         let batch: Vec<u64> = ch.ready_batch(2).unwrap().collect();
         assert_eq!(batch, vec![1, 2]);
         let rest: Vec<u64> = std::iter::from_fn(|| ch.recv().ok()).collect();

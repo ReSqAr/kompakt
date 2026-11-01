@@ -15,7 +15,7 @@
 //!     drop()         ⇒ End::Aborted      resume_on_abort / take_while /
 //!                                        until / into_stream
 //!   broadcast(..) -> (tx, registry, shutdown)
-//!     registry.subscribe() ───────────▶ Channel<Arc<T>>  (hang up on lag)
+//!     registry.subscribe() ───────────▶ Channel<T>  (hang up on lag)
 //! ```
 //!
 //! The verdict is the contract: `Complete` means the stream ended cleanly

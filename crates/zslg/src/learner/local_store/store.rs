@@ -84,7 +84,7 @@ pub(crate) struct LocalStore {
     /// forwarder delivering its own log in order.
     integrate_tx: crossbeam_channel::Sender<IntegrateItem>,
     /// Live subscribers to first-time integrations (`subscribe_unstable`).
-    unstable_tx: crossbeam_channel::Sender<Arc<Data>>,
+    unstable_tx: crossbeam_channel::Sender<Data>,
     unstable_registry: Registry<Data>,
     unstable_shutdown: Shutdown,
     /// Test-only fault injection for the commit fence.
@@ -145,11 +145,7 @@ impl LocalStore {
         stable_log: Arc<dyn StableLogSnapshot>,
         dedup_ring: Option<std::num::NonZeroUsize>,
         integrate_tx: crossbeam_channel::Sender<IntegrateItem>,
-        unstable: (
-            crossbeam_channel::Sender<Arc<Data>>,
-            Registry<Data>,
-            Shutdown,
-        ),
+        unstable: (crossbeam_channel::Sender<Data>, Registry<Data>, Shutdown),
     ) -> Self {
         let (unstable_tx, unstable_registry, unstable_shutdown) = unstable;
         let (integrated, _) = watch::channel(());
@@ -217,7 +213,7 @@ impl LocalStore {
             .map(|(data_id, blob)| Data { data_id, blob })
             .collect();
         for data in fresh {
-            let _ = self.unstable_tx.send(Arc::new(data));
+            let _ = self.unstable_tx.send(data);
         }
     }
 
@@ -317,8 +313,7 @@ impl crate::api::LocalStoreView for LocalStore {
     fn subscribe_unstable(&self) -> Channel<Data> {
         self.unstable_registry
             .subscribe()
-            .map(|ch| ch.map(|data| (*data).clone()))
-            .unwrap_or_else(|_| Channel::empty())
+            .unwrap_or_else(|_| Channel::aborted("unstable tail subscription"))
     }
 
     async fn subscription_cursor(&self, upstream: NodeId) -> Result<Option<LogIndex>, Error> {
@@ -1510,7 +1505,7 @@ mod tests {
 
         let got: Vec<Data> = store
             .stream_window_ordered(None, Hlc(1_000), None)
-            .into_channels()
+            .into_channel()
             .into_iter()
             .filter_map(|r| match r {
                 Ok(WindowItem::Entry(d)) => Some(d),
@@ -1539,7 +1534,7 @@ mod tests {
         // Lower bound exclusive, upper bound inclusive: (100, 300] → 200, 300.
         let got: Vec<Data> = store
             .stream_window_ordered(Some(Hlc(100)), Hlc(300), None)
-            .into_channels()
+            .into_channel()
             .into_iter()
             .filter_map(|r| match r {
                 Ok(WindowItem::Entry(d)) => Some(d),
@@ -1579,7 +1574,7 @@ mod tests {
         let cap = std::num::NonZeroUsize::new(2).expect("nonzero");
         let items: Vec<WindowItem> = store
             .stream_window_ordered(None, Hlc(200), Some(cap))
-            .into_channels()
+            .into_channel()
             .into_iter()
             .filter_map(|r| r.ok())
             .collect();
@@ -1625,7 +1620,7 @@ mod tests {
         let cap = std::num::NonZeroUsize::new(100).expect("nonzero");
         let items: Vec<WindowItem> = store
             .stream_window_ordered(None, Hlc(200), Some(cap))
-            .into_channels()
+            .into_channel()
             .into_iter()
             .filter_map(|r| r.ok())
             .collect();
@@ -1658,7 +1653,7 @@ mod tests {
         }
         let items: Vec<WindowItem> = store
             .stream_window_ordered(None, Hlc(200), None)
-            .into_channels()
+            .into_channel()
             .into_iter()
             .filter_map(|r| r.ok())
             .collect();

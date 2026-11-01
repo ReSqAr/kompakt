@@ -123,7 +123,7 @@ impl LocalStoreView for StallingLocalStore {
         crate::ordered::window_stream(
             self.inner
                 .stream_window_ordered(above, upto, max_entries)
-                .into_channels()
+                .into_channel()
                 .filter_map(move |item| {
                     gate.call_once(|| {
                         let _ = release.recv();

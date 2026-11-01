@@ -667,14 +667,14 @@ Open: confirm this simpler shape (no `end_with`/`ScanEnded`).
 
 ### Q14 — Further simplification: no `Feed::pump`
 
-The scan is already a lazy `Channels` (`StableStream::into_channels`). `range`
+The scan is already a lazy `Channels` (`StableStream::into_channel`). `range`
 can return the composed scan directly:
 
 ```rust
 fn range(&self, cut: Option<Hlc>) -> Channels<FoldItem> {
     let Some(until) = cut else { return Channels::empty(); };
     self.reader.subscribe_stable_log(self.from)
-        .into_channels()
+        .into_channel()
         .until(&self.cancelled)
         .take_while(|ev| before(until, ev))
         .filter_map(/* Scan / ScanFailed */)
@@ -899,9 +899,18 @@ complete; the design document is
   subscriber logs `ProducerGone`. `subscription_reorder` remains.
 - `LiveSeam` adds `StopReason::LiveStreamEnded` for a generic merged-stream
   `End`; `ScanEnded` is removed.
-- The loader drops a **leading** below-start replay, preserving the overlapping
-  re-append test; a backward index at/above the start is an order violation.
+- The loader drops any index below the start, wherever it appears, preserving
+  the overlapping re-append test; a backward step at/above the start is an
+  order violation.
 - The zslg local-store overrun test is removed; `Shed` is covered by the
   crate-level fan-out test, where the shed is deterministic.
 - `PENDING_SUBSCRIBERS` is 1024; the full-queue test is removed because the
   threaded registry admits registrations immediately.
+
+## Q19 — Fan-out item is `T: Clone`, not `Arc<T>`
+
+The distribution loop clones one element per matching subscriber; `Arc` is a
+caller choice, not a crate policy. `broadcast`/`keyed` return
+`Sender<T>`/`Channel<T>`, and a user with a large payload can set
+`T = Arc<Payload>`. This removes the per-subscriber `(*event).clone()` adapters
+in `zslg`/`nvzn`; their payloads are already cheap (`Bytes`/`Copy`).

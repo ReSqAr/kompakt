@@ -138,10 +138,10 @@ The loader keeps the HLC non-decreasing check and commits the contiguous prefix
 before surfacing an error. A gap or order violation becomes
 `StreamTruncated`; the durable gap fence in `append` is unchanged.
 
-The archive starts at `next_after(frontier)`. A **leading** below-start replay
-is still dropped (the `append_tolerates_overlapping_reappend` contract); a
-backward index at or above the start is an order violation. The old branch
-skipped any index below the running expected; that broader tolerance is gone.
+The archive starts at `next_after(frontier)`. Any index below the start is
+dropped (the `append_tolerates_overlapping_reappend` contract); a backward step
+at or above the start is an order violation. The old branch skipped any index
+below the running expected; that broader tolerance is gone.
 
 ### 5.4 Boundary labels
 
@@ -176,16 +176,18 @@ let (tx, registry, shutdown) =
     keyed(what, route, data_cap, register_cap, sub_cap, OverflowPolicy::Block);
 
 tx.send(Arc::new(item))?;                 // bounded data queue; blocks
-let sub: Channel<Arc<T>> = registry.subscribe()?;      // or subscribe(key)
+let sub: Channel<T> = registry.subscribe()?;      // or subscribe(key)
 shutdown.cancel();
 shutdown.wait();
 ```
 
-- `tx`: raw `crossbeam_channel::Sender<Arc<T>>`; no `publish` method. The
-  producer owns/wraps the item. `send` blocks when the data queue is full;
-  dropping all `tx` clones drains and ends the fan-out.
+- `tx`: raw `crossbeam_channel::Sender<T>`; no `publish` method. The producer
+  owns the item. `send` blocks when the data queue is full; dropping all `tx`
+  clones drains and ends the fan-out. `T: Clone + Send + 'static`; the fan-out
+  clones once per matching subscriber. If the payload is expensive, the caller
+  can use `T = Arc<Payload>` itself — that is a user choice, not a crate one.
 - `registry`: cloneable `Registry<T>` / `KeyedRegistry<K, T>`. `subscribe`
-  creates a bounded `Channel<Arc<T>>`. It `try_send`s into the bounded
+  creates a bounded `Channel<T>`. It `try_send`s into the bounded
   registration queue (`register_cap`, 1024 in `nvzn`) and returns `Full` when
   full. It does not bind a `Cancellation`; a caller can `.until` itself.
 - `shutdown`: non-cloneable one-owner `Shutdown`. It owns a cap-1 one-shot
@@ -206,7 +208,7 @@ Phase 1 — receive one element:
 Select (biased: cancel, register, data)
   cancel   -> stop
   register -> admit subscriber; continue
-  data     -> one Arc<T>; enter phase 2
+  data     -> one T; enter phase 2
 ```
 
 Registration is checked before data so a subscriber enqueued before an element
@@ -225,7 +227,9 @@ Select(cancel, register, send op for each remaining recipient)
   send     -> op.send(cloned Arc); remove from remaining
 ```
 
-- The element is one `Arc<T>`; each subscriber gets an `Arc::clone`.
+- The element is one `T`; each matching subscriber gets a `clone()`. The
+  fan-out never imposes `Arc`; a caller with a large payload can make `T` an
+  `Arc` and clone that.
 - `Block`: a subscriber whose queue is full has a non-ready send op; the others
   proceed; the element finishes only when all recipients have accepted or
   disconnected. The slowest subscriber paces the element.
@@ -280,10 +284,9 @@ Tokio reactor. `registry.subscribe` is `try_send` and safe from async.
 
 `zslg`:
 
-- `StableLog`: `events_tx: Sender<Arc<StableLogEvent>>`,
+- `StableLog`: `events_tx: Sender<StableLogEvent>`,
   `events_registry: Registry<StableLogEvent>`, `events_shutdown: Shutdown`.
-  `subscribe_events -> Channel<Arc<StableLogEvent>>`; consumers adapt to `Arc`.
-  `Shed` policy, as today.
+  `subscribe_events -> Channel<StableLogEvent>`. `Shed` policy, as today.
 - `LocalStore`: the unstable fan-out is the same triple; `Shed`.
 - `ReplicaLogStore`: the live fan-out is the same triple; the flush loop sends
   with `tx`; `ReplicaSeam::subscribe` uses `registry`; `Shed`.
@@ -293,7 +296,7 @@ Tokio reactor. `registry.subscribe` is `try_send` and safe from async.
 
 - The fold owns `tx` and `shutdown`; readers hold a cloned `registry`. The
   route key is `(TenantId, ProjectionTypeId)`; the item is the written-ref
-  triple (`Arc<(TenantId, ProjectionTypeId, ProjectionId)>`).
+  triple `(TenantId, ProjectionTypeId, ProjectionId)` (Copy).
 - The registration queue, `take_up`, and the fold-side subscriber list are
   removed. A small reader-side `Subscriptions` wrapper remains for the
   **live-view cancellation** (registry + `Cancellation` + an armed
@@ -303,7 +306,8 @@ Tokio reactor. `registry.subscribe` is `try_send` and safe from async.
   channel that ends `ProducerGone`.
 - `publish` sends each written ref with `tx.send`; `Block` policy. The fold
   does not drain a registration queue; the reader’s `subscribe` returns a
-  `Channel<Arc<...>>`; the reader maps the `ProjectionId` into `Ref<P>`.
+  `Channel<(TenantId, ProjectionTypeId, ProjectionId)>`; the reader maps the
+  `ProjectionId` into `Ref<P>`.
 - The fan-out shutdown calls `shutdown.cancel()` when the fold stops for
   cancellation; otherwise the fold drops `shutdown`/`tx` for teardown. All
   subscriber streams end `ProducerGone`; `Cancelled` is no longer delivered by
@@ -321,7 +325,7 @@ The cold-start scan is lazy; no `Feed`, no separate thread.
 ```rust
 let scan = reader
     .subscribe_stable_log(from)
-    .into_channels()
+    .into_channel()
     .chain(Channel::once(Err(zslg::Error::StreamTruncated {
         what: "live scan ended before the cut".into(),
     })))
@@ -355,6 +359,8 @@ it is equivalent to `take_while(|x| !pred(x))`.
 - `Channel<T>` rename; `Channels` disappears.
 - `Channel::empty()`: closed, empty, `Complete`.
 - `Channel::once(item)`: one item, then `Complete`.
+- `Channel::aborted(what)`: empty, `Aborted(ProducerGone { what })` immediately;
+  use it when an infinite source cannot be opened.
 - `Channel::take_until(pred)`: stop before the matching item.
 - `take_while` stays (used by `take_until` and available directly).
 - `dedup_by_key`.
@@ -369,8 +375,8 @@ it is equivalent to `take_while(|x| !pred(x))`.
 
 Crate:
 
-- `Channel::empty/once/take_until`, `dedup_by_key`; end preservation and abort
-  propagation.
+- `Channel::empty/once/aborted/take_until`, `dedup_by_key`; end preservation
+  and abort propagation.
 - Ordered policies under the new names; `LocalStore`/archive closures.
 - Fan-out: broadcast and keyed routing; every matching subscriber gets every
   element; order; Block slowest-paces; Shed removes a full subscriber; a
@@ -400,7 +406,7 @@ Crate:
    new name.
 2. Policy renames; `LocalStoreView` typed; archive `Contiguous`; loader
    `dedup_by_key` + `Contiguous`; tests.
-3. `Channel::empty/once/take_until`; `take_while` tests; no `end_with`.
+3. `Channel::empty/once/aborted/take_until`; `take_while` tests; no `end_with`.
 4. Fan-out rewrite in the crate: `broadcast`/`keyed`, `Registry`, `Shutdown`,
    `OverflowPolicy`, thread, tests.
 5. Migrate `zslg` stable log/local store/replica to the tuple; `Arc` adaptation;
@@ -426,8 +432,9 @@ Steps 1–3 are independent of the fan-out; 4 must precede 5–6; 7 can follow 3
 
 ## 12. Risks and open points
 
-- Subscriber channels now yield `Arc<T>`; every consumer adapts (clone/deref).
-  For `ProjectionId` the `Arc` is overhead but uniform.
+- Subscriber channels yield `T: Clone`; the fan-out clones per subscriber. A
+  caller with an expensive payload can choose `T = Arc<Payload>`; `zslg`'s
+  `Data`/`StableLogEvent` are `Bytes`-backed, so the clone is cheap.
 - `subscription_shed` and `unstable_fanout_hangups` lose their producer-side
   emission; the subscriber log is the replacement. If operators depend on the
   metrics, add an observer.
@@ -435,8 +442,9 @@ Steps 1–3 are independent of the fan-out; 4 must precede 5–6; 7 can follow 3
   join) must be documented and tested. `wait` is the deterministic path.
 - `Shutdown` is one-owner; a component needing both token reaction and its own
   wait must select itself or a signal is added later.
-- The loader’s below-start replay behavior changes from skip to order
-  violation; the archive bound is expected to make it unreachable.
+- The loader drops any below-start index wherever it appears; a backward step
+  at or above the start is an order violation. The archive bound is expected to
+  make the backward case unreachable.
 - The archive’s error detail is intentionally generic; tests and logs move to
   boundary labels.
 - `OrderedChannel` takes a boundary label; the label API must be settled in
