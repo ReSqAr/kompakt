@@ -1,7 +1,7 @@
 # Channel seams — internal model
 
 Working document for the IAIC interview, not a design doc. It states my
-current model only; how it got here is in the decision log (D1–D34). The design
+current model only; how it got here is in the decision log (D1–D36). The design
 doc is the spec.
 
 ## Where we are

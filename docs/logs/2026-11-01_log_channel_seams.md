@@ -604,3 +604,15 @@ without one), `ordered`/`also`/`covers` (three roles), a generic window clip
   sections described the pre-review architecture (free `open` + `Live`, public
   `Recv`/`pump`, fan-out owning the registry, `bool` sends, infinite-only
   `subscribe`, construction-time `defer_async` handle). History stays here.
+
+### D36. Slice 2 `Key` impls; inclusive-to-exclusive migration named
+
+- Slice 2 adds `Hlc: Key<Result<SnapshotEntry, Error>>` and
+  `Hlc: Key<Result<(LogIndex, Data), Error>>`: the archive and
+  `HistoricalReplay` call `also::<NonDecreasing<Hlc>>`, which needs them.
+- The switch to exclusive `after` is a semantic migration, not a rename. Tests
+  and `examples/write_tracker` pass first-wanted indices
+  (`subscribe_stable_log(LogIndex::ZERO)`, `range(LogIndex(0), ..)`):
+  inclusive `ZERO` → `None`, inclusive `k` → `Some(k - 1)`. Slices 2 (`range`)
+  and 4 (`subscribe_stable_log`) state it; a mechanical wrap would skip index 0.
+- Headers of the design and the internal model name D1–D36.

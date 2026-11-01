@@ -1,6 +1,6 @@
 # Channel seams — design
 
-Process: IAIC. Decision log: `2026-11-01_log_channel_seams.md` (D1–D34).
+Process: IAIC. Decision log: `2026-11-01_log_channel_seams.md` (D1–D36).
 Internal model: `2026-11-01_internal_channel_seams.md`. Branch
 `channel-extraction`. The last polish round of the extraction (D17).
 
@@ -731,7 +731,13 @@ Each slice is green (tests, clippy, fmt) before the next.
 2. **Completeness + archive.** Exclusive starts everywhere (`after`, `Gap`,
    `range`, `ArchiveBounds.after`), `Successor::next_after`; `covers`, `also`;
    `defer_async`; archive declaration; compaction merge feeder; lazy
-   `HistoricalReplay`; stable log loader as a declaration (§9.7).
+   `HistoricalReplay`; stable log loader as a declaration (§9.7). `Key` impls
+   for `also::<NonDecreasing<Hlc>>`: `Hlc: Key<Result<SnapshotEntry, Error>>`
+   (archive) and `Hlc: Key<Result<(LogIndex, Data), Error>>` (replay).
+   **Migration hazard:** `range` call sites that pass an inclusive start
+   convert it — inclusive `LogIndex::ZERO` → `None`, inclusive `LogIndex(k)` →
+   `Some(LogIndex(k - 1))` (or the caller's last-seen index); a mechanical
+   `LogIndex(0)` → `Some(LogIndex(0))` would silently skip index 0.
 3. **Kinds + seam.** `Kind`, `Channel<T, K>`, `Feed<T, K>`,
    `OrderedChannel<T, P, K>`, kind rules, `Kind::Proof` (producers and
    `defer_async` become kind-generic), `Key<T>` for `Hlc` on the unstable and
@@ -739,7 +745,10 @@ Each slice is green (tests, clippy, fmt) before the next.
    `above` via `filter_above`, end to end on the replica path; then all
    signatures in zslg/nvzn.
 4. **Resumption.** `Opening`, one resume `Source` behind `Resumable` and
-   `resync`; `subscribe_stable_log(after)`; stable/unstable/nvzn migrated; delete
+   `resync`; `subscribe_stable_log(after)` — production callers (nvzn fold,
+   live view, supervisor) already hold a last-seen index; tests and
+   `examples/write_tracker` pass first-wanted indices and convert as in slice 2
+   (`LogIndex::ZERO` → `None`); stable/unstable/nvzn migrated; delete
    `Tail`/`Ranged`/`blend_chain`, `resume_on_abort`'s public form if unused,
    `stable_stream`.
 
