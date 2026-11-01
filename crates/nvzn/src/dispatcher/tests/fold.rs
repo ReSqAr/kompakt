@@ -533,7 +533,9 @@ async fn an_upstream_cancel_stops_an_idle_fold_and_cancels_its_subscribers() {
     assert_eq!(
         end,
         Err(crossbeam_combinators::End::Aborted {
-            reason: crossbeam_combinators::AbortReason::Cancelled,
+            reason: crossbeam_combinators::AbortReason::ProducerGone {
+                what: "nvzn-subscribe",
+            },
         })
     );
     drop(log);

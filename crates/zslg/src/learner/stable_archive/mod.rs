@@ -19,7 +19,7 @@ use crate::error::Error;
 use crate::hlc::Hlc;
 use crate::ids::LogIndex;
 use crate::meta::SnapshotMetadata;
-use crossbeam_combinators::Channels;
+use crossbeam_combinators::Channel;
 
 /// Depth of the channel handed back by [`stream`](ObjectStoreArchiveReader::stream).
 /// Matches the snapshot-store read channel: the consumer drains on its own
@@ -112,16 +112,13 @@ fn place(index: LogIndex, bounds: ArchiveBounds) -> Placement {
 
 #[async_trait::async_trait]
 impl StableArchiveReader for ObjectStoreArchiveReader {
-    async fn stream(
-        &self,
-        bounds: ArchiveBounds,
-    ) -> Result<Channels<Result<crate::meta::SnapshotEntry, Error>>, Error> {
+    async fn stream(&self, bounds: ArchiveBounds) -> Result<crate::ordered::ArchiveStream, Error> {
         let covering =
             covering_snapshots(&self.raft_state.snapshot().manifest_state.manifest, bounds);
         let from_idx = lower_index(bounds.from);
         let snapshot_store = self.snapshot_store.clone();
         let (tx, rx) = crossbeam_channel::bounded(ARCHIVE_STREAM_CHANNEL_CAP);
-        let (ch_out, closer) = Channels::from(rx, "stable_archive::stream");
+        let (ch_out, closer) = Channel::from(rx, "stable_archive::stream");
 
         // Every exit is a `break`, so the single `closer.close()` below is
         // unconditional and `tx` — still owned by this scope — drops after it.
@@ -164,17 +161,6 @@ impl StableArchiveReader for ObjectStoreArchiveReader {
                                     Placement::Below => continue,
                                     Placement::Within => {
                                         let idx = entry.global_index;
-                                        let want = exp.unwrap_or(from_idx);
-                                        if idx != want {
-                                            let _ = inner_tx.send(Err(Error::StableLogGap(
-                                                format!(
-                                                    "archive stream: expected index {} but got {}",
-                                                    want.raw(),
-                                                    idx.raw(),
-                                                ),
-                                            )));
-                                            return (exp, hlc, true);
-                                        }
                                         let entry_hlc = entry.data.data_id.hlc();
                                         assert!(
                                             hlc.is_none_or(|prev| entry_hlc >= prev),
@@ -226,7 +212,7 @@ impl StableArchiveReader for ObjectStoreArchiveReader {
             closer.close();
         });
 
-        Ok(ch_out)
+        Ok(crate::ordered::archive_stream(ch_out, from_idx))
     }
 }
 

@@ -6,7 +6,7 @@
 //! have already started, and one of the writer's never finishes:
 //!
 //! ```text
-//!   crossbeam_combinators::Channels::recv                     channel.rs
+//!   crossbeam_combinators::Channel::recv                     channel.rs
 //!   zslg::quorum::coordinator::run_replica            coordinator.rs
 //!   tokio::runtime::blocking::pool::Task::run
 //! ```
@@ -19,7 +19,7 @@
 //!
 //! Ignored because it hangs rather than fails: there is nothing to assert
 //! against until the wait itself is bounded (a `recv` with a deadline, or a
-//! liveness guard like the one [`Channels::into_stream`] already races
+//! liveness guard like the one [`Channel::into_stream`] already races
 //! against). Run it with `--ignored` under a timeout to check a fix.
 
 #![allow(unused_crate_dependencies, reason = "integration test")]

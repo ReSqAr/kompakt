@@ -20,7 +20,7 @@ use crate::api::LocalStoreView;
 use crate::hlc::Hlc;
 use crate::ids::{LogIndex, NodeId};
 use crate::meta::Data;
-use crossbeam_combinators::Channels;
+use crossbeam_combinators::Channel;
 
 #[async_trait::async_trait]
 pub(crate) trait LocalStoreMut: LocalStoreView {
@@ -34,7 +34,7 @@ pub(crate) trait LocalStoreMut: LocalStoreView {
     /// slow commit stalls every caller, not just the one behind it.
     async fn integrate_loop(
         &self,
-        records: Channels<Result<(NodeId, LogIndex, Data), crate::Error>>,
+        records: Channel<Result<(NodeId, LogIndex, Data), crate::Error>>,
     ) -> Result<(), crate::Error>;
 
     /// Purge all local-store rows whose HLC is strictly below `threshold`.

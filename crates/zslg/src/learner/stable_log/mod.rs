@@ -121,8 +121,8 @@ use crate::hlc::Hlc;
 use crate::ids::LogIndex;
 use crate::meta::{Data, SnapshotEntry, StableLogEvent};
 use crate::metrics::{self, LogType, OpState};
-use crossbeam_combinators::Channels;
-use crossbeam_combinators::{Fanout, Wakes};
+use crossbeam_combinators::Channel;
+use crossbeam_combinators::{OverflowPolicy, Registry, Shutdown, Wakes, broadcast};
 
 // ── key codec ───────────────────────────────────────────────────────────────
 //
@@ -357,7 +357,9 @@ pub(crate) struct StableLog {
     /// is never retired).
     frontier_hlc: Arc<SyncMutex<Option<Hlc>>>,
     /// Data plane: entries and watermarks, per-subscriber, on crossbeam.
-    events: Arc<Fanout<StableLogEvent>>,
+    events_tx: crossbeam_channel::Sender<Arc<StableLogEvent>>,
+    events_registry: Registry<StableLogEvent>,
+    events_shutdown: Shutdown,
     /// Control plane: the current watermark, level-triggered. Consumers that
     /// only want to know "has the watermark reached X" (`learner::quorum`) or
     /// "did it move" (`local_store::purge`) read this instead of the event
@@ -430,10 +432,13 @@ impl StableLog {
             metrics::log_index_frontier(LogType::Stable, idx.raw());
         }
 
-        let events = Arc::new(Fanout::new(
-            subscriber_queue_capacity,
+        let (events_tx, events_registry, events_shutdown) = broadcast(
             "stable log subscription",
-        ));
+            std::num::NonZeroUsize::new(1024).unwrap_or(std::num::NonZeroUsize::MIN),
+            std::num::NonZeroUsize::new(1024).unwrap_or(std::num::NonZeroUsize::MIN),
+            subscriber_queue_capacity,
+            OverflowPolicy::Shed,
+        );
         let (watermark, _) = watch::channel(end_hlc);
 
         Ok(Self {
@@ -442,7 +447,9 @@ impl StableLog {
             end_index: Arc::new(SyncMutex::new(end_index)),
             end_hlc: Arc::new(SyncMutex::new(end_hlc)),
             frontier_hlc: Arc::new(SyncMutex::new(frontier_hlc)),
-            events,
+            events_tx,
+            events_registry,
+            events_shutdown,
             watermark,
             watermark_wakes: Arc::new(Wakes::new("stable watermark moves")),
         })
@@ -476,12 +483,15 @@ pub(crate) async fn spawn_stable_store(
     reason = "cumulative append count bounded by log size, far below usize::MAX"
 )]
 struct BatchAppender {
-    rx: Channels<Result<SnapshotEntry, Error>>,
+    rx: crossbeam_combinators::OrderedChannel<
+        Result<SnapshotEntry, Error>,
+        crossbeam_combinators::Contiguous<LogIndex>,
+    >,
     storage: Arc<Storage>,
     end_index: Arc<SyncMutex<Option<LogIndex>>>,
     end_hlc: Arc<SyncMutex<Option<Hlc>>>,
     frontier_hlc: Arc<SyncMutex<Option<Hlc>>>,
-    events: Arc<Fanout<StableLogEvent>>,
+    events_tx: crossbeam_channel::Sender<Arc<StableLogEvent>>,
     watermark: watch::Sender<Option<Hlc>>,
     watermark_wakes: Arc<Wakes>,
 }
@@ -524,35 +534,27 @@ impl BatchAppender {
                     }
                 };
                 let idx = entry.global_index;
-                let expected = LogIndex::next_after(frontier);
-                if idx > expected {
+                debug_assert_eq!(
+                    idx,
+                    LogIndex::next_after(frontier),
+                    "contiguous loader yielded a non-successor"
+                );
+                let hlc = entry.data.data_id.hlc();
+                if let Some(prev) = watermark.max(frontier_entry_hlc)
+                    && hlc < prev
+                {
                     pending_err = Some(Error::StableLogGap(format!(
-                        "input stream jumped to index {} but the next appendable index is {} — \
-                         refusing to commit a gap",
-                        idx.raw(),
-                        expected.raw(),
+                        "snapshot stream must be HLC-sorted: got {hlc:?} after {prev:?}"
                     )));
                     break;
                 }
-                if idx == expected {
-                    let hlc = entry.data.data_id.hlc();
-                    if let Some(prev) = watermark.max(frontier_entry_hlc)
-                        && hlc < prev
-                    {
-                        pending_err = Some(Error::StableLogGap(format!(
-                            "snapshot stream must be HLC-sorted: got {hlc:?} after {prev:?}"
-                        )));
-                        break;
-                    }
-                    // Settled only strictly below this entry: several entries
-                    // can share an HLC and a batch boundary may fall inside the
-                    // group, so `hlc` itself waits for `record_end_hlc` (see
-                    // `StableLog`).
-                    watermark = watermark.max(settled_below(hlc));
-                    frontier = Some(idx);
-                    frontier_entry_hlc = Some(hlc);
-                    committed.push((entry.global_index, entry.data));
-                }
+                // Settled only strictly below this entry: several entries can
+                // share an HLC and a batch boundary may fall inside the group,
+                // so `hlc` itself waits for `record_end_hlc` (see `StableLog`).
+                watermark = watermark.max(settled_below(hlc));
+                frontier = Some(idx);
+                frontier_entry_hlc = Some(hlc);
+                committed.push((entry.global_index, entry.data));
             }
 
             let n = committed.len();
@@ -590,11 +592,13 @@ impl BatchAppender {
             }
             metrics::log_writes(LogType::Stable, n);
             for (index, data) in committed {
-                self.events.send(&StableLogEvent::Appended { index, data });
+                let _ = self
+                    .events_tx
+                    .send(Arc::new(StableLogEvent::Appended { index, data }));
             }
             if let Some(wm) = new_watermark {
                 *self.end_hlc.lock() = Some(wm);
-                self.events.send(&StableLogEvent::Watermark(wm));
+                let _ = self.events_tx.send(Arc::new(StableLogEvent::Watermark(wm)));
                 self.watermark.send_replace(Some(wm));
                 self.watermark_wakes.wake();
                 metrics::stable_log_end_hlc_physical_ms(wm);
@@ -625,6 +629,12 @@ impl BatchAppender {
     }
 }
 
+impl Drop for StableLog {
+    fn drop(&mut self) {
+        self.events_shutdown.cancel();
+    }
+}
+
 #[async_trait::async_trait]
 impl crate::api::StableLogSnapshot for StableLog {
     fn end_index(&self) -> Option<LogIndex> {
@@ -635,10 +645,7 @@ impl crate::api::StableLogSnapshot for StableLog {
         *self.end_hlc.lock()
     }
 
-    async fn append(
-        &self,
-        entries: Channels<Result<SnapshotEntry, Error>>,
-    ) -> Result<usize, Error> {
+    async fn append(&self, entries: Channel<Result<SnapshotEntry, Error>>) -> Result<usize, Error> {
         // The entire drain → encode → commit → fsync → frontier-advance →
         // broadcast loop runs on ONE blocking thread (CLAUDE.md §8; mirrors
         // `replica/log.rs::flush_loop_blocking`). The caller (`integrate_manifest`)
@@ -650,13 +657,24 @@ impl crate::api::StableLogSnapshot for StableLog {
         // Serialize the frontier/watermark read-modify-write against
         // `record_end_hlc`; held across the blocking task.
         let _g = self.write_lock.lock().await;
+        let start = LogIndex::next_after(*self.end_index.lock());
+        let entries = entries
+            .dedup_by_key(|item: &Result<SnapshotEntry, Error>| {
+                item.as_ref().ok().map(|entry| entry.global_index)
+            })
+            .filter_map(move |item| match item {
+                Ok(entry) if entry.global_index < start => None,
+                other => Some(other),
+            });
+        let entries =
+            crossbeam_combinators::OrderedChannel::named(entries, Some(start), "stable log loader");
         let appender = BatchAppender {
             rx: entries,
             storage: Arc::clone(&self.storage),
             end_index: Arc::clone(&self.end_index),
             end_hlc: Arc::clone(&self.end_hlc),
             frontier_hlc: Arc::clone(&self.frontier_hlc),
-            events: Arc::clone(&self.events),
+            events_tx: self.events_tx.clone(),
             watermark: self.watermark.clone(),
             watermark_wakes: Arc::clone(&self.watermark_wakes),
         };
@@ -698,31 +716,36 @@ impl crate::api::StableLogSnapshot for StableLog {
         if advanced {
             metrics::stable_log_end_hlc_physical_ms(end_hlc);
             metrics::stable_log_end_advanced();
-            self.events.send(&StableLogEvent::Watermark(end_hlc));
+            let _ = self
+                .events_tx
+                .send(Arc::new(StableLogEvent::Watermark(end_hlc)));
             self.watermark.send_replace(Some(end_hlc));
             self.watermark_wakes.wake();
         }
         Ok(())
     }
 
-    fn subscribe_events(&self) -> Channels<StableLogEvent> {
-        self.events.subscribe()
+    fn subscribe_events(&self) -> Channel<StableLogEvent> {
+        self.events_registry
+            .subscribe()
+            .map(|ch| ch.map(|event| (*event).clone()))
+            .unwrap_or_else(|_| Channel::empty())
     }
 
     fn watch_watermark(&self) -> watch::Receiver<Option<Hlc>> {
         self.watermark.subscribe()
     }
 
-    fn watermark_moves(&self) -> Channels<()> {
+    fn watermark_moves(&self) -> Channel<()> {
         self.watermark_wakes.subscribe()
     }
 
-    fn range(&self, from: LogIndex, until: LogIndex) -> Channels<Result<(LogIndex, Data), Error>> {
+    fn range(&self, from: LogIndex, until: LogIndex) -> Channel<Result<(LogIndex, Data), Error>> {
         // `[from, until)` — the half-open index window, streamed off a blocking
         // scan through a bounded channel.
         let storage = Arc::clone(&self.storage);
         let (tx, rx) = crossbeam_channel::bounded::<Result<(LogIndex, Data), Error>>(32);
-        let (ch, closer) = Channels::from(rx, "StableLogSnapshot::range");
+        let (ch, closer) = Channel::from(rx, "StableLogSnapshot::range");
         tokio::task::spawn_blocking(move || {
             let mut decode_err: Option<Error> = None;
             let scan = for_each_entry(
@@ -800,14 +823,14 @@ mod tests {
     use crate::api::StableLogSnapshot;
     use crate::tests::make_data;
 
-    /// Build a closed `Channels` pre-loaded with `items` — test convenience
+    /// Build a closed `Channel` pre-loaded with `items` — test convenience
     /// for the channel-based [`StableLogSnapshot::append`] signature (mirrors how
     /// `integrate_manifest`'s decode worker feeds the channel, then drops its
     /// sender at end-of-stream).
     fn rx_of(
         items: impl IntoIterator<Item = Result<(LogIndex, Data), Error>>,
-    ) -> Channels<Result<SnapshotEntry, Error>> {
-        Channels::from_vec(
+    ) -> Channel<Result<SnapshotEntry, Error>> {
+        Channel::from_vec(
             items
                 .into_iter()
                 .map(|item| item.map(|(global_index, data)| SnapshotEntry { global_index, data }))
@@ -1055,7 +1078,7 @@ mod tests {
         store
             .write_snapshot(
                 id,
-                Channels::from_vec(entries.into_iter().map(Ok).collect()),
+                Channel::from_vec(entries.into_iter().map(Ok).collect()),
                 CompressionLevel::standard(),
                 crate::metrics::ObjectStoreReason::SnapshotCreate,
             )
@@ -1178,7 +1201,7 @@ mod tests {
         assert_eq!(log.end_hlc(), Some(Hlc(199)));
     }
 
-    /// Gapless ingest fence (docs/STABLE_LOG_GAP_FIX.md): an input stream that
+    /// Contiguous ingest fence (docs/STABLE_LOG_GAP_FIX.md): an input stream that
     /// JUMPS past `frontier + 1` must be rejected before anything commits — a
     /// committed gap would be hidden forever by the manifest-integration skip.
     #[tokio::test]
@@ -1198,7 +1221,7 @@ mod tests {
             .await
             .expect_err("gap must be rejected");
         assert!(
-            err.to_string().contains("gap"),
+            matches!(err, Error::StreamTruncated { ref what } if what.contains("stable log loader")),
             "typed gap error expected, got: {err}"
         );
 

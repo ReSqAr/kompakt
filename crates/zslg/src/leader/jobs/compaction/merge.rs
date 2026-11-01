@@ -40,7 +40,7 @@ use crate::leader::integrator::{IntentOutcome, IntentSubmitter};
 use crate::meta::{SnapshotEntry, SnapshotMetadata};
 use crate::metrics::{self, OpState};
 use crate::object_store::CompressionLevel;
-use crossbeam_combinators::Channels;
+use crossbeam_combinators::Channel;
 
 /// A time window; snapshots sharing a bucket at this width may merge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -303,7 +303,7 @@ async fn merge_group(
     // go into `tx` too, so `write_snapshot` is the one place that surfaces them.
     let (tx, rx) =
         crossbeam_channel::bounded(crate::leader::jobs::snapshot::SNAPSHOT_WRITE_FORWARDER_CAP);
-    let (entries_ch, entries_closer) = Channels::from(rx, "merge_group feeder");
+    let (entries_ch, entries_closer) = Channel::from(rx, "merge_group feeder");
     let store = snapshot_store.clone();
     let cancel = snapshot_store.shutdown_token();
     let feeder = tokio::spawn(async move {
@@ -556,7 +556,7 @@ mod tests {
         for (idx, rec) in records {
             let _ = tx.send(Ok((source, idx, rec)));
         }
-        let (ch, closer) = crossbeam_combinators::Channels::from(rx, "test integrate");
+        let (ch, closer) = crossbeam_combinators::Channel::from(rx, "test integrate");
         // Close before the last sender drops, or the consumer forms its
         // verdict as "disconnected, not yet closed" — an abort.
         closer.close();

@@ -1,19 +1,21 @@
 //! Blocking channel pipelines, both ends.
 //!
-//! A [`Channels<T>`] is the read half: a composable pull-source over crossbeam
-//! receivers, with an explicit [`End`] verdict. A [`Feed<T>`] or [`Fanout<T>`]
-//! is the write half: the sender plus the proof of completion. The graph runs
-//! at pull time, on the consumer's thread; nothing here spawns.
+//! A [`Channel<T>`] is the read half: a composable pull-source over crossbeam
+//! receivers, with an explicit [`End`] verdict. A [`Feed<T>`] is a write half;
+//! [`broadcast`]/[`keyed`] add a distribution thread plus a cloneable registry,
+//! a bounded data queue, and a single [`Shutdown`] owner. The channel graph
+//! itself still runs at pull time; only the fan-out owns a thread.
 //!
 //! ```text
 //!   write half                         read half
 //!   ──────────                         ─────────
-//!   Feed::channel(cap, what) ────────▶ Channels<T>
+//!   Feed::channel(cap, what) ────────▶ Channel<T>
 //!     send(item)                         recv() / try_recv() / ready_batch()
 //!     close()        ⇒ End::Complete     filter_map / map / merge / chain /
 //!     drop()         ⇒ End::Aborted      resume_on_abort / take_while /
 //!                                        until / into_stream
-//!   Fanout<T>::subscribe() ───────────▶ Channels<T>  (hang up on lag)
+//!   broadcast(..) -> (tx, registry, shutdown)
+//!     registry.subscribe() ───────────▶ Channel<Arc<T>>  (hang up on lag)
 //! ```
 //!
 //! The verdict is the contract: `Complete` means the stream ended cleanly
@@ -29,7 +31,7 @@
 //! boundary means.
 //!
 //! Tokio and futures are optional: the `tokio` feature adds
-//! [`Channels::into_stream`] and [`Cancellation::from_token`]. The core is
+//! [`Channel::into_stream`] and [`Cancellation::from_token`]. The core is
 //! crossbeam-only.
 
 // Dev-dependencies used by feature-gated tests; keep the unused-dependency
@@ -51,10 +53,14 @@ mod ordered;
 
 pub use blend::{Ranged, Tail, blend_chain};
 pub use channel::{
-    AbortReason, CancelHandle, Cancellation, ChannelIter, Channels, Closer, End, ReadyBatch,
+    AbortReason, CancelHandle, Cancellation, Channel, ChannelIter, Closer, End, ReadyBatch,
 };
-pub use fanout::{Fanout, Wakes};
+#[cfg(feature = "tokio")]
+pub use fanout::shutdown_on_token;
+pub use fanout::{
+    KeyedRegistry, OverflowPolicy, Registry, RegistryError, Shutdown, Wakes, broadcast, keyed,
+};
 pub use feed::Feed;
 pub use ordered::{
-    Gap, Gapless, Key, NonDecreasing, OrderPolicy, OrderedChannel, StrictlyMonotone, Successor,
+    Contiguous, Gap, Key, NonDecreasing, OrderPolicy, OrderedChannel, StrictlyIncreasing, Successor,
 };

@@ -40,14 +40,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::object_store::CompressionLevel;
-use crossbeam_combinators::Channels;
 use object_store::ObjectStore;
 use object_store::memory::InMemory;
 use tokio::sync::Notify;
 use tokio::sync::watch;
 
 use crate::api::ReplicatedRaftState;
-use crate::api::{LocalStoreMut, LocalStoreView, Replica, Router, StableLogSnapshot, WindowItem};
+use crate::api::{LocalStoreMut, LocalStoreView, Replica, Router, StableLogSnapshot};
 use crate::error::Error;
 use crate::hlc::HlcGate;
 use crate::hlc::{Hlc, HlcParts};
@@ -76,7 +75,7 @@ async fn integrate_batch(
     for (idx, rec) in records {
         let _ = tx.send(Ok((source, idx, rec)));
     }
-    let (ch, closer) = crossbeam_combinators::Channels::from(rx, "test integrate");
+    let (ch, closer) = crossbeam_combinators::Channel::from(rx, "test integrate");
     // Close before the last sender drops, or the consumer forms its
     // verdict as "disconnected, not yet closed" — an abort.
     closer.close();
@@ -98,7 +97,7 @@ struct StallingLocalStore {
 
 #[async_trait::async_trait]
 impl LocalStoreView for StallingLocalStore {
-    fn stream_above_hlc(&self, threshold: Option<Hlc>) -> Channels<Result<Data, Error>> {
+    fn stream_above_hlc(&self, threshold: Option<Hlc>) -> crate::ordered::LocalStoreStream {
         self.inner.stream_above_hlc(threshold)
     }
 
@@ -106,7 +105,7 @@ impl LocalStoreView for StallingLocalStore {
     ///
     /// `stream_window_ordered` is synchronous, so it cannot await here — and
     /// `block_on` inside the runtime panics (and violates CLAUDE.md §4). The
-    /// returned `Channels` is drained on a blocking thread
+    /// returned `Channel` is drained on a blocking thread
     /// (`snapshot/create.rs` pulls it inside `spawn_blocking`), so gating the
     /// first pull is both legal and the stall point we actually want: after
     /// `create_snapshot_entry` captured its base generation, before the window
@@ -116,26 +115,30 @@ impl LocalStoreView for StallingLocalStore {
         above: Option<Hlc>,
         upto: Hlc,
         max_entries: Option<std::num::NonZeroUsize>,
-    ) -> Channels<Result<WindowItem, Error>> {
+    ) -> crate::ordered::WindowStream {
         self.entered.notify_one();
         let release = self.release.clone();
         // `filter_map` takes `Fn`, so the once-flag needs interior mutability.
         let gate = std::sync::Once::new();
-        self.inner
-            .stream_window_ordered(above, upto, max_entries)
-            .filter_map(move |item| {
-                gate.call_once(|| {
-                    let _ = release.recv();
-                });
-                Some(item)
-            })
+        crate::ordered::window_stream(
+            self.inner
+                .stream_window_ordered(above, upto, max_entries)
+                .into_channels()
+                .filter_map(move |item| {
+                    gate.call_once(|| {
+                        let _ = release.recv();
+                    });
+                    Some(item)
+                }),
+            "stalling window",
+        )
     }
 
     fn subscribe_integrated(&self) -> watch::Receiver<()> {
         self.inner.subscribe_integrated()
     }
 
-    fn subscribe_unstable(&self) -> crossbeam_combinators::Channels<crate::meta::Data> {
+    fn subscribe_unstable(&self) -> crossbeam_combinators::Channel<crate::meta::Data> {
         self.inner.subscribe_unstable()
     }
 

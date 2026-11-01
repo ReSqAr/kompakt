@@ -52,7 +52,7 @@ use crate::network::messages::{
     RpcStreamKind,
 };
 use crate::network::tcp::{self, SocketOpts};
-use crossbeam_combinators::Channels;
+use crossbeam_combinators::Channel;
 
 mod write_stream;
 pub(super) use write_stream::open_write;
@@ -382,8 +382,8 @@ impl StreamOpener {
     fn write(
         &self,
         node_id: NodeId,
-        input: Channels<StampedWrite>,
-    ) -> Channels<Result<WriteOutcome, Error>> {
+        input: Channel<StampedWrite>,
+    ) -> Channel<Result<WriteOutcome, Error>> {
         open_write(
             self.rpc_weak.clone(),
             Target::Registered(node_id),
@@ -570,8 +570,8 @@ impl RpcClient {
     pub(in crate::network) fn write(
         &self,
         node_id: NodeId,
-        input: Channels<StampedWrite>,
-    ) -> Channels<Result<WriteOutcome, Error>> {
+        input: Channel<StampedWrite>,
+    ) -> Channel<Result<WriteOutcome, Error>> {
         self.streams.write(node_id, input)
     }
 

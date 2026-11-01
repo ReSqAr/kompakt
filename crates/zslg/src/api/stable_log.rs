@@ -24,7 +24,7 @@
 //! §8), fed straight from the off-reactor snapshot decode. A `blocking_send` on
 //! a full channel is the backpressure that paces decode to the commit rate.
 
-use crossbeam_combinators::Channels;
+use crossbeam_combinators::Channel;
 
 use crate::hlc::Hlc;
 use crate::ids::LogIndex;
@@ -48,11 +48,11 @@ pub(crate) trait StableLogSnapshot: Send + Sync + 'static {
     fn end_hlc(&self) -> Option<Hlc>;
 
     /// Append decoded snapshot entries (chunked commit + fsync + fan-out).
-    /// Gapless-ingest fence: an index past `end + 1` is rejected
+    /// Contiguous-ingest fence: an index past `end + 1` is rejected
     /// (`Error::StableLogGap`) rather than leaving a hole.
     async fn append(
         &self,
-        entries: Channels<Result<SnapshotEntry, crate::Error>>,
+        entries: Channel<Result<SnapshotEntry, crate::Error>>,
     ) -> Result<usize, crate::Error>;
 
     /// Record that the prefix is loaded up to the manifest watermark `end_hlc`.
@@ -68,7 +68,7 @@ pub(crate) trait StableLogSnapshot: Send + Sync + 'static {
     /// is to replay from your cursor and subscribe again — see
     /// the fan-out and `learner::read`.
     #[must_use]
-    fn subscribe_events(&self) -> Channels<StableLogEvent>;
+    fn subscribe_events(&self) -> Channel<StableLogEvent>;
 
     /// The current watermark, level-triggered — for consumers that want log
     /// *state*, not its data. No payload crosses it and it cannot lag, so a
@@ -81,14 +81,14 @@ pub(crate) trait StableLogSnapshot: Send + Sync + 'static {
     /// wake stands for any number of moves, so it cannot lag either. Infinite;
     /// it ends `Aborted` only when the log is dropped.
     #[must_use]
-    fn watermark_moves(&self) -> Channels<()>;
+    fn watermark_moves(&self) -> Channel<()>;
 
     #[must_use]
     fn range(
         &self,
         from: LogIndex,
         until: LogIndex,
-    ) -> Channels<Result<(LogIndex, Data), crate::Error>>;
+    ) -> Channel<Result<(LogIndex, Data), crate::Error>>;
 
     /// Durably delete everything at or below `hlc_threshold`: a `WriteBatch`
     /// range-delete, fenced before returning. The threshold is clamped

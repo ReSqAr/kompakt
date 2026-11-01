@@ -235,7 +235,7 @@ pub enum Error {
 
 // ── Boxed variant payloads ────────────────────────────────────────────────────
 //
-// `Error` rides in the item type of every streamed channel, and a `Channels`
+// `Error` rides in the item type of every streamed channel, and a `Channel`
 // ring pre-allocates `capacity` slots — so the *error* arm sets the stride of
 // queues that are empty in the common case. A measured 8192-deep subscribe ring
 // paid ~143 B/slot for 88 B of useful payload, purely because one variant
@@ -457,7 +457,7 @@ impl<T, E: std::fmt::Display> ToCodec<T> for Result<T, E> {
 mod tests {
     use super::*;
 
-    /// `Error` rides in every streamed channel item — a `Channels<Result<T, Error>>`
+    /// `Error` rides in every streamed channel item — a `Channel<Result<T, Error>>`
     /// ring pre-allocates `capacity` slots, so the *error* arm sets the slot
     /// stride for queues that are empty in the common case. A `DataId` (32 B) is
     /// the largest thing the payload arm genuinely needs; an error has no claim

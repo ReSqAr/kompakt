@@ -1,11 +1,11 @@
-//! Microbenchmark for `crossbeam_combinators::Channels`' poll-routing cost.
+//! Microbenchmark for `crossbeam_combinators::Channel`' poll-routing cost.
 //!
 //! An example, not a test: nothing runs it in CI and no number is pinned. It
 //! exists to put a figure on the ordinal-routing change, in the shape this repo
 //! already sanctions for perf work — an example binary, no `criterion`, no
 //! `benches/` (CLAUDE.md §14, `docs/TESTING.md` §Status), alongside
 //! `loadgen.rs`. Being an example is also the point of it: it drives
-//! `Channels` through the same public surface an embedder has, so it cannot
+//! `Channel` through the same public surface an embedder has, so it cannot
 //! quietly measure something only the crate's insides can reach.
 //!
 //! ## What is being measured
@@ -46,7 +46,7 @@ use std::time::{Duration, Instant};
 
 use crossbeam_channel::Sender;
 
-use crossbeam_combinators::Channels;
+use crossbeam_combinators::Channel;
 
 /// Items pulled per timed round, split evenly across the leaves.
 const ITEMS_PER_ROUND: usize = 120_000;
@@ -58,7 +58,7 @@ const ROUNDS: usize = 9;
 /// The senders must outlive the timed loop: a leaf whose last `Sender` dropped
 /// disconnects, and the collapse would change the topology mid-measurement.
 struct Rig {
-    ch: Channels<u64>,
+    ch: Channel<u64>,
     keepalive: Vec<Sender<u64>>,
     items: usize,
 }
@@ -67,7 +67,7 @@ struct Rig {
 /// left-leaning. Pre-filling is what keeps `ready()` from ever parking.
 fn merged(leaves: usize, per_leaf: usize) -> Rig {
     let mut keepalive = Vec::with_capacity(leaves);
-    let mut built: Option<Channels<u64>> = None;
+    let mut built: Option<Channel<u64>> = None;
     for _ in 0..leaves {
         let (tx, rx) = crossbeam_channel::bounded::<u64>(per_leaf);
         for n in 0..per_leaf {
@@ -75,14 +75,14 @@ fn merged(leaves: usize, per_leaf: usize) -> Rig {
             tx.send(v).unwrap_or(());
         }
         keepalive.push(tx);
-        let leaf = Channels::from_infinite(rx, "bench leaf");
+        let leaf = Channel::from_infinite(rx, "bench leaf");
         built = Some(match built.take() {
             Some(acc) => acc.merge(leaf),
             None => leaf,
         });
     }
     Rig {
-        ch: built.unwrap_or_else(|| Channels::from_vec(Vec::new())),
+        ch: built.unwrap_or_else(|| Channel::from_vec(Vec::new())),
         keepalive,
         items: leaves.saturating_mul(per_leaf),
     }
@@ -135,7 +135,7 @@ fn timed(label: &str, items: usize, mut build: impl FnMut() -> Rig) {
 }
 
 fn bench_recv_routing() {
-    println!("\n== Channels::recv, every leaf pre-filled ==");
+    println!("\n== Channel::recv, every leaf pre-filled ==");
     for leaves in [1usize, 2, 4, 8, 16] {
         let per_leaf = ITEMS_PER_ROUND.checked_div(leaves).unwrap_or(1);
         let items = leaves.saturating_mul(per_leaf);
@@ -148,7 +148,7 @@ fn bench_recv_routing() {
 fn bench_recv_with_filtered_retry() {
     // Half the items are filtered out, so every delivered item costs two trips
     // through register/ready/poll.
-    println!("\n== Channels::recv through a filter_map dropping half ==");
+    println!("\n== Channel::recv through a filter_map dropping half ==");
     let per_leaf = ITEMS_PER_ROUND.checked_div(2).unwrap_or(1);
     let mut rounds = Vec::with_capacity(ROUNDS);
     let delivered = per_leaf; // 2 leaves x per_leaf items, half survive

@@ -31,7 +31,9 @@ pub(crate) use fold_state::FoldState;
 pub use handles::{Encoder, EventWriter, Syncer};
 pub use registration::AssociatedProjectorManager;
 use registration::compute_config_hash;
-pub(crate) use subscribers::{PENDING_SUBSCRIBERS, Subscribers, Subscriptions};
+pub(crate) use subscribers::{
+    PENDING_SUBSCRIBERS, SUBSCRIBER_CAPACITY, Subscribers, SubscriptionItem, Subscriptions,
+};
 
 use crate::{
     ArcStore, Error, IndexId, ProjectionTypeId, ProjectorManager, RocksDBStore, StoreConfig,
@@ -125,7 +127,18 @@ impl Dispatcher {
     ) -> Result<Self, Error> {
         let max_hlc = store.read()?.watermark()?.hlc;
         let (tx, rx) = watch::channel(max_hlc);
-        let (subscriptions, subscribers) = Subscriptions::new();
+        let (events_tx, registry, events_shutdown) = crossbeam_combinators::keyed(
+            "nvzn-subscribe",
+            |entry: &SubscriptionItem| Some((entry.0, entry.1)),
+            std::num::NonZeroUsize::new(1024).unwrap_or(std::num::NonZeroUsize::MIN),
+            std::num::NonZeroUsize::new(PENDING_SUBSCRIBERS).unwrap_or(std::num::NonZeroUsize::MIN),
+            std::num::NonZeroUsize::new(SUBSCRIBER_CAPACITY).unwrap_or(std::num::NonZeroUsize::MIN),
+            crossbeam_combinators::OverflowPolicy::Block,
+        );
+        let (cancel, cancelled) = crossbeam_combinators::CancelHandle::new();
+        let cancel = Arc::new(cancel);
+        let subscriptions = Subscriptions::new(registry, cancelled, Arc::clone(&cancel));
+        let subscribers = Subscribers::new(events_tx, events_shutdown, cancel);
         Ok(Self {
             store,
             handlers: BTreeMap::new(),

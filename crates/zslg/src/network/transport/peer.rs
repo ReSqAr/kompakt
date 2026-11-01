@@ -26,7 +26,7 @@ use crate::network::messages::{
 };
 use crate::raft::TypeConfig;
 use async_trait::async_trait;
-use crossbeam_combinators::Channels;
+use crossbeam_combinators::Channel;
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use openraft::error::{InstallSnapshotError, RaftError};
@@ -120,13 +120,13 @@ impl Replica for TcpPeerClient {
     /// for as long as the caller drives it. Only a *registered* peer can be
     /// written to: `Target::Direct` exists for cluster join (membership + status
     /// only), before the peer's `NodeId` is even known.
-    fn write(&self, input: Channels<StampedWrite>) -> Channels<Result<WriteOutcome, Error>> {
+    fn write(&self, input: Channel<StampedWrite>) -> Channel<Result<WriteOutcome, Error>> {
         match &self.target {
             Target::Registered(node_id) => self.rpc_client.write(*node_id, input),
             Target::Direct(addr) => {
                 // A direct-dialed peer (join-time transport, before its NodeId is
                 // known) never accepts writes: yield one terminal error.
-                Channels::from_vec(vec![Err(Error::Rpc(format!(
+                Channel::from_vec(vec![Err(Error::Rpc(format!(
                     "direct-dialed peer {addr:?} does not accept writes (join-time transport)"
                 )))])
             }
@@ -136,7 +136,7 @@ impl Replica for TcpPeerClient {
     fn subscribe_from(&self, from: Option<LogIndex>) -> crate::ordered::ReplicaStream {
         match &self.target {
             Target::Registered(node_id) => self.rpc_client.subscribe_from(*node_id, from),
-            Target::Direct(_) => crate::ordered::replica_stream(Channels::from_vec(vec![]), from),
+            Target::Direct(_) => crate::ordered::replica_stream(Channel::from_vec(vec![]), from),
         }
     }
 

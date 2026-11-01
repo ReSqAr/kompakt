@@ -4,7 +4,7 @@
 //!   node.shutdown_token().cancel()
 //!     └─> zslg reader's streams end End::Aborted { reason: crossbeam_combinators::AbortReason::Cancelled }   (even on a quiet log)
 //!           └─> nvzn fold stops as StopReason::Cancelled    (dispatcher task: Ok)
-//!                 └─> Reader::subscribe_stable_log streams end End::Aborted { reason: crossbeam_combinators::AbortReason::Cancelled }
+//!                 └─> Reader::subscribe_stable_log streams end End::Aborted { reason: ProducerGone }
 //! ```
 //!
 //! The quiet log is the point. A fold parked in `recv` with nothing arriving
@@ -80,7 +80,9 @@ async fn cancelling_the_node_stops_an_idle_fold_and_its_subscribers() {
     assert_eq!(
         end,
         crossbeam_combinators::End::Aborted {
-            reason: crossbeam_combinators::AbortReason::Cancelled
+            reason: crossbeam_combinators::AbortReason::ProducerGone {
+                what: "nvzn-subscribe",
+            },
         }
     );
 }

@@ -27,7 +27,7 @@
 use crate::Error;
 use crate::ids::{DataId, LogIndex};
 use crate::meta::{Data, RaftState, ReplicaStatus};
-use crossbeam_combinators::Channels;
+use crossbeam_combinators::Channel;
 
 /// A write with the wall-clock time it entered a queue, for *direct*
 /// queue-residency measurement (the write→replica triangulation). Threaded
@@ -105,7 +105,7 @@ pub(crate) trait Replica: Send + Sync + 'static {
     /// stamps at the point it hands the write over; the stamp costs an
     /// `Instant` and is never optional, because a second unstamped entry point
     /// is how the measurement silently stops covering a path.
-    fn write(&self, input: Channels<StampedWrite>) -> Channels<Result<WriteOutcome, Error>>;
+    fn write(&self, input: Channel<StampedWrite>) -> Channel<Result<WriteOutcome, Error>>;
 
     /// Resumable subscription to the replica's append stream.
     fn subscribe_from(&self, from: Option<LogIndex>) -> crate::ordered::ReplicaStream;

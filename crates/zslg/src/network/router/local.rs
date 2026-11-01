@@ -22,7 +22,7 @@ use crate::api::{
 use crate::ids::{LogIndex, NodeId, PeerAddr};
 use crate::meta::{RaftState, ReplicaStatus};
 use crate::raft::TypeConfig;
-use crossbeam_combinators::Channels;
+use crossbeam_combinators::Channel;
 use futures::stream::BoxStream;
 use openraft::error::{InstallSnapshotError, RaftError};
 use openraft::raft::{
@@ -53,7 +53,7 @@ impl LocalReplicaClient {
 
 #[async_trait::async_trait]
 impl Replica for LocalReplicaClient {
-    fn write(&self, input: Channels<StampedWrite>) -> Channels<Result<WriteOutcome, Error>> {
+    fn write(&self, input: Channel<StampedWrite>) -> Channel<Result<WriteOutcome, Error>> {
         // Straight through, timestamp intact, so the replica service measures
         // the server→raft dispatch wait for the leader's own (self) append too.
         self.replica.write(input)

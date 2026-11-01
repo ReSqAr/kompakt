@@ -11,8 +11,7 @@
 
 use crate::error::Error;
 use crate::ids::LogIndex;
-use crate::meta::SnapshotEntry;
-use crossbeam_combinators::Channels;
+use crate::ordered::ArchiveStream;
 
 /// Inclusive lower bound of an archive stream.
 #[derive(Debug, Clone, Copy)]
@@ -52,8 +51,5 @@ pub(crate) trait StableArchiveReader: Send + Sync {
     /// The outer `Result` is a setup failure (nothing to stream); a per-snapshot
     /// open or decode error arrives as an `Err` item, so a consumer that fences
     /// on the first error still aborts cleanly.
-    async fn stream(
-        &self,
-        bounds: ArchiveBounds,
-    ) -> Result<Channels<Result<SnapshotEntry, Error>>, Error>;
+    async fn stream(&self, bounds: ArchiveBounds) -> Result<ArchiveStream, Error>;
 }

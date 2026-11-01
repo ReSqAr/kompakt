@@ -4,7 +4,9 @@
 //! differs by source. These impls keep the key concept at the boundary without
 //! putting it on the item.
 
-use crossbeam_combinators::{Channels, Gapless, Key, OrderedChannel, StrictlyMonotone, Successor};
+use crossbeam_combinators::{
+    Channel, Contiguous, Key, OrderedChannel, StrictlyIncreasing, Successor,
+};
 
 use crate::api::WindowItem;
 use crate::error::Error;
@@ -56,23 +58,57 @@ impl Key<Result<WindowItem, Error>> for DataId {
 /// The replica append stream: strictly increasing indices, forward purge gaps
 /// allowed.
 pub(crate) type ReplicaStream =
-    OrderedChannel<Result<(LogIndex, Data), Error>, StrictlyMonotone<LogIndex>>;
+    OrderedChannel<Result<(LogIndex, Data), Error>, StrictlyIncreasing<LogIndex>>;
 
 /// Wrap a replica stream with the strict policy and its cursor.
 pub(crate) fn replica_stream(
-    ch: Channels<Result<(LogIndex, Data), Error>>,
+    ch: Channel<Result<(LogIndex, Data), Error>>,
     from: Option<LogIndex>,
 ) -> ReplicaStream {
-    OrderedChannel::new(ch, Some(LogIndex::next_after(from)))
+    OrderedChannel::named(ch, Some(LogIndex::next_after(from)), "replica subscription")
 }
 
 /// The stable-log read: gapless indices, replaying from `from` inclusive.
-pub type StableStream = OrderedChannel<Result<StableLogEvent, Error>, Gapless<LogIndex>>;
+pub type StableStream = OrderedChannel<Result<StableLogEvent, Error>, Contiguous<LogIndex>>;
+
+/// The local store's above-HLC scan: strictly increasing `DataId`s.
+pub(crate) type LocalStoreStream = OrderedChannel<Result<Data, Error>, StrictlyIncreasing<DataId>>;
+
+/// The local store's bounded window scan; terminals are no-key items.
+pub(crate) type WindowStream =
+    OrderedChannel<Result<WindowItem, Error>, StrictlyIncreasing<DataId>>;
+
+/// The archive stream: gapless indices, tiled from snapshots.
+pub(crate) type ArchiveStream = OrderedChannel<Result<SnapshotEntry, Error>, Contiguous<LogIndex>>;
+
+/// Wrap a local-store scan with its `StrictlyIncreasing` contract.
+pub(crate) fn local_store_stream(
+    ch: Channel<Result<Data, Error>>,
+    what: &'static str,
+) -> LocalStoreStream {
+    OrderedChannel::named(ch, None, what)
+}
+
+/// Wrap a local-store window scan with its `StrictlyIncreasing` contract.
+pub(crate) fn window_stream(
+    ch: Channel<Result<WindowItem, Error>>,
+    what: &'static str,
+) -> WindowStream {
+    OrderedChannel::named(ch, None, what)
+}
+
+/// Wrap an archive stream with its `Contiguous` contract.
+pub(crate) fn archive_stream(
+    ch: Channel<Result<SnapshotEntry, Error>>,
+    from: LogIndex,
+) -> ArchiveStream {
+    OrderedChannel::named(ch, Some(from), "archive stream")
+}
 
 /// Wrap a stable-log stream with the gapless policy and its inclusive start.
 pub(crate) fn stable_stream(
-    ch: Channels<Result<StableLogEvent, Error>>,
+    ch: Channel<Result<StableLogEvent, Error>>,
     from: LogIndex,
 ) -> StableStream {
-    OrderedChannel::new(ch, Some(from))
+    OrderedChannel::named(ch, Some(from), "stable log stream")
 }

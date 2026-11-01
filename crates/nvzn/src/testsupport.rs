@@ -16,7 +16,7 @@ use crate::{
     TenantId, View, WithWireFormat, Write,
 };
 use bytes::Bytes;
-use crossbeam_combinators::Channels;
+use crossbeam_combinators::Channel;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use zslg::{Data, Hlc, LogIndex, StableLogEvent};
@@ -351,11 +351,11 @@ impl zslg::Reader for FailingSyncReader {
         self.inner.subscribe_stable_log(from)
     }
 
-    fn unstable_tail(&self) -> Channels<Result<Data, zslg::Error>> {
+    fn unstable_tail(&self) -> Channel<Result<Data, zslg::Error>> {
         self.inner.unstable_tail()
     }
 
-    fn subscribe_unstable_tail(&self) -> Channels<Result<zslg::UnstableEvent, zslg::Error>> {
+    fn subscribe_unstable_tail(&self) -> Channel<Result<zslg::UnstableEvent, zslg::Error>> {
         self.inner.subscribe_unstable_tail()
     }
 }
@@ -457,10 +457,10 @@ impl zslg::Reader for ScriptedReader {
             .expect("test mutex")
             .take()
             .expect("a scripted reader serves one subscription");
-        zslg::StableStream::new(Channels::from_infinite(rx, "scripted"), Some(from))
+        zslg::StableStream::new(Channel::from_infinite(rx, "scripted"), Some(from))
     }
 
-    fn unstable_tail(&self) -> Channels<Result<Data, zslg::Error>> {
+    fn unstable_tail(&self) -> Channel<Result<Data, zslg::Error>> {
         let items = self
             .unstable
             .lock()
@@ -469,12 +469,12 @@ impl zslg::Reader for ScriptedReader {
             .cloned()
             .map(Ok)
             .collect();
-        Channels::from_vec(items)
+        Channel::from_vec(items)
     }
 
     /// The staged unstable entries above the watermark, once: a scripted
     /// reader has no live leg, so the stream then ends `Aborted`.
-    fn subscribe_unstable_tail(&self) -> Channels<Result<zslg::UnstableEvent, zslg::Error>> {
+    fn subscribe_unstable_tail(&self) -> Channel<Result<zslg::UnstableEvent, zslg::Error>> {
         let watermark = self.stable_watermark();
         let entries = self.unstable.lock().expect("test mutex").clone();
         let (tx, rx) = crossbeam_channel::unbounded();
@@ -486,6 +486,6 @@ impl zslg::Reader for ScriptedReader {
                 let _ = tx.send(Ok(zslg::UnstableEvent::Appended(data)));
             }
         }
-        Channels::from_infinite(rx, "scripted unstable")
+        Channel::from_infinite(rx, "scripted unstable")
     }
 }

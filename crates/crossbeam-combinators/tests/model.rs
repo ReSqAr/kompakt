@@ -6,23 +6,23 @@
 //! A model-based check of finite combinator graphs.
 //!
 //! This is the external oracle for the experiment: whatever happens inside
-//! `Channels`, a graph of closed leaves must deliver exactly the model's
+//! `Channel`, a graph of closed leaves must deliver exactly the model's
 //! multiset, in the model's order when the graph is ordered (leaves, chains,
 //! maps and filters; a merge makes the order unspecified). It also pins
 //! `try_recv` and `recv` to the same result, which is the contract the routing
 //! rewrites must preserve.
 
-use crossbeam_combinators::{AbortReason, Channels, End, Feed, Ranged, Tail, blend_chain};
+use crossbeam_combinators::{AbortReason, Channel, End, Feed, Ranged, Tail, blend_chain};
 use proptest::prelude::*;
 
 /// A segment with items already queued, then a disconnect without a close.
-fn aborted(items: Vec<u64>) -> Channels<u64> {
+fn aborted(items: Vec<u64>) -> Channel<u64> {
     let (tx, rx) = crossbeam_channel::bounded(items.len().max(1));
     for item in items {
         tx.send(item).unwrap();
     }
     drop(tx);
-    Channels::from_infinite(rx, "aborted")
+    Channel::from_infinite(rx, "aborted")
 }
 
 #[derive(Debug, Clone)]
@@ -48,13 +48,13 @@ fn arb_node() -> impl Strategy<Value = Node> {
 }
 
 impl Node {
-    fn build(&self) -> Channels<u64> {
+    fn build(&self) -> Channel<u64> {
         match self {
-            Self::Leaf(items) => Channels::from_vec(items.clone()),
+            Self::Leaf(items) => Channel::from_vec(items.clone()),
             Self::Aborted => {
                 let (tx, rx) = crossbeam_channel::bounded::<u64>(1);
                 drop(tx);
-                Channels::from_infinite(rx, "aborted")
+                Channel::from_infinite(rx, "aborted")
             }
             Self::Merge(a, b) => a.build().merge(b.build()),
             Self::Chain(a, b) => a.build().chain(b.build()),
@@ -183,7 +183,7 @@ proptest! {
 
     #[test]
     fn resume_on_abort_concatenates_aborted_segments(segments in prop::collection::vec(prop::collection::vec(0u64..100, 0..5), 0..6)) {
-        let mut ch = Channels::resume_on_abort(0usize, {
+        let mut ch = Channel::resume_on_abort(0usize, {
             let segments = segments.clone();
             move |next, _previous| {
                 let segment = segments.get(*next)?;
@@ -211,7 +211,7 @@ proptest! {
         items in prop::collection::vec(0u64..100, 0..20),
         cut in 0u64..100,
     ) {
-        let mut ch = Channels::from_vec(items.clone()).take_while(move |v| *v < cut);
+        let mut ch = Channel::from_vec(items.clone()).take_while(move |v| *v < cut);
         let got: Vec<u64> = std::iter::from_fn(|| ch.recv().ok()).collect();
         let want: Vec<u64> = items.iter().copied().take_while(|v| *v < cut).collect();
         prop_assert_eq!(&got, &want);
@@ -249,15 +249,15 @@ impl Tail for TestSeam {
     type Item = u64;
     type Cut = u64;
 
-    fn subscribe(&self) -> Channels<u64> {
-        Channels::from_vec(self.live.clone())
+    fn subscribe(&self) -> Channel<u64> {
+        Channel::from_vec(self.live.clone())
     }
 
     fn cut(&self) -> u64 {
         self.cut
     }
 
-    fn above(&self, live: Channels<u64>, cut: u64) -> Channels<u64> {
+    fn above(&self, live: Channel<u64>, cut: u64) -> Channel<u64> {
         live.filter_map(move |v| (v > cut).then_some(v))
     }
 }
@@ -265,9 +265,9 @@ impl Tail for TestSeam {
 impl Ranged<u64> for TestSeam {
     type Item = u64;
 
-    fn range(&self, cut: u64) -> Channels<u64> {
+    fn range(&self, cut: u64) -> Channel<u64> {
         assert_eq!(cut, self.cut);
-        Channels::from_vec(self.history.clone())
+        Channel::from_vec(self.history.clone())
     }
 }
 

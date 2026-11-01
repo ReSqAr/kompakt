@@ -51,7 +51,7 @@ async fn integrate_batch(
     for (idx, rec) in records {
         let _ = tx.send(Ok((source, idx, rec)));
     }
-    let (ch, closer) = crossbeam_combinators::Channels::from(rx, "test integrate");
+    let (ch, closer) = crossbeam_combinators::Channel::from(rx, "test integrate");
     // Close before the last sender drops, or the consumer forms its
     // verdict as "disconnected, not yet closed" — an abort.
     closer.close();
@@ -80,7 +80,7 @@ async fn append_entries(local_store: &LocalStore, entries: &[Data]) {
 async fn snapshot_refuses_to_commit_an_aborted_window() {
     use crate::api::LocalStoreView;
     use crate::error::Error;
-    use crossbeam_combinators::Channels;
+    use crossbeam_combinators::Channel;
 
     use tokio::sync::watch;
 
@@ -92,7 +92,7 @@ async fn snapshot_refuses_to_commit_an_aborted_window() {
 
     #[async_trait::async_trait]
     impl LocalStoreView for TruncatingLocalStore {
-        fn stream_above_hlc(&self, threshold: Option<Hlc>) -> Channels<Result<Data, Error>> {
+        fn stream_above_hlc(&self, threshold: Option<Hlc>) -> crate::ordered::LocalStoreStream {
             self.inner.stream_above_hlc(threshold)
         }
         fn stream_window_ordered(
@@ -100,19 +100,19 @@ async fn snapshot_refuses_to_commit_an_aborted_window() {
             _above: Option<Hlc>,
             _upto: Hlc,
             _max_entries: Option<std::num::NonZeroUsize>,
-        ) -> Channels<Result<WindowItem, Error>> {
+        ) -> crate::ordered::WindowStream {
             let (tx, rx) = crossbeam_channel::bounded(4);
-            let (ch, closer) = Channels::from(rx, "truncated window");
+            let (ch, closer) = Channel::from(rx, "truncated window");
             tx.send(Ok(WindowItem::Entry(make_data(1, 100, b"a"))))
                 .unwrap();
             drop(tx);
             drop(closer); // never closed: the scan died
-            ch
+            crate::ordered::window_stream(ch, "truncated window")
         }
         fn subscribe_integrated(&self) -> watch::Receiver<()> {
             self.inner.subscribe_integrated()
         }
-        fn subscribe_unstable(&self) -> crossbeam_combinators::Channels<crate::meta::Data> {
+        fn subscribe_unstable(&self) -> crossbeam_combinators::Channel<crate::meta::Data> {
             self.inner.subscribe_unstable()
         }
         async fn subscription_cursor(&self, upstream: NodeId) -> Result<Option<LogIndex>, Error> {
@@ -564,14 +564,14 @@ async fn fenced_write_rejected_on_stale_generation() {
 /// leader during a leadership flap). The generation fence rejects it and the
 /// concurrent manifest entry + watermark survive.
 ///
-/// NOTE: Ignored post-Channels refactoring. The old async `stream_window_ordered`
+/// NOTE: Ignored post-Channel refactoring. The old async `stream_window_ordered`
 /// allowed async injection (foreign manifest commit) during the window-ordered
-/// read. The sync `Channels<T>` return type runs on the caller's thread — async
+/// read. The sync `Channel<T>` return type runs on the caller's thread — async
 /// injection from a tokio worker panics (`block_on` from within a runtime).
 /// Restoring this test requires bridging sync injection into the async pipeline
 /// (e.g. signal + yield in `create_snapshot_entry` before the snapshot commit).
 #[tokio::test]
-#[ignore = "needs async injection bridge for sync Channels pipeline"]
+#[ignore = "needs async injection bridge for sync Channel pipeline"]
 async fn invariant_stale_snapshot_commit_is_fenced() {
     use std::sync::atomic::AtomicBool;
 
@@ -581,8 +581,7 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
     use crate::hlc::{Hlc, HlcParts};
     use crate::ids::{LogIndex, NodeId, RaftGeneration, SnapshotId};
     use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
-    use crate::meta::{Data, SnapshotMetadata};
-    use crossbeam_combinators::Channels;
+    use crate::meta::SnapshotMetadata;
 
     use crate::tests::{FixedClock, ReadyReplica};
 
@@ -619,7 +618,7 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
 
     #[async_trait::async_trait]
     impl LocalStoreView for InjectingLocalStore {
-        fn stream_above_hlc(&self, threshold: Option<Hlc>) -> Channels<Result<Data, Error>> {
+        fn stream_above_hlc(&self, threshold: Option<Hlc>) -> crate::ordered::LocalStoreStream {
             self.inner.stream_above_hlc(threshold)
         }
 
@@ -628,7 +627,7 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
             above: Option<Hlc>,
             upto: Hlc,
             max_entries: Option<std::num::NonZeroUsize>,
-        ) -> Channels<Result<WindowItem, Error>> {
+        ) -> crate::ordered::WindowStream {
             self.inner.stream_window_ordered(above, upto, max_entries)
         }
 
@@ -636,7 +635,7 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
             self.inner.subscribe_integrated()
         }
 
-        fn subscribe_unstable(&self) -> crossbeam_combinators::Channels<crate::meta::Data> {
+        fn subscribe_unstable(&self) -> crossbeam_combinators::Channel<crate::meta::Data> {
             self.inner.subscribe_unstable()
         }
 
@@ -890,7 +889,7 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
     use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
     use crate::meta::SnapshotEntry;
     use crate::tests::ReadyReplica;
-    use crossbeam_combinators::Channels;
+    use crossbeam_combinators::Channel;
 
     /// Replica stub: always drained, no end_index — quorum checks pass instantly.
     struct OnePeerRouter {
@@ -973,7 +972,7 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
         async fn write_snapshot(
             &self,
             id: SnapshotId,
-            entries: Channels<Result<SnapshotEntry, Error>>,
+            entries: Channel<Result<SnapshotEntry, Error>>,
             compression: CompressionLevel,
             _reason: crate::metrics::ObjectStoreReason,
         ) -> Result<usize, Error> {
@@ -992,7 +991,7 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
             &self,
             id: SnapshotId,
             _reason: crate::metrics::ObjectStoreReason,
-        ) -> Result<Channels<Result<SnapshotEntry, Error>>, Error> {
+        ) -> Result<Channel<Result<SnapshotEntry, Error>>, Error> {
             self.inner
                 .read_snapshot(id, crate::metrics::ObjectStoreReason::ArchiveRead)
                 .await

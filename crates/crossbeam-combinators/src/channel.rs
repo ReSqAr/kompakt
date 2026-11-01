@@ -1,6 +1,6 @@
-//! `Channels<T>` — the blocking read half of a pipeline.
+//! `Channel<T>` — the blocking read half of a pipeline.
 //!
-//! A `Channels<T>` owns a private tree of sources: a leaf (one crossbeam
+//! A `Channel<T>` owns a private tree of sources: a leaf (one crossbeam
 //! receiver), a concurrent merge, a sequential chain, a guard raced against a
 //! liveness signal or [`Cancellation`], a lazy `resume_on_abort`, a bounded
 //! `take_while`, and pull-time `map`/`filter_map`. The tree is invisible through
@@ -17,7 +17,7 @@
 //!
 //! - [`End::Complete`]: the stream ended cleanly. A producer called
 //!   [`Closer::close`], every phase/branch completed, or a
-//!   [`Channels::take_while`] bound was reached.
+//!   [`Channel::take_while`] bound was reached.
 //! - [`End::Aborted`]: the stream did not complete cleanly. The
 //!   [`AbortReason`] says who or what ended it.
 //!
@@ -25,7 +25,7 @@
 //! [`AbortReason::ProducerGone`]; a fired cancellation is
 //! [`AbortReason::Cancelled`]; a dropped unfired handle is
 //! [`AbortReason::CancelHandleDropped`]. The library never decides that an
-//! abort is recoverable — [`Channels::resume_on_abort`] hands it to the caller.
+//! abort is recoverable — [`Channel::resume_on_abort`] hands it to the caller.
 //!
 //! A `take_while` bound is a clean end of the derived stream. If the source
 //! ends before the bound, that is also `Complete`; bound-vs-short-read is a
@@ -40,16 +40,16 @@
 //!
 //! ## Composition
 //!
-//! [`Channels::merge`] selects across two sources and drops a dead branch as
-//! soon as it dies, releasing whatever its closures captured. [`Channels::chain`]
+//! [`Channel::merge`] selects across two sources and drops a dead branch as
+//! soon as it dies, releasing whatever its closures captured. [`Channel::chain`]
 //! runs phases in order and condemns the chain on an abort.
-//! [`Channels::resume_on_abort`] rebuilds a stream after an abort, handing
-//! that abort to the caller. [`Channels::take_while`] ends at a consumer bound;
-//! [`Channels::filter_map`], [`Channels::map`] and [`Channels::until`]
+//! [`Channel::resume_on_abort`] rebuilds a stream after an abort, handing
+//! that abort to the caller. [`Channel::take_while`] ends at a consumer bound;
+//! [`Channel::filter_map`], [`Channel::map`] and [`Channel::until`]
 //! transform and bound a stream at pull time.
 //!
 //! The write half lives next door: [`crate::Feed`] for one producer and
-//! [`crate::Fanout`]/[`crate::Wakes`] for many. The seam
+//! [`crate::broadcast`]/[`crate::keyed`]/[`crate::Wakes`] for many. The seam
 //! ([`crate::Tail`], [`crate::Ranged`], [`crate::blend_chain`]) composes a live
 //! tail with a bounded history.
 
@@ -68,7 +68,7 @@ use futures::stream::BoxStream;
 #[cfg(feature = "tokio")]
 const STREAM_BRIDGE_CAP: usize = 256;
 
-/// Why a [`Channels`] stopped yielding items.
+/// Why a [`Channel`] stopped yielding items.
 ///
 /// The top level is only “clean” or “not clean”. The detail lives in
 /// [`AbortReason`], so a producer close, a consumer bound, and a cancellation
@@ -89,7 +89,7 @@ pub enum AbortReason {
     /// A data channel disconnected without a close: the producer panicked, was
     /// discarded before it ran, simply forgot, or an infinite source ended.
     ProducerGone { what: &'static str },
-    /// A [`Cancellation`] bound with [`Channels::until`] fired. Items still
+    /// A [`Cancellation`] bound with [`Channel::until`] fired. Items still
     /// buffered when it fired may or may not have been delivered.
     Cancelled,
     /// A cancellation handle was dropped without firing. This is teardown, not
@@ -134,7 +134,7 @@ impl std::fmt::Display for AbortReason {
 }
 
 /// The producer's half of an explicit close. Handed out by
-/// [`Channels::from`] so a construction site cannot forget it exists.
+/// [`Channel::from`] so a construction site cannot forget it exists.
 ///
 /// Dropping this without calling [`close`](Self::close) marks the stream
 /// [`End::Aborted`] — that is the whole point, so the "I forgot" case and the
@@ -205,7 +205,7 @@ pub(crate) trait Source<T>: Send {
     /// follows it, because the splits are computed at poll time while the
     /// registration was built before `Select::ready` blocked. Nothing
     /// threatens that today — every mutating method takes `&mut self` and the
-    /// consumer holds `&mut Channels`, so no leaf can die while `ready` is
+    /// consumer holds `&mut Channel`, so no leaf can die while `ready` is
     /// parked — but a source that mutated itself from elsewhere would break
     /// routing without touching this file.
     fn leaf_count(&self) -> usize;
@@ -222,7 +222,7 @@ pub(crate) trait Source<T>: Send {
 
 /// The lifecycle of a single wrapped `Receiver`. `Alive` holds the receiver and
 /// the consumer's half of the explicit close (or `None` for an
-/// [`Channels::from_infinite`] stream — no closer may exist, so any termination
+/// [`Channel::from_infinite`] stream — no closer may exist, so any termination
 /// is [`End::Aborted`]). When the data channel disconnects, the verdict is
 /// resolved from `close_rx` and the state moves to `Resolved` — or `Pending`
 /// if the closer has not spoken yet (the non-memoisation safety net, see
@@ -795,11 +795,11 @@ impl<T: Send + 'static> Source<T> for ChainState<T> {
 /// as long as anyone is still listening", and the guard carries no items: its
 /// only event is disconnecting.
 ///
-/// Used by [`Channels::into_stream`], where the guard's sender rides with the
+/// Used by [`Channel::into_stream`], where the guard's sender rides with the
 /// returned stream, so the drain thread stops the moment the consumer drops it
 /// rather than parking until an item that may never come.
 ///
-/// Also [`Channels::until`], where the guard is a [`Cancellation`] and `fired`
+/// Also [`Channel::until`], where the guard is a [`Cancellation`] and `fired`
 /// is `Some`. Its disconnect ends the stream the same way — whatever holds the
 /// stream may be what keeps its producer alive, so the guard is the one thing
 /// that can be relied on to wake the consumer — and `fired` only picks the
@@ -911,7 +911,7 @@ impl<T: Send + 'static> Source<T> for Guarded<T> {
 
 // ── Cancellation ───────────────────────────────────────────────────────
 
-/// A cancellation that can end a blocked [`Channels::recv`].
+/// A cancellation that can end a blocked [`Channel::recv`].
 ///
 /// A tokio [`CancellationToken`](tokio_util::sync::CancellationToken) cannot
 /// wake a crossbeam `Select`, but a disconnecting receiver can, and every clone
@@ -997,7 +997,7 @@ impl Cancellation {
         cancellation
     }
 
-    /// A cancellation that never fires: [`Channels::until`] with it is a
+    /// A cancellation that never fires: [`Channel::until`] with it is a
     /// no-op. For a caller with nothing to cancel on.
     #[must_use]
     pub fn never() -> Self {
@@ -1041,7 +1041,7 @@ impl Cancellation {
 struct ResumeOnAbort<S, T> {
     state: S,
     #[allow(clippy::type_complexity, reason = "one boxed closure, named inline")]
-    next: Box<dyn FnMut(&mut S, Option<End>) -> Option<Channels<T>> + Send>,
+    next: Box<dyn FnMut(&mut S, Option<End>) -> Option<Channel<T>> + Send>,
     current: Option<Box<dyn Source<T>>>,
     /// The end of the segment before `current`, reported once by `end_reason`
     /// when `next` finally declines.
@@ -1252,13 +1252,118 @@ impl<T: Send + 'static> Source<T> for TakeWhile<T> {
     }
 }
 
-// ── Channels<T> ────────────────────────────────────────────────────────
+// ── DedupByKey<T, K, F> ────────────────────────────────────────────────
 
-pub struct Channels<T> {
+/// Drop consecutive items whose key repeats.
+///
+/// No-key items (errors, watermarks) pass through and do not change the last
+/// key. This is a stream transform, not an order policy: the caller can pair it
+/// with `Contiguous` when exact succession is required.
+struct DedupByKey<T, K, F> {
+    inner: Option<Box<dyn Source<T>>>,
+    key: F,
+    last: Option<K>,
+    done: Option<End>,
+}
+
+impl<T, K, F> Source<T> for DedupByKey<T, K, F>
+where
+    T: Send + 'static,
+    K: PartialEq + Copy + Send + 'static,
+    F: Fn(&T) -> Option<K> + Send + Sync + 'static,
+{
+    fn register<'a>(&'a mut self, sel: &mut crossbeam_channel::Select<'a>) -> usize {
+        self.inner.as_mut().map_or(0, |src| src.register(sel))
+    }
+
+    fn poll(&mut self, ordinal: usize) -> Poll<T> {
+        let Some(mut inner) = self.inner.take() else {
+            return Poll::Dead;
+        };
+        match inner.poll(ordinal) {
+            Poll::Got(item) => match (self.key)(&item) {
+                Some(key) if self.last == Some(key) => {
+                    self.inner = Some(inner);
+                    Poll::Filtered
+                }
+                Some(key) => {
+                    self.last = Some(key);
+                    self.inner = Some(inner);
+                    Poll::Got(item)
+                }
+                None => {
+                    self.inner = Some(inner);
+                    Poll::Got(item)
+                }
+            },
+            Poll::Filtered => {
+                self.inner = Some(inner);
+                Poll::Filtered
+            }
+            Poll::Empty => {
+                self.inner = Some(inner);
+                Poll::Empty
+            }
+            Poll::Dead => {
+                self.done = Some(inner.end_reason());
+                Poll::Dead
+            }
+        }
+    }
+
+    fn drain_first(&mut self) -> Option<T> {
+        loop {
+            let mut inner = self.inner.take()?;
+            match inner.drain_first() {
+                Some(item) => match (self.key)(&item) {
+                    Some(key) if self.last == Some(key) => {
+                        self.inner = Some(inner);
+                        continue;
+                    }
+                    Some(key) => {
+                        self.last = Some(key);
+                        self.inner = Some(inner);
+                        return Some(item);
+                    }
+                    None => {
+                        self.inner = Some(inner);
+                        return Some(item);
+                    }
+                },
+                None => {
+                    if inner.leaf_count() == 0 {
+                        self.done = Some(inner.end_reason());
+                        return None;
+                    }
+                    self.inner = Some(inner);
+                    return None;
+                }
+            }
+        }
+    }
+
+    fn leaf_count(&self) -> usize {
+        self.inner.as_ref().map_or(0, |src| src.leaf_count())
+    }
+
+    fn end_reason(&mut self) -> End {
+        match self.done {
+            Some(end) => end,
+            None => self
+                .inner
+                .as_mut()
+                .map_or(End::Complete, |src| src.end_reason()),
+        }
+    }
+}
+
+// ── Channel<T> ────────────────────────────────────────────────────────
+
+pub struct Channel<T> {
     pub(crate) source: Box<dyn Source<T>>,
 }
 
-impl<T: Send + 'static> Channels<T> {
+impl<T: Send + 'static> Channel<T> {
     /// Wrap a **finite** receiver, handing back the producer's [`Closer`].
     ///
     /// `what` names the producer in an [`End::Aborted`] verdict, so keep it
@@ -1314,7 +1419,7 @@ impl<T: Send + 'static> Channels<T> {
     ///
     /// Useful when the items are already queued and the producer is gone; the
     /// stream reports [`End::Complete`] after draining. For a producer that is
-    /// still running, use [`Channels::from`] and keep its [`Closer`].
+    /// still running, use [`Channel::from`] and keep its [`Closer`].
     #[must_use]
     pub fn closed(rx: Receiver<T>) -> Self {
         let (ch, closer) = Self::from(rx, "closed");
@@ -1324,6 +1429,18 @@ impl<T: Send + 'static> Channels<T> {
 
     /// A complete, finite stream: everything is already here, so it closes
     /// itself and can never be `Aborted`.
+    /// A closed, empty stream: `End::Complete` immediately.
+    #[must_use]
+    pub fn empty() -> Self {
+        Self::from_vec(Vec::new())
+    }
+
+    /// A closed stream of exactly one item.
+    #[must_use]
+    pub fn once(item: T) -> Self {
+        Self::from_vec(vec![item])
+    }
+
     #[must_use]
     pub fn from_vec(items: Vec<T>) -> Self {
         let (tx, rx) = crossbeam_channel::bounded(items.len().max(1));
@@ -1331,7 +1448,7 @@ impl<T: Send + 'static> Channels<T> {
             let _ = tx.send(item);
         }
         drop(tx);
-        let (ch, closer) = Channels::from(rx, "from_vec");
+        let (ch, closer) = Channel::from(rx, "from_vec");
         closer.close();
         ch
     }
@@ -1346,10 +1463,10 @@ impl<T: Send + 'static> Channels<T> {
     /// hung-up subscription is the signal to replay from a cursor and
     /// resubscribe. The library makes no policy: a panic is still
     /// [`End::Aborted`], and `next` decides whether that fault is recoverable.
-    pub fn resume_on_abort<S, F>(state: S, next: F) -> Channels<T>
+    pub fn resume_on_abort<S, F>(state: S, next: F) -> Channel<T>
     where
         S: Send + 'static,
-        F: FnMut(&mut S, Option<End>) -> Option<Channels<T>> + Send + 'static,
+        F: FnMut(&mut S, Option<End>) -> Option<Channel<T>> + Send + 'static,
     {
         let mut source = ResumeOnAbort {
             state,
@@ -1359,14 +1476,14 @@ impl<T: Send + 'static> Channels<T> {
         };
         // Eagerly, so `leaf_count()` is accurate before the first `register`.
         source.start();
-        Channels {
+        Channel {
             source: Box::new(source),
         }
     }
 
     #[must_use]
-    pub fn merge(self, other: Channels<T>) -> Channels<T> {
-        Channels {
+    pub fn merge(self, other: Channel<T>) -> Channel<T> {
+        Channel {
             source: Box::new(MergeState::Both {
                 left: self.source,
                 right: other.source,
@@ -1386,11 +1503,11 @@ impl<T: Send + 'static> Channels<T> {
     /// survivor — the cancellation — and never end. Here either side ending
     /// ends the stream, and a clean [`End::Complete`] keeps its verdict.
     #[must_use]
-    pub fn until(self, cancel: &Cancellation) -> Channels<T> {
+    pub fn until(self, cancel: &Cancellation) -> Channel<T> {
         let Some(rx) = &cancel.rx else {
             return self;
         };
-        Channels {
+        Channel {
             source: Box::new(Guarded {
                 inner: self.source,
                 alive: LeafState::Alive {
@@ -1411,32 +1528,32 @@ impl<T: Send + 'static> Channels<T> {
     /// An empty phase list is an empty [`End::Complete`] stream. A single phase
     /// is returned as-is.
     #[must_use]
-    pub fn chain_all<I>(phases: I) -> Channels<T>
+    pub fn chain_all<I>(phases: I) -> Channel<T>
     where
-        I: IntoIterator<Item = Channels<T>>,
+        I: IntoIterator<Item = Channel<T>>,
     {
         let mut phases: VecDeque<Box<dyn Source<T>>> =
             phases.into_iter().map(|ch| ch.source).collect();
         if phases.len() == 1 {
             let source = phases.pop_front().expect("checked one phase");
-            return Channels { source };
+            return Channel { source };
         }
-        Channels {
+        Channel {
             source: Box::new(ChainState::Active { phases }),
         }
     }
 
     #[must_use]
-    pub fn chain(self, next: Channels<T>) -> Channels<T> {
+    pub fn chain(self, next: Channel<T>) -> Channel<T> {
         Self::chain_all([self, next])
     }
 
-    pub fn filter_map<U, F>(self, f: F) -> Channels<U>
+    pub fn filter_map<U, F>(self, f: F) -> Channel<U>
     where
         U: Send + 'static,
         F: Fn(T) -> Option<U> + Send + Sync + 'static,
     {
-        Channels {
+        Channel {
             source: Box::new(FilterMap {
                 inner: self.source,
                 f: Arc::new(f),
@@ -1454,11 +1571,11 @@ impl<T: Send + 'static> Channels<T> {
     /// This is a consumer-imposed bound, not a producer close. The channel does
     /// not distinguish "the bound was reached" from "the source closed early";
     /// that is a domain completeness question.
-    pub fn take_while<F>(self, pred: F) -> Channels<T>
+    pub fn take_while<F>(self, pred: F) -> Channel<T>
     where
         F: Fn(&T) -> bool + Send + Sync + 'static,
     {
-        Channels {
+        Channel {
             source: Box::new(TakeWhile {
                 inner: Some(self.source),
                 pred: Arc::new(pred),
@@ -1467,7 +1584,39 @@ impl<T: Send + 'static> Channels<T> {
         }
     }
 
-    pub fn map<U, F>(self, f: F) -> Channels<U>
+    /// End the stream at the first item for which `pred` returns `true`.
+    ///
+    /// The matching item is consumed and dropped, like
+    /// `take_while(|item| !pred(item))`. The stream then ends
+    /// [`End::Complete`]; a source abort is preserved.
+    pub fn take_until<F>(self, pred: F) -> Channel<T>
+    where
+        F: Fn(&T) -> bool + Send + Sync + 'static,
+    {
+        self.take_while(move |item| !pred(item))
+    }
+
+    /// Drop an item when its key equals the previous item's key.
+    ///
+    /// No-key items pass through and do not change the last key. This is a
+    /// stream transform, not an order policy; pair it with a contiguous policy
+    /// when exact succession is required.
+    pub fn dedup_by_key<K, F>(self, key: F) -> Channel<T>
+    where
+        K: PartialEq + Copy + Send + 'static,
+        F: Fn(&T) -> Option<K> + Send + Sync + 'static,
+    {
+        Channel {
+            source: Box::new(DedupByKey {
+                inner: Some(self.source),
+                key,
+                last: None,
+                done: None,
+            }),
+        }
+    }
+
+    pub fn map<U, F>(self, f: F) -> Channel<U>
     where
         U: Send + 'static,
         F: Fn(T) -> U + Send + Sync + 'static,
@@ -1553,7 +1702,7 @@ impl<T: Send + 'static> Channels<T> {
     pub fn into_stream(self) -> BoxStream<'static, T> {
         let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BRIDGE_CAP);
         let (alive_tx, alive_rx) = crossbeam_channel::bounded::<()>(1);
-        let source = Channels {
+        let source = Channel {
             source: Box::new(Guarded {
                 inner: self.source,
                 alive: LeafState::Alive {
@@ -1594,7 +1743,7 @@ impl<T: Send + 'static> Channels<T> {
 }
 
 pub struct ReadyBatch<'a, T> {
-    channel: &'a mut Channels<T>,
+    channel: &'a mut Channel<T>,
     head: Option<T>,
     remaining: usize,
 }
@@ -1623,7 +1772,7 @@ impl<T: Send + 'static> Iterator for ReadyBatch<'_, T> {
 // ── ChannelIter<T> ─────────────────────────────────────────────────────
 
 pub struct ChannelIter<T> {
-    inner: Channels<T>,
+    inner: Channel<T>,
 }
 
 impl<T: Send + 'static> Iterator for ChannelIter<T> {
@@ -1638,7 +1787,7 @@ impl<T: Send + 'static> Iterator for ChannelIter<T> {
     }
 }
 
-impl<T: Send + 'static> IntoIterator for Channels<T> {
+impl<T: Send + 'static> IntoIterator for Channel<T> {
     type Item = T;
     type IntoIter = ChannelIter<T>;
 
@@ -1656,8 +1805,8 @@ mod tests {
 
     /// Most tests care about item flow, not the verdict: wrap a receiver in a
     /// channel whose producer has already declared completion.
-    fn closed<T: Send + 'static>(rx: Receiver<T>) -> Channels<T> {
-        let (ch, closer) = Channels::from(rx, "test");
+    fn closed<T: Send + 'static>(rx: Receiver<T>) -> Channel<T> {
+        let (ch, closer) = Channel::from(rx, "test");
         closer.close();
         ch
     }
@@ -1679,10 +1828,10 @@ mod tests {
     fn resume_on_abort_does_not_resume_after_complete() {
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let seen = calls.clone();
-        let mut ch = Channels::resume_on_abort(0u32, move |n, _prev| {
+        let mut ch = Channel::resume_on_abort(0u32, move |n, _prev| {
             seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             *n = n.saturating_add(1);
-            (*n == 1).then(|| Channels::from_vec(vec![10, 11]))
+            (*n == 1).then(|| Channel::from_vec(vec![10, 11]))
         });
         let got: Vec<u32> = std::iter::from_fn(|| ch.recv().ok()).collect();
         assert_eq!(got, vec![10, 11]);
@@ -1698,7 +1847,7 @@ mod tests {
     fn resume_on_abort_hands_the_previous_end_to_next_and_may_continue_past_an_abort() {
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
         let s = seen.clone();
-        let mut ch = Channels::resume_on_abort(0u32, move |n, prev| {
+        let mut ch = Channel::resume_on_abort(0u32, move |n, prev| {
             s.lock().unwrap().push(prev);
             *n = n.saturating_add(1);
             match *n {
@@ -1707,9 +1856,9 @@ mod tests {
                     let (tx, rx) = crossbeam_channel::bounded(4);
                     tx.send(7).unwrap();
                     drop(tx);
-                    Some(Channels::from_infinite(rx, "seg"))
+                    Some(Channel::from_infinite(rx, "seg"))
                 }
-                2 => Some(Channels::from_vec(vec![8])),
+                2 => Some(Channel::from_vec(vec![8])),
                 _ => None,
             }
         });
@@ -1749,7 +1898,7 @@ mod tests {
         let alive = Arc::downgrade(&guard);
         let (_tx, rx) = crossbeam_channel::bounded::<u32>(1);
 
-        let stream = Channels::from_infinite(rx, "socket")
+        let stream = Channel::from_infinite(rx, "socket")
             .map(move |x| {
                 let _held = &guard;
                 x
@@ -1853,7 +2002,7 @@ mod tests {
         let (tx_b, rx_b) = crossbeam_channel::bounded::<u32>(1);
         let (tx_c, rx_c) = crossbeam_channel::bounded::<u32>(1);
         let inner = closed(rx_a).merge(closed(rx_b));
-        let (ch_c, closer_c) = Channels::from(rx_c, "c");
+        let (ch_c, closer_c) = Channel::from(rx_c, "c");
         closer_c.close();
         drop(tx_c);
         let mut ch = inner.merge(ch_c);
@@ -1887,7 +2036,7 @@ mod tests {
     fn assert_ordinals_reach(
         parts: usize,
         ordinal_to_part: &[usize],
-        build: impl Fn(Vec<Channels<u32>>) -> Channels<u32>,
+        build: impl Fn(Vec<Channel<u32>>) -> Channel<u32>,
     ) {
         for (ordinal, &part) in ordinal_to_part.iter().enumerate() {
             let planted = u32::try_from(part).unwrap().saturating_add(100);
@@ -1960,7 +2109,7 @@ mod tests {
             // is *ready*, and would win the select on its own.
             let (alive_tx, alive_rx) = crossbeam_channel::bounded::<()>(1);
             let inner = closed(rx_a).merge(closed(rx_b));
-            let mut ch = Channels {
+            let mut ch = Channel {
                 source: Box::new(Guarded {
                     inner: inner.source,
                     alive: LeafState::Alive {
@@ -2010,7 +2159,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "register pushed 0 ops but leaf_count() is 1")]
     fn register_leaf_count_mismatch_is_caught() {
-        let mut ch = Channels {
+        let mut ch = Channel {
             source: Box::new(UnderRegistering),
         };
         let _ = ch.recv();
@@ -2087,7 +2236,7 @@ mod tests {
     /// survivor after collapsing to `One`.
     #[test]
     fn try_recv_retries_the_survivor_after_a_clean_branch_death() {
-        let mut ch = Channels::from_vec(Vec::<u32>::new()).merge(Channels::from_vec(vec![1, 2]));
+        let mut ch = Channel::from_vec(Vec::<u32>::new()).merge(Channel::from_vec(vec![1, 2]));
         assert_eq!(ch.try_recv(), Some(1));
         assert_eq!(ch.try_recv(), Some(2));
         assert_eq!(ch.try_recv(), None);
@@ -2202,7 +2351,7 @@ mod tests {
     #[test]
     fn verdict_is_not_memoised_while_the_closer_is_still_alive() {
         let (tx, rx) = crossbeam_channel::bounded::<u32>(4);
-        let (mut ch, closer) = Channels::from(rx, "racy producer");
+        let (mut ch, closer) = Channel::from(rx, "racy producer");
         drop(tx); // sender gone first — the ordering hazard
         assert_eq!(
             ch.end_reason(),
@@ -2227,7 +2376,7 @@ mod tests {
     #[test]
     fn infinite_stream_end_is_always_aborted() {
         let (tx, rx) = crossbeam_channel::bounded(4);
-        let mut ch = Channels::from_infinite(rx, "socket");
+        let mut ch = Channel::from_infinite(rx, "socket");
         tx.send(1).unwrap();
         drop(tx); // peer closed politely — still an error to the app
         assert_eq!(ch.recv(), Ok(1));
@@ -2252,10 +2401,10 @@ mod tests {
     fn merge_with_infinite_branch_reports_aborted() {
         let (tx_f, rx_f) = crossbeam_channel::bounded::<u32>(4);
         let (tx_i, rx_i) = crossbeam_channel::bounded::<u32>(4);
-        let (ch_f, closer_f) = Channels::from(rx_f, "finite");
+        let (ch_f, closer_f) = Channel::from(rx_f, "finite");
         drop(tx_f);
         closer_f.close();
-        let ch_i = Channels::from_infinite(rx_i, "socket");
+        let ch_i = Channel::from_infinite(rx_i, "socket");
         drop(tx_i);
         let mut ch = ch_f.merge(ch_i);
         assert_eq!(
@@ -2269,7 +2418,7 @@ mod tests {
     #[test]
     fn closed_producer_yields_closed() {
         let (tx, rx) = crossbeam_channel::bounded(4);
-        let (mut ch, closer) = Channels::from(rx, "finite scan");
+        let (mut ch, closer) = Channel::from(rx, "finite scan");
         tx.send(1).unwrap();
         drop(tx);
         closer.close();
@@ -2282,7 +2431,7 @@ mod tests {
     #[test]
     fn unclosed_producer_yields_aborted() {
         let (tx, rx) = crossbeam_channel::bounded(4);
-        let (mut ch, closer) = Channels::from(rx, "finite scan");
+        let (mut ch, closer) = Channel::from(rx, "finite scan");
         tx.send(1).unwrap();
         drop(tx);
         drop(closer); // dropped without close(): panicked, or forgot
@@ -2302,7 +2451,7 @@ mod tests {
     #[test]
     fn panicking_producer_yields_aborted() {
         let (tx, rx) = crossbeam_channel::bounded(4);
-        let (mut ch, closer) = Channels::from(rx, "scan");
+        let (mut ch, closer) = Channel::from(rx, "scan");
         let handle = std::thread::spawn(move || {
             let _closer = closer;
             tx.send(1).unwrap();
@@ -2323,7 +2472,7 @@ mod tests {
     #[test]
     fn producer_dropped_before_running_is_aborted() {
         let (tx, rx) = crossbeam_channel::bounded::<u32>(4);
-        let (mut ch, closer) = Channels::from(rx, "never ran");
+        let (mut ch, closer) = Channel::from(rx, "never ran");
         let never_ran = move || {
             let _closer = closer;
             let _tx = tx;
@@ -2346,8 +2495,8 @@ mod tests {
     fn merge_reports_aborted_if_either_branch_aborted() {
         let (tx_a, rx_a) = crossbeam_channel::bounded(4);
         let (tx_b, rx_b) = crossbeam_channel::bounded(4);
-        let (ch_a, closer_a) = Channels::from(rx_a, "good");
-        let (ch_b, closer_b) = Channels::from(rx_b, "bad");
+        let (ch_a, closer_a) = Channel::from(rx_a, "good");
+        let (ch_b, closer_b) = Channel::from(rx_b, "bad");
         tx_a.send(1).unwrap();
         tx_b.send(2).unwrap();
         drop(tx_a);
@@ -2379,8 +2528,8 @@ mod tests {
     fn merge_reports_closed_when_both_branches_closed() {
         let (tx_a, rx_a) = crossbeam_channel::bounded::<u32>(4);
         let (tx_b, rx_b) = crossbeam_channel::bounded::<u32>(4);
-        let (ch_a, closer_a) = Channels::from(rx_a, "a");
-        let (ch_b, closer_b) = Channels::from(rx_b, "b");
+        let (ch_a, closer_a) = Channel::from(rx_a, "a");
+        let (ch_b, closer_b) = Channel::from(rx_b, "b");
         drop(tx_a);
         drop(tx_b);
         closer_a.close();
@@ -2397,8 +2546,8 @@ mod tests {
     fn chain_reports_aborted_from_the_phase_that_died() {
         let (tx_h, rx_h) = crossbeam_channel::bounded(4);
         let (tx_l, rx_l) = crossbeam_channel::bounded(4);
-        let (ch_h, closer_h) = Channels::from(rx_h, "historical");
-        let (ch_l, closer_l) = Channels::from(rx_l, "live");
+        let (ch_h, closer_h) = Channel::from(rx_h, "historical");
+        let (ch_l, closer_l) = Channel::from(rx_l, "live");
         tx_h.send(1).unwrap();
         drop(tx_h);
         drop(closer_h); // historical replay died
@@ -2421,7 +2570,7 @@ mod tests {
     #[test]
     fn abort_survives_filter_map() {
         let (tx, rx) = crossbeam_channel::bounded(4);
-        let (ch, closer) = Channels::from(rx, "window");
+        let (ch, closer) = Channel::from(rx, "window");
         tx.send(2u32).unwrap();
         drop(tx);
         drop(closer);
@@ -2436,15 +2585,47 @@ mod tests {
     }
 
     #[test]
+    fn empty_is_complete() {
+        let mut ch = Channel::<u32>::empty();
+        assert_eq!(ch.recv(), Err(End::Complete));
+    }
+
+    #[test]
+    fn once_yields_one_then_complete() {
+        let mut ch = Channel::once(7u32);
+        assert_eq!(ch.recv(), Ok(7));
+        assert_eq!(ch.recv(), Err(End::Complete));
+    }
+
+    #[test]
+    fn take_until_stops_before_the_match() {
+        let mut ch = Channel::from_vec(vec![1u32, 2, 3, 4]).take_until(|v| *v == 3);
+        assert_eq!(ch.recv(), Ok(1));
+        assert_eq!(ch.recv(), Ok(2));
+        assert_eq!(ch.recv(), Err(End::Complete));
+    }
+
+    #[test]
+    fn dedup_by_key_drops_consecutive_duplicates() {
+        let mut ch = Channel::from_vec(vec![Some(1u32), Some(1), None, Some(2), Some(2), Some(1)])
+            .dedup_by_key(|v: &Option<u32>| *v);
+        assert_eq!(ch.recv(), Ok(Some(1)));
+        assert_eq!(ch.recv(), Ok(None));
+        assert_eq!(ch.recv(), Ok(Some(2)));
+        assert_eq!(ch.recv(), Ok(Some(1)));
+        assert_eq!(ch.recv(), Err(End::Complete));
+    }
+
+    #[test]
     fn from_vec_is_always_closed() {
-        let mut ch = Channels::from_vec(vec![1u32]);
+        let mut ch = Channel::from_vec(vec![1u32]);
         assert_eq!(ch.recv(), Ok(1));
         assert_eq!(ch.recv(), Err(End::Complete));
     }
 
     #[test]
     fn take_while_stops_at_the_bound_with_complete() {
-        let mut ch = Channels::from_vec(vec![1u32, 2, 3, 4]).take_while(|v| *v < 3);
+        let mut ch = Channel::from_vec(vec![1u32, 2, 3, 4]).take_while(|v| *v < 3);
         assert_eq!(ch.recv(), Ok(1));
         assert_eq!(ch.recv(), Ok(2));
         assert_eq!(ch.recv(), Err(End::Complete));
@@ -2456,7 +2637,7 @@ mod tests {
         let (tx, rx) = crossbeam_channel::bounded(4);
         tx.send(1u32).unwrap();
         drop(tx);
-        let mut ch = Channels::from_infinite(rx, "bounded").take_while(|_| true);
+        let mut ch = Channel::from_infinite(rx, "bounded").take_while(|_| true);
         assert_eq!(ch.recv(), Ok(1));
         assert_eq!(
             ch.recv(),
@@ -2468,8 +2649,8 @@ mod tests {
 
     #[test]
     fn take_while_advances_a_chain_phase() {
-        let bounded = Channels::from_vec(vec![1u32, 2, 3]).take_while(|v| *v < 2);
-        let mut ch = bounded.chain(Channels::from_vec(vec![9]));
+        let bounded = Channel::from_vec(vec![1u32, 2, 3]).take_while(|v| *v < 2);
+        let mut ch = bounded.chain(Channel::from_vec(vec![9]));
         assert_eq!(ch.recv(), Ok(1));
         assert_eq!(ch.recv(), Ok(9));
         assert_eq!(ch.recv(), Err(End::Complete));
@@ -2481,7 +2662,7 @@ mod tests {
         tx.send(1u32).unwrap();
         tx.send(2).unwrap();
         drop(tx);
-        let mut ch = Channels::closed(rx);
+        let mut ch = Channel::closed(rx);
         assert_eq!(ch.recv(), Ok(1));
         assert_eq!(ch.recv(), Ok(2));
         assert_eq!(ch.recv(), Err(End::Complete));
@@ -2489,9 +2670,9 @@ mod tests {
 
     #[test]
     fn chain_three_phases_keeps_order() {
-        let mut ch = Channels::from_vec(vec![1u32])
-            .chain(Channels::from_vec(vec![2]))
-            .chain(Channels::from_vec(vec![3]));
+        let mut ch = Channel::from_vec(vec![1u32])
+            .chain(Channel::from_vec(vec![2]))
+            .chain(Channel::from_vec(vec![3]));
         assert_eq!(ch.recv(), Ok(1));
         assert_eq!(ch.recv(), Ok(2));
         assert_eq!(ch.recv(), Ok(3));
@@ -2500,14 +2681,14 @@ mod tests {
 
     #[test]
     fn chain_all_empty_is_a_closed_stream() {
-        let mut ch: Channels<u32> = Channels::chain_all([]);
+        let mut ch: Channel<u32> = Channel::chain_all([]);
         assert_eq!(ch.recv(), Err(End::Complete));
         assert_eq!(ch.end_reason(), End::Complete);
     }
 
     #[test]
     fn chain_all_single_phase_is_that_stream() {
-        let mut ch = Channels::chain_all([Channels::from_vec(vec![1u32, 2])]);
+        let mut ch = Channel::chain_all([Channel::from_vec(vec![1u32, 2])]);
         assert_eq!(ch.recv(), Ok(1));
         assert_eq!(ch.recv(), Ok(2));
         assert_eq!(ch.recv(), Err(End::Complete));
@@ -2515,10 +2696,10 @@ mod tests {
 
     #[test]
     fn chain_all_runs_phases_in_order_and_skips_empty_ones() {
-        let mut ch = Channels::chain_all([
-            Channels::from_vec(vec![1u32]),
-            Channels::from_vec(Vec::new()),
-            Channels::from_vec(vec![2]),
+        let mut ch = Channel::chain_all([
+            Channel::from_vec(vec![1u32]),
+            Channel::from_vec(Vec::new()),
+            Channel::from_vec(vec![2]),
         ]);
         assert_eq!(ch.recv(), Ok(1));
         assert_eq!(ch.recv(), Ok(2));
@@ -2534,9 +2715,9 @@ mod tests {
         drop(tx_b);
         let (tx_c, rx_c) = crossbeam_channel::bounded::<u32>(4);
         drop(tx_c);
-        let mut ch = Channels::chain_all([
-            Channels::from_vec(vec![1]),
-            Channels::from_infinite(rx_b, "middle"),
+        let mut ch = Channel::chain_all([
+            Channel::from_vec(vec![1]),
+            Channel::from_infinite(rx_b, "middle"),
             closed(rx_c),
         ]);
         assert_eq!(ch.recv(), Ok(1));
@@ -2616,7 +2797,7 @@ mod tests {
 
     #[test]
     fn from_vec_drains_all_items() {
-        let mut ch = Channels::from_vec(vec![10, 20, 30]);
+        let mut ch = Channel::from_vec(vec![10, 20, 30]);
         assert_eq!(ch.recv(), Ok(10));
         assert_eq!(ch.recv(), Ok(20));
         assert_eq!(ch.recv(), Ok(30));
@@ -2625,7 +2806,7 @@ mod tests {
 
     #[test]
     fn from_vec_empty_disconnects_immediately() {
-        let mut ch: Channels<u32> = Channels::from_vec(vec![]);
+        let mut ch: Channel<u32> = Channel::from_vec(vec![]);
         assert_eq!(ch.recv(), Err(End::Complete));
     }
 
@@ -2698,7 +2879,7 @@ mod tests {
     fn until_wakes_a_blocked_recv_with_cancelled() {
         let (_tx, rx) = crossbeam_channel::bounded::<u32>(1);
         let (handle, cancellation) = CancelHandle::new();
-        let mut ch = Channels::from_infinite(rx, "quiet").until(&cancellation);
+        let mut ch = Channel::from_infinite(rx, "quiet").until(&cancellation);
         std::thread::scope(|scope| {
             scope.spawn(|| {
                 std::thread::sleep(std::time::Duration::from_millis(50));
@@ -2743,7 +2924,7 @@ mod tests {
     fn until_a_handle_dropped_unfired_ends_aborted() {
         let (_tx, rx) = crossbeam_channel::bounded::<u32>(1);
         let (handle, cancellation) = CancelHandle::new();
-        let mut ch = Channels::from_infinite(rx, "quiet").until(&cancellation);
+        let mut ch = Channel::from_infinite(rx, "quiet").until(&cancellation);
         drop(handle);
         assert_eq!(
             ch.recv(),
@@ -2762,7 +2943,7 @@ mod tests {
         for _ in 0..64 {
             let (tx, rx) = crossbeam_channel::bounded::<u32>(1);
             let (handle, cancellation) = CancelHandle::new();
-            let mut ch = Channels::from_infinite(rx, "source").until(&cancellation);
+            let mut ch = Channel::from_infinite(rx, "source").until(&cancellation);
             handle.cancel();
             drop(tx);
             assert_eq!(
@@ -2781,7 +2962,7 @@ mod tests {
         let (handle, cancellation) = CancelHandle::new();
         handle.cancel();
         handle.cancel(); // idempotent
-        let mut ch = Channels::from_infinite(rx, "quiet").until(&cancellation);
+        let mut ch = Channel::from_infinite(rx, "quiet").until(&cancellation);
         assert_eq!(
             ch.recv(),
             Err(End::Aborted {
@@ -2797,9 +2978,9 @@ mod tests {
         let (_tx_a, rx_a) = crossbeam_channel::bounded::<u32>(1);
         let (_tx_b, rx_b) = crossbeam_channel::bounded::<u32>(1);
         let (handle, cancellation) = CancelHandle::new();
-        let mut ch = Channels::from_infinite(rx_a, "a")
+        let mut ch = Channel::from_infinite(rx_a, "a")
             .until(&cancellation)
-            .merge(Channels::from_infinite(rx_b, "b"));
+            .merge(Channel::from_infinite(rx_b, "b"));
         handle.cancel();
         assert_eq!(
             ch.recv(),
@@ -2828,7 +3009,7 @@ mod tests {
         let token = tokio_util::sync::CancellationToken::new();
         let cancellation = Cancellation::from_token(&token);
         let (tx, rx) = crossbeam_channel::bounded::<u32>(1);
-        let mut ch = Channels::from_infinite(rx, "quiet").until(&cancellation);
+        let mut ch = Channel::from_infinite(rx, "quiet").until(&cancellation);
         let blocked = tokio::task::spawn_blocking(move || ch.recv());
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         assert!(!blocked.is_finished(), "recv returned before the cancel");

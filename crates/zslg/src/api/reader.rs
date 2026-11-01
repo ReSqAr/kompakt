@@ -34,7 +34,7 @@ use crate::Error;
 use crate::hlc::Hlc;
 use crate::ids::LogIndex;
 use crate::meta::{Data, UnstableEvent};
-use crossbeam_combinators::Channels;
+use crossbeam_combinators::Channel;
 
 #[async_trait::async_trait]
 pub trait Reader: Send + Sync + 'static {
@@ -68,7 +68,7 @@ pub trait Reader: Send + Sync + 'static {
 
     /// One-shot scan of entries strictly above the watermark. Emitting one at or
     /// below it would duplicate `stable_tail` (CLAUDE.md §12).
-    fn unstable_tail(&self) -> Channels<Result<Data, Error>>;
+    fn unstable_tail(&self) -> Channel<Result<Data, Error>>;
 
     /// Live entries above the watermark, in arrival (integration) order, with
     /// the watermark in-band. At-least-once: an entry may repeat, so consumers
@@ -83,5 +83,5 @@ pub trait Reader: Send + Sync + 'static {
     /// everything above the watermark, then live), so any termination is
     /// [`End::Aborted`](crossbeam_combinators::End::Aborted), and node shutdown is
     /// [`AbortReason::Cancelled`](crossbeam_combinators::AbortReason::Cancelled).
-    fn subscribe_unstable_tail(&self) -> Channels<Result<UnstableEvent, Error>>;
+    fn subscribe_unstable_tail(&self) -> Channel<Result<UnstableEvent, Error>>;
 }

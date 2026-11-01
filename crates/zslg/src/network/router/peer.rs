@@ -23,7 +23,7 @@ use crate::ids::{LogIndex, NodeId, PeerAddr};
 use crate::meta::ReplicaStatus;
 use crate::raft::TypeConfig;
 use crate::{Data, Error};
-use crossbeam_combinators::Channels;
+use crossbeam_combinators::Channel;
 use futures::stream::BoxStream;
 use openraft::error::{InstallSnapshotError, RaftError};
 use openraft::raft::{
@@ -80,7 +80,7 @@ struct ErrorTransport;
 
 #[async_trait::async_trait]
 impl Replica for ErrorTransport {
-    fn write(&self, input: Channels<StampedWrite>) -> Channels<Result<WriteOutcome, Error>> {
+    fn write(&self, input: Channel<StampedWrite>) -> Channel<Result<WriteOutcome, Error>> {
         // Node is shutting down: fail every write. As a pull-time map — no thread.
         input.map(|stamped| {
             Ok(WriteOutcome::Failed {
@@ -94,7 +94,7 @@ impl Replica for ErrorTransport {
         let (tx, rx) = crossbeam_channel::bounded::<Result<(LogIndex, Data), Error>>(1);
         drop(tx);
         // Node is shutting down: a deliberately empty stream, so close it.
-        let (ch, closer) = Channels::from(rx, "shutdown stub");
+        let (ch, closer) = Channel::from(rx, "shutdown stub");
         closer.close();
         crate::ordered::replica_stream(ch, from)
     }

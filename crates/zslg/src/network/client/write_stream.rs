@@ -22,7 +22,7 @@ use crate::network::client::{RpcClient, Target};
 use crate::network::framing::{TcpFrameSink, TcpFrameStream, adopt_blocking};
 use crate::network::messages::WriteOutcome as WireWriteOutcome;
 use crate::network::messages::{RpcReplicaRequest, RpcRequest, WriteStreamResponse};
-use crossbeam_combinators::Channels;
+use crossbeam_combinators::Channel;
 
 /// Open a write stream to `target` over **one** connection. Drives writes off
 /// `input`, yielding their outcomes. See [`Replica::write`](crate::api::Replica::write).
@@ -35,14 +35,14 @@ use crossbeam_combinators::Channels;
 pub(in crate::network) fn open_write(
     client: Weak<RpcClient>,
     target: Target,
-    input: Channels<StampedWrite>,
+    input: Channel<StampedWrite>,
     cap: usize,
-) -> Channels<Result<WriteOutcome, Error>> {
+) -> Channel<Result<WriteOutcome, Error>> {
     // cap ≥ the in-flight window (the writer's permit pool), so the reader's outcome
     // sends never fill.
     let (out_tx, out_rx) = crossbeam_channel::bounded::<Result<WriteOutcome, Error>>(cap);
 
-    let ch = Channels::from_infinite(out_rx, "client write stream");
+    let ch = Channel::from_infinite(out_rx, "client write stream");
     tokio::spawn(async move {
         let Some(rpc) = client.upgrade() else {
             let _ = out_tx.send(Err(Error::Shutdown));
@@ -94,7 +94,7 @@ pub(in crate::network) fn open_write(
 
 /// Blocking writer loop: pull writes off `input` and frame them onto the socket,
 /// batched (one flush per burst). Ends when `input` drains or the socket breaks.
-fn writer_loop(mut input: Channels<StampedWrite>, mut sink: TcpFrameSink) {
+fn writer_loop(mut input: Channel<StampedWrite>, mut sink: TcpFrameSink) {
     const MAX_BATCH: usize = 512;
     loop {
         let Some(batch) = input.ready_batch(MAX_BATCH) else {

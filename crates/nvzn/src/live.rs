@@ -38,7 +38,7 @@ use crate::{
     ArcStore, Error, EventSet, Projection, ProjectionTypeId, Snapshot, Tenant, TenantId, Watermark,
     WithWireFormat, WriteTransactionImpl,
 };
-use crossbeam_combinators::{AbortReason, Channels, End, Feed, Ranged, Tail};
+use crossbeam_combinators::{AbortReason, Channel, End, Ranged, Tail};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
@@ -486,7 +486,6 @@ enum FoldItem {
     ReplayDone,
     TailFailed(zslg::Error),
     ScanFailed(zslg::Error),
-    ScanEnded(End),
 }
 
 /// The live subscription and the stable watermark it is anchored to.
@@ -500,7 +499,7 @@ impl Tail for LiveSeam {
     type Item = FoldItem;
     type Cut = Option<Hlc>;
 
-    fn subscribe(&self) -> Channels<Self::Item> {
+    fn subscribe(&self) -> Channel<Self::Item> {
         self.reader
             .subscribe_unstable_tail()
             .until(&self.cancelled)
@@ -515,7 +514,7 @@ impl Tail for LiveSeam {
         self.reader.stable_watermark()
     }
 
-    fn above(&self, live: Channels<Self::Item>, cut: Self::Cut) -> Channels<Self::Item> {
+    fn above(&self, live: Channel<Self::Item>, cut: Self::Cut) -> Channel<Self::Item> {
         // Drop live entries the scan already covered. `Held` still dedups by
         // DataId above the cut; the seam does not rely on that for the overlap.
         live.filter_map(move |item| match item {
@@ -528,61 +527,33 @@ impl Tail for LiveSeam {
 impl Ranged<Option<Hlc>> for LiveSeam {
     type Item = FoldItem;
 
-    fn range(&self, cut: Option<Hlc>) -> Channels<Self::Item> {
+    fn range(&self, cut: Option<Hlc>) -> Channel<Self::Item> {
         let Some(until) = cut else {
-            return Channels::from_vec(Vec::new());
+            return Channel::empty();
         };
-        let (feed, ch) = Feed::channel(SCAN_CAP, "live scan");
-        let mut log = self
-            .reader
+        self.reader
             .subscribe_stable_log(self.from)
             .into_channels()
-            .until(&self.cancelled);
-        tokio::task::spawn_blocking(move || {
-            // Overflowed or not, the scan reads to its end: an overflow cannot
-            // recover until it has (`Coverage::Overflowed`).
-            loop {
-                match log.recv() {
-                    Ok(Ok(StableLogEvent::Appended { data, .. })) => {
-                        // The stable log is HLC-ordered: past `until`, done.
-                        if data.data_id.hlc() > until {
-                            break;
-                        }
-                        if !feed.send(FoldItem::Scan(data)) {
-                            return;
-                        }
-                    }
-                    Ok(Ok(StableLogEvent::Watermark(h))) => {
-                        if h >= until {
-                            break;
-                        }
-                    }
-                    Ok(Err(e)) => {
-                        let _ = feed.send(FoldItem::ScanFailed(e));
-                        feed.close();
-                        return;
-                    }
-                    Err(End::Aborted {
-                        reason: AbortReason::Cancelled | AbortReason::CancelHandleDropped,
-                    }) => {
-                        feed.close();
-                        return;
-                    }
-                    Err(end) => {
-                        let _ = feed.send(FoldItem::ScanEnded(end));
-                        feed.close();
-                        return;
-                    }
-                }
-            }
-            let _ = feed.send(FoldItem::ReplayDone);
-            feed.close();
-        });
-        ch
+            .until(&self.cancelled)
+            .chain(Channel::once(Err(zslg::Error::StreamTruncated {
+                what: "live scan ended before the cut".into(),
+            })))
+            .take_until(move |item| matches!(item, Ok(ev) if at_or_after_cut(until, ev)))
+            .filter_map(|item| match item {
+                Ok(StableLogEvent::Appended { data, .. }) => Some(FoldItem::Scan(data)),
+                Ok(StableLogEvent::Watermark(_)) => None,
+                Err(e) => Some(FoldItem::ScanFailed(e)),
+            })
+            .chain(Channel::once(FoldItem::ReplayDone))
     }
 }
 
-const SCAN_CAP: usize = 64;
+fn at_or_after_cut(until: Hlc, event: &StableLogEvent) -> bool {
+    match event {
+        StableLogEvent::Appended { data, .. } => data.data_id.hlc() > until,
+        StableLogEvent::Watermark(hlc) => *hlc >= until,
+    }
+}
 
 fn scan_done<Ev: WithWireFormat>(inner: &Inner<Ev>, entries: u64, started: Instant) {
     metrics::live_scan(entries, started.elapsed());
@@ -606,7 +577,7 @@ impl<Ev: WithWireFormat> Drop for FinishScanOnDrop<'_, Ev> {
 }
 
 /// The single live consumer: stable scan, then/while the unstable tail.
-fn run<Ev: WithWireFormat>(inner: &Inner<Ev>, mut stream: Channels<FoldItem>) {
+fn run<Ev: WithWireFormat>(inner: &Inner<Ev>, mut stream: Channel<FoldItem>) {
     let _finish = FinishScanOnDrop(inner);
     let started = Instant::now();
     let mut entries: u64 = 0;
@@ -635,25 +606,18 @@ fn run<Ev: WithWireFormat>(inner: &Inner<Ev>, mut stream: Channels<FoldItem>) {
                 scan_done(inner, entries, started);
                 return;
             }
-            Ok(FoldItem::ScanEnded(end)) => {
-                error!(?end, "live view: the cold-start scan ended early");
-                inner.fold_state.halt(StopReason::LiveScanEnded);
-                scan_done(inner, entries, started);
-                return;
-            }
             Err(End::Aborted {
                 reason: AbortReason::Cancelled | AbortReason::CancelHandleDropped,
             }) => return,
             Err(end) => {
-                // zslg resyncs a slow consumer inside the stream, so an end is
-                // the node's reader breaking; a live view that stopped
-                // integrating would serve a stale world as fresh.
+                // A scan and the tail are both unrecoverable here; the `End`
+                // label says which source stopped.
                 error!(
                     tenant = inner.tenant.name(),
                     ?end,
-                    "live view: the unstable tail ended; stopping the dispatcher"
+                    "live view: the stream ended; stopping the dispatcher"
                 );
-                inner.fold_state.halt(StopReason::UnstableTailEnded);
+                inner.fold_state.halt(StopReason::LiveStreamEnded);
                 return;
             }
         }
@@ -1503,17 +1467,17 @@ mod tests {
         fn subscribe_stable_log(&self, from: LogIndex) -> zslg::StableStream {
             let (tx, rx) = crossbeam_channel::bounded(1);
             *self.stable.lock().expect("test mutex") = Some(tx);
-            zslg::StableStream::new(Channels::from_infinite(rx, "stalled stable"), Some(from))
+            zslg::StableStream::new(Channel::from_infinite(rx, "stalled stable"), Some(from))
         }
 
-        fn unstable_tail(&self) -> Channels<Result<Data, zslg::Error>> {
-            Channels::from_vec(Vec::new())
+        fn unstable_tail(&self) -> Channel<Result<Data, zslg::Error>> {
+            Channel::from_vec(Vec::new())
         }
 
-        fn subscribe_unstable_tail(&self) -> Channels<Result<UnstableEvent, zslg::Error>> {
+        fn subscribe_unstable_tail(&self) -> Channel<Result<UnstableEvent, zslg::Error>> {
             let (tx, rx) = crossbeam_channel::bounded(1);
             *self.tail.lock().expect("test mutex") = Some(tx);
-            Channels::from_infinite(rx, "stalled tail")
+            Channel::from_infinite(rx, "stalled tail")
         }
     }
 
@@ -1584,10 +1548,7 @@ mod tests {
             .expect("the dispatcher stops")
             .unwrap();
         assert!(
-            matches!(
-                ended,
-                Err(Error::FoldStopped(StopReason::UnstableTailEnded))
-            ),
+            matches!(ended, Err(Error::FoldStopped(StopReason::LiveStreamEnded))),
             "{ended:?}"
         );
         let live2 = live.clone();
@@ -1596,7 +1557,7 @@ mod tests {
             .unwrap();
         assert!(matches!(
             read,
-            Err(Error::FoldStopped(StopReason::UnstableTailEnded))
+            Err(Error::FoldStopped(StopReason::LiveStreamEnded))
         ));
     }
 

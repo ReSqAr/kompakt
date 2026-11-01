@@ -20,12 +20,13 @@ use tokio::sync::watch;
 use crate::hlc::Hlc;
 use crate::ids::{LogIndex, NodeId};
 use crate::meta::Data;
-use crossbeam_combinators::Channels;
+use crate::ordered::{LocalStoreStream, WindowStream};
+use crossbeam_combinators::Channel;
 
 #[async_trait::async_trait]
 pub(crate) trait LocalStoreView: Send + Sync + 'static {
     #[must_use]
-    fn stream_above_hlc(&self, threshold: Option<Hlc>) -> Channels<Result<Data, crate::Error>>;
+    fn stream_above_hlc(&self, threshold: Option<Hlc>) -> LocalStoreStream;
 
     /// Stream `(above, upto]` in `(hlc, data_id)` order.
     ///
@@ -40,7 +41,7 @@ pub(crate) trait LocalStoreView: Send + Sync + 'static {
         above: Option<Hlc>,
         upto: Hlc,
         max_entries: Option<std::num::NonZeroUsize>,
-    ) -> Channels<Result<WindowItem, crate::Error>>;
+    ) -> WindowStream;
 
     /// "Integration happened, go look" — level-triggered, carrying nothing.
     ///
@@ -65,7 +66,7 @@ pub(crate) trait LocalStoreView: Send + Sync + 'static {
     /// after everything already queued — the cue to rescan above the watermark
     /// and subscribe again (`learner::read`).
     #[must_use]
-    fn subscribe_unstable(&self) -> Channels<Data>;
+    fn subscribe_unstable(&self) -> Channel<Data>;
 
     async fn subscription_cursor(&self, upstream: NodeId)
     -> Result<Option<LogIndex>, crate::Error>;

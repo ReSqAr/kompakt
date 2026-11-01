@@ -33,7 +33,7 @@ use crate::meta::{SnapshotEntry, SnapshotMetadata};
 use crate::metrics::{self, SnapshotState, SnapshotStep};
 use crate::object_store::CompressionLevel;
 use crate::quorum::{FanOutResponse, fan_out_quorum};
-use crossbeam_combinators::Channels;
+use crossbeam_combinators::Channel;
 
 pub(in crate::leader) struct SnapshotEntryInputs<'a> {
     pub(in crate::leader) local_store: &'a dyn LocalStoreView,
@@ -128,14 +128,14 @@ pub(in crate::leader) async fn create_snapshot_entry(
     let end_hlc_raw = Arc::new(AtomicU64::new(0));
     let end_hlc_tracker = end_hlc_raw.clone();
 
-    // Channels built here so `local_store` need not be 'static.
+    // Channel built here so `local_store` need not be 'static.
     let window = inputs.local_store.stream_window_ordered(
         lower_bound,
         new_cutoff,
         Some(inputs.max_snapshot_entries),
     );
 
-    type PeekOk = Option<(Channels<Result<SnapshotEntry, Error>>, Hlc)>;
+    type PeekOk = Option<(Channel<Result<SnapshotEntry, Error>>, Hlc)>;
 
     let (entries, start_hlc) = {
         let end_hlc_tracker = end_hlc_tracker.clone();
@@ -166,14 +166,14 @@ pub(in crate::leader) async fn create_snapshot_entry(
             let start_hlc = first.data_id.hlc();
             end_hlc_tracker.store(start_hlc.raw(), Ordering::Relaxed);
 
-            let head = Channels::from_vec(vec![Ok(SnapshotEntry {
+            let head = Channel::from_vec(vec![Ok(SnapshotEntry {
                 global_index: LogIndex(next_index_start),
                 data: first,
             })]);
 
             let index = Arc::new(AtomicU64::new(next_index_start.saturating_add(1)));
             let seen_terminal = terminal.clone();
-            let tail = data.filter_map(move |r| match r {
+            let tail = data.into_channels().filter_map(move |r| match r {
                 Ok(WindowItem::Entry(d)) => {
                     end_hlc_tracker.store(d.data_id.hlc().raw(), Ordering::Relaxed);
                     let idx = LogIndex(index.fetch_add(1, Ordering::Relaxed));
@@ -457,7 +457,7 @@ mod tests {
         for (idx, rec) in records {
             let _ = tx.send(Ok((source, idx, rec)));
         }
-        let (ch, closer) = crossbeam_combinators::Channels::from(rx, "test integrate");
+        let (ch, closer) = crossbeam_combinators::Channel::from(rx, "test integrate");
         // Close before the last sender drops, or the consumer forms its
         // verdict as "disconnected, not yet closed" — an abort.
         closer.close();

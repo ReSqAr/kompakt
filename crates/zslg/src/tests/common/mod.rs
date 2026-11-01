@@ -44,7 +44,7 @@ use crate::meta::{Data, RaftState, ReplicaStatus};
 use crate::raft::RaftStateHandle;
 use crate::raft::build_raft_for_test;
 use crate::raft::{NodeInfo, Raft, TypeConfig};
-use crossbeam_combinators::Channels;
+use crossbeam_combinators::Channel;
 use dashmap::DashMap;
 use futures::stream::BoxStream;
 use openraft::Config;
@@ -351,7 +351,7 @@ pub(crate) async fn replica_write<R: Replica + ?Sized>(
     replica: &R,
     data: Data,
 ) -> Result<RaftState, Error> {
-    let mut outcomes = replica.write(Channels::from_vec(vec![StampedWrite::now(data)]));
+    let mut outcomes = replica.write(Channel::from_vec(vec![StampedWrite::now(data)]));
     // The channel blocks on the replica's pipeline, so it must not be pulled on the
     // reactor.
     let first = tokio::task::spawn_blocking(move || outcomes.recv())
@@ -480,7 +480,7 @@ struct ReplicaOnly(Arc<dyn Replica>);
 
 #[async_trait::async_trait]
 impl Replica for ReplicaOnly {
-    fn write(&self, input: Channels<StampedWrite>) -> Channels<Result<WriteOutcome, Error>> {
+    fn write(&self, input: Channel<StampedWrite>) -> Channel<Result<WriteOutcome, Error>> {
         self.0.write(input)
     }
 
@@ -601,7 +601,7 @@ impl LivenessProbe for ProbeOnly {
 
 #[async_trait::async_trait]
 impl Replica for ProbeOnly {
-    fn write(&self, _: Channels<StampedWrite>) -> Channels<Result<WriteOutcome, Error>> {
+    fn write(&self, _: Channel<StampedWrite>) -> Channel<Result<WriteOutcome, Error>> {
         unimplemented!("ProbeOnly: replica not used")
     }
 

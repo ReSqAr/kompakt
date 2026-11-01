@@ -216,7 +216,7 @@ impl DataId {
     }
 }
 
-/// Gapless, monotonic index into a replica or local log.
+/// Contiguous, monotonic index into a replica or local log.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct LogIndex(pub(crate) u64);

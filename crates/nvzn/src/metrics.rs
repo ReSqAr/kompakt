@@ -117,6 +117,8 @@ pub enum StopReason {
     /// A live view's cold-start scan of the stable log ended before reaching
     /// the stable watermark it set out for; as `UnstableTailEnded`.
     LiveScanEnded,
+    /// A live view's merged scan/tail stream ended; the `End` names the source.
+    LiveStreamEnded,
 }
 
 impl StopReason {
@@ -134,6 +136,7 @@ impl StopReason {
             Self::Panicked => "panicked",
             Self::UnstableTailEnded => "unstable_tail_ended",
             Self::LiveScanEnded => "live_scan_ended",
+            Self::LiveStreamEnded => "live_stream_ended",
         }
     }
 }

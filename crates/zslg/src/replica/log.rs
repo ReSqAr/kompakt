@@ -47,8 +47,10 @@ use crate::error::{Error, ToStorage};
 use crate::hlc::{Hlc, HlcGuard};
 use crate::ids::{DataId, LogIndex};
 use crate::meta::Data;
-use crate::metrics::{self, FlushTrigger, LogType, OpState, ShedSite};
-use crossbeam_combinators::{Channels, Ranged, Tail, blend_chain};
+use crate::metrics::{self, FlushTrigger, LogType, OpState};
+use crossbeam_combinators::{
+    Channel, OverflowPolicy, Ranged, Registry, Shutdown, Tail, blend_chain, broadcast,
+};
 
 /// Fallback sizing for [`ReplicaLogStore::open_with_flush`], the
 /// directory-shaped entry point used by the test constructors. Production goes
@@ -512,7 +514,9 @@ pub(crate) struct ReplicaLogStore {
     storage: Arc<Storage>,
     frontier: Frontier,
     batch_builder: BatchBuilder,
-    fan_out: parking_lot::Mutex<Vec<crossbeam_channel::Sender<(LogIndex, Data)>>>,
+    live_tx: crossbeam_channel::Sender<Arc<(LogIndex, Data)>>,
+    live_registry: Registry<(LogIndex, Data)>,
+    live_shutdown: Shutdown,
     /// Sync MPSC into the flush loop. crossbeam (not tokio): `submit` is called
     /// from blocking threads and never `.await`s the enqueue.
     write_tx: crossbeam_channel::Sender<PendingWrite>,
@@ -523,6 +527,12 @@ pub(crate) struct ReplicaLogStore {
     subscribe_channel_capacity: usize,
     /// Max records drained into one append + fsync.
     max_flush_batch: usize,
+}
+
+impl Drop for ReplicaLogStore {
+    fn drop(&mut self) {
+        self.live_shutdown.cancel();
+    }
 }
 
 impl ReplicaLogStore {
@@ -574,12 +584,21 @@ impl ReplicaLogStore {
         let frontier = Frontier::new(recovered_index, recovered_max_hlc);
         let batch_builder = BatchBuilder::new(max_flush_batch, max_payload_bytes);
 
-        let fan_out = parking_lot::Mutex::new(Vec::new());
+        let (live_tx, live_registry, live_shutdown) = broadcast(
+            "replica live tail",
+            std::num::NonZeroUsize::new(1024).unwrap_or(std::num::NonZeroUsize::MIN),
+            std::num::NonZeroUsize::new(1024).unwrap_or(std::num::NonZeroUsize::MIN),
+            std::num::NonZeroUsize::new(subscribe_channel_capacity)
+                .unwrap_or(std::num::NonZeroUsize::MIN),
+            OverflowPolicy::Shed,
+        );
         Ok(Self {
             storage,
             frontier,
             batch_builder,
-            fan_out,
+            live_tx,
+            live_registry,
+            live_shutdown,
             write_tx,
             subscribe_channel_capacity,
             max_flush_batch,
@@ -668,10 +687,10 @@ impl ReplicaLogStore {
     /// An empty historic phase: complete by construction, so it is closed
     /// rather than aborted — the window *was* fully served, it just held
     /// nothing.
-    fn empty_historic() -> Channels<Result<(LogIndex, Data), Error>> {
+    fn empty_historic() -> Channel<Result<(LogIndex, Data), Error>> {
         let (tx, rx) = crossbeam_channel::bounded(1);
         drop(tx);
-        let (ch, closer) = Channels::from(rx, "replica historic tail");
+        let (ch, closer) = Channel::from(rx, "replica historic tail");
         closer.close();
         ch
     }
@@ -681,14 +700,10 @@ impl ReplicaLogStore {
     /// distinguishes "the window was fully served" from "the scan died" — a
     /// panic here would otherwise truncate a subscriber's catch-up and still look
     /// like a clean handoff to the live tail.
-    fn pump_range(
-        &self,
-        from: LogIndex,
-        to: LogIndex,
-    ) -> Channels<Result<(LogIndex, Data), Error>> {
+    fn pump_range(&self, from: LogIndex, to: LogIndex) -> Channel<Result<(LogIndex, Data), Error>> {
         debug_assert!(from <= to);
         let (tx, rx) = crossbeam_channel::bounded(self.subscribe_channel_capacity);
-        let (ch, closer) = Channels::from(rx, "replica historic tail");
+        let (ch, closer) = Channel::from(rx, "replica historic tail");
         let storage = Arc::clone(&self.storage);
         tokio::task::spawn_blocking(move || {
             // PINNING RULE: `payload` is borrowed from the iterator's pinned
@@ -779,19 +794,23 @@ impl Tail for ReplicaSeam {
     type Item = Result<(LogIndex, Data), Error>;
     type Cut = Option<LogIndex>;
 
-    fn subscribe(&self) -> Channels<Self::Item> {
-        let (live_tx, live_rx) = crossbeam_channel::bounded(self.log.subscribe_channel_capacity);
-        self.log.fan_out.lock().push(live_tx);
+    fn subscribe(&self) -> Channel<Self::Item> {
+        let live = self
+            .log
+            .live_registry
+            .subscribe()
+            .map(|ch| ch.map(|entry| (*entry).clone()))
+            .unwrap_or_else(|_| Channel::empty());
         #[cfg(test)]
         subscribe_handoff_pause();
-        Channels::from_infinite(live_rx, "replica live tail").map(Ok)
+        live.map(Ok)
     }
 
     fn cut(&self) -> Self::Cut {
         self.log.frontier.index()
     }
 
-    fn above(&self, live: Channels<Self::Item>, cut: Self::Cut) -> Channels<Self::Item> {
+    fn above(&self, live: Channel<Self::Item>, cut: Self::Cut) -> Channel<Self::Item> {
         live.filter_map(move |item| match item {
             Ok((idx, _)) if cut.is_some_and(|c| idx <= c) => None,
             other => Some(other),
@@ -802,7 +821,7 @@ impl Tail for ReplicaSeam {
 impl Ranged<Option<LogIndex>> for ReplicaSeam {
     type Item = Result<(LogIndex, Data), Error>;
 
-    fn range(&self, cut: Option<LogIndex>) -> Channels<Self::Item> {
+    fn range(&self, cut: Option<LogIndex>) -> Channel<Self::Item> {
         let start = LogIndex::next_after(self.from);
         // How far behind this subscriber is resuming. Rising across
         // successive connects for the same peer = the deficit is diverging,
@@ -832,8 +851,8 @@ impl Ranged<Option<LogIndex>> for ReplicaSeam {
 /// (timer-free) crossbeam `recv` for the idle wait — no per-batch async↔blocking
 /// hop. The signature is kept (`async` + `CancellationToken` + `Result`) so all
 /// spawn sites and tests are unchanged. A plain crossbeam `Receiver` (not
-/// `crossbeam_combinators::Channels`): the loop only recv/try_recv-batches — no transforms
-/// — so the `Channels` combinators would add nothing.
+/// `crossbeam_combinators::Channel`): the loop only recv/try_recv-batches — no transforms
+/// — so the `Channel` combinators would add nothing.
 pub(in crate::replica) async fn flush_loop(
     weak: Weak<ReplicaLogStore>,
     rx: crossbeam_channel::Receiver<PendingWrite>,
@@ -986,31 +1005,12 @@ fn flush_one_batch_blocking(
 
             metrics::log_writes(LogType::Replica, flush_entries);
             metrics::log_index_frontier(LogType::Replica, last_index.raw());
-            metrics::log_subscriptions_count(store.fan_out.lock().len());
             metrics::replica_log_flush_bytes(flush_bytes);
             metrics::replica_log_flush_entries(flush_entries);
             metrics::replica_log_flushed();
-            let mut shed_this_batch: u64 = 0;
             for (i, (index, data, guard)) in batch.staged.into_iter().enumerate() {
                 let data_id = data.data_id;
-                store
-                    .fan_out
-                    .lock()
-                    .retain(|tx| match tx.try_send((index, data.clone())) {
-                        Ok(()) => true,
-                        // Deliberate load shedding, unchanged: a subscriber that
-                        // cannot keep up is evicted rather than allowed to block
-                        // this single shared flush thread. Counted so the choice
-                        // is visible — until this metric existed, the eviction
-                        // was silent here and surfaced only on the *learner* as
-                        // "stream ended", which names the peer, not the cause.
-                        Err(crossbeam_channel::TrySendError::Full(_)) => {
-                            metrics::subscription_shed(ShedSite::ReplicaFanout);
-                            shed_this_batch = shed_this_batch.saturating_add(1);
-                            false
-                        }
-                        Err(crossbeam_channel::TrySendError::Disconnected(_)) => false,
-                    });
+                let _ = store.live_tx.send(Arc::new((index, data)));
                 metrics::replica_log_append_probe().finish(OpState::Success);
                 // `try_send`, never `send`: this runs on the replica's *single
                 // shared* flush thread, so blocking here for one slow connection
@@ -1025,18 +1025,6 @@ fn flush_one_batch_blocking(
                     metrics::replica_outcome_dropped();
                 }
                 drop(guard);
-            }
-            if shed_this_batch > 0 {
-                // One line per flush batch, not per eviction: a batch is at most
-                // `max_flush_batch` records, so this is naturally rate-limited by the
-                // flush cadence. `warn` because it is degraded-but-functional —
-                // the subscriber must reconnect and re-scan from its cursor.
-                tracing::warn!(
-                    shed = shed_this_batch,
-                    remaining_subscribers = store.fan_out.lock().len(),
-                    "replica log: evicted subscriber(s) with a full live channel \
-                     (load shedding; they reconnect and resume from their cursor)",
-                );
             }
             drop(postcommit_probe);
             metrics::replica_log_queue_depth(rx.len());
@@ -1096,7 +1084,7 @@ mod tests {
         for (idx, rec) in records {
             let _ = tx.send(Ok((source, idx, rec)));
         }
-        let (ch, closer) = crossbeam_combinators::Channels::from(rx, "test integrate");
+        let (ch, closer) = crossbeam_combinators::Channel::from(rx, "test integrate");
         // Close before the last sender drops, or the consumer forms its
         // verdict as "disconnected, not yet closed" — an abort.
         closer.close();

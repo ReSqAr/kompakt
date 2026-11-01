@@ -49,7 +49,7 @@ use crate::metrics::{self, ReplicaWriteState};
 use crate::replica::log::flush_loop;
 use crate::shutdown::Shutdown;
 use crate::warn_throttle::WarnThrottle;
-use crossbeam_combinators::Channels;
+use crossbeam_combinators::Channel;
 
 /// Minimum spacing between replica-write-rejection `warn!`s. Rejections recur at
 /// the write rate (tens/sec) under a persistent failure, so they are throttled
@@ -122,7 +122,7 @@ impl ReplicaService {
 impl Replica for ReplicaService {
     /// Wall-clock skew is not checked here: it is enforced at ingress, against
     /// the fresh per-RPC envelope HLC rather than the write's own.
-    fn write(&self, input: Channels<StampedWrite>) -> Channels<Result<WriteOutcome, Error>> {
+    fn write(&self, input: Channel<StampedWrite>) -> Channel<Result<WriteOutcome, Error>> {
         // No thread: the gate is a `filter_map` stage that runs when the *consumer*
         // pulls the returned channel. A rejection short-circuits onto the output; an
         // accepted write is submitted (durably, inline) and the stage yields
@@ -317,7 +317,7 @@ impl WriteSubmitter {
         Gated::Pass(data, guard)
     }
 
-    fn write(self, input: Channels<Data>) -> Channels<Result<WriteOutcome, Error>> {
+    fn write(self, input: Channel<Data>) -> Channel<Result<WriteOutcome, Error>> {
         // Bounded: the flush loop sends here on the shared flush thread and must
         // never block it, so cap ≥ the in-flight window the writer's permits
         // enforce (a Full here is a sizing bug, not a steady state).
@@ -336,7 +336,7 @@ impl WriteSubmitter {
         // Lives as long as the connection: it ends by refcount when the gate
         // branch and every in-flight write are gone, which no producer can
         // declare — so any end is an error the writer retries.
-        let cmt_ch = Channels::from_infinite(cmt_rx, "replica commit outcomes");
+        let cmt_ch = Channel::from_infinite(cmt_rx, "replica commit outcomes");
         let outcomes = cmt_ch.filter_map(move |(data_id, res)| match res {
             Ok(_idx) => {
                 metrics::replica_write_request(ReplicaWriteState::Success);
@@ -692,7 +692,7 @@ mod tests {
             replica_with(me, &[me], 1_000, Duration::from_secs(10)).await;
 
         let (tx, rx) = crossbeam_channel::unbounded();
-        let outcomes = node.write(Channels::closed(rx));
+        let outcomes = node.write(Channel::closed(rx));
         for i in 0..8u8 {
             tx.send(StampedWrite::now(make_data(i, 1_000, b"payload")))
                 .expect("send");
@@ -721,7 +721,7 @@ mod tests {
             replica_with(me, &[me], 1_000, Duration::from_secs(10)).await;
 
         let (tx, rx) = crossbeam_channel::unbounded();
-        drop(node.write(Channels::closed(rx)));
+        drop(node.write(Channel::closed(rx)));
 
         // The output (and with it the input receiver) is gone, so the very next
         // send must fail.
@@ -747,7 +747,7 @@ mod tests {
             replica_with(me, &[nid(2)], 1_000, Duration::from_secs(10)).await;
 
         let (tx, rx) = crossbeam_channel::unbounded();
-        let outcomes = node.write(Channels::closed(rx));
+        let outcomes = node.write(Channel::closed(rx));
         for i in 0..4u8 {
             tx.send(StampedWrite::now(make_data(i, 1_000, b"payload")))
                 .expect("send");

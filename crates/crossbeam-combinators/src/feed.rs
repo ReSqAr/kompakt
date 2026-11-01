@@ -1,4 +1,4 @@
-//! The write half of a [`Channels`]: a sender plus the completion proof.
+//! The write half of a [`Channel`]: a sender plus the completion proof.
 //!
 //! A producer writes through a `Feed` and calls [`Feed::close`] on its normal
 //! exit. Dropping the feed without closing — a panic, an early return, a task
@@ -20,9 +20,9 @@
 
 use crossbeam_channel::{Sender, TrySendError};
 
-use crate::channel::{Channels, Closer};
+use crate::channel::{Channel, Closer};
 
-/// The producer's handle on one [`Channels`].
+/// The producer's handle on one [`Channel`].
 pub struct Feed<T> {
     tx: Sender<T>,
     closer: Closer,
@@ -31,9 +31,9 @@ pub struct Feed<T> {
 impl<T: Send + 'static> Feed<T> {
     /// Create the write/read pair. The caller spawns the producer body.
     #[must_use]
-    pub fn channel(cap: usize, what: &'static str) -> (Self, Channels<T>) {
+    pub fn channel(cap: usize, what: &'static str) -> (Self, Channel<T>) {
         let (tx, rx) = crossbeam_channel::bounded(cap);
-        let (ch, closer) = Channels::from(rx, what);
+        let (ch, closer) = Channel::from(rx, what);
         (Self { tx, closer }, ch)
     }
 }

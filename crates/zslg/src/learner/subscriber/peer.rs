@@ -120,7 +120,7 @@ impl ReplicationSubscriber {
         // Decided once, not per item, so skew sampling stays "every Nth item".
         let stride = u64::try_from(SKEW_SAMPLE_STRIDE).unwrap_or(8);
 
-        // The upstream is already `StrictlyMonotone`: forward purge gaps are
+        // The upstream is already `StrictlyIncreasing`: forward purge gaps are
         // allowed and duplicate/backwards indices abort inside the channel.
         // This filter only tags, samples and meters the accepted items.
         let stream = self
@@ -185,7 +185,7 @@ mod tests {
     use crate::ids::LogIndex;
     use crate::meta::{Data, ReplicaStatus};
     use crate::tests::{fresh_local, make_meta, upstream as upstream_id};
-    use crossbeam_combinators::Channels;
+    use crossbeam_combinators::Channel;
 
     /// Drive a subscriber whose fake upstream declares completion. Even a
     /// *declared* close is an error (a subscription cannot complete), so these
@@ -220,7 +220,7 @@ mod tests {
 
     #[async_trait]
     impl Replica for FakeUpstreamReplica {
-        fn write(&self, _: Channels<StampedWrite>) -> Channels<Result<WriteOutcome, Error>> {
+        fn write(&self, _: Channel<StampedWrite>) -> Channel<Result<WriteOutcome, Error>> {
             unimplemented!()
         }
         async fn fetch_status(&self) -> Result<ReplicaStatus, Error> {
@@ -229,7 +229,7 @@ mod tests {
         fn subscribe_from(&self, _from: Option<LogIndex>) -> crate::ordered::ReplicaStream {
             let items = self.items.lock().expect("lock").take().unwrap_or_default();
             crate::ordered::replica_stream(
-                Channels::from_vec(
+                Channel::from_vec(
                     items
                         .into_iter()
                         .map(|(idx, data)| Ok((idx, data)))
@@ -251,7 +251,7 @@ mod tests {
 
     #[async_trait]
     impl Replica for DyingUpstreamReplica {
-        fn write(&self, _: Channels<StampedWrite>) -> Channels<Result<WriteOutcome, Error>> {
+        fn write(&self, _: Channel<StampedWrite>) -> Channel<Result<WriteOutcome, Error>> {
             unimplemented!()
         }
         async fn fetch_status(&self) -> Result<ReplicaStatus, Error> {
@@ -261,7 +261,7 @@ mod tests {
             let (tx, rx) = crossbeam_channel::bounded::<Result<(LogIndex, Data), Error>>(1);
             drop(tx); // the peer went away
             crate::ordered::replica_stream(
-                Channels::from_infinite(rx, "client subscribe stream"),
+                Channel::from_infinite(rx, "client subscribe stream"),
                 None,
             )
         }

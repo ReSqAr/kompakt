@@ -24,7 +24,7 @@ use crate::Error;
 use crate::ids::SnapshotId;
 use crate::meta::SnapshotEntry;
 use crate::object_store::CompressionLevel;
-use crossbeam_combinators::Channels;
+use crossbeam_combinators::Channel;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct CleanupReport {
@@ -42,7 +42,7 @@ pub(crate) trait SnapshotStore: Send + Sync {
     async fn write_snapshot(
         &self,
         id: SnapshotId,
-        entries: Channels<Result<SnapshotEntry, Error>>,
+        entries: Channel<Result<SnapshotEntry, Error>>,
         compression: CompressionLevel,
         reason: crate::metrics::ObjectStoreReason,
     ) -> Result<usize, Error>;
@@ -59,7 +59,7 @@ pub(crate) trait SnapshotStore: Send + Sync {
         &self,
         id: SnapshotId,
         reason: crate::metrics::ObjectStoreReason,
-    ) -> Result<Channels<Result<SnapshotEntry, Error>>, Error>;
+    ) -> Result<Channel<Result<SnapshotEntry, Error>>, Error>;
 
     /// The token this store's blocking workers cancel on. A feeder must cancel
     /// on *this* token, not its own: an encode worker parked on `blocking_recv`

@@ -3,7 +3,7 @@
 //! One call, one TCP connection. The client never writes after the handshake;
 //! the server pushes `SubscribeStreamItem` frames. The reader loop decodes them
 //! into a `crossbeam_channel::Sender`, and the caller drains the resulting
-//! `Channels` in a `spawn_blocking` thread.
+//! `Channel` in a `spawn_blocking` thread.
 //!
 //! When the connection breaks the channel simply disconnects — the caller
 //! (ReplicationSubscriber) owns reopen.
@@ -18,7 +18,7 @@ use crate::meta::Data;
 use crate::network::client::{RpcClient, Target};
 use crate::network::framing::{TcpFrameStream, adopt_blocking};
 use crate::network::messages::SubscribeStreamItem;
-use crossbeam_combinators::Channels;
+use crossbeam_combinators::Channel;
 
 /// How long the reader waits for the consumer to make room before declaring it
 /// wedged and ending the connection.
@@ -56,11 +56,11 @@ pub(in crate::network) fn open_subscribe(
     from: Option<LogIndex>,
     capacity: std::num::NonZeroUsize,
     cancel: CancellationToken,
-) -> Channels<Result<(LogIndex, Data), Error>> {
+) -> Channel<Result<(LogIndex, Data), Error>> {
     let (out_tx, out_rx) =
         crossbeam_channel::bounded::<Result<(LogIndex, Data), Error>>(capacity.get());
 
-    let ch = Channels::from_infinite(out_rx, "client subscribe stream");
+    let ch = Channel::from_infinite(out_rx, "client subscribe stream");
     tokio::spawn(async move {
         let Some(rpc) = client.upgrade() else {
             return; // node shutting down — channel disconnects

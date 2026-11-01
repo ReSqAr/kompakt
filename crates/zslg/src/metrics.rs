@@ -259,8 +259,6 @@ const LABEL_KIND: &str = "kind";
 const LABEL_DIRECTION: &str = "direction";
 const LABEL_OUTCOME: &str = "outcome";
 const LABEL_PEER_ID: &str = "peer_id";
-/// Which side of the replication path shed a record (see [`ShedSite`]).
-const LABEL_SITE: &str = "site";
 /// Peer identity (`NodeId::to_string()`). High-cardinality but bounded by cluster
 /// size; the enum-valued-label rule targets bounded vocabularies, not node ids.
 const LABEL_NODE_ID: &str = "node_id";
@@ -292,7 +290,6 @@ const ALL_LABEL_KEYS: &[&str] = &[
     LABEL_DIRECTION,
     LABEL_OUTCOME,
     LABEL_PEER_ID,
-    LABEL_SITE,
     LABEL_NODE_ID,
     LABEL_JOB,
     LABEL_CF,
@@ -629,9 +626,6 @@ metrics!(logs; {
         Gauge None
         "Highest log index per log type. replica-vs-local spread on a \
          learner = replication lag in entries.";
-    gauge_usize log_subscriptions_count LOG_SUBSCRIPTIONS_COUNT
-        "log_subscriptions_count" Count
-        "Active subscribers to this replica's log broadcast." (count: usize);
     counter subscription_reconnect LOG_SUBSCRIPTION_RECONNECTS_TOTAL
         "log_subscription_reconnects_total"
         "Subscription reconnects (learner side). Sustained rate = flaky \
@@ -692,19 +686,6 @@ pub(crate) fn subscription_messages(count: usize) {
 // shedding behaviour.
 
 metrics!(subscription; {
-    labeled_counter subscription_shed LOG_SUBSCRIPTION_SHED_TOTAL
-        "log_subscription_shed_total"
-        "Records dropped by deliberate load shedding on the replication \
-         path. Only site=\"replica_fanout\" emits: the serving replica \
-         evicted a subscriber whose live channel was full, rather than \
-         block the single flush thread that serves every writer on the \
-         node. By design, and it costs a resend rather than data — \
-         delivery is index-addressed and the consumer dedups by data_id. \
-         The learner does not shed: its reader thread is dedicated to \
-         one subscription, so it waits instead, which lets TCP pace the \
-         replica's catch-up scan. Expect this only under live write \
-         load, never during a quiet catch-up."
-        (site: ShedSite) [LABEL_SITE => site.as_str()];
     counter subscription_consumer_stalled LOG_SUBSCRIPTION_CONSUMER_STALLED_TOTAL
         "log_subscription_consumer_stalled_total"
         "Subscriptions ended because the consumer accepted nothing for \
@@ -918,12 +899,6 @@ metrics!(read_path; {
          sees duplicates, never a gap. The under-pressure signal: a steadily \
          rising rate means consumers cannot keep up with their queue depth \
          and are paying an O(window) rescan each time.";
-    custom  unstable_fanout_hangups UNSTABLE_FANOUT_HANGUPS_TOTAL
-        "unstable_fanout_hangups_total" Counter None
-        "Unstable-tail subscribers the local store's fan-out dropped because \
-         their queue was full or their consumer had gone — the two are the \
-         same case to the fan-out. Read with unstable_read_resyncs_total: \
-         hang-ups a resync follows are slow consumers; the rest departed.";
     counter read_token_wait_timeout READ_TOKEN_WAIT_TIMEOUTS_TOTAL
         "read_token_wait_timeouts_total"
         "Read-token waits that hit their timeout.";
@@ -945,11 +920,6 @@ pub(crate) fn manifest_watermark_advanced() {
         MANIFEST_WATERMARK_ADVANCED_TIMESTAMP_SECONDS,
         unix_now_secs(),
     );
-}
-
-pub(crate) fn unstable_fanout_hangups(count: usize) {
-    metrics::counter!(UNSTABLE_FANOUT_HANGUPS_TOTAL)
-        .increment(u64::try_from(count).expect("usize fits u64"));
 }
 
 pub(crate) fn read_request(source: ReadSource) {
@@ -1576,25 +1546,10 @@ label_enum!(#[doc = "`reason` label of the per-store flush-trigger counters: why
     Idle => "idle",
 });
 
-label_enum!(#[doc = "`site` label of [`LOG_SUBSCRIPTION_SHED_TOTAL`] — which side dropped the \
-record. Shedding happens on a *full* buffer, never on a disconnect (a disconnect is a \
-stream end, counted by [`LOG_SUBSCRIPTION_ENDED_TOTAL`]).\n\nOne site, and the label is \
-kept because *which* side shed is the first question asked when it fires. The learner does \
-not shed at all: it has no shared resource to protect, so it waits — see \
-`network::client::subscribe_stream::send_or_stall`."] ShedSite {
-    /// The serving replica's broadcast fan-out: the subscriber's live channel
-    /// was full, so it was evicted rather than block the shared flush thread
-    /// that serves every writer on the node.
-    ReplicaFanout => "replica_fanout",
-});
-
 label_enum!(#[doc = "`reason` label of [`LOG_SUBSCRIPTION_ENDED_TOTAL`] — why one subscription attempt ended. A stream that ended because *we* shed is indistinguishable on the wire from one that ended because the peer went away, so the reason has to be recorded here or it is unrecoverable."] SubscriptionEndReason {
     /// The stream simply ended. On a stream that is infinite by contract this
     /// is never "the peer finished"; it is a socket drop, a replica restart, or
-    /// a shed on **either** side — all identical on the wire. Which one it was
-    /// is answered by correlating [`LOG_SUBSCRIPTION_SHED_TOTAL`] on this node
-    /// (`site="client_buffer"`) and on the serving replica
-    /// (`site="replica_fanout"`) over the same window.
+    /// a local teardown — all identical on the wire.
     Ended => "ended",
     /// The peer is gone, unroutable, or replaced (membership still converging).
     PeerGone => "peer_gone",
@@ -2378,7 +2333,6 @@ mod tests {
             "zslg_hlc_cutoff_drain_duration_seconds",
             "zslg_log_writes_total",
             "zslg_log_index_frontier",
-            "zslg_log_subscriptions_count",
             "zslg_log_subscription_reconnects_total",
             "zslg_local_store_integrate_queue_depth",
             "zslg_purged_entries_total",

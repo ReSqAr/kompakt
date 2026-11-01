@@ -46,7 +46,7 @@ use crate::ids::{DataId, NodeId};
 use crate::meta::Data;
 use crate::metrics::{self, FanoutResponseState, WriteRpcOutcome};
 use crate::quorum::{all_targets, is_quorum};
-use crossbeam_combinators::Channels;
+use crossbeam_combinators::Channel;
 
 /// Global in-flight cap. A permit is held for a write's whole life, so this
 /// bounds `pending` and every per-stream channel with it (a `DataId` is 32 bytes;
@@ -197,10 +197,10 @@ fn run_replica(weak: Weak<Coordinator>, node: NodeId, mut ids_rx: Receiver<DataI
         // Both finite-by-drop rather than by declaration: the prime set is fully
         // sent above, and the fan is replaced wholesale on reopen. Nothing reads
         // this stream's verdict — an un-acked write is resent from `pending`.
-        let (prime_ch, prime_closer) = Channels::from(prime_rx, "coordinator prime");
+        let (prime_ch, prime_closer) = Channel::from(prime_rx, "coordinator prime");
         prime_closer.close();
         // Infinite: replaced wholesale on reopen, never completed.
-        let ids_ch = Channels::from_infinite(ids_rx, "coordinator fan");
+        let ids_ch = Channel::from_infinite(ids_rx, "coordinator fan");
         let prime_stamped = prime_ch.filter_map(|data| Some(StampedWrite::now(data)));
         let ids_stamped = ids_ch.filter_map(move |id| {
             if let Some(wait) = pending.elapsed_since_enqueued(&id) {
@@ -524,7 +524,7 @@ mod tests {
 
     #[async_trait]
     impl Replica for FakeReplica {
-        fn write(&self, input: Channels<StampedWrite>) -> Channels<Result<WriteOutcome, Error>> {
+        fn write(&self, input: Channel<StampedWrite>) -> Channel<Result<WriteOutcome, Error>> {
             let (tx, rx) = crossbeam_channel::unbounded();
             let resp = self.resp.clone();
             // This double measures nothing, so it drops the stamp immediately.
@@ -553,7 +553,7 @@ mod tests {
                     }
                 }
             });
-            let (ch, closer) = Channels::from(rx, "test replica");
+            let (ch, closer) = Channel::from(rx, "test replica");
             closer.close();
             ch
         }
@@ -562,7 +562,7 @@ mod tests {
             unimplemented!()
         }
         fn subscribe_from(&self, _: Option<LogIndex>) -> crate::ordered::ReplicaStream {
-            crate::ordered::replica_stream(Channels::from_vec(vec![]), None)
+            crate::ordered::replica_stream(Channel::from_vec(vec![]), None)
         }
         async fn subscribe_status(
             &self,

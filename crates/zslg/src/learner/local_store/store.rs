@@ -34,7 +34,7 @@ use crate::learner::local_store::key::{
     DATA_PRIMARY_WIDTH, decode_data_key, encode_cursor_key, encode_data_key,
 };
 use bytes::Bytes;
-use crossbeam_combinators::Fanout;
+use crossbeam_combinators::{OverflowPolicy, Registry, Shutdown, broadcast};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tracing::error;
@@ -45,7 +45,8 @@ use crate::hlc::Hlc;
 use crate::ids::{DataId, LogIndex, NodeId};
 use crate::meta::Data;
 use crate::metrics::{self, LocalWriteKind, LogType, OpState};
-use crossbeam_combinators::Channels;
+use crate::ordered::{local_store_stream, window_stream};
+use crossbeam_combinators::Channel;
 
 const STREAM_CHANNEL_CAPACITY: usize = 32;
 
@@ -83,7 +84,9 @@ pub(crate) struct LocalStore {
     /// forwarder delivering its own log in order.
     integrate_tx: crossbeam_channel::Sender<IntegrateItem>,
     /// Live subscribers to first-time integrations (`subscribe_unstable`).
-    unstable: Fanout<Data>,
+    unstable_tx: crossbeam_channel::Sender<Arc<Data>>,
+    unstable_registry: Registry<Data>,
+    unstable_shutdown: Shutdown,
     /// Test-only fault injection for the commit fence.
     #[cfg(test)]
     fail_next_append: AtomicBool,
@@ -116,12 +119,24 @@ pub(in crate::learner::local_store) async fn create_local_store(
         stable_log,
         config.dedup_ring,
         integrate_tx,
-        Fanout::new(
-            config.unstable_subscriber_queue_capacity,
-            "unstable tail subscription",
-        ),
+        {
+            let (tx, registry, shutdown) = broadcast(
+                "unstable tail subscription",
+                std::num::NonZeroUsize::new(1024).unwrap_or(std::num::NonZeroUsize::MIN),
+                std::num::NonZeroUsize::new(1024).unwrap_or(std::num::NonZeroUsize::MIN),
+                config.unstable_subscriber_queue_capacity,
+                OverflowPolicy::Shed,
+            );
+            (tx, registry, shutdown)
+        },
     ));
     Ok((store, integrate_rx))
+}
+
+impl Drop for LocalStore {
+    fn drop(&mut self) {
+        self.unstable_shutdown.cancel();
+    }
 }
 
 impl LocalStore {
@@ -130,8 +145,13 @@ impl LocalStore {
         stable_log: Arc<dyn StableLogSnapshot>,
         dedup_ring: Option<std::num::NonZeroUsize>,
         integrate_tx: crossbeam_channel::Sender<IntegrateItem>,
-        unstable: Fanout<Data>,
+        unstable: (
+            crossbeam_channel::Sender<Arc<Data>>,
+            Registry<Data>,
+            Shutdown,
+        ),
     ) -> Self {
+        let (unstable_tx, unstable_registry, unstable_shutdown) = unstable;
         let (integrated, _) = watch::channel(());
         Self {
             storage,
@@ -139,7 +159,9 @@ impl LocalStore {
             integrated,
             dirty: AtomicBool::new(false),
             integrate_tx,
-            unstable,
+            unstable_tx,
+            unstable_registry,
+            unstable_shutdown,
             recent: parking_lot::Mutex::new(Dedup::new(dedup_ring)),
             #[cfg(test)]
             fail_next_append: AtomicBool::new(false),
@@ -194,11 +216,8 @@ impl LocalStore {
             .filter(|(data_id, _)| watermark.is_none_or(|w| data_id.hlc() > w))
             .map(|(data_id, blob)| Data { data_id, blob })
             .collect();
-        if !fresh.is_empty() {
-            let hung_up = self.unstable.send_all(&fresh);
-            if hung_up > 0 {
-                metrics::unstable_fanout_hangups(hung_up);
-            }
+        for data in fresh {
+            let _ = self.unstable_tx.send(Arc::new(data));
         }
     }
 
@@ -243,11 +262,11 @@ impl LocalStore {
 
 #[async_trait::async_trait]
 impl crate::api::LocalStoreView for LocalStore {
-    fn stream_above_hlc(&self, threshold: Option<Hlc>) -> Channels<Result<Data, Error>> {
+    fn stream_above_hlc(&self, threshold: Option<Hlc>) -> crate::ordered::LocalStoreStream {
         let storage = self.storage.clone();
         let (tx, rx) =
             crossbeam_channel::bounded::<Result<WindowItem, Error>>(STREAM_CHANNEL_CAPACITY);
-        let (ch, closer) = Channels::from(rx, "stream_above_hlc");
+        let (ch, closer) = Channel::from(rx, "stream_above_hlc");
         tokio::task::spawn_blocking(move || {
             let start = match threshold {
                 None => Bound::Unbounded,
@@ -260,11 +279,14 @@ impl crate::api::LocalStoreView for LocalStore {
         });
         // Uncapped, so the terminal is always `Complete` and carries nothing
         // this caller needs.
-        ch.filter_map(|r| match r {
-            Ok(WindowItem::Entry(d)) => Some(Ok(d)),
-            Ok(_) => None,
-            Err(e) => Some(Err(e)),
-        })
+        local_store_stream(
+            ch.filter_map(|r| match r {
+                Ok(WindowItem::Entry(d)) => Some(Ok(d)),
+                Ok(_) => None,
+                Err(e) => Some(Err(e)),
+            }),
+            "local store above HLC",
+        )
     }
 
     fn stream_window_ordered(
@@ -272,10 +294,10 @@ impl crate::api::LocalStoreView for LocalStore {
         above: Option<Hlc>,
         upto: Hlc,
         max_entries: Option<std::num::NonZeroUsize>,
-    ) -> Channels<Result<WindowItem, Error>> {
+    ) -> crate::ordered::WindowStream {
         let storage = self.storage.clone();
         let (tx, rx) = crossbeam_channel::bounded(STREAM_CHANNEL_CAPACITY);
-        let (ch, closer) = Channels::from(rx, "stream_window_ordered");
+        let (ch, closer) = Channel::from(rx, "stream_window_ordered");
         tokio::task::spawn_blocking(move || {
             let start = match above {
                 None => Bound::Unbounded,
@@ -285,15 +307,18 @@ impl crate::api::LocalStoreView for LocalStore {
             stream_scan(&storage, (start, end), &tx, max_entries);
             closer.close();
         });
-        ch
+        window_stream(ch, "local store window")
     }
 
     fn subscribe_integrated(&self) -> watch::Receiver<()> {
         self.integrated.subscribe()
     }
 
-    fn subscribe_unstable(&self) -> Channels<Data> {
-        self.unstable.subscribe()
+    fn subscribe_unstable(&self) -> Channel<Data> {
+        self.unstable_registry
+            .subscribe()
+            .map(|ch| ch.map(|data| (*data).clone()))
+            .unwrap_or_else(|_| Channel::empty())
     }
 
     async fn subscription_cursor(&self, upstream: NodeId) -> Result<Option<LogIndex>, Error> {
@@ -310,10 +335,10 @@ impl crate::api::LocalStoreView for LocalStore {
 impl crate::api::LocalStoreMut for LocalStore {
     async fn integrate_loop(
         &self,
-        mut records: Channels<Result<(NodeId, LogIndex, Data), Error>>,
+        mut records: Channel<Result<(NodeId, LogIndex, Data), Error>>,
     ) -> Result<(), Error> {
         let tx = self.integrate_tx.clone();
-        // Forwarding blocks on both halves (Channels::recv and a bounded
+        // Forwarding blocks on both halves (Channel::recv and a bounded
         // send), so it belongs on the blocking pool. It does no IO — the
         // single worker owns every commit.
         let forwarded = tokio::task::spawn_blocking(move || -> (Result<(), Error>, bool) {
@@ -941,7 +966,7 @@ mod tests {
         for (idx, rec) in records {
             let _ = tx.send(Ok((source, idx, rec)));
         }
-        let (ch, closer) = crossbeam_combinators::Channels::from(rx, "test integrate");
+        let (ch, closer) = crossbeam_combinators::Channel::from(rx, "test integrate");
         // Close before the last sender drops, or the consumer forms its
         // verdict as "disconnected, not yet closed" — an abort.
         closer.close();
@@ -1118,38 +1143,6 @@ mod tests {
         assert_eq!(live.try_recv(), None);
     }
 
-    /// The integrate worker never waits on a subscriber: one whose queue is
-    /// full is hung up on, after everything already queued.
-    #[tokio::test]
-    async fn an_overrun_unstable_subscriber_is_hung_up_on() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let mut config = crate::learner::local_store::LocalStoreConfig::for_test();
-        config.unstable_subscriber_queue_capacity = crate::unit::nonzero(2);
-        let store = store_with(dir.path(), &config, None).await;
-        let mut live = store.subscribe_unstable();
-
-        for i in 0..3u8 {
-            put_full(
-                &store,
-                upstream(1),
-                LogIndex(u64::from(i)),
-                make_data(i, 100 + u64::from(i), b"x"),
-            )
-            .await;
-        }
-
-        assert_eq!(live.recv().expect("first").data_id.hlc(), Hlc(100));
-        assert_eq!(live.recv().expect("second").data_id.hlc(), Hlc(101));
-        assert_eq!(
-            live.recv().err(),
-            Some(crossbeam_combinators::End::Aborted {
-                reason: crossbeam_combinators::AbortReason::ProducerGone {
-                    what: "unstable tail subscription",
-                },
-            })
-        );
-    }
-
     #[tokio::test]
     async fn integrate_skips_full_record_at_or_below_end_hlc() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1271,7 +1264,7 @@ mod tests {
         for (src, idx, rec) in records {
             let _ = tx.send(Ok((src, idx, rec)));
         }
-        let (ch, closer) = crossbeam_combinators::Channels::from(rx, "test integrate");
+        let (ch, closer) = crossbeam_combinators::Channel::from(rx, "test integrate");
         // Close before the last sender drops, or the consumer forms its
         // verdict as "disconnected, not yet closed" — an abort.
         closer.close();
@@ -1517,6 +1510,7 @@ mod tests {
 
         let got: Vec<Data> = store
             .stream_window_ordered(None, Hlc(1_000), None)
+            .into_channels()
             .into_iter()
             .filter_map(|r| match r {
                 Ok(WindowItem::Entry(d)) => Some(d),
@@ -1545,6 +1539,7 @@ mod tests {
         // Lower bound exclusive, upper bound inclusive: (100, 300] → 200, 300.
         let got: Vec<Data> = store
             .stream_window_ordered(Some(Hlc(100)), Hlc(300), None)
+            .into_channels()
             .into_iter()
             .filter_map(|r| match r {
                 Ok(WindowItem::Entry(d)) => Some(d),
@@ -1584,6 +1579,7 @@ mod tests {
         let cap = std::num::NonZeroUsize::new(2).expect("nonzero");
         let items: Vec<WindowItem> = store
             .stream_window_ordered(None, Hlc(200), Some(cap))
+            .into_channels()
             .into_iter()
             .filter_map(|r| r.ok())
             .collect();
@@ -1629,6 +1625,7 @@ mod tests {
         let cap = std::num::NonZeroUsize::new(100).expect("nonzero");
         let items: Vec<WindowItem> = store
             .stream_window_ordered(None, Hlc(200), Some(cap))
+            .into_channels()
             .into_iter()
             .filter_map(|r| r.ok())
             .collect();
@@ -1661,6 +1658,7 @@ mod tests {
         }
         let items: Vec<WindowItem> = store
             .stream_window_ordered(None, Hlc(200), None)
+            .into_channels()
             .into_iter()
             .filter_map(|r| r.ok())
             .collect();

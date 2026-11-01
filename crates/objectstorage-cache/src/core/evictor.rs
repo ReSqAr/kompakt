@@ -48,13 +48,13 @@ pub(super) enum Ask {
     Tick(oneshot::Sender<usize>),
 }
 
-pub(super) struct Channels {
+pub(super) struct Channel {
     pub(super) wake: Arc<Notify>,
     pub(super) asks: mpsc::UnboundedReceiver<Ask>,
     pub(super) stop: watch::Receiver<bool>,
 }
 
-pub(super) async fn run(inner: Weak<Inner>, mut ch: Channels) {
+pub(super) async fn run(inner: Weak<Inner>, mut ch: Channel) {
     // A deadline looked at every turn, not only when idle: under a steady
     // stream of wakes and room requests the loop may never wait, and the
     // tick must still come.

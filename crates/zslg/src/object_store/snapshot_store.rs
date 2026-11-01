@@ -55,7 +55,7 @@ use crate::meta::SnapshotEntry;
 use crate::metrics::{self, ObjectStoreOp, OpState};
 use crate::object_store::CompressionLevel;
 use crate::object_store::framing;
-use crossbeam_combinators::Channels;
+use crossbeam_combinators::Channel;
 
 const SNAPSHOT_PREFIX: &str = "snapshots";
 
@@ -184,7 +184,7 @@ impl RemoteSnapshotStore {
     async fn write_snapshot_inner(
         &self,
         path: &Path,
-        mut entries: Channels<Result<SnapshotEntry, Error>>,
+        mut entries: Channel<Result<SnapshotEntry, Error>>,
         compression: CompressionLevel,
     ) -> Result<(usize, u64, u64), Error> {
         let upload = self
@@ -257,7 +257,7 @@ impl SnapshotStore for RemoteSnapshotStore {
     async fn write_snapshot(
         &self,
         id: SnapshotId,
-        entries: Channels<Result<SnapshotEntry, Error>>,
+        entries: Channel<Result<SnapshotEntry, Error>>,
         compression: CompressionLevel,
         reason: crate::metrics::ObjectStoreReason,
     ) -> Result<usize, Error> {
@@ -278,7 +278,7 @@ impl SnapshotStore for RemoteSnapshotStore {
         &self,
         id: SnapshotId,
         reason: crate::metrics::ObjectStoreReason,
-    ) -> Result<Channels<Result<SnapshotEntry, Error>>, Error> {
+    ) -> Result<Channel<Result<SnapshotEntry, Error>>, Error> {
         let path = snapshot_path(id);
 
         let probe = metrics::object_store_request_probe(ObjectStoreOp::Get);
@@ -300,7 +300,7 @@ impl SnapshotStore for RemoteSnapshotStore {
         let sync_reader = SyncIoBridge::new(StreamReader::new(byte_stream));
         let cancel = self.cancel.clone();
         let (tx, rx) = crossbeam_channel::bounded(SNAPSHOT_READ_CHANNEL_CAP);
-        let (ch, closer) = Channels::from(rx, "read_snapshot");
+        let (ch, closer) = Channel::from(rx, "read_snapshot");
         tokio::task::spawn_blocking(move || {
             let res = crate::object_store::framing::decode_framed_records_streaming::<
                 SnapshotEntry,
@@ -472,8 +472,8 @@ mod tests {
     /// Pre-load a bounded channel with `records` for `write_snapshot`, the test-side
     /// mirror of the production producer tasks. The capacity covers every record so
     /// `try_send` never blocks.
-    fn entries_channel(records: Vec<SnapshotEntry>) -> Channels<Result<SnapshotEntry, Error>> {
-        Channels::from_vec(records.into_iter().map(Ok).collect())
+    fn entries_channel(records: Vec<SnapshotEntry>) -> Channel<Result<SnapshotEntry, Error>> {
+        Channel::from_vec(records.into_iter().map(Ok).collect())
     }
 
     fn store() -> Arc<RemoteSnapshotStore> {
@@ -579,7 +579,7 @@ mod tests {
         let result = store
             .write_snapshot(
                 id,
-                Channels::closed(rx),
+                Channel::closed(rx),
                 CompressionLevel::standard(),
                 crate::metrics::ObjectStoreReason::SnapshotCreate,
             )

@@ -7,7 +7,7 @@ use crate::{
     ArcReadTransaction, ArcStore, Error, EventSet, Index, Projection, ProjectionTypeId,
     ReadTransactionExt, Ref, ResultSet, SubEventOf, Syncer, Tenant, TenantId, View, WithWireFormat,
 };
-use crossbeam_combinators::Channels;
+use crossbeam_combinators::{Channel, RegistryError};
 use std::collections::{BTreeMap, BTreeSet};
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -20,9 +20,6 @@ impl Error {
         }
     }
 }
-
-/// Unread refs before the fold blocks on a subscriber.
-const SUBSCRIBER_CAPACITY: usize = 1024;
 
 /// One tenant's read side, typed by the tenant's event type `Ev` like the
 /// [`EventWriter`](crate::EventWriter) handed out beside it.
@@ -158,7 +155,7 @@ impl<Ev> Reader<Ev> {
     ///     let _ = reader.subscribe_stable_log::<P>();
     /// }
     /// ```
-    pub fn subscribe_stable_log<P>(&self) -> Result<Channels<Ref<P>>, Error>
+    pub fn subscribe_stable_log<P>(&self) -> Result<Channel<Ref<P>>, Error>
     where
         P: Projection,
         for<'a> P::Event<'a>: SubEventOf<'a, Ev>,
@@ -171,19 +168,22 @@ impl<Ev> Reader<Ev> {
                 tenant_id: self.tenant.id().as_u128(),
             });
         }
-        let (tx, rx) = crossbeam_channel::bounded(SUBSCRIBER_CAPACITY);
-        // Racy by a few concurrent subscribes, which is fine for this bound.
-        if self.subscriptions.register.len() >= PENDING_SUBSCRIBERS {
-            return Err(Error::TooManyPendingSubscriptions(PENDING_SUBSCRIBERS));
-        }
-        // If the fold is gone, `tx` is dropped here and the channel ends.
-        let _ = self
+        let stream = match self
             .subscriptions
-            .register
-            .send((self.tenant.id(), P::TYPE_ID, tx));
-        Ok(Channels::from_infinite(rx, "nvzn-subscribe")
-            .until(&self.subscriptions.cancelled)
-            .map(Ref::new))
+            .registry
+            .subscribe((self.tenant.id(), P::TYPE_ID))
+        {
+            Ok(stream) => stream,
+            Err(RegistryError::Full) => {
+                return Err(Error::TooManyPendingSubscriptions(PENDING_SUBSCRIBERS));
+            }
+            Err(RegistryError::Closed) => {
+                let (tx, rx) = crossbeam_channel::bounded(1);
+                drop(tx);
+                Channel::from_infinite(rx, "nvzn-subscribe")
+            }
+        };
+        Ok(stream.map(|entry| Ref::new(entry.2)))
     }
 }
 
@@ -518,9 +518,9 @@ mod tests {
 
         /// The next `n` receives, off the runtime: `recv` blocks.
         async fn recv_n<T: Send + 'static>(
-            ch: Channels<T>,
+            ch: Channel<T>,
             n: usize,
-        ) -> (Channels<T>, Vec<Result<T, End>>) {
+        ) -> (Channel<T>, Vec<Result<T, End>>) {
             timeout(
                 WAIT,
                 tokio::task::spawn_blocking(move || {
@@ -594,24 +594,14 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn a_full_registration_queue_fails_rather_than_blocks() {
+        async fn many_registrations_are_admitted_and_see_a_commit() {
             let (_log, writer, reader, _handle) = rig().await;
-            // An idle fold takes up no registrations: fill the queue.
             let pending: Vec<_> = (0..PENDING_SUBSCRIBERS)
                 .map(|_| reader.subscribe_stable_log::<Todo>().unwrap())
                 .collect();
-            assert!(matches!(
-                reader.subscribe_stable_log::<Todo>().map(|_| ()),
-                Err(Error::TooManyPendingSubscriptions(PENDING_SUBSCRIBERS))
-            ));
 
-            // A commit drains the queue, and the queued ones see it.
             writer.write(&[new_todo(1)]).await.unwrap();
             reader.sync().await.unwrap();
-            let todos = reader
-                .subscribe_stable_log::<Todo>()
-                .expect("the queue drained");
-            drop(todos);
             let first = pending.into_iter().next().unwrap();
             let (_first, got) = recv_n(first, 1).await;
             assert_eq!(got, vec![Ok(todo_ref(1))]);

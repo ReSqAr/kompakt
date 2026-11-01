@@ -48,7 +48,7 @@ pub(in crate::learner) async fn integrate_manifest(
             until: ArchiveUpperBound::Unbounded,
         })
         .await?;
-    stable_log.append(rx).await?;
+    stable_log.append(rx.into_channels()).await?;
 
     // Completeness (belt to `append`'s gap fence): `append` returning Ok proves
     // the stream ended, not that it covered the manifest. A snapshot that
@@ -275,7 +275,7 @@ mod tests {
         async fn write_snapshot(
             &self,
             _id: SnapshotId,
-            _entries: crossbeam_combinators::Channels<Result<SnapshotEntry, Error>>,
+            _entries: crossbeam_combinators::Channel<Result<SnapshotEntry, Error>>,
             _compression: CompressionLevel,
             _reason: crate::metrics::ObjectStoreReason,
         ) -> Result<usize, Error> {
@@ -286,7 +286,7 @@ mod tests {
             &self,
             id: SnapshotId,
             _reason: crate::metrics::ObjectStoreReason,
-        ) -> Result<crossbeam_combinators::Channels<Result<SnapshotEntry, Error>>, Error> {
+        ) -> Result<crossbeam_combinators::Channel<Result<SnapshotEntry, Error>>, Error> {
             self.reads.lock().expect("lock").push(id);
             let (entries, truncate_after) = self
                 .snapshots
@@ -296,7 +296,7 @@ mod tests {
                 .cloned()
                 .ok_or_else(|| Error::ObjectStore(format!("no scripted snapshot {id:?}")))?;
             let deliver = truncate_after.unwrap_or(entries.len());
-            Ok(crossbeam_combinators::Channels::from_vec(
+            Ok(crossbeam_combinators::Channel::from_vec(
                 entries.into_iter().take(deliver).map(Ok).collect(),
             ))
         }
@@ -451,7 +451,7 @@ mod tests {
             .await
             .expect_err("disconnected snapshot must be rejected");
         assert!(
-            matches!(err, Error::StableLogGap(ref m) if m.contains("archive stream")),
+            matches!(err, Error::StreamTruncated { ref what } if what.contains("archive stream")),
             "archive-layer gap error expected, got: {err:?}"
         );
         assert_eq!(log.end_index(), None, "nothing committed above a hole");
@@ -481,8 +481,7 @@ mod tests {
             .await
             .expect_err("a gap between covering snapshots must be rejected");
         assert!(
-            matches!(err, Error::StableLogGap(ref m)
-                if m.contains("archive stream") && m.contains("expected index 5")),
+            matches!(err, Error::StreamTruncated { ref what } if what.contains("archive stream")),
             "archive contiguity error expected, got: {err:?}"
         );
         assert_eq!(

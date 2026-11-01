@@ -40,7 +40,7 @@
 
 use crate::{RocksDBStore, Store};
 use bytes::Bytes;
-use crossbeam_combinators::Channels;
+use crossbeam_combinators::Channel;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use zslg::{Data, DataId, Hlc, LogIndex, StableLogEvent, UnstableEvent};
@@ -298,10 +298,10 @@ impl zslg::Reader for TestReader {
             senders.lock().expect("test mutex").push(tx);
         }
 
-        zslg::StableStream::new(Channels::from_infinite(rx, "test-log"), Some(from))
+        zslg::StableStream::new(Channel::from_infinite(rx, "test-log"), Some(from))
     }
 
-    fn unstable_tail(&self) -> Channels<Result<Data, zslg::Error>> {
+    fn unstable_tail(&self) -> Channel<Result<Data, zslg::Error>> {
         let items = self
             .shared
             .lock()
@@ -311,12 +311,12 @@ impl zslg::Reader for TestReader {
             .cloned()
             .map(Ok)
             .collect();
-        Channels::from_vec(items)
+        Channel::from_vec(items)
     }
 
     /// One cycle of zslg's: the watermark, the staged entries above it, then
     /// live. No resync — a hang-up ends it `Aborted`.
-    fn subscribe_unstable_tail(&self) -> Channels<Result<UnstableEvent, zslg::Error>> {
+    fn subscribe_unstable_tail(&self) -> Channel<Result<UnstableEvent, zslg::Error>> {
         let (tx, rx) = crossbeam_channel::unbounded();
 
         let shared = self.shared.lock().expect("test mutex");
@@ -338,7 +338,7 @@ impl zslg::Reader for TestReader {
         }
         drop(shared);
 
-        Channels::from_infinite(rx, "test-log unstable")
+        Channel::from_infinite(rx, "test-log unstable")
     }
 }
 
