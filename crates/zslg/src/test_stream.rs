@@ -12,17 +12,16 @@ use futures::StreamExt;
 use futures::stream::BoxStream;
 
 pub(crate) trait ChannelTestExt<T> {
-    /// The items until the stream ends, verdict ignored.
-    fn items(self) -> std::vec::IntoIter<T>;
+    /// The items until the stream ends, verdict ignored. Lazy, so a bounded
+    /// prefix of an infinite stream (`.take(n)`) does not block.
+    fn items(self) -> impl Iterator<Item = T> + Send;
     /// The items as an async stream, drained on the blocking pool.
     fn into_test_stream(self) -> BoxStream<'static, T>;
 }
 
 impl<T: Send + 'static> ChannelTestExt<T> for Channel<T> {
-    fn items(mut self) -> std::vec::IntoIter<T> {
-        std::iter::from_fn(|| self.recv().ok())
-            .collect::<Vec<_>>()
-            .into_iter()
+    fn items(mut self) -> impl Iterator<Item = T> + Send {
+        std::iter::from_fn(move || self.recv().ok())
     }
 
     fn into_test_stream(self) -> BoxStream<'static, T> {
@@ -50,7 +49,7 @@ where
     P: OrderPolicy,
     P::Key: Key<T>,
 {
-    fn items(self) -> std::vec::IntoIter<T> {
+    fn items(self) -> impl Iterator<Item = T> + Send {
         self.into_channel().items()
     }
 
