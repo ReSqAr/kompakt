@@ -95,3 +95,10 @@ post-implementation doc. Not a design doc; the design is
   `testing` double, then skipped index `from` and stopped with
   `SubscriptionAborted`. Fixed with `from.before()` (`LogIndex::before`, the
   inverse of `next_after`).
+- **A full disk masqueraded as test failures.** One rerun reported failures
+  in replica/cluster proptests and the snapshot lifecycle; the cause was
+  `target/debug/incremental` reaching 15 GB and the disk filling (a proptest
+  even recorded a spurious regression seed, discarded). Verification runs now
+  use `CARGO_INCREMENTAL=0`; with that, slice 2 is green.
+
+## Slice 3
