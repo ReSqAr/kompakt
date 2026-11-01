@@ -311,3 +311,32 @@ with that reason unchanged. The factory still receives the reason (logging,
 metrics) and may still decline with `None`, but cannot resume a stop request or
 a contract violation. Consequences: `until` is safe inside or outside a
 segment; a corrupt log cannot spin a resync loop.
+
+### D19. The resume position is always exclusive: `after: Option<K>` (answers R4)
+
+Every caller already holds a *last-seen* position and converts it to a start:
+nvzn's fold and live view compute `LogIndex::next_after(watermark)`, and
+`Replica::subscribe_from(Option<LogIndex>)` is already exclusive. So the
+cursor is always "after", never "from":
+
+```rust
+enum Opening { First, AfterProducerGone { what: &'static str } }
+
+Resumable::<T, P>::new(after: Option<P::Key>,
+                       make: impl FnMut(Option<P::Key> /*after*/, Opening) -> Option<S>)
+// first open: after = the caller's; resync: after = last emitted key
+```
+
+- `None` means "from the beginning"; the first open and a resync use the same
+  meaning, so no off-by-one between them.
+- No `Successor` needed: `Resumable` works for any order policy
+  (`StrictlyIncreasing` and `Contiguous`).
+- The ordered check takes the same `after`: `StrictlyIncreasing` requires the
+  first key `> after`; `Contiguous` requires it `== Successor::next_after(after)`.
+  `Successor` becomes `fn next_after(prev: Option<Self>) -> Self` — exactly
+  `LogIndex::next_after` today — so `None` has a defined first key.
+- `Reader::subscribe_stable_log(after: Option<LogIndex>)` aligns with
+  `subscribe_from`; nvzn passes its watermark directly. The factory converts to
+  its own scan bound.
+- `Opening` replaces D4's `End` / the draft's `Option<AbortReason>`: with D18
+  the factory runs only on the first open or after `ProducerGone`.
