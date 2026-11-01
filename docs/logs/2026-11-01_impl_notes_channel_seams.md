@@ -44,3 +44,20 @@ post-implementation doc. Not a design doc; the design is
   `FnMut` state as soon as `filter_map` took `FnMut`. The stable cursor's
   `AtomicU64` stays until slice 4: it is shared by two closures (the resume
   factory and the filter), which only `Resumable` removes.
+- **Tests needed a lazy, verdict-ignoring read.** Removing `IntoIterator` and
+  `into_stream` left ~70 test sites that only compare items. They use a
+  test-only `ChannelTestExt` in zslg (`items()`, `into_test_stream()`), not a
+  crate API. Two traps found: `items()` must be lazy — several replica tests
+  take `.take(5)` of an infinite live tail, and an eager collect hangs — and
+  `into_test_stream` must keep the old bridge's cancellation guard, or a
+  dropped stream on a quiet infinite channel parks a blocking thread and hangs
+  runtime shutdown.
+- **The network bridges move to slice 3, not slice 1.** An infinite
+  `produce_async` needs `Feed<T, Infinite>` (no `close()`), which is a kind;
+  a pre-kind version would have been a throwaway. They stay hand-wired until
+  slice 3.
+- **`examples/write_tracker` got its own `drain` helper** (recv on the blocking
+  pool, guarded by a `CancelHandle` the receiver owns) — the same shape as the
+  test helper, since examples cannot use test code.
+
+## Slice 2
