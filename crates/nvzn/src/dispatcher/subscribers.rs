@@ -16,7 +16,7 @@
 
 use crate::metrics::StopReason;
 use crate::{ProjectionId, ProjectionTypeId, TenantId};
-use crossbeam_combinators::{CancelHandle, Cancellation, KeyedRegistry, Shutdown};
+use crossbeam_combinators::{CancelHandle, Cancellation, Fanout, KeyedRegistry};
 use std::sync::Arc;
 
 /// A registration key.
@@ -52,40 +52,51 @@ pub(crate) const PENDING_SUBSCRIBERS: usize = 1024;
 /// Per-subscriber stream depth.
 pub(crate) const SUBSCRIBER_CAPACITY: usize = 1024;
 
-/// The fold's side: the data sender and the single shutdown owner.
+/// The fold's side: the fan-out producer (until stopped) and the live-view
+/// cancellation.
 pub(crate) struct Subscribers {
-    tx: crossbeam_channel::Sender<SubscriptionItem>,
-    shutdown: Shutdown,
+    /// `None` once [`cancel_if`](Self::cancel_if) stopped it.
+    fanout: Option<Fanout<SubscriptionItem>>,
     cancel: Arc<CancelHandle>,
+    /// Whether a stopped fan-out has been reported; it is reported once.
+    warned: bool,
 }
 
 impl Subscribers {
-    pub(crate) fn new(
-        tx: crossbeam_channel::Sender<SubscriptionItem>,
-        shutdown: Shutdown,
-        cancel: Arc<CancelHandle>,
-    ) -> Self {
+    pub(crate) fn new(fanout: Fanout<SubscriptionItem>, cancel: Arc<CancelHandle>) -> Self {
         Self {
-            tx,
-            shutdown,
+            fanout: Some(fanout),
             cancel,
+            warned: false,
         }
     }
 
-    /// Publish every written ref. `tx` is the bounded data queue; `Block`
-    /// backpressures the fold while a subscriber catches up.
+    /// Publish every written ref. The data queue is bounded and the fan-out
+    /// is `Block`, so this backpressures the fold while a subscriber catches up.
+    ///
+    /// A stopped fan-out is warned about once and otherwise ignored:
+    /// subscribers are observers, and the fold's correctness does not depend
+    /// on them.
     pub(super) fn publish(&mut self, written: &[(TenantId, ProjectionTypeId, ProjectionId)]) {
+        let Some(fanout) = &self.fanout else {
+            return;
+        };
         for &(tenant, ptid, pid) in written {
-            let _ = self.tx.send((tenant, ptid, pid));
+            if fanout.publish((tenant, ptid, pid)).is_err() && !self.warned {
+                self.warned = true;
+                tracing::warn!(
+                    "subscriber fan-out stopped; stable-log subscribers see no more refs"
+                );
+            }
         }
     }
 
-    /// Stop the fan-out. A deliberate stop ends subscriber streams
-    /// `ProducerGone`; dropping `Subscribers` stops it the same way.
+    /// Stop the fan-out: subscriber streams end `ProducerGone`. Dropping
+    /// `Subscribers` stops it the same way.
     pub(super) fn cancel_if(&mut self, recorded: Option<StopReason>) {
         if recorded == Some(StopReason::Cancelled) {
             self.cancel.cancel();
         }
-        self.shutdown.cancel();
+        drop(self.fanout.take());
     }
 }

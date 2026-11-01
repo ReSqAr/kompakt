@@ -14,13 +14,14 @@
     clippy::result_large_err,
     reason = "test code"
 )]
+use crate::test_stream::ChannelTestExt as _;
 use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
 use uuid::Uuid;
 
-use crate::api::{LocalStoreMut, ReplicatedRaftState, StableLogSnapshot, WindowItem};
+use crate::api::{LocalStoreMut, ReplicatedRaftState, StableLogSnapshot};
 use crate::hlc::Hlc;
 use crate::ids::{DataId, LogIndex, NodeId, PeerAddr};
 use crate::leader::jobs::snapshot::create::{
@@ -95,19 +96,17 @@ async fn snapshot_refuses_to_commit_an_aborted_window() {
         fn stream_above_hlc(&self, threshold: Option<Hlc>) -> crate::ordered::LocalStoreStream {
             self.inner.stream_above_hlc(threshold)
         }
-        fn stream_window_ordered(
+        fn stream_window(
             &self,
             _above: Option<Hlc>,
             _upto: Hlc,
-            _max_entries: Option<std::num::NonZeroUsize>,
-        ) -> crate::ordered::WindowStream {
+        ) -> crate::ordered::LocalStoreStream {
             let (tx, rx) = crossbeam_channel::bounded(4);
             let (ch, closer) = Channel::from(rx, "truncated window");
-            tx.send(Ok(WindowItem::Entry(make_data(1, 100, b"a"))))
-                .unwrap();
+            tx.send(Ok(make_data(1, 100, b"a"))).unwrap();
             drop(tx);
             drop(closer); // never closed: the scan died
-            crate::ordered::window_stream(ch, "truncated window")
+            crate::ordered::local_store_stream(ch, "truncated window")
         }
         fn subscribe_integrated(&self) -> watch::Receiver<()> {
             self.inner.subscribe_integrated()
@@ -217,7 +216,7 @@ async fn snapshot_round_trip_through_object_store() {
     assert_eq!(learner_stable.end_index(), Some(LogIndex(2)));
     let stable_entries: Vec<(crate::ids::LogIndex, crate::meta::Data)> = learner_stable
         .range(LogIndex(0), LogIndex(3))
-        .into_iter()
+        .items()
         .filter_map(|r| r.ok())
         .collect();
     assert_eq!(stable_entries.len(), 3);
@@ -371,7 +370,7 @@ async fn second_snapshot_extends_stable_log_via_load() {
 
     let entries: Vec<(crate::ids::LogIndex, crate::meta::Data)> = learner_stable
         .range(LogIndex(0), LogIndex(4))
-        .into_iter()
+        .items()
         .filter_map(|r| r.ok())
         .collect();
     assert_eq!(entries.len(), 4);
@@ -487,7 +486,7 @@ async fn invariant_stable_order_is_hlc_order() {
 
     let stable_entries: Vec<(LogIndex, Data)> = learner_stable
         .range(LogIndex(0), LogIndex(100))
-        .into_iter()
+        .items()
         .filter_map(|r| r.ok())
         .collect();
     assert_eq!(stable_entries.len(), entries.len());
@@ -622,13 +621,8 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
             self.inner.stream_above_hlc(threshold)
         }
 
-        fn stream_window_ordered(
-            &self,
-            above: Option<Hlc>,
-            upto: Hlc,
-            max_entries: Option<std::num::NonZeroUsize>,
-        ) -> crate::ordered::WindowStream {
-            self.inner.stream_window_ordered(above, upto, max_entries)
+        fn stream_window(&self, above: Option<Hlc>, upto: Hlc) -> crate::ordered::LocalStoreStream {
+            self.inner.stream_window(above, upto)
         }
 
         fn subscribe_integrated(&self) -> watch::Receiver<()> {
@@ -975,7 +969,7 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
             entries: Channel<Result<SnapshotEntry, Error>>,
             compression: CompressionLevel,
             _reason: crate::metrics::ObjectStoreReason,
-        ) -> Result<usize, Error> {
+        ) -> Result<crate::api::SnapshotWrite, Error> {
             self.writes.fetch_add(1, Ordering::Relaxed);
             self.inner
                 .write_snapshot(

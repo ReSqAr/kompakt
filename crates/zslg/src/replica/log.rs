@@ -49,7 +49,7 @@ use crate::ids::{DataId, LogIndex};
 use crate::meta::Data;
 use crate::metrics::{self, FlushTrigger, LogType, OpState};
 use crossbeam_combinators::{
-    Channel, Feed, OverflowPolicy, Ranged, Registry, Shutdown, Tail, blend_chain, broadcast,
+    Channel, Fanout, FanoutConfig, OverflowPolicy, Ranged, Registry, Tail, blend_chain, broadcast,
 };
 
 /// Fallback sizing for [`ReplicaLogStore::open_with_flush`], the
@@ -514,9 +514,9 @@ pub(crate) struct ReplicaLogStore {
     storage: Arc<Storage>,
     frontier: Frontier,
     batch_builder: BatchBuilder,
-    live_tx: crossbeam_channel::Sender<(LogIndex, Data)>,
+    /// The live tail's fan-out; dropping the store stops its thread.
+    live: Fanout<(LogIndex, Data)>,
     live_registry: Registry<(LogIndex, Data)>,
-    live_shutdown: Shutdown,
     /// Sync MPSC into the flush loop. crossbeam (not tokio): `submit` is called
     /// from blocking threads and never `.await`s the enqueue.
     write_tx: crossbeam_channel::Sender<PendingWrite>,
@@ -527,12 +527,6 @@ pub(crate) struct ReplicaLogStore {
     subscribe_channel_capacity: usize,
     /// Max records drained into one append + fsync.
     max_flush_batch: usize,
-}
-
-impl Drop for ReplicaLogStore {
-    fn drop(&mut self) {
-        self.live_shutdown.cancel();
-    }
 }
 
 impl ReplicaLogStore {
@@ -584,20 +578,17 @@ impl ReplicaLogStore {
         let frontier = Frontier::new(recovered_index, recovered_max_hlc);
         let batch_builder = BatchBuilder::new(max_flush_batch, max_payload_bytes);
 
-        let (live_tx, live_registry, live_shutdown) = broadcast(
+        let (live, live_registry) = broadcast(
             "replica live tail",
-            crate::unit::nonzero(1024),
-            crate::unit::nonzero(1024),
-            crate::unit::nonzero(subscribe_channel_capacity),
+            FanoutConfig::with_sub_cap(crate::unit::nonzero(subscribe_channel_capacity)),
             OverflowPolicy::Shed,
         );
         Ok(Self {
             storage,
             frontier,
             batch_builder,
-            live_tx,
+            live,
             live_registry,
-            live_shutdown,
             write_tx,
             subscribe_channel_capacity,
             max_flush_batch,
@@ -696,25 +687,25 @@ impl ReplicaLogStore {
     /// like a clean handoff to the live tail.
     fn pump_range(&self, from: LogIndex, to: LogIndex) -> Channel<Result<(LogIndex, Data), Error>> {
         debug_assert!(from <= to);
-        let (feed, ch) = Feed::channel(self.subscribe_channel_capacity, "replica historic tail");
         let storage = Arc::clone(&self.storage);
-        tokio::task::spawn_blocking(move || {
-            // PINNING RULE: `payload` is borrowed from the iterator's pinned
-            // block for the duration of the call, and this `Data` is sent
-            // onward, so it takes an owned copy — the copy happens only here,
-            // where the value outlives the iterator.
-            let scan = for_each_entry(&storage, from, to, &mut |idx, data_id, payload| {
-                let blob = bytes::Bytes::copy_from_slice(payload);
-                feed.send(Ok((idx, Data { data_id, blob })))
-            });
-            if let Err(e) = scan {
-                let _ = feed.send(Err(e));
-            }
-            // Normal path only: a panic in the scan drops `feed`, so the
-            // chained subscription reports `End::Aborted` instead of a clean end.
-            feed.close();
-        });
-        ch
+        Channel::produce_blocking(
+            self.subscribe_channel_capacity,
+            "replica historic tail",
+            move |feed| {
+                // PINNING RULE: `payload` is borrowed from the iterator's pinned
+                // block for the duration of the call, and this `Data` is sent
+                // onward, so it takes an owned copy — the copy happens only
+                // here, where the value outlives the iterator.
+                let scan = for_each_entry(&storage, from, to, &mut |idx, data_id, payload| {
+                    let blob = bytes::Bytes::copy_from_slice(payload);
+                    feed.send(Ok((idx, Data { data_id, blob }))).is_ok()
+                });
+                if let Err(e) = scan {
+                    let _ = feed.send(Err(e));
+                }
+                feed.close()
+            },
+        )
     }
 
     /// Test-only async wrapper around [`submit`](Self::submit) that awaits the
@@ -998,7 +989,9 @@ fn flush_one_batch_blocking(
             metrics::replica_log_flushed();
             for (i, (index, data, guard)) in batch.staged.into_iter().enumerate() {
                 let data_id = data.data_id;
-                let _ = store.live_tx.send((index, data));
+                // `Stopped` only while the store is being dropped: the live
+                // tail has no reader left to miss it.
+                let _ = store.live.publish((index, data));
                 metrics::replica_log_append_probe().finish(OpState::Success);
                 // `try_send`, never `send`: this runs on the replica's *single
                 // shared* flush thread, so blocking here for one slow connection
@@ -1044,6 +1037,7 @@ fn flush_one_batch_blocking(
     reason = "test code"
 )]
 mod tests {
+    use crate::test_stream::ChannelTestExt as _;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
@@ -1755,7 +1749,7 @@ mod tests {
 
         let mut seen = 0usize;
         while seen < batch {
-            let Some(items) = ch.ready_batch(batch) else {
+            let Ok(items) = ch.ready_batch(batch) else {
                 panic!("subscriber was shed after {seen}/{batch} records");
             };
             seen = seen.saturating_add(items.count());
@@ -1778,7 +1772,7 @@ mod tests {
         let ch = store.subscribe_from(None);
         let entries: Vec<_> = ch
             .into_channel()
-            .into_iter()
+            .items()
             .take(5)
             .filter_map(|r| match r {
                 Ok((idx, data)) => Some((idx, data)),
@@ -1837,7 +1831,7 @@ mod tests {
             let ch = store.subscribe_from(Some(LogIndex(3)));
             let entries: Vec<_> = ch
                 .into_channel()
-                .into_iter()
+                .items()
                 .filter_map(|r| r.ok())
                 .take(5)
                 .collect();
@@ -1859,7 +1853,7 @@ mod tests {
             let ch = store.subscribe_from(Some(LogIndex(3)));
             let entries: Vec<_> = ch
                 .into_channel()
-                .into_iter()
+                .items()
                 .filter_map(|r| r.ok())
                 .take(5)
                 .collect();
@@ -1879,7 +1873,7 @@ mod tests {
             let ch = store.subscribe_from(Some(LogIndex(7)));
             let entries: Vec<_> = ch
                 .into_channel()
-                .into_iter()
+                .items()
                 .filter_map(|r| r.ok())
                 .take(1)
                 .collect();

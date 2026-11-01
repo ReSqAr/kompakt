@@ -7,23 +7,27 @@
 //!   CommitSnapshot intent        manifest entry + new watermark
 //! ```
 //!
-//! `max_snapshot_entries` caps a build, and the cap is a **floor**: the scan
-//! runs to the end of the HLC it lands in, because the next chunk resumes at an
-//! exclusive bound and would otherwise skip the remainder of that HLC. The
-//! watermark then advances only to what was written, leaving the window open
-//! for the next chunk.
+//! `max_snapshot_entries` caps a build, and the cap is a **floor**:
+//! `take_at_least` runs to the end of the HLC group it lands in, because the
+//! next chunk resumes at an exclusive bound and would otherwise skip the rest of
+//! that HLC. The watermark is chosen from what was written:
+//!
+//! ```text
+//!   written < cap   the scan ran out first         watermark = cutoff
+//!   written ≥ cap   maybe stopped by the cap        watermark = last written HLC
+//! ```
+//!
+//! The second rule is conservative: a window that ends exactly at the cap costs
+//! one more iteration, which finds `(hlc, cutoff]` empty and commits `cutoff`.
 //!
 //! Ordering is crash-safety-critical: the cutoff appears in both the opening
 //! proposal and the committing one, so a crash between them is safe.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tracing::{debug, warn};
 
-use crate::api::{
-    LocalStoreView, RaftStateView, Router, SnapshotStore, StableLogSnapshot, WindowItem,
-};
+use crate::api::{LocalStoreView, RaftStateView, Router, SnapshotStore, StableLogSnapshot};
 use crate::error::Error;
 use crate::error::ToStorage;
 use crate::hlc::Hlc;
@@ -96,7 +100,6 @@ impl SnapshotResult {
     }
 }
 
-#[allow(clippy::expect_used, reason = "channel just created with capacity 1")]
 pub(in crate::leader) async fn create_snapshot_entry(
     inputs: &SnapshotEntryInputs<'_>,
     new_cutoff: Hlc,
@@ -124,92 +127,63 @@ pub(in crate::leader) async fn create_snapshot_entry(
     };
 
     let snapshot_id = SnapshotId::open(LogIndex(next_index_start));
-    let terminal: Arc<std::sync::Mutex<Option<WindowItem>>> = Arc::new(std::sync::Mutex::new(None));
-    let end_hlc_raw = Arc::new(AtomicU64::new(0));
-    let end_hlc_tracker = end_hlc_raw.clone();
+    let cap = inputs.max_snapshot_entries;
 
     // Channel built here so `local_store` need not be 'static.
-    let window = inputs.local_store.stream_window_ordered(
-        lower_bound,
-        new_cutoff,
-        Some(inputs.max_snapshot_entries),
-    );
+    let window = inputs
+        .local_store
+        .stream_window(lower_bound, new_cutoff)
+        .into_channel()
+        .take_at_least::<Hlc>(cap);
 
     type PeekOk = Option<(Channel<Result<SnapshotEntry, Error>>, Hlc)>;
 
-    let (entries, start_hlc) = {
-        let end_hlc_tracker = end_hlc_tracker.clone();
-        let terminal = terminal.clone();
-        let peek_result: PeekOk = tokio::task::spawn_blocking(move || -> Result<PeekOk, Error> {
-            let mut data = window;
-            let first = match data.recv() {
-                Ok(Ok(WindowItem::Entry(d))) => d,
-                // A terminal as the first item is an empty window.
-                Ok(Ok(WindowItem::Complete | WindowItem::TruncatedAt(_))) => return Ok(None),
-                Ok(Err(e)) => return Err(e),
-                // No terminal at all: the scan did not run to a conclusion, so
-                // the window's extent is unknown.
-                Err(_) => {
-                    return Err(Error::StreamTruncated {
-                        what: "local store window scan".to_owned(),
-                    });
-                }
-            };
-
-            if last_manifest_end.is_some_and(|last| stable_end_index.is_none_or(|f| f < last)) {
-                return Err(Error::StableLogBehindManifest {
-                    end_index: stable_end_index,
-                    manifest_end_index: last_manifest_end.unwrap_or(LogIndex(0)),
+    // The peek: it runs before the upload starts, so an empty window creates no
+    // object, and it is where a lagging stable log is caught.
+    let peek_result: PeekOk = tokio::task::spawn_blocking(move || -> Result<PeekOk, Error> {
+        let mut window = window;
+        let first = match window.recv() {
+            Ok(Ok(d)) => d,
+            Ok(Err(e)) => return Err(e),
+            Err(crossbeam_combinators::End::Complete) => return Ok(None),
+            Err(crossbeam_combinators::End::Aborted { reason }) => {
+                return Err(Error::StreamTruncated {
+                    what: reason.label().to_owned(),
                 });
             }
+        };
 
-            let start_hlc = first.data_id.hlc();
-            end_hlc_tracker.store(start_hlc.raw(), Ordering::Relaxed);
-
-            let head = Channel::once(Ok(SnapshotEntry {
-                global_index: LogIndex(next_index_start),
-                data: first,
-            }));
-
-            let index = Arc::new(AtomicU64::new(next_index_start.saturating_add(1)));
-            let seen_terminal = terminal.clone();
-            let tail = data.into_channel().filter_map(move |r| match r {
-                Ok(WindowItem::Entry(d)) => {
-                    end_hlc_tracker.store(d.data_id.hlc().raw(), Ordering::Relaxed);
-                    let idx = LogIndex(index.fetch_add(1, Ordering::Relaxed));
-                    Some(Ok(SnapshotEntry {
-                        global_index: idx,
-                        data: d,
-                    }))
-                }
-                // The terminal is the last item, so recording it here is seen by
-                // the time the drain below returns.
-                Ok(item) => {
-                    *seen_terminal.lock().expect("terminal lock") = Some(item);
-                    None
-                }
-                Err(e) => Some(Err(e)),
+        if last_manifest_end.is_some_and(|last| stable_end_index.is_none_or(|f| f < last)) {
+            return Err(Error::StableLogBehindManifest {
+                end_index: stable_end_index,
+                manifest_end_index: last_manifest_end.unwrap_or(LogIndex(0)),
             });
-
-            Ok(Some((head.chain(tail), start_hlc)))
-        })
-        .await
-        .to_storage("snapshot stream scan panicked")??;
-        match peek_result {
-            Some(x) => x,
-            None => {
-                return Ok(SnapshotResult::Committed {
-                    object: None,
-                    entries: 0,
-                    new_watermark: new_cutoff,
-                    prev_watermark: lower_bound,
-                    prev_end_index: last_manifest_end,
-                });
-            }
         }
+
+        let start_hlc = first.data_id.hlc();
+        let mut next_index = next_index_start;
+        let entries = Channel::once(Ok(first)).chain(window).map(move |r| {
+            r.map(|data| {
+                let global_index = LogIndex(next_index);
+                next_index = next_index.saturating_add(1);
+                SnapshotEntry { global_index, data }
+            })
+        });
+        Ok(Some((entries, start_hlc)))
+    })
+    .await
+    .to_storage("snapshot stream scan panicked")??;
+    let Some((entries, start_hlc)) = peek_result else {
+        return Ok(SnapshotResult::Committed {
+            object: None,
+            entries: 0,
+            new_watermark: new_cutoff,
+            prev_watermark: lower_bound,
+            prev_end_index: last_manifest_end,
+        });
     };
 
-    let entry_count = inputs
+    let written = inputs
         .snapshot_store
         .write_snapshot(
             snapshot_id,
@@ -218,30 +192,22 @@ pub(in crate::leader) async fn create_snapshot_entry(
             crate::metrics::ObjectStoreReason::SnapshotCreate,
         )
         .await?;
-    let end_hlc = Hlc(end_hlc_raw.load(Ordering::Relaxed));
-
-    let new_watermark = match terminal.lock().expect("terminal lock").take() {
-        Some(WindowItem::Complete) => new_cutoff,
-        // A capped chunk covers only `(lower_bound, hlc]`; the watermark must
-        // name what was written, or the uncovered tail counts as snapshotted.
-        Some(WindowItem::TruncatedAt(hlc)) => hlc,
-        Some(WindowItem::Entry(_)) | None => {
-            return Err(Error::StreamTruncated {
-                what: "local store window scan ended without a terminal".to_owned(),
-            });
-        }
+    let entry_count = written.count;
+    let Some(last) = written.last else {
+        return Err(Error::Storage(
+            "snapshot write reported no last entry after a non-empty peek".into(),
+        ));
+    };
+    let end_hlc = last.hlc;
+    let new_watermark = if entry_count < cap.get() {
+        new_cutoff
+    } else {
+        // A capped chunk covers only `(lower_bound, last]`: the watermark names
+        // what was written, or the uncovered tail would count as snapshotted.
+        end_hlc
     };
 
-    let count_u64 = u64::try_from(entry_count)
-        .map_err(|_| Error::Storage("snapshot entry count overflow".into()))?;
-    // The peek guarantees count > 0; saturating_sub keeps zero well-defined.
-    let end_offset = count_u64.saturating_sub(1);
-    let end_index = LogIndex(
-        next_index_start
-            .checked_add(end_offset)
-            .ok_or_else(|| Error::Storage("global index overflow".into()))?,
-    );
-
+    let end_index = last.index;
     let start_index = LogIndex(next_index_start);
 
     Ok(SnapshotResult::Committed {
@@ -430,6 +396,7 @@ async fn await_quorum_ready(inputs: &SnapshotInputs<'_>, new_cutoff: Hlc) -> Res
 )]
 mod tests {
     use super::*;
+    use crate::test_stream::ChannelTestExt as _;
 
     use bytes::Bytes;
     use proptest::prelude::*;
@@ -533,7 +500,7 @@ mod tests {
     async fn collect_log(log: &StableLog) -> Vec<(u64, Hlc, DataId, Bytes)> {
         let entries: Vec<(LogIndex, Data)> = log
             .range(LogIndex(0), LogIndex(1_000))
-            .into_iter()
+            .items()
             .filter_map(|r| r.ok())
             .collect();
         entries

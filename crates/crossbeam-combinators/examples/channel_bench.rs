@@ -187,7 +187,7 @@ fn bench_ready_batch_control() {
         let start = Instant::now();
         let mut seen = 0usize;
         while seen < rig.items {
-            let Some(batch) = rig.ch.ready_batch(256) else {
+            let Ok(batch) = rig.ch.ready_batch(256) else {
                 break;
             };
             for v in batch {

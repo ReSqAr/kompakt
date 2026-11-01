@@ -14,6 +14,7 @@
     clippy::result_large_err,
     reason = "test code"
 )]
+use crate::test_stream::ChannelTestExt as _;
 use std::collections::{BTreeMap, BTreeSet};
 
 use bytes::Bytes;
@@ -143,7 +144,7 @@ fn run_sequence(ops: &[Op]) {
         use futures::TryStreamExt as _;
         let all_data_ids: BTreeSet<DataId> = store
             .stream_above_hlc(None)
-            .into_stream()
+            .into_test_stream()
             .try_collect::<Vec<_>>()
             .await
             .expect("stream")

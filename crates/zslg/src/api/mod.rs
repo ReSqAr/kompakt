@@ -56,7 +56,7 @@ pub use writer::Writer;
 pub(crate) use clock::Clock;
 pub(crate) use liveness_probe::LivenessProbe;
 pub(crate) use local_store_mut::LocalStoreMut;
-pub(crate) use local_store_view::{LocalStoreView, WindowItem};
+pub(crate) use local_store_view::LocalStoreView;
 pub(crate) use membership_gate::MembershipGate;
 pub(crate) use quorum_check::QuorumCheck;
 pub(crate) use raft_consensus::RaftConsensus;
@@ -68,7 +68,7 @@ pub use raft_state::RaftStateView;
 pub(crate) use replica::{Replica, StampedWrite, WriteOutcome};
 pub(crate) use replica_client::ReplicaClient;
 pub(crate) use router::Router;
-pub(crate) use snapshot_store::{CleanupReport, SnapshotStore};
+pub(crate) use snapshot_store::{CleanupReport, EntryMeta, SnapshotStore, SnapshotWrite};
 pub(crate) use spare_selection::{CandidateInfo, SpareSelector};
 pub(crate) use stable_archive::{
     ArchiveBounds, ArchiveLowerBound, ArchiveUpperBound, StableArchiveReader,

@@ -552,27 +552,27 @@ enum UnstableStep {
 /// stable log has already settled is dropped even before its `Watermark` goes
 /// out.
 struct WatermarkGate {
-    level: tokio::sync::watch::Receiver<Option<Hlc>>,
-    emitted: parking_lot::Mutex<Option<Hlc>>,
+    level: crossbeam_combinators::Level<Option<Hlc>>,
+    emitted: Option<Hlc>,
 }
 
 impl WatermarkGate {
-    fn admit(&self, step: UnstableStep) -> Option<UnstableEvent> {
-        let mut emitted = self.emitted.lock();
+    fn admit(&mut self, step: UnstableStep) -> Option<UnstableEvent> {
+        let emitted = &mut self.emitted;
         match step {
             UnstableStep::Opened(watermark) => {
                 *emitted = (*emitted).max(watermark);
                 emitted.map(UnstableEvent::Watermark)
             }
             UnstableStep::WatermarkMoved => {
-                let level = *self.level.borrow();
+                let level = self.level.get();
                 (level > *emitted).then(|| {
                     *emitted = level;
                     level.map(UnstableEvent::Watermark)
                 })?
             }
             UnstableStep::Entry(data) => {
-                let watermark = (*emitted).max(*self.level.borrow());
+                let watermark = (*emitted).max(self.level.get());
                 watermark
                     .is_none_or(|w| data.data_id.hlc() > w)
                     .then_some(UnstableEvent::Appended(data))
@@ -597,7 +597,8 @@ impl Tail for UnstableSeam {
             .map(|data| Ok(UnstableStep::Entry(data)))
             .merge(
                 self.stable_log
-                    .watermark_moves()
+                    .watermark()
+                    .changes()
                     .map(|()| Ok(UnstableStep::WatermarkMoved)),
             )
     }
@@ -657,9 +658,9 @@ fn resyncing_unstable_tail(
     local_store: Arc<dyn LocalStoreView>,
     stable_log: Arc<dyn StableLogSnapshot>,
 ) -> Channel<Result<UnstableEvent, Error>> {
-    let gate = WatermarkGate {
-        level: stable_log.watch_watermark(),
-        emitted: parking_lot::Mutex::new(None),
+    let mut gate = WatermarkGate {
+        level: stable_log.watermark(),
+        emitted: None,
     };
     let weak_local_store = Arc::downgrade(&local_store);
     let weak_stable_log = Arc::downgrade(&stable_log);
@@ -772,6 +773,7 @@ impl Reader for ReaderImpl {
     reason = "test code"
 )]
 mod tests {
+    use crate::test_stream::ChannelTestExt as _;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -886,7 +888,7 @@ mod tests {
             >,
             _compression: crate::object_store::CompressionLevel,
             _reason: crate::metrics::ObjectStoreReason,
-        ) -> Result<usize, crate::Error> {
+        ) -> Result<crate::api::SnapshotWrite, crate::Error> {
             unimplemented!("reader tests never write snapshots")
         }
         async fn read_snapshot(
@@ -1035,7 +1037,7 @@ mod tests {
                 Ok(StableLogEvent::Watermark(_)) => None,
                 Err(e) => Some(Err(e)),
             })
-            .into_stream();
+            .into_test_stream();
 
         let (i0, d0) = stream.next().await.expect("item0").expect("ok");
         assert_eq!(i0, LogIndex(0));
@@ -1088,7 +1090,7 @@ mod tests {
                 Ok(StableLogEvent::Watermark(_)) => None,
                 Err(e) => Some(Err(e)),
             })
-            .into_stream();
+            .into_test_stream();
         let mut hlcs = Vec::new();
         for _ in 0..2 {
             let item = stream.next().await.expect("item").expect("ok");
@@ -1129,7 +1131,7 @@ mod tests {
         stable_log.set_purge_threshold(Hlc(102)).expect("purge");
         let local_only: Vec<u64> = stable_log
             .range(LogIndex(0), LogIndex(5))
-            .into_iter()
+            .items()
             .map(|r| r.expect("ok").0.raw())
             .collect();
         assert_eq!(
@@ -1185,7 +1187,7 @@ mod tests {
                 Ok(StableLogEvent::Watermark(_)) => None,
                 Err(e) => Some(Err(e)),
             })
-            .into_stream();
+            .into_test_stream();
         let mut got: Vec<(u64, u64)> = Vec::new();
         for _ in 0..5 {
             let (idx, data) = stream.next().await.expect("item").expect("ok");
@@ -1210,11 +1212,10 @@ mod tests {
         entries: std::sync::Mutex<Vec<(LogIndex, Data)>>,
         end_index: std::sync::Mutex<Option<LogIndex>>,
         end_hlc: std::sync::Mutex<Option<Hlc>>,
-        events_tx: crossbeam_channel::Sender<StableLogEvent>,
+        events: crossbeam_combinators::Fanout<StableLogEvent>,
         events_registry: crossbeam_combinators::Registry<StableLogEvent>,
-        events_shutdown: crossbeam_combinators::Shutdown,
-        watermark: tokio::sync::watch::Sender<Option<Hlc>>,
-        watermark_wakes: crossbeam_combinators::Wakes,
+        watermark: crossbeam_combinators::LevelSetter<Option<Hlc>>,
+        watermark_level: crossbeam_combinators::Level<Option<Hlc>>,
     }
 
     impl ScriptedStableLog {
@@ -1228,24 +1229,24 @@ mod tests {
         fn with_broadcast_capacity(entries: Vec<(LogIndex, Data)>, capacity: usize) -> Self {
             let end_index = entries.last().map(|(i, _)| *i);
             let end_hlc = entries.last().map(|(_, d)| d.data_id.hlc());
-            let (events_tx, events_registry, events_shutdown) = crossbeam_combinators::broadcast(
+            let (events, events_registry) = crossbeam_combinators::broadcast(
                 "stable log subscription",
-                crate::unit::nonzero(1024),
-                crate::unit::nonzero(1024),
-                std::num::NonZeroUsize::new(capacity).expect("capacity > 0"),
+                crossbeam_combinators::FanoutConfig::with_sub_cap(
+                    std::num::NonZeroUsize::new(capacity).expect("capacity > 0"),
+                ),
                 crossbeam_combinators::OverflowPolicy::Shed,
             );
-            let (watermark, _) = tokio::sync::watch::channel(end_hlc);
+            let (watermark, watermark_level) =
+                crossbeam_combinators::Level::new("scripted moves", end_hlc);
             Self {
                 ranges: std::sync::atomic::AtomicUsize::new(0),
                 entries: std::sync::Mutex::new(entries),
                 end_index: std::sync::Mutex::new(end_index),
                 end_hlc: std::sync::Mutex::new(end_hlc),
-                events_tx,
+                events,
                 events_registry,
-                events_shutdown,
                 watermark,
-                watermark_wakes: crossbeam_combinators::Wakes::new("scripted moves"),
+                watermark_level,
             }
         }
 
@@ -1253,10 +1254,9 @@ mod tests {
         fn push_watermark(&self, hlc: Hlc) {
             *self.end_hlc.lock().expect("lock") = Some(hlc);
             let _ = self
-                .events_tx
-                .send(crate::meta::StableLogEvent::Watermark(hlc));
-            self.watermark.send_replace(Some(hlc));
-            self.watermark_wakes.wake();
+                .events
+                .publish(crate::meta::StableLogEvent::Watermark(hlc));
+            self.watermark.set(Some(hlc));
         }
 
         /// Durably append (visible to `range`/`end_index`) and broadcast, in
@@ -1271,14 +1271,8 @@ mod tests {
             *self.end_index.lock().expect("lock") = Some(index);
             *self.end_hlc.lock().expect("lock") = Some(hlc);
             let _ = self
-                .events_tx
-                .send(crate::meta::StableLogEvent::Appended { index, data });
-        }
-    }
-
-    impl Drop for ScriptedStableLog {
-        fn drop(&mut self) {
-            self.events_shutdown.cancel();
+                .events
+                .publish(crate::meta::StableLogEvent::Appended { index, data });
         }
     }
 
@@ -1302,11 +1296,8 @@ mod tests {
         fn subscribe_events(&self) -> Channel<crate::meta::StableLogEvent> {
             self.events_registry.subscribe_infinite()
         }
-        fn watch_watermark(&self) -> tokio::sync::watch::Receiver<Option<Hlc>> {
-            self.watermark.subscribe()
-        }
-        fn watermark_moves(&self) -> Channel<()> {
-            self.watermark_wakes.subscribe()
+        fn watermark(&self) -> crossbeam_combinators::Level<Option<Hlc>> {
+            self.watermark_level.clone()
         }
         fn range(
             &self,
@@ -1350,7 +1341,9 @@ mod tests {
         )
         .await;
 
-        let mut stream = reader.subscribe_stable_log(LogIndex::ZERO).into_stream();
+        let mut stream = reader
+            .subscribe_stable_log(LogIndex::ZERO)
+            .into_test_stream();
 
         // Lap the ring many times over without polling the stream.
         for i in 1u64..12 {
@@ -1393,7 +1386,9 @@ mod tests {
         )
         .await;
 
-        let mut stream = reader.subscribe_stable_log(LogIndex::ZERO).into_stream();
+        let mut stream = reader
+            .subscribe_stable_log(LogIndex::ZERO)
+            .into_test_stream();
 
         // Overrun the 4-deep queue, so the subscriber is hung up on ...
         for i in 1u64..8 {
@@ -1449,7 +1444,7 @@ mod tests {
                 Ok(StableLogEvent::Watermark(_)) => None,
                 Err(e) => Some(Err(e)),
             })
-            .into_stream();
+            .into_test_stream();
         for i in 1u64..12 {
             log.push(LogIndex(i), make_data(1, 100 + i, b"x"));
         }
@@ -1488,7 +1483,9 @@ mod tests {
         )
         .await;
 
-        let mut stream = reader.subscribe_stable_log(LogIndex::ZERO).into_stream();
+        let mut stream = reader
+            .subscribe_stable_log(LogIndex::ZERO)
+            .into_test_stream();
 
         // Lap the 2-deep ring, then drain everything it dropped.
         for i in 1u64..6 {
@@ -1623,7 +1620,7 @@ mod tests {
                 Ok(StableLogEvent::Watermark(_)) => None,
                 Err(e) => Some(Err(e)),
             })
-            .into_stream();
+            .into_test_stream();
         let mut got: Vec<(u64, u64)> = Vec::new();
         for _ in 0..6 {
             let (idx, data) = stream.next().await.expect("item").expect("ok");
@@ -1679,7 +1676,7 @@ mod tests {
                 Ok(StableLogEvent::Watermark(_)) => None,
                 Err(e) => Some(Err(e)),
             })
-            .into_stream();
+            .into_test_stream();
 
         // 0,1 (local) then 2 (archive) come through; then the untiled 3 errors.
         for expected in [(0u64, 100u64), (1, 101), (2, 102)] {
@@ -1736,7 +1733,7 @@ mod tests {
             Duration::from_millis(5),
         );
 
-        let mut stream = reader.unstable_tail().into_stream();
+        let mut stream = reader.unstable_tail().into_test_stream();
         let first = stream.next().await.expect("item").expect("ok");
         assert_eq!(first.data_id.hlc(), Hlc(200));
         assert_eq!(first.blob.as_ref(), b"new");
@@ -1753,7 +1750,7 @@ mod tests {
         .await
         .expect("integrate");
 
-        let mut stream2 = reader.unstable_tail().into_stream();
+        let mut stream2 = reader.unstable_tail().into_test_stream();
         let a = stream2.next().await.expect("a").expect("ok");
         let b = stream2.next().await.expect("b").expect("ok");
         assert_eq!(a.data_id.hlc(), Hlc(200));
@@ -2094,7 +2091,7 @@ mod tests {
 
                 let expected: std::collections::BTreeSet<crate::ids::DataId> = reader
                     .unstable_tail()
-                    .into_stream()
+                    .into_test_stream()
                     .map_ok(|data| data.data_id)
                     .try_collect()
                     .await
@@ -2134,7 +2131,7 @@ mod tests {
             .expect("append");
 
         let reader = local_reader(local_log, stable_log.clone(), Duration::from_millis(5));
-        let mut stream = reader.subscribe_stable_log(LogIndex(0)).into_stream();
+        let mut stream = reader.subscribe_stable_log(LogIndex(0)).into_test_stream();
 
         for expected in [0u64, 1] {
             let ev = tokio::time::timeout(Duration::from_secs(1), stream.next())
@@ -2236,7 +2233,7 @@ mod tests {
             Duration::from_millis(5),
         );
         reader.sync().await.expect("quorum");
-        let mut stream = reader.unstable_tail().into_stream();
+        let mut stream = reader.unstable_tail().into_test_stream();
         let first = stream.next().await.expect("item").expect("ok");
         assert_eq!(first, d);
     }
@@ -2268,7 +2265,7 @@ mod tests {
         // Before the watermark passes them, the weak unstable view shows them.
         let before: Vec<Data> = reader
             .unstable_tail()
-            .into_stream()
+            .into_test_stream()
             .try_collect()
             .await
             .expect("collect");
@@ -2286,7 +2283,7 @@ mod tests {
         // Now they are below the watermark → they must disappear from the view.
         let after: Vec<Data> = reader
             .unstable_tail()
-            .into_stream()
+            .into_test_stream()
             .try_collect()
             .await
             .expect("collect");
@@ -2305,7 +2302,7 @@ mod tests {
         .expect("integrate");
         let recent: Vec<Data> = reader
             .unstable_tail()
-            .into_stream()
+            .into_test_stream()
             .try_collect()
             .await
             .expect("collect");

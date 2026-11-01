@@ -170,6 +170,7 @@ impl ReplicationSubscriber {
     reason = "test code"
 )]
 mod tests {
+    use crate::test_stream::ChannelTestExt as _;
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::time::Duration;
@@ -327,7 +328,7 @@ mod tests {
         use futures::TryStreamExt as _;
         let all: Vec<crate::meta::Data> = local
             .stream_above_hlc(None)
-            .into_stream()
+            .into_test_stream()
             .try_collect::<Vec<_>>()
             .await
             .expect("stream");
@@ -358,7 +359,7 @@ mod tests {
         use futures::TryStreamExt as _;
         let all: Vec<Data> = local
             .stream_above_hlc(None)
-            .into_stream()
+            .into_test_stream()
             .try_collect::<Vec<_>>()
             .await
             .expect("stream");
@@ -431,7 +432,7 @@ mod tests {
         use futures::TryStreamExt as _;
         let data_ids: Vec<crate::ids::DataId> = local
             .stream_above_hlc(None)
-            .into_stream()
+            .into_test_stream()
             .try_collect::<Vec<_>>()
             .await
             .expect("stream")

@@ -237,7 +237,19 @@ async fn feed_sources(
         // order is preserved.
         let send_tx = tx.clone();
         let fed = tokio::task::spawn_blocking(move || {
-            for item in ch {
+            let mut ch = ch;
+            loop {
+                let item = match ch.recv() {
+                    Ok(item) => item,
+                    Err(crossbeam_combinators::End::Complete) => return Feed::Done,
+                    // A source that ends without closing is short: forward
+                    // that, or the merged object would claim entries it lacks.
+                    Err(crossbeam_combinators::End::Aborted { reason }) => {
+                        Err(Error::StreamTruncated {
+                            what: reason.label().to_owned(),
+                        })
+                    }
+                };
                 let is_err = item.is_err();
                 if send_tx.send(item).is_err() {
                     return Feed::ConsumerGone;
@@ -246,7 +258,6 @@ async fn feed_sources(
                     return Feed::ErrorForwarded;
                 }
             }
-            Feed::Done
         })
         .await;
         match fed {
@@ -349,6 +360,7 @@ mod tests {
     use crate::Hlc;
     use crate::hlc::HlcParts;
     use crate::ids::{LogIndex, NodeId};
+    use crate::test_stream::ChannelTestExt as _;
 
     fn meta(start_ms: u64, end_ms: u64, id: u64) -> SnapshotMetadata {
         SnapshotMetadata {
@@ -667,7 +679,7 @@ mod tests {
                 LogIndex(0),
                 LogIndex(u64::try_from(all_entries.len()).expect("fits")),
             )
-            .into_stream()
+            .into_test_stream()
             .try_collect()
             .await
             .expect("range pre");
@@ -744,7 +756,7 @@ mod tests {
                 LogIndex(0),
                 LogIndex(u64::try_from(all_entries.len()).expect("fits")),
             )
-            .into_stream()
+            .into_test_stream()
             .try_collect()
             .await
             .expect("range post");

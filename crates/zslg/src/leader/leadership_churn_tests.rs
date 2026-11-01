@@ -14,6 +14,7 @@
     clippy::result_large_err,
     reason = "test code"
 )]
+use crate::test_stream::ChannelTestExt as _;
 /// Leadership churn against an in-flight snapshot (EXPERT_REVIEW Appendix
 /// B.4): a real 3-node raft cluster, a snapshot pipeline stalled between
 /// its base-generation capture and its final fenced manifest commit, and a
@@ -91,7 +92,7 @@ struct StallingLocalStore {
     inner: Arc<LocalStore>,
     entered: Arc<Notify>,
     /// Sync, not `Notify`: the stall happens on the *consumer's blocking thread*
-    /// (see `stream_window_ordered` below), where awaiting is impossible.
+    /// (see `stream_window` below), where awaiting is impossible.
     release: crossbeam_channel::Receiver<()>,
 }
 
@@ -103,31 +104,26 @@ impl LocalStoreView for StallingLocalStore {
 
     /// Stall on the *first pull*, not on the call.
     ///
-    /// `stream_window_ordered` is synchronous, so it cannot await here — and
+    /// `stream_window` is synchronous, so it cannot await here — and
     /// `block_on` inside the runtime panics (and violates CLAUDE.md §4). The
     /// returned `Channel` is drained on a blocking thread
     /// (`snapshot/create.rs` pulls it inside `spawn_blocking`), so gating the
     /// first pull is both legal and the stall point we actually want: after
     /// `create_snapshot_entry` captured its base generation, before the window
     /// is read.
-    fn stream_window_ordered(
-        &self,
-        above: Option<Hlc>,
-        upto: Hlc,
-        max_entries: Option<std::num::NonZeroUsize>,
-    ) -> crate::ordered::WindowStream {
+    fn stream_window(&self, above: Option<Hlc>, upto: Hlc) -> crate::ordered::LocalStoreStream {
         self.entered.notify_one();
         let release = self.release.clone();
-        // `filter_map` takes `Fn`, so the once-flag needs interior mutability.
-        let gate = std::sync::Once::new();
-        crate::ordered::window_stream(
+        let mut released = false;
+        crate::ordered::local_store_stream(
             self.inner
-                .stream_window_ordered(above, upto, max_entries)
+                .stream_window(above, upto)
                 .into_channel()
                 .filter_map(move |item| {
-                    gate.call_once(|| {
+                    if !released {
+                        released = true;
                         let _ = release.recv();
-                    });
+                    }
                     Some(item)
                 }),
             "stalling window",
@@ -490,7 +486,7 @@ async fn covered_entries(c: &Churn, via: NodeId) -> usize {
         .expect("load manifest");
     let entries: Vec<(LogIndex, Data)> = verify
         .range(LogIndex(0), LogIndex(1_000))
-        .into_iter()
+        .items()
         .filter_map(|r| r.ok())
         .collect();
     entries.len()

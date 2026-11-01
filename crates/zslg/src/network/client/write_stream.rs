@@ -97,8 +97,14 @@ pub(in crate::network) fn open_write(
 fn writer_loop(mut input: Channel<StampedWrite>, mut sink: TcpFrameSink) {
     const MAX_BATCH: usize = 512;
     loop {
-        let Some(batch) = input.ready_batch(MAX_BATCH) else {
-            return; // input drained
+        let batch = match input.ready_batch(MAX_BATCH) {
+            Ok(batch) => batch,
+            // Drained or broken, the connection has nothing left to carry; the
+            // caller learns which from the outcome stream, not from here.
+            Err(end) => {
+                tracing::debug!(?end, "write stream: input ended, closing the connection");
+                return;
+            }
         };
         let send_t0 = std::time::Instant::now();
         for item in batch {

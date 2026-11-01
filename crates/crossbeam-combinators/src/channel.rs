@@ -59,14 +59,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crossbeam_channel::{Receiver, Select, TryRecvError};
 
-#[cfg(feature = "tokio")]
-use futures::StreamExt;
-#[cfg(feature = "tokio")]
-use futures::stream::BoxStream;
-
-/// Buffer capacity for the `into_stream()` mpsc bridge.
-#[cfg(feature = "tokio")]
-const STREAM_BRIDGE_CAP: usize = 256;
+use crate::ordered::Key;
 
 /// Why a [`Channel`] stopped yielding items.
 ///
@@ -95,9 +88,6 @@ pub enum AbortReason {
     /// A cancellation handle was dropped without firing. This is teardown, not
     /// a stop request.
     CancelHandleDropped,
-    /// A liveness guard disappeared, e.g. the `into_stream` consumer dropped
-    /// the stream.
-    ConsumerGone { what: &'static str },
     /// An internal routing invariant was violated; the stream fails closed.
     RoutingViolation { what: &'static str },
     /// An ordered source saw a position that violated its policy.
@@ -111,7 +101,6 @@ impl AbortReason {
     pub const fn label(self) -> &'static str {
         match self {
             Self::ProducerGone { what }
-            | Self::ConsumerGone { what }
             | Self::RoutingViolation { what }
             | Self::OrderViolation { what } => what,
             Self::Cancelled => "cancelled",
@@ -126,7 +115,6 @@ impl std::fmt::Display for AbortReason {
             Self::ProducerGone { what } => write!(f, "stream {what} ended"),
             Self::Cancelled => f.write_str("stream cancelled"),
             Self::CancelHandleDropped => f.write_str("cancellation handle dropped"),
-            Self::ConsumerGone { what } => write!(f, "{what} gone"),
             Self::RoutingViolation { what } => write!(f, "routing violation in {what}"),
             Self::OrderViolation { what } => write!(f, "order violation in {what}"),
         }
@@ -300,12 +288,11 @@ impl<T: Send + 'static> Source<T> for LeafState<T> {
                         End::Complete
                     }
                     Err(crossbeam_channel::TryRecvError::Disconnected) => {
-                        *self = LeafState::Resolved(End::Aborted {
-                            reason: AbortReason::RoutingViolation { what },
-                        });
-                        End::Aborted {
+                        let end = End::Aborted {
                             reason: AbortReason::ProducerGone { what },
-                        }
+                        };
+                        *self = LeafState::Resolved(end);
+                        end
                     }
                     // Still outstanding: fail closed for this read, but do not
                     // commit — a late `close()` can still be honoured next time.
@@ -786,38 +773,26 @@ impl<T: Send + 'static> Source<T> for ChainState<T> {
 
 // ── Guarded<T> ─────────────────────────────────────────────────────────
 
-/// An inner source raced against a liveness receiver: whichever ends first ends
-/// the stream.
+/// An inner source raced against a [`Cancellation`]: whichever ends first ends
+/// the stream ([`Channel::until`]).
 ///
 /// Not [`MergeState`], which keeps the survivor when one branch closes cleanly
 /// — that would make a finite source never terminate. Not [`ChainState`]
-/// either, which is sequential. This is "drain the inner source, but only for
-/// as long as anyone is still listening", and the guard carries no items: its
-/// only event is disconnecting.
-///
-/// Used by [`Channel::into_stream`], where the guard's sender rides with the
-/// returned stream, so the drain thread stops the moment the consumer drops it
-/// rather than parking until an item that may never come.
-///
-/// Also [`Channel::until`], where the guard is a [`Cancellation`] and `fired`
-/// is `Some`. Its disconnect ends the stream the same way — whatever holds the
-/// stream may be what keeps its producer alive, so the guard is the one thing
-/// that can be relied on to wake the consumer — and `fired` only picks the
-/// verdict: [`End::Aborted { reason: AbortReason::Cancelled }`] for a cancel, the guard leaf's `Aborted` for a
-/// [`CancelHandle`] dropped without cancelling.
+/// either, which is sequential. The guard carries no items: its only event is
+/// disconnecting. Whatever holds the stream may be what keeps its producer
+/// alive, so the guard is the one thing that can be relied on to wake the
+/// consumer; `fired` only picks the verdict — `Cancelled` for a cancel,
+/// `CancelHandleDropped` for a handle dropped without cancelling.
 struct Guarded<T> {
     inner: Box<dyn Source<T>>,
     alive: LeafState<()>,
-    /// Set before the guard's sender is dropped by a deliberate cancel. `None`
-    /// for a liveness guard.
-    fired: Option<Arc<AtomicBool>>,
+    /// Set before the guard's sender is dropped by a deliberate cancel.
+    fired: Arc<AtomicBool>,
 }
 
 impl<T> Guarded<T> {
     fn fired(&self) -> bool {
-        self.fired
-            .as_ref()
-            .is_some_and(|fired| fired.load(Ordering::SeqCst))
+        self.fired.load(Ordering::SeqCst)
     }
 }
 
@@ -892,17 +867,10 @@ impl<T: Send + 'static> Source<T> for Guarded<T> {
             };
         }
         if self.alive.leaf_count() == 0 {
-            // The consumer left, or a cancel handle went away unfired. The
-            // guard's own disconnect is the reason, not the inner source's.
-            if self.fired.is_some() {
-                return End::Aborted {
-                    reason: AbortReason::CancelHandleDropped,
-                };
-            }
+            // A cancel handle went away unfired. The guard's own disconnect is
+            // the reason, not the inner source's.
             return End::Aborted {
-                reason: AbortReason::ConsumerGone {
-                    what: "into_stream consumer",
-                },
+                reason: AbortReason::CancelHandleDropped,
             };
         }
         self.inner.end_reason()
@@ -1130,7 +1098,7 @@ impl<S: Send + 'static, T: Send + 'static> Source<T> for ResumeOnAbort<S, T> {
 
 struct FilterMap<S, T> {
     inner: Box<dyn Source<S>>,
-    f: Arc<dyn Fn(S) -> Option<T> + Send + Sync>,
+    f: Box<dyn FnMut(S) -> Option<T> + Send>,
 }
 
 impl<S: Send + 'static, T: Send + 'static> Source<T> for FilterMap<S, T> {
@@ -1179,7 +1147,7 @@ impl<S: Send + 'static, T: Send + 'static> Source<T> for FilterMap<S, T> {
 /// preserved; a clean `Complete` there is also a complete (if shorter) stream.
 struct TakeWhile<T> {
     inner: Option<Box<dyn Source<T>>>,
-    pred: Arc<dyn Fn(&T) -> bool + Send + Sync>,
+    pred: Box<dyn FnMut(&T) -> bool + Send>,
     done: Option<End>,
 }
 
@@ -1252,25 +1220,23 @@ impl<T: Send + 'static> Source<T> for TakeWhile<T> {
     }
 }
 
-// ── DedupByKey<T, K, F> ────────────────────────────────────────────────
+// ── DedupByKey<T, Pos> ─────────────────────────────────────────────────
 
 /// Drop consecutive items whose key repeats.
 ///
 /// No-key items (errors, watermarks) pass through and do not change the last
 /// key. This is a stream transform, not an order policy: the caller can pair it
 /// with `Contiguous` when exact succession is required.
-struct DedupByKey<T, K, F> {
+struct DedupByKey<T, Pos> {
     inner: Option<Box<dyn Source<T>>>,
-    key: F,
-    last: Option<K>,
+    last: Option<Pos>,
     done: Option<End>,
 }
 
-impl<T, K, F> Source<T> for DedupByKey<T, K, F>
+impl<T, Pos> Source<T> for DedupByKey<T, Pos>
 where
     T: Send + 'static,
-    K: PartialEq + Copy + Send + 'static,
-    F: Fn(&T) -> Option<K> + Send + Sync + 'static,
+    Pos: Key<T>,
 {
     fn register<'a>(&'a mut self, sel: &mut crossbeam_channel::Select<'a>) -> usize {
         self.inner.as_mut().map_or(0, |src| src.register(sel))
@@ -1281,7 +1247,7 @@ where
             return Poll::Dead;
         };
         match inner.poll(ordinal) {
-            Poll::Got(item) => match (self.key)(&item) {
+            Poll::Got(item) => match Pos::key(&item) {
                 Some(key) if self.last == Some(key) => {
                     self.inner = Some(inner);
                     Poll::Filtered
@@ -1315,7 +1281,7 @@ where
         loop {
             let mut inner = self.inner.take()?;
             match inner.drain_first() {
-                Some(item) => match (self.key)(&item) {
+                Some(item) => match Pos::key(&item) {
                     Some(key) if self.last == Some(key) => {
                         self.inner = Some(inner);
                         continue;
@@ -1359,6 +1325,16 @@ where
 
 // ── Channel<T> ────────────────────────────────────────────────────────
 
+/// The read half of a pipeline: see the module docs.
+///
+/// There is no `IntoIterator`: iterating would have to drop the verdict.
+/// Read with [`recv`](Self::recv) or [`ready_batch`](Self::ready_batch),
+/// which return it.
+///
+/// ```compile_fail
+/// let ch = crossbeam_combinators::Channel::from_vec(vec![1u32]);
+/// for item in ch {}
+/// ```
 pub struct Channel<T> {
     pub(crate) source: Box<dyn Source<T>>,
 }
@@ -1527,7 +1503,7 @@ impl<T: Send + 'static> Channel<T> {
                     close_rx: None,
                     what: "cancellation",
                 },
-                fired: Some(Arc::clone(&cancel.fired)),
+                fired: Arc::clone(&cancel.fired),
             }),
         }
     }
@@ -1560,15 +1536,17 @@ impl<T: Send + 'static> Channel<T> {
         Self::chain_all([self, next])
     }
 
+    /// Transform and filter at pull time. `f` may hold state: a channel has
+    /// one consumer, so it runs on one thread at a time.
     pub fn filter_map<U, F>(self, f: F) -> Channel<U>
     where
         U: Send + 'static,
-        F: Fn(T) -> Option<U> + Send + Sync + 'static,
+        F: FnMut(T) -> Option<U> + Send + 'static,
     {
         Channel {
             source: Box::new(FilterMap {
                 inner: self.source,
-                f: Arc::new(f),
+                f: Box::new(f),
             }),
         }
     }
@@ -1585,12 +1563,12 @@ impl<T: Send + 'static> Channel<T> {
     /// that is a domain completeness question.
     pub fn take_while<F>(self, pred: F) -> Channel<T>
     where
-        F: Fn(&T) -> bool + Send + Sync + 'static,
+        F: FnMut(&T) -> bool + Send + 'static,
     {
         Channel {
             source: Box::new(TakeWhile {
                 inner: Some(self.source),
-                pred: Arc::new(pred),
+                pred: Box::new(pred),
                 done: None,
             }),
         }
@@ -1601,11 +1579,36 @@ impl<T: Send + 'static> Channel<T> {
     /// The matching item is consumed and dropped, like
     /// `take_while(|item| !pred(item))`. The stream then ends
     /// [`End::Complete`]; a source abort is preserved.
-    pub fn take_until<F>(self, pred: F) -> Channel<T>
+    pub fn take_until<F>(self, mut pred: F) -> Channel<T>
     where
-        F: Fn(&T) -> bool + Send + Sync + 'static,
+        F: FnMut(&T) -> bool + Send + 'static,
     {
         self.take_while(move |item| !pred(item))
+    }
+
+    /// At least `n` keyed items, then the rest of the last item's key group:
+    /// the stream ends at the first item whose key differs once `n` is reached
+    /// (that item is dropped, as in [`take_while`](Self::take_while)).
+    ///
+    /// `n` counts keyed items, not groups, so the last group may push the total
+    /// past `n`; a group is never split. No-key items pass and do not count.
+    #[must_use]
+    pub fn take_at_least<Pos: Key<T>>(self, n: std::num::NonZeroUsize) -> Channel<T> {
+        let mut seen: usize = 0;
+        let mut finishing: Option<Pos> = None;
+        self.take_while(move |item| {
+            let Some(key) = Pos::key(item) else {
+                return true;
+            };
+            if let Some(group) = finishing {
+                return key == group;
+            }
+            seen = seen.saturating_add(1);
+            if seen >= n.get() {
+                finishing = Some(key);
+            }
+            true
+        })
     }
 
     /// Drop an item when its key equals the previous item's key.
@@ -1613,25 +1616,31 @@ impl<T: Send + 'static> Channel<T> {
     /// No-key items pass through and do not change the last key. This is a
     /// stream transform, not an order policy; pair it with a contiguous policy
     /// when exact succession is required.
-    pub fn dedup_by_key<K, F>(self, key: F) -> Channel<T>
-    where
-        K: PartialEq + Copy + Send + 'static,
-        F: Fn(&T) -> Option<K> + Send + Sync + 'static,
-    {
+    #[must_use]
+    pub fn dedup_by_key<Pos: Key<T>>(self) -> Channel<T> {
         Channel {
-            source: Box::new(DedupByKey {
+            source: Box::new(DedupByKey::<T, Pos> {
                 inner: Some(self.source),
-                key,
                 last: None,
                 done: None,
             }),
         }
     }
 
-    pub fn map<U, F>(self, f: F) -> Channel<U>
+    /// Drop items whose key is at or below `cut`; no-key items pass. `None`
+    /// keeps everything.
+    #[must_use]
+    pub fn filter_above<Pos: Key<T>>(self, cut: Option<Pos>) -> Channel<T> {
+        self.filter_map(move |item| match (Pos::key(&item), cut) {
+            (Some(key), Some(cut)) if key <= cut => None,
+            _ => Some(item),
+        })
+    }
+
+    pub fn map<U, F>(self, mut f: F) -> Channel<U>
     where
         U: Send + 'static,
-        F: Fn(T) -> U + Send + Sync + 'static,
+        F: FnMut(T) -> U + Send + 'static,
     {
         self.filter_map(move |t| Some(f(t)))
     }
@@ -1672,85 +1681,24 @@ impl<T: Send + 'static> Channel<T> {
         self.source.drain_first()
     }
 
-    /// Why the stream finished. Meaningful once it has stopped yielding — i.e.
-    /// after `recv` returned `Err`, or after a `ready_batch` drain loop broke.
-    /// `ready_batch` returns `None` for both a clean close and an abort, so a
-    /// loop that needs the distinction consults this afterwards.
+    /// Why the stream finished, for a stream already known to have stopped.
+    /// `recv` and `ready_batch` return the same verdict in their `Err`.
     pub fn end_reason(&mut self) -> End {
         self.source.end_reason()
     }
 
     /// Block for the first item, then non-blocking drain up to `max` items.
-    /// Returns `None` when the channel is disconnected; the returned iterator
-    /// yields at least one item. Each subsequent `next()` calls `try_recv()`,
-    /// so items that arrive while you iterate are still captured.
-    pub fn ready_batch(&mut self, max: usize) -> Option<ReadyBatch<'_, T>> {
-        let first = self.recv().ok()?;
-        Some(ReadyBatch {
+    /// `Err` carries the verdict when the stream has ended, exactly as
+    /// [`recv`](Self::recv) does; the returned iterator yields at least one
+    /// item. Each subsequent `next()` calls `try_recv()`, so items that arrive
+    /// while you iterate are still captured.
+    pub fn ready_batch(&mut self, max: usize) -> Result<ReadyBatch<'_, T>, End> {
+        let first = self.recv()?;
+        Ok(ReadyBatch {
             channel: self,
             head: Some(first),
             remaining: max.saturating_sub(1),
         })
-    }
-
-    /// Bridge to an async `Stream`, draining on a blocking thread.
-    ///
-    /// The drain is woken by *either* an item or the consumer going away. The
-    /// second half is not a nicety: a failing `blocking_send` is the only other
-    /// way this loop learns the stream was dropped, and on an infinite source
-    /// that has gone quiet no further item ever arrives to make one fail. The
-    /// thread would park in `recv` forever — and `Runtime::drop` waits for
-    /// started blocking tasks, so one dropped tail subscription would hang
-    /// shutdown.
-    ///
-    /// So the source is raced against a liveness receiver (a guard): it
-    /// carries no items, its sender rides with the returned stream, and
-    /// dropping the stream disconnects it. A race, not a
-    /// [`merge`](Self::merge) — a merge keeps the surviving branch when the
-    /// other closes cleanly, which would stop a *finite* stream from ever
-    /// ending.
-    #[cfg(feature = "tokio")]
-    #[must_use = "a stream does nothing unless polled"]
-    pub fn into_stream(self) -> BoxStream<'static, T> {
-        let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BRIDGE_CAP);
-        let (alive_tx, alive_rx) = crossbeam_channel::bounded::<()>(1);
-        let source = Channel {
-            source: Box::new(Guarded {
-                inner: self.source,
-                alive: LeafState::Alive {
-                    rx: alive_rx,
-                    close_rx: None,
-                    what: "into_stream consumer",
-                },
-                fired: None,
-            }),
-        };
-        tokio::task::spawn_blocking(move || {
-            for item in source {
-                if tx.blocking_send(item).is_err() {
-                    break;
-                }
-            }
-        });
-        futures::stream::unfold(
-            (tokio_stream::wrappers::ReceiverStream::new(rx), alive_tx),
-            |(mut rx, alive)| async move {
-                // `alive` is carried in the state, so it is released exactly
-                // when this stream is dropped — never sooner.
-                rx.next().await.map(|item| (item, (rx, alive)))
-            },
-        )
-        .boxed()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn drain_into(self, tx: &crossbeam_channel::Sender<T>) -> bool {
-        for item in self {
-            if tx.send(item).is_err() {
-                return false;
-            }
-        }
-        true
     }
 }
 
@@ -1778,33 +1726,6 @@ impl<T: Send + 'static> Iterator for ReadyBatch<'_, T> {
             .remaining
             .saturating_add(if self.head.is_some() { 1 } else { 0 });
         (0, Some(n))
-    }
-}
-
-// ── ChannelIter<T> ─────────────────────────────────────────────────────
-
-pub struct ChannelIter<T> {
-    inner: Channel<T>,
-}
-
-impl<T: Send + 'static> Iterator for ChannelIter<T> {
-    type Item = T;
-
-    fn next(&mut self) -> Option<T> {
-        self.inner.recv().ok()
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, None)
-    }
-}
-
-impl<T: Send + 'static> IntoIterator for Channel<T> {
-    type Item = T;
-    type IntoIter = ChannelIter<T>;
-
-    fn into_iter(self) -> ChannelIter<T> {
-        ChannelIter { inner: self }
     }
 }
 
@@ -1890,41 +1811,6 @@ mod tests {
             ],
             "next sees no verdict first, then only the abort"
         );
-    }
-
-    /// `into_stream`'s bridge drains on a blocking thread, so it only notices a
-    /// departed consumer when a send fails — which never happens on an infinite
-    /// stream that has gone quiet. The thread then parks forever in `recv`, and
-    /// `Runtime::drop` waits for started blocking tasks, so a single dropped
-    /// tail subscription hangs shutdown. The stream must therefore carry a
-    /// liveness signal the drain can select on.
-    ///
-    /// Nothing is ever sent here: the sender stays alive and idle, so the only
-    /// thing that can end the drain is the consumer going away. The guard
-    /// travels with the source, so it is released exactly when the drain
-    /// thread drops it — i.e. when the thread ends.
-    #[cfg(feature = "tokio")]
-    #[tokio::test]
-    async fn into_stream_stops_draining_when_the_consumer_drops_it() {
-        let guard = Arc::new(());
-        let alive = Arc::downgrade(&guard);
-        let (_tx, rx) = crossbeam_channel::bounded::<u32>(1);
-
-        let stream = Channel::from_infinite(rx, "socket")
-            .map(move |x| {
-                let _held = &guard;
-                x
-            })
-            .into_stream();
-        drop(stream);
-
-        for _ in 0..200u32 {
-            if alive.strong_count() == 0 {
-                return;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-        panic!("the drain thread never exited: still parked in recv()");
     }
 
     #[test]
@@ -2129,7 +2015,7 @@ mod tests {
                         close_rx: None,
                         what: "test guard",
                     },
-                    fired: None,
+                    fired: Arc::new(AtomicBool::new(false)),
                 }),
             };
 
@@ -2628,10 +2514,82 @@ mod tests {
         assert_eq!(ch.recv(), Err(End::Complete));
     }
 
+    /// Keyed by the tens digit: (10, 11) is one group. `n` counts items, so the
+    /// group that reaches it is finished, and the first item of the next group
+    /// ends the stream (and is dropped).
+    #[test]
+    fn take_at_least_finishes_the_group_that_reaches_n() {
+        let n = std::num::NonZeroUsize::new(2).unwrap();
+        let items = vec![
+            Some(1u64),
+            None,
+            Some(10),
+            Some(10),
+            Some(10),
+            Some(20),
+            Some(30),
+        ];
+        let mut ch = Channel::from_vec(items).take_at_least::<u64>(n);
+        let got: Vec<_> = std::iter::from_fn(|| ch.recv().ok()).collect();
+        assert_eq!(got, vec![Some(1), None, Some(10), Some(10), Some(10)]);
+        assert_eq!(ch.end_reason(), End::Complete);
+    }
+
+    #[test]
+    fn take_at_least_below_n_keeps_the_source_verdict() {
+        let n = std::num::NonZeroUsize::new(5).unwrap();
+        let (tx, rx) = crossbeam_channel::bounded(4);
+        tx.send(Some(1u64)).unwrap();
+        drop(tx);
+        let mut ch = Channel::from_infinite(rx, "short").take_at_least::<u64>(n);
+        assert_eq!(ch.recv(), Ok(Some(1)));
+        assert_eq!(
+            ch.recv(),
+            Err(End::Aborted {
+                reason: AbortReason::ProducerGone { what: "short" }
+            })
+        );
+    }
+
+    #[test]
+    fn filter_above_drops_keys_at_or_below_the_cut() {
+        let items = vec![Some(1u64), Some(2), None, Some(3), Some(4)];
+        let mut ch = Channel::from_vec(items.clone()).filter_above::<u64>(Some(2));
+        let got: Vec<_> = std::iter::from_fn(|| ch.recv().ok()).collect();
+        assert_eq!(got, vec![None, Some(3), Some(4)]);
+        let mut all = Channel::from_vec(items.clone()).filter_above::<u64>(None);
+        let got: Vec<_> = std::iter::from_fn(|| all.recv().ok()).collect();
+        assert_eq!(got, items);
+    }
+
+    #[test]
+    fn filter_map_may_hold_state() {
+        let mut seen = 0u32;
+        let mut ch = Channel::from_vec(vec![5u32, 6, 7]).map(move |v| {
+            seen += 1;
+            (seen, v)
+        });
+        assert_eq!(ch.recv(), Ok((1, 5)));
+        assert_eq!(ch.recv(), Ok((2, 6)));
+    }
+
+    #[test]
+    fn ready_batch_returns_the_verdict() {
+        let (tx, rx) = crossbeam_channel::bounded::<u32>(1);
+        drop(tx);
+        let mut ch = Channel::from_infinite(rx, "gone");
+        assert!(matches!(
+            ch.ready_batch(4),
+            Err(End::Aborted {
+                reason: AbortReason::ProducerGone { what: "gone" }
+            })
+        ));
+    }
+
     #[test]
     fn dedup_by_key_drops_consecutive_duplicates() {
-        let mut ch = Channel::from_vec(vec![Some(1u32), Some(1), None, Some(2), Some(2), Some(1)])
-            .dedup_by_key(|v: &Option<u32>| *v);
+        let mut ch = Channel::from_vec(vec![Some(1u64), Some(1), None, Some(2), Some(2), Some(1)])
+            .dedup_by_key::<u64>();
         assert_eq!(ch.recv(), Ok(Some(1)));
         assert_eq!(ch.recv(), Ok(None));
         assert_eq!(ch.recv(), Ok(Some(2)));
@@ -2831,67 +2789,6 @@ mod tests {
     fn from_vec_empty_disconnects_immediately() {
         let mut ch: Channel<u32> = Channel::from_vec(vec![]);
         assert_eq!(ch.recv(), Err(End::Complete));
-    }
-
-    #[test]
-    fn into_iter_collects_all_items() {
-        let (tx, rx) = crossbeam_channel::bounded(4);
-        let ch = closed(rx);
-        tx.send(1).unwrap();
-        tx.send(2).unwrap();
-        tx.send(3).unwrap();
-        drop(tx);
-        let got: Vec<u32> = ch.into_iter().collect();
-        assert_eq!(got, vec![1, 2, 3]);
-    }
-
-    #[test]
-    fn into_iter_empty_disconnected() {
-        let (tx, rx) = crossbeam_channel::bounded::<u32>(1);
-        drop(tx);
-        let ch = closed(rx);
-        let got: Vec<u32> = ch.into_iter().collect();
-        assert!(got.is_empty());
-    }
-
-    #[cfg(feature = "tokio")]
-    #[test]
-    fn into_stream_yields_items() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let (tx, rx) = crossbeam_channel::bounded(4);
-        tx.send(10).unwrap();
-        tx.send(20).unwrap();
-        drop(tx);
-        let got: Vec<u32> = rt.block_on(async {
-            let stream = closed(rx).into_stream();
-            use futures::StreamExt;
-            stream.collect().await
-        });
-        assert_eq!(got, vec![10, 20]);
-    }
-
-    #[test]
-    fn drain_into_transfers_items() {
-        let (stx, srx) = crossbeam_channel::bounded(4);
-        let (dtx, drx) = crossbeam_channel::bounded(4);
-        stx.send(1).unwrap();
-        stx.send(2).unwrap();
-        drop(stx);
-        assert!(closed(srx).drain_into(&dtx));
-        drop(dtx);
-        let got: Vec<u32> = drx.iter().collect();
-        assert_eq!(got, vec![1, 2]);
-    }
-
-    #[test]
-    fn drain_into_returns_false_when_receiver_dropped() {
-        let (stx, srx) = crossbeam_channel::bounded(4);
-        let (dtx, drx) = crossbeam_channel::bounded(1);
-        stx.send(1).unwrap();
-        stx.send(2).unwrap();
-        drop(stx);
-        drop(drx); // consumer drops early
-        assert!(!closed(srx).drain_into(&dtx));
     }
 
     // ── until / Cancellation ───────────────────────────────────────────

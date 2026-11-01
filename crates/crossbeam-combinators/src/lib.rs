@@ -1,21 +1,25 @@
 //! Blocking channel pipelines, both ends.
 //!
 //! A [`Channel<T>`] is the read half: a composable pull-source over crossbeam
-//! receivers, with an explicit [`End`] verdict. A [`Feed<T>`] is a write half;
-//! [`broadcast`]/[`keyed`] add a distribution thread plus a cloneable registry,
-//! a bounded data queue, and a single [`Shutdown`] owner. The channel graph
-//! itself still runs at pull time; only the fan-out owns a thread.
+//! receivers, with an explicit [`End`] verdict that every read returns. The
+//! write half is a [`Feed<T>`] (one producer, closed with a [`Closed`] proof),
+//! a [`Fanout<T>`] (one distribution thread, many subscribers), or a
+//! [`Level<T>`] (a watched value). The channel graph runs at pull time on the
+//! consumer's thread; only producers and the fan-out own threads.
 //!
 //! ```text
-//!   write half                         read half
-//!   ──────────                         ─────────
-//!   Feed::channel(cap, what) ────────▶ Channel<T>
-//!     send(item)                         recv() / try_recv() / ready_batch()
-//!     close()        ⇒ End::Complete     filter_map / map / merge / chain /
-//!     drop()         ⇒ End::Aborted      resume_on_abort / take_while /
-//!                                        until / into_stream
-//!   broadcast(..) -> (tx, registry, shutdown)
-//!     registry.subscribe() ───────────▶ Channel<T>  (hang up on lag)
+//!   write half                          read half
+//!   ──────────                          ─────────
+//!   Channel::produce_blocking(..) ────▶ Channel<T>
+//!     feed.send(item)                     recv() / try_recv() / ready_batch()
+//!     feed.close() -> Closed ⇒ Complete   filter_map / map / merge / chain /
+//!     panic / drop       ⇒ Aborted        take_while / take_until /
+//!                                         take_at_least / filter_above /
+//!                                         dedup_by_key / until
+//!   broadcast(..) -> (Fanout, Registry)
+//!     registry.subscribe() ────────────▶ Channel<T>  (hang up on lag)
+//!   Level::new(..) -> (setter, level)
+//!     level.changes() ─────────────────▶ Channel<()>
 //! ```
 //!
 //! The verdict is the contract: `Complete` means the stream ended cleanly
@@ -26,18 +30,14 @@
 //!
 //! The seam ([`Tail`], [`Ranged`], [`blend_chain`]) is the
 //! subscribe-then-cut pattern: open the live source, snapshot the cut, read the
-//! history up to it, then continue live. One domain-chosen item type flows
-//! through both halves; the crate never changes it and never knows what a
-//! boundary means.
+//! history up to it, then continue live.
 //!
-//! Tokio and futures are optional: the `tokio` feature adds
-//! [`Channel::into_stream`] and [`Cancellation::from_token`]. The core is
+//! The `tokio` feature adds [`Channel::produce_blocking`],
+//! [`Cancellation::from_token`] and [`Level::changed`]. The core is
 //! crossbeam-only.
 
 // Dev-dependencies used by feature-gated tests; keep the unused-dependency
 // lint quiet when the `tokio` feature is off.
-#[cfg(test)]
-use futures as _;
 #[cfg(test)]
 use proptest as _;
 #[cfg(test)]
@@ -49,18 +49,17 @@ mod blend;
 mod channel;
 mod fanout;
 mod feed;
+mod level;
 mod ordered;
 
 pub use blend::{Ranged, Tail, blend_chain};
-pub use channel::{
-    AbortReason, CancelHandle, Cancellation, Channel, ChannelIter, Closer, End, ReadyBatch,
-};
-#[cfg(feature = "tokio")]
-pub use fanout::shutdown_on_token;
+pub use channel::{AbortReason, CancelHandle, Cancellation, Channel, Closer, End, ReadyBatch};
 pub use fanout::{
-    KeyedRegistry, OverflowPolicy, Registry, RegistryError, Shutdown, Wakes, broadcast, keyed,
+    Fanout, FanoutConfig, KeyedRegistry, OverflowPolicy, Registry, RegistryError, Stopped,
+    TryPublishError, broadcast, keyed,
 };
-pub use feed::Feed;
+pub use feed::{Closed, Disconnected, Feed};
+pub use level::{Level, LevelGone, LevelSetter};
 pub use ordered::{
     Contiguous, Gap, Key, NonDecreasing, OrderPolicy, OrderedChannel, StrictlyIncreasing, Successor,
 };

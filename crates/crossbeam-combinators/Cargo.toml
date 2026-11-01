@@ -9,22 +9,19 @@ publish = false
 
 [dependencies]
 crossbeam-channel = { workspace = true }
-futures = { workspace = true, optional = true }
 parking_lot = { workspace = true }
 tokio = { workspace = true, optional = true, features = ["rt", "sync"] }
-tokio-stream = { workspace = true, optional = true, features = ["sync"] }
 tokio-util = { workspace = true, optional = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-futures = { workspace = true }
 proptest = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }
 tokio-util = { workspace = true }
 
 [features]
 default = []
-tokio = ["dep:futures", "dep:tokio", "dep:tokio-stream", "dep:tokio-util"]
+tokio = ["dep:tokio", "dep:tokio-util"]
 
 [lints]
 workspace = true

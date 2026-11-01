@@ -65,8 +65,8 @@ use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crossbeam_combinators::{CancelHandle, Channel};
 use dashmap::DashMap;
-use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 
 use zslg::{DataId, LogIndex, Reader, StableLogEvent};
@@ -220,10 +220,10 @@ impl WriteTracker {
                 // The stream is gapless by contract, lag included: it
                 // re-enters historical replay from its own cursor rather than
                 // surfacing a `Lagged`. Nothing to resync here.
-                let mut stream = r.subscribe_stable_log(LogIndex::ZERO).into_stream();
+                let mut stream = drain(r.subscribe_stable_log(LogIndex::ZERO).into_channel());
                 loop {
                     tokio::select! {
-                        item = stream.next() => {
+                        item = stream.recv() => {
                             let event = match item {
                                 Some(Ok(ev)) => ev,
                                 Some(Err(e)) => {
@@ -231,7 +231,9 @@ impl WriteTracker {
                                         error = %e,
                                         "stable-log event stream failed; resubscribing"
                                     );
-                                    stream = r.subscribe_stable_log(LogIndex::ZERO).into_stream();
+                                    stream = drain(
+                                        r.subscribe_stable_log(LogIndex::ZERO).into_channel(),
+                                    );
                                     continue;
                                 }
                                 None => continue,
@@ -349,17 +351,18 @@ impl WriteTracker {
         // part is guaranteed to cover it — the loop cannot hang on the live
         // tail.
         let mut found: HashSet<DataId> = HashSet::new();
-        let mut scan = reader
-            .subscribe_stable_log(floor)
-            .into_channel()
-            .filter_map(|item| match item {
-                Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
-                Ok(StableLogEvent::Watermark(_)) => None,
-                Err(e) => Some(Err(e)),
-            })
-            .into_stream();
+        let mut scan = drain(
+            reader
+                .subscribe_stable_log(floor)
+                .into_channel()
+                .filter_map(|item| match item {
+                    Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
+                    Ok(StableLogEvent::Watermark(_)) => None,
+                    Err(e) => Some(Err(e)),
+                }),
+        );
         let mut scan_failed = false;
-        while let Some(item) = scan.next().await {
+        while let Some(item) = scan.recv().await {
             match item {
                 Ok((idx, data)) => {
                     if pending.contains(&data.data_id) {
@@ -428,8 +431,8 @@ impl WriteTracker {
         // Collect unstable DataIds into a set for the "not in unstable" check.
         let mut unstable: HashSet<DataId> = HashSet::new();
         {
-            let mut ut = reader.unstable_tail().into_stream();
-            while let Some(Ok(data)) = ut.next().await {
+            let mut ut = drain(reader.unstable_tail());
+            while let Some(Ok(data)) = ut.recv().await {
                 unstable.insert(data.data_id);
             }
         }
@@ -476,5 +479,38 @@ impl WriteTracker {
         metrics::gauge!("follower_oldest_write_not_in_unstable_age_seconds")
             .set(oldest_unstable_age);
         metrics::gauge!("follower_writes_not_in_unstable").set(not_in_unstable_gauge);
+    }
+}
+
+/// The items of `ch` on an async receiver, drained by `recv` on the blocking
+/// pool. Dropping the receiver ends the drain: the handle travels with it, and
+/// the drain is bound to its cancellation — so a quiet infinite stream cannot
+/// leave a blocking thread parked in `recv` past the receiver.
+fn drain<T: Send + 'static>(ch: Channel<T>) -> Drained<T> {
+    let (handle, cancellation) = CancelHandle::new();
+    let mut ch = ch.until(&cancellation);
+    let (tx, rx) = tokio::sync::mpsc::channel(256);
+    tokio::task::spawn_blocking(move || {
+        while let Ok(item) = ch.recv() {
+            if tx.blocking_send(item).is_err() {
+                break;
+            }
+        }
+    });
+    Drained {
+        rx,
+        _handle: handle,
+    }
+}
+
+/// See [`drain`].
+struct Drained<T> {
+    rx: tokio::sync::mpsc::Receiver<T>,
+    _handle: CancelHandle,
+}
+
+impl<T> Drained<T> {
+    async fn recv(&mut self) -> Option<T> {
+        self.rx.recv().await
     }
 }

@@ -587,6 +587,7 @@ impl ReplicaLogConfig {
     reason = "test code"
 )]
 mod tests {
+    use crate::test_stream::ChannelTestExt as _;
     use tokio_util::sync::CancellationToken;
 
     use super::*;
@@ -699,10 +700,9 @@ mod tests {
         }
         drop(tx); // ends the input
 
-        let collected =
-            tokio::task::spawn_blocking(move || outcomes.into_iter().collect::<Vec<_>>())
-                .await
-                .expect("join");
+        let collected = tokio::task::spawn_blocking(move || outcomes.items().collect::<Vec<_>>())
+            .await
+            .expect("join");
         assert_eq!(collected.len(), 8, "every accepted write is answered");
         assert!(
             collected
@@ -754,10 +754,9 @@ mod tests {
         }
         drop(tx);
 
-        let collected =
-            tokio::task::spawn_blocking(move || outcomes.into_iter().collect::<Vec<_>>())
-                .await
-                .expect("join");
+        let collected = tokio::task::spawn_blocking(move || outcomes.items().collect::<Vec<_>>())
+            .await
+            .expect("join");
         assert_eq!(collected.len(), 4, "a rejection does not end the stream");
         assert!(
             collected.iter().all(|o| matches!(

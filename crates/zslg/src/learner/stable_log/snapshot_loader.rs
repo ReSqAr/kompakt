@@ -205,6 +205,7 @@ impl SnapshotLoader {
     reason = "test code"
 )]
 mod tests {
+    use crate::test_stream::ChannelTestExt as _;
     use std::collections::{BTreeSet, HashMap};
     use std::sync::Mutex;
     use std::time::Duration;
@@ -278,7 +279,7 @@ mod tests {
             _entries: crossbeam_combinators::Channel<Result<SnapshotEntry, Error>>,
             _compression: CompressionLevel,
             _reason: crate::metrics::ObjectStoreReason,
-        ) -> Result<usize, Error> {
+        ) -> Result<crate::api::SnapshotWrite, Error> {
             unimplemented!("loader tests never write snapshots")
         }
 
@@ -376,7 +377,7 @@ mod tests {
         assert_eq!(log.end_hlc(), Some(Hlc(200)), "watermark advances");
         let indices: Vec<u64> = log
             .range(LogIndex(0), LogIndex(100))
-            .into_iter()
+            .items()
             .filter_map(|r| r.ok().map(|(i, _)| i.raw()))
             .collect();
         assert_eq!(indices, (0..=9).collect::<Vec<u64>>());
@@ -574,7 +575,7 @@ mod tests {
         // The log is complete and contiguous: every index 0..=9 present.
         let indices: Vec<u64> = log
             .range(LogIndex(0), LogIndex(100))
-            .into_iter()
+            .items()
             .filter_map(|r| r.ok().map(|(i, _)| i.raw()))
             .collect();
         assert_eq!(indices, (0..=9).collect::<Vec<u64>>());

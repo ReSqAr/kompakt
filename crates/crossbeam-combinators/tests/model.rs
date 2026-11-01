@@ -223,10 +223,13 @@ proptest! {
         let (want, ordered) = node.model();
         let mut ch = node.build();
         let mut got = Vec::new();
-        while let Some(batch) = ch.ready_batch(batch_size) {
-            got.extend(batch);
-        }
-        prop_assert_eq!(ch.end_reason(), End::Complete);
+        let end = loop {
+            match ch.ready_batch(batch_size) {
+                Ok(batch) => got.extend(batch),
+                Err(end) => break end,
+            }
+        };
+        prop_assert_eq!(end, End::Complete);
 
         let mut want_sorted = want.clone();
         let mut got_sorted = got.clone();
@@ -283,7 +286,8 @@ proptest! {
             history: history.clone(),
             cut,
         };
-        let got: Vec<u64> = blend_chain(&seam, &seam).into_iter().collect();
+        let mut ch = blend_chain(&seam, &seam);
+        let got: Vec<u64> = std::iter::from_fn(|| ch.recv().ok()).collect();
         let want: Vec<u64> = history.into_iter().chain(live.into_iter().filter(|v| *v > cut)).collect();
         prop_assert_eq!(got, want);
     }
@@ -300,19 +304,19 @@ fn concurrent_merge_loses_nothing() {
 
     let producer_a = std::thread::spawn(move || {
         for i in 0..N {
-            if !feed_a.send(i) {
+            if feed_a.send(i).is_err() {
                 return;
             }
         }
-        feed_a.close();
+        let _ = feed_a.close();
     });
     let producer_b = std::thread::spawn(move || {
         for i in 0..N {
-            if !feed_b.send(N + i) {
+            if feed_b.send(N + i).is_err() {
                 return;
             }
         }
-        feed_b.close();
+        let _ = feed_b.close();
     });
 
     let mut got: Vec<u64> = std::iter::from_fn(|| merged.recv().ok()).collect();

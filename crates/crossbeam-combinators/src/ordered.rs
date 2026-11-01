@@ -289,7 +289,12 @@ where
         self.inner.try_recv()
     }
 
-    pub fn ready_batch(&mut self, max: usize) -> Option<ReadyBatch<'_, T>> {
+    /// See [`Channel::ready_batch`].
+    ///
+    /// # Errors
+    ///
+    /// The verdict once the stream has ended.
+    pub fn ready_batch(&mut self, max: usize) -> Result<ReadyBatch<'_, T>, End> {
         self.inner.ready_batch(max)
     }
 
@@ -302,12 +307,6 @@ where
     #[must_use]
     pub fn into_channel(self) -> Channel<T> {
         self.inner
-    }
-
-    #[cfg(feature = "tokio")]
-    #[must_use = "a stream does nothing unless polled"]
-    pub fn into_stream(self) -> futures::stream::BoxStream<'static, T> {
-        self.inner.into_stream()
     }
 }
 

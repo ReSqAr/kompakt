@@ -130,7 +130,7 @@ async fn wait_for_stable_caught_up(
     }
     let started = tokio::time::Instant::now();
     stable_log
-        .watch_watermark()
+        .watermark()
         .wait_for(|wm| wm.is_some_and(|hlc| hlc >= target))
         .await
         .map_err(|_| Error::Shutdown)?;
@@ -502,12 +502,11 @@ mod tests {
         fn stream_above_hlc(&self, _threshold: Option<Hlc>) -> crate::ordered::LocalStoreStream {
             unimplemented!()
         }
-        fn stream_window_ordered(
+        fn stream_window(
             &self,
             _above: Option<Hlc>,
             _upto: Hlc,
-            _max_entries: Option<std::num::NonZeroUsize>,
-        ) -> crate::ordered::WindowStream {
+        ) -> crate::ordered::LocalStoreStream {
             unimplemented!()
         }
         fn subscribe_integrated(&self) -> tokio::sync::watch::Receiver<()> {

@@ -127,18 +127,22 @@ impl Dispatcher {
     ) -> Result<Self, Error> {
         let max_hlc = store.read()?.watermark()?.hlc;
         let (tx, rx) = watch::channel(max_hlc);
-        let (events_tx, registry, events_shutdown) = crossbeam_combinators::keyed(
+        let (fanout, registry) = crossbeam_combinators::keyed(
             "nvzn-subscribe",
             |entry: &SubscriptionItem| Some((entry.0, entry.1)),
-            std::num::NonZeroUsize::new(1024).unwrap_or(std::num::NonZeroUsize::MIN),
-            std::num::NonZeroUsize::new(PENDING_SUBSCRIBERS).unwrap_or(std::num::NonZeroUsize::MIN),
-            std::num::NonZeroUsize::new(SUBSCRIBER_CAPACITY).unwrap_or(std::num::NonZeroUsize::MIN),
+            crossbeam_combinators::FanoutConfig {
+                data_cap: std::num::NonZeroUsize::new(1024).unwrap_or(std::num::NonZeroUsize::MIN),
+                register_cap: std::num::NonZeroUsize::new(PENDING_SUBSCRIBERS)
+                    .unwrap_or(std::num::NonZeroUsize::MIN),
+                sub_cap: std::num::NonZeroUsize::new(SUBSCRIBER_CAPACITY)
+                    .unwrap_or(std::num::NonZeroUsize::MIN),
+            },
             crossbeam_combinators::OverflowPolicy::Block,
         );
         let (cancel, cancelled) = crossbeam_combinators::CancelHandle::new();
         let cancel = Arc::new(cancel);
         let subscriptions = Subscriptions::new(registry, cancelled, Arc::clone(&cancel));
-        let subscribers = Subscribers::new(events_tx, events_shutdown, cancel);
+        let subscribers = Subscribers::new(fanout, cancel);
         Ok(Self {
             store,
             handlers: BTreeMap::new(),

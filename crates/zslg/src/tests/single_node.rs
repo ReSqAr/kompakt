@@ -14,6 +14,7 @@
     clippy::result_large_err,
     reason = "test code"
 )]
+use crate::test_stream::ChannelTestExt as _;
 use std::time::Duration;
 
 use std::path::PathBuf;
@@ -99,7 +100,7 @@ async fn write_then_read_via_unstable_tail() {
     let reader = node.reader();
     let entry = tokio::time::timeout(TEST_TIMEOUT, async {
         loop {
-            let mut stream = reader.unstable_tail().into_stream();
+            let mut stream = reader.unstable_tail().into_test_stream();
             let mut found = None;
             while let Some(item) = stream.next().await {
                 if let Ok(d) = item {
@@ -181,7 +182,7 @@ async fn write_multiple_entries_observable_via_reader() {
                 payloads.len()
             );
         }
-        let mut stream = reader.unstable_tail().into_stream();
+        let mut stream = reader.unstable_tail().into_test_stream();
         observed.clear();
         for _ in 0..payloads.len() {
             match tokio::time::timeout(Duration::from_millis(500), stream.next()).await {
@@ -238,7 +239,7 @@ async fn snapshot_creation_tick_promotes_into_stable_log() {
                 Ok(StableLogEvent::Watermark(_)) => None,
                 Err(e) => Some(Err(e)),
             })
-            .into_stream();
+            .into_test_stream();
         if matches!(
             tokio::time::timeout(Duration::from_millis(500), stream.next()).await,
             Ok(Some(Ok(_)))

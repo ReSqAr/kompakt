@@ -71,17 +71,12 @@ pub(crate) trait StableLogSnapshot: Send + Sync + 'static {
     fn subscribe_events(&self) -> Channel<StableLogEvent>;
 
     /// The current watermark, level-triggered — for consumers that want log
-    /// *state*, not its data. No payload crosses it and it cannot lag, so a
-    /// slow reader simply observes the latest value rather than a backlog.
+    /// *state*, not its data. No payload crosses it and it cannot lag: a slow
+    /// reader observes the latest value rather than a backlog. Blocking readers
+    /// use `changes()` (one wake-up stands for any number of moves), async
+    /// readers `changed()`/`wait_for`.
     #[must_use]
-    fn watch_watermark(&self) -> tokio::sync::watch::Receiver<Option<Hlc>>;
-
-    /// The same level for a blocking consumer: a wake-up after each move,
-    /// carrying nothing — read `end_hlc` or the watch on waking. One pending
-    /// wake stands for any number of moves, so it cannot lag either. Infinite;
-    /// it ends `Aborted` only when the log is dropped.
-    #[must_use]
-    fn watermark_moves(&self) -> Channel<()>;
+    fn watermark(&self) -> crossbeam_combinators::Level<Option<Hlc>>;
 
     #[must_use]
     fn range(

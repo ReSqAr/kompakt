@@ -284,15 +284,10 @@ impl LocalStoreView for FailingWindowStore {
         unimplemented!("pacing tests do not stream above an hlc")
     }
 
-    fn stream_window_ordered(
-        &self,
-        _above: Option<Hlc>,
-        _upto: Hlc,
-        _max_entries: Option<std::num::NonZeroUsize>,
-    ) -> crate::ordered::WindowStream {
+    fn stream_window(&self, _above: Option<Hlc>, _upto: Hlc) -> crate::ordered::LocalStoreStream {
         let n = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         let _ = self.done.send(n);
-        crate::ordered::window_stream(
+        crate::ordered::local_store_stream(
             Channel::once(Err(Error::Storage("pacing test: window read".into()))),
             "pacing test window",
         )
@@ -330,13 +325,10 @@ impl StableLogSnapshot for EmptyStableLog {
     async fn record_end_hlc(&self, _end_hlc: Hlc) -> Result<(), Error> {
         unimplemented!("pacing tests never record an end hlc")
     }
-    fn watermark_moves(&self) -> Channel<()> {
-        Channel::from_infinite(crossbeam_channel::never(), "stub watermark moves")
-    }
     fn subscribe_events(&self) -> Channel<crate::meta::StableLogEvent> {
         unimplemented!("pacing tests never subscribe to stable-log events")
     }
-    fn watch_watermark(&self) -> tokio::sync::watch::Receiver<Option<Hlc>> {
+    fn watermark(&self) -> crossbeam_combinators::Level<Option<Hlc>> {
         unimplemented!("pacing tests never watch the stable-log watermark")
     }
     fn range(&self, _from: LogIndex, _until: LogIndex) -> Channel<Result<(LogIndex, Data), Error>> {
@@ -359,7 +351,7 @@ impl SnapshotStore for UnusedSnapshotStore {
         _entries: Channel<Result<crate::meta::SnapshotEntry, Error>>,
         _compression: CompressionLevel,
         _reason: crate::metrics::ObjectStoreReason,
-    ) -> Result<usize, Error> {
+    ) -> Result<crate::api::SnapshotWrite, Error> {
         unimplemented!("pacing tests never reach the object write")
     }
     async fn read_snapshot(

@@ -46,7 +46,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use crate::Error;
-use crate::api::{CleanupReport, SnapshotStore};
+use crate::api::{CleanupReport, EntryMeta, SnapshotStore, SnapshotWrite};
 use crate::error::ToStorage as _;
 use crate::ids::SnapshotId;
 #[cfg(test)]
@@ -55,7 +55,7 @@ use crate::meta::SnapshotEntry;
 use crate::metrics::{self, ObjectStoreOp, OpState};
 use crate::object_store::CompressionLevel;
 use crate::object_store::framing;
-use crossbeam_combinators::{Channel, Feed};
+use crossbeam_combinators::Channel;
 
 const SNAPSHOT_PREFIX: &str = "snapshots";
 
@@ -186,7 +186,7 @@ impl RemoteSnapshotStore {
         path: &Path,
         mut entries: Channel<Result<SnapshotEntry, Error>>,
         compression: CompressionLevel,
-    ) -> Result<(usize, u64, u64), Error> {
+    ) -> Result<SnapshotWrite, Error> {
         let upload = self
             .store
             .put_multipart(path)
@@ -199,15 +199,24 @@ impl RemoteSnapshotStore {
                 write: WriteMultipart::new(upload),
                 stored_bytes: 0,
             };
-            framing::encode_framed_records_streaming::<SnapshotEntry, _>(
+            let mut last: Option<EntryMeta> = None;
+            let encoded = framing::encode_framed_records_streaming::<SnapshotEntry, _>(
                 writer,
                 compression,
-                move || {
+                || {
                     if cancel.is_cancelled() {
                         return Some(Err(Error::Storage("snapshot write cancelled".into())));
                     }
                     match entries.recv() {
-                        Ok(item) => Some(item),
+                        Ok(item) => {
+                            if let Ok(entry) = &item {
+                                last = Some(EntryMeta {
+                                    index: entry.global_index,
+                                    hlc: entry.data.data_id.hlc(),
+                                });
+                            }
+                            Some(item)
+                        }
                         Err(crossbeam_combinators::End::Complete) => None,
                         // No declared completion, so this prefix must not be
                         // finalized as if it were the whole snapshot (§20).
@@ -218,10 +227,12 @@ impl RemoteSnapshotStore {
                         }
                     }
                 },
-            )
+            );
+            (encoded, last)
         });
 
-        let (mw_opt, encoded) = worker.await.to_storage("snapshot write worker panicked")?;
+        let ((mw_opt, encoded), last) =
+            worker.await.to_storage("snapshot write worker panicked")?;
 
         match encoded {
             Ok((count, uncompressed)) => {
@@ -234,7 +245,12 @@ impl RemoteSnapshotStore {
                     .finish()
                     .await
                     .map_err(|e| Error::ObjectStore(format!("multipart finish {path}: {e}")))?;
-                Ok((count, stored, uncompressed))
+                Ok(SnapshotWrite {
+                    count,
+                    last,
+                    stored_bytes: stored,
+                    uncompressed_bytes: uncompressed,
+                })
             }
             Err(e) => {
                 // Best-effort: a failed abort just leaves the parts to the
@@ -260,18 +276,18 @@ impl SnapshotStore for RemoteSnapshotStore {
         entries: Channel<Result<SnapshotEntry, Error>>,
         compression: CompressionLevel,
         reason: crate::metrics::ObjectStoreReason,
-    ) -> Result<usize, Error> {
+    ) -> Result<SnapshotWrite, Error> {
         let path = snapshot_path(id);
 
         let probe = metrics::object_store_request_probe(ObjectStoreOp::Put);
         let result = self.write_snapshot_inner(&path, entries, compression).await;
         probe.finish(OpState::from_ok(result.is_ok()));
 
-        let (entry_count, stored, uncompressed) = result?;
-        metrics::object_store_transfer_bytes(ObjectStoreOp::Put, reason, stored);
-        metrics::snapshot_compression_ratio(uncompressed, stored);
-        crate::metrics::snapshot_size(stored);
-        Ok(entry_count)
+        let written = result?;
+        metrics::object_store_transfer_bytes(ObjectStoreOp::Put, reason, written.stored_bytes);
+        metrics::snapshot_compression_ratio(written.uncompressed_bytes, written.stored_bytes);
+        crate::metrics::snapshot_size(written.stored_bytes);
+        Ok(written)
     }
 
     async fn read_snapshot(
@@ -299,32 +315,30 @@ impl SnapshotStore for RemoteSnapshotStore {
 
         let sync_reader = SyncIoBridge::new(StreamReader::new(byte_stream));
         let cancel = self.cancel.clone();
-        let (feed, ch) = Feed::channel(SNAPSHOT_READ_CHANNEL_CAP, "read_snapshot");
-        tokio::task::spawn_blocking(move || {
-            let res = crate::object_store::framing::decode_framed_records_streaming::<
-                SnapshotEntry,
-                _,
-            >(sync_reader, |entry: SnapshotEntry| {
-                // Send first, *then* check for cancellation: the blocking send is
-                // the backpressure, and checking before it would spin.
-                if !feed.send(Ok(entry)) {
-                    return Err(Error::Storage("snapshot read: consumer dropped".into()));
+        let ch =
+            Channel::produce_blocking(SNAPSHOT_READ_CHANNEL_CAP, "read_snapshot", move |feed| {
+                let res = crate::object_store::framing::decode_framed_records_streaming::<
+                    SnapshotEntry,
+                    _,
+                >(sync_reader, |entry: SnapshotEntry| {
+                    // Send first, *then* check for cancellation: the blocking send is
+                    // the backpressure, and checking before it would spin.
+                    if feed.send(Ok(entry)).is_err() {
+                        return Err(Error::Storage("snapshot read: consumer dropped".into()));
+                    }
+                    if cancel.is_cancelled() {
+                        return Err(Error::Storage("snapshot read cancelled".into()));
+                    }
+                    Ok(())
+                });
+                if let Err(e) = res {
+                    // Unconditional, cancelled or not — see the header. It cannot wedge
+                    // shutdown: a consumer either drains to close or drops its receiver,
+                    // and the latter makes this fail fast.
+                    let _ = feed.send(Err(e));
                 }
-                if cancel.is_cancelled() {
-                    return Err(Error::Storage("snapshot read cancelled".into()));
-                }
-                Ok(())
+                feed.close()
             });
-            if let Err(e) = res {
-                // Unconditional, cancelled or not — see the header. It cannot wedge
-                // shutdown: a consumer either drains to close or drops its receiver,
-                // and the latter makes this fail fast.
-                let _ = feed.send(Err(e));
-            }
-            // Reached only on the normal path: a panic drops `feed` instead,
-            // leaving the consumer with `End::Aborted`.
-            feed.close();
-        });
         Ok(ch)
     }
 
@@ -453,6 +467,7 @@ async fn list_orphans(
     reason = "test code"
 )]
 mod tests {
+    use crate::test_stream::ChannelTestExt as _;
     use std::sync::Arc;
     use std::time::{Duration, SystemTime};
 
@@ -513,12 +528,12 @@ mod tests {
             )
             .await
             .expect("write");
-        assert_eq!(n, records.len());
+        assert_eq!(n.count, records.len());
         let rx = store
             .read_snapshot(id, crate::metrics::ObjectStoreReason::ArchiveRead)
             .await
             .expect("read");
-        let got: Vec<SnapshotEntry> = rx.into_iter().filter_map(|r| r.ok()).collect();
+        let got: Vec<SnapshotEntry> = rx.items().filter_map(|r| r.ok()).collect();
         assert_eq!(got, records);
     }
 
@@ -536,12 +551,12 @@ mod tests {
             )
             .await
             .expect("write");
-        assert_eq!(n, records.len());
+        assert_eq!(n.count, records.len());
         let rx = store
             .read_snapshot(id, crate::metrics::ObjectStoreReason::ArchiveRead)
             .await
             .expect("read");
-        let got: Vec<SnapshotEntry> = rx.into_iter().filter_map(|r| r.ok()).collect();
+        let got: Vec<SnapshotEntry> = rx.items().filter_map(|r| r.ok()).collect();
         assert_eq!(got, records);
     }
 
@@ -558,7 +573,8 @@ mod tests {
             )
             .await
             .expect("write");
-        assert_eq!(n, 0);
+        assert_eq!(n.count, 0);
+        assert_eq!(n.last, None, "an empty write has no last entry");
     }
 
     /// On an encode error mid-stream the partial multipart upload is aborted, not

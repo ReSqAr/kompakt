@@ -8,8 +8,8 @@ use crossbeam_combinators::{
     Channel, Contiguous, Key, OrderedChannel, StrictlyIncreasing, Successor,
 };
 
-use crate::api::WindowItem;
 use crate::error::Error;
+use crate::hlc::Hlc;
 use crate::ids::{DataId, LogIndex};
 use crate::meta::{Data, SnapshotEntry, StableLogEvent};
 
@@ -46,12 +46,10 @@ impl Key<Result<Data, Error>> for DataId {
     }
 }
 
-impl Key<Result<WindowItem, Error>> for DataId {
-    fn key(item: &Result<WindowItem, Error>) -> Option<Self> {
-        match item {
-            Ok(WindowItem::Entry(data)) => Some(data.data_id),
-            Ok(WindowItem::Complete | WindowItem::TruncatedAt(_)) | Err(_) => None,
-        }
+/// A local-store entry's HLC group: what a snapshot chunk must not split.
+impl Key<Result<Data, Error>> for Hlc {
+    fn key(item: &Result<Data, Error>) -> Option<Self> {
+        item.as_ref().ok().map(|data| data.data_id.hlc())
     }
 }
 
@@ -71,12 +69,9 @@ pub(crate) fn replica_stream(
 /// The stable-log read: gapless indices, replaying from `from` inclusive.
 pub type StableStream = OrderedChannel<Result<StableLogEvent, Error>, Contiguous<LogIndex>>;
 
-/// The local store's above-HLC scan: strictly increasing `DataId`s.
+/// A local-store scan (above an HLC, or a bounded window): strictly increasing
+/// `DataId`s.
 pub(crate) type LocalStoreStream = OrderedChannel<Result<Data, Error>, StrictlyIncreasing<DataId>>;
-
-/// The local store's bounded window scan; terminals are no-key items.
-pub(crate) type WindowStream =
-    OrderedChannel<Result<WindowItem, Error>, StrictlyIncreasing<DataId>>;
 
 /// The archive stream: gapless indices, tiled from snapshots.
 pub(crate) type ArchiveStream = OrderedChannel<Result<SnapshotEntry, Error>, Contiguous<LogIndex>>;
@@ -86,14 +81,6 @@ pub(crate) fn local_store_stream(
     ch: Channel<Result<Data, Error>>,
     what: &'static str,
 ) -> LocalStoreStream {
-    OrderedChannel::named(ch, None, what)
-}
-
-/// Wrap a local-store window scan with its `StrictlyIncreasing` contract.
-pub(crate) fn window_stream(
-    ch: Channel<Result<WindowItem, Error>>,
-    what: &'static str,
-) -> WindowStream {
     OrderedChannel::named(ch, None, what)
 }
 

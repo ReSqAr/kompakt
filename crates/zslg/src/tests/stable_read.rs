@@ -19,6 +19,7 @@
 )]
 
 use crate::ids::LogIndex;
+use crate::test_stream::ChannelTestExt as _;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -88,7 +89,7 @@ async fn writes_appear_in_stable_log_across_all_nodes() {
                         Ok(StableLogEvent::Watermark(_)) => None,
                         Err(e) => Some(Err(e)),
                     })
-                    .into_stream();
+                    .into_test_stream();
                 while let Some(item) = stream.next().await {
                     if let Ok((_, d)) = item
                         && d.blob == payload

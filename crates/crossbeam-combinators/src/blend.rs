@@ -272,7 +272,8 @@ mod tests {
             }
         }
 
-        let got: Vec<Item> = blend_chain(&Seam, &Seam).into_iter().collect();
+        let mut ch = blend_chain(&Seam, &Seam);
+        let got: Vec<Item> = std::iter::from_fn(|| ch.recv().ok()).collect();
         assert_eq!(got, vec![Item::Data(1), Item::Done, Item::Data(2)]);
     }
 }

@@ -1,13 +1,12 @@
 //! Threaded fan-out: a broadcast or keyed registry with one distribution thread.
 //!
-//! Construction returns the three sides of the same fan-out:
+//! Construction returns the two sides of the same fan-out:
 //!
 //! ```text
-//!   (tx, registry, shutdown)
-//!     │      │          │
-//!     │      │          └── one owner stops and joins the thread
-//!     │      └───────────── cloneable subscribe side
-//!     └──────────────────── raw bounded data sender
+//!   (fanout, registry)
+//!     │        └── cloneable subscribe side
+//!     └─────────── the producer: publish / try_publish / shutdown
+//!                  (owns the data sender and the thread; Drop cancels)
 //! ```
 //!
 //! The thread owns the subscriber set, so routing, registration and
@@ -19,8 +18,9 @@
 //!
 //! A subscriber stream is infinite by construction: it ends with
 //! [`AbortReason::ProducerGone`](crate::AbortReason::ProducerGone) when the
-//! thread stops (explicit shutdown, data sender dropped, or producer gone). A
-//! caller that wants `Cancelled` binds its own
+//! thread stops (explicit shutdown, the [`Fanout`] dropped, or a panic). A
+//! departed subscriber never reaches the producer: the thread sheds or skips
+//! it. A caller that wants `Cancelled` binds its own
 //! [`Cancellation`](crate::Cancellation) with `until`.
 
 use std::num::NonZeroUsize;
@@ -42,6 +42,38 @@ pub enum OverflowPolicy {
     Shed,
 }
 
+/// The three queue bounds of a fan-out. The overflow policy is not here: it is
+/// a semantic choice, not sizing, and every constructor takes it explicitly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FanoutConfig {
+    /// Elements queued between the producer and the distribution thread.
+    pub data_cap: NonZeroUsize,
+    /// Registrations queued before `subscribe` reports `Full`.
+    pub register_cap: NonZeroUsize,
+    /// Per-subscriber queue depth: the lag a `Shed` subscriber may build up.
+    pub sub_cap: NonZeroUsize,
+}
+
+impl FanoutConfig {
+    const DEFAULT_CAP: NonZeroUsize = NonZeroUsize::new(1024).expect("nonzero");
+
+    /// The default data and registration bounds with the given subscriber depth.
+    #[must_use]
+    pub const fn with_sub_cap(sub_cap: NonZeroUsize) -> Self {
+        Self {
+            data_cap: Self::DEFAULT_CAP,
+            register_cap: Self::DEFAULT_CAP,
+            sub_cap,
+        }
+    }
+}
+
+impl Default for FanoutConfig {
+    fn default() -> Self {
+        Self::with_sub_cap(Self::DEFAULT_CAP)
+    }
+}
+
 /// A failed `Registry::subscribe`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegistryError {
@@ -51,29 +83,75 @@ pub enum RegistryError {
     Closed,
 }
 
-/// A fan-out's single lifecycle owner.
+/// The distribution thread is gone (shut down or panicked); the item is
+/// handed back.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Stopped<T>(pub T);
+
+/// A failed [`Fanout::try_publish`]; the item is handed back.
+#[derive(Debug, PartialEq, Eq)]
+pub enum TryPublishError<T> {
+    /// The data queue is full.
+    Full(T),
+    /// The distribution thread is gone.
+    Stopped(T),
+}
+
+/// The producer side of a fan-out: the data sender and the thread's lifecycle.
 ///
-/// It owns the one-shot shutdown sender and the thread's join handle.
-/// `cancel` is idempotent: the first call sends without blocking, later calls
-/// see `None`. `wait` cancels and joins. Dropping it cancels but does not join.
-pub struct Shutdown {
+/// Dropping it cancels the thread without joining; [`shutdown`](Self::shutdown)
+/// cancels and joins.
+pub struct Fanout<T> {
+    tx: Sender<T>,
+    shutdown: Shutdown,
+}
+
+impl<T> Fanout<T> {
+    /// Queue `item` for every matching subscriber, waiting for room.
+    ///
+    /// # Errors
+    ///
+    /// [`Stopped`] with the item when the distribution thread is gone.
+    pub fn publish(&self, item: T) -> Result<(), Stopped<T>> {
+        self.tx.send(item).map_err(|e| Stopped(e.into_inner()))
+    }
+
+    /// Queue `item` without waiting.
+    ///
+    /// # Errors
+    ///
+    /// The item and why: the data queue is full, or the thread is gone.
+    pub fn try_publish(&self, item: T) -> Result<(), TryPublishError<T>> {
+        self.tx.try_send(item).map_err(|e| match e {
+            TrySendError::Full(item) => TryPublishError::Full(item),
+            TrySendError::Disconnected(item) => TryPublishError::Stopped(item),
+        })
+    }
+
+    /// Stop the distribution thread and wait for it. Blocking: from async code,
+    /// call it on the blocking pool.
+    pub fn shutdown(self) {
+        let Self { tx, shutdown } = self;
+        drop(tx);
+        shutdown.wait();
+    }
+}
+
+/// The thread's stop signal and join handle. `cancel` is idempotent; dropping
+/// cancels without joining.
+struct Shutdown {
     signal: Option<Sender<()>>,
     join: Option<JoinHandle<()>>,
 }
 
 impl Shutdown {
-    /// Signal the distribution thread to stop. The first call cannot block.
-    pub fn cancel(&mut self) {
+    fn cancel(&mut self) {
         if let Some(tx) = self.signal.take() {
             let _ = tx.try_send(());
         }
     }
 
-    /// Cancel (if still needed) and join the distribution thread.
-    ///
-    /// Blocking. In async code call it from `spawn_blocking`, or use
-    /// [`shutdown_on_token`] under the `tokio` feature.
-    pub fn wait(mut self) {
+    fn wait(mut self) {
         self.cancel();
         if let Some(join) = self.join.take() {
             let _ = join.join();
@@ -109,6 +187,10 @@ impl<T> Clone for Registry<T> {
 impl<T: Clone + Send + 'static> Registry<T> {
     /// A new subscriber stream; `Full` if the registration queue is full,
     /// `Closed` if the fan-out is gone.
+    ///
+    /// # Errors
+    ///
+    /// [`RegistryError`] when the subscriber could not be registered.
     pub fn subscribe(&self) -> Result<Channel<T>, RegistryError> {
         subscribe(&self.register, &self.state, (), self.sub_cap, self.what)
     }
@@ -150,6 +232,10 @@ impl<K, T> Clone for KeyedRegistry<K, T> {
 impl<K: Eq + Copy + Send + 'static, T: Clone + Send + 'static> KeyedRegistry<K, T> {
     /// A new subscriber stream for `key`; `Full` if the registration queue is
     /// full, `Closed` if the fan-out is gone.
+    ///
+    /// # Errors
+    ///
+    /// [`RegistryError`] when the subscriber could not be registered.
     pub fn subscribe(&self, key: K) -> Result<Channel<T>, RegistryError> {
         subscribe(&self.register, &self.state, key, self.sub_cap, self.what)
     }
@@ -193,43 +279,24 @@ struct Subscriber<K, T> {
     tx: Sender<T>,
 }
 
-/// Spawn a broadcast fan-out.
-///
-/// `route` is implicit (`K = ()`): every subscriber receives every element.
+/// Spawn a broadcast fan-out: every subscriber receives every element.
 #[must_use]
 pub fn broadcast<T>(
     what: &'static str,
-    data_cap: NonZeroUsize,
-    register_cap: NonZeroUsize,
-    sub_cap: NonZeroUsize,
+    config: FanoutConfig,
     overflow: OverflowPolicy,
-) -> (Sender<T>, Registry<T>, Shutdown)
+) -> (Fanout<T>, Registry<T>)
 where
     T: Clone + Send + 'static,
 {
-    let (data_tx, data_rx) = crossbeam_channel::bounded(data_cap.get());
-    let (register_tx, register_rx) = crossbeam_channel::bounded(register_cap.get());
-    let (shutdown_tx, shutdown_rx) = crossbeam_channel::bounded(1);
-    let state = Arc::new(Mutex::new(false));
-    let join = spawn(
-        data_rx,
-        register_rx,
-        shutdown_rx,
-        |_: &T| Some(()),
-        overflow,
-        Arc::clone(&state),
-    );
+    let (fanout, register, state) = start(config, |_: &T| Some(()), overflow);
     let registry = Registry {
-        register: register_tx,
-        sub_cap,
+        register,
+        sub_cap: config.sub_cap,
         what,
         state,
     };
-    let shutdown = Shutdown {
-        signal: Some(shutdown_tx),
-        join: Some(join),
-    };
-    (data_tx, registry, shutdown)
+    (fanout, registry)
 }
 
 /// Spawn a keyed fan-out. `route` returns the subscriber key for an element;
@@ -238,18 +305,40 @@ where
 pub fn keyed<K, T, F>(
     what: &'static str,
     route: F,
-    data_cap: NonZeroUsize,
-    register_cap: NonZeroUsize,
-    sub_cap: NonZeroUsize,
+    config: FanoutConfig,
     overflow: OverflowPolicy,
-) -> (Sender<T>, KeyedRegistry<K, T>, Shutdown)
+) -> (Fanout<T>, KeyedRegistry<K, T>)
 where
     K: Eq + Copy + Send + 'static,
     T: Clone + Send + 'static,
     F: Fn(&T) -> Option<K> + Send + 'static,
 {
-    let (data_tx, data_rx) = crossbeam_channel::bounded(data_cap.get());
-    let (register_tx, register_rx) = crossbeam_channel::bounded(register_cap.get());
+    let (fanout, register, state) = start(config, route, overflow);
+    let registry = KeyedRegistry {
+        register,
+        sub_cap: config.sub_cap,
+        what,
+        state,
+    };
+    (fanout, registry)
+}
+
+#[allow(
+    clippy::type_complexity,
+    reason = "the three parts of one fan-out, unpacked by both constructors"
+)]
+fn start<K, T, F>(
+    config: FanoutConfig,
+    route: F,
+    overflow: OverflowPolicy,
+) -> (Fanout<T>, Sender<(K, Sender<T>)>, Arc<Mutex<bool>>)
+where
+    K: Eq + Copy + Send + 'static,
+    T: Clone + Send + 'static,
+    F: Fn(&T) -> Option<K> + Send + 'static,
+{
+    let (data_tx, data_rx) = crossbeam_channel::bounded(config.data_cap.get());
+    let (register_tx, register_rx) = crossbeam_channel::bounded(config.register_cap.get());
     let (shutdown_tx, shutdown_rx) = crossbeam_channel::bounded(1);
     let state = Arc::new(Mutex::new(false));
     let join = spawn(
@@ -260,17 +349,14 @@ where
         overflow,
         Arc::clone(&state),
     );
-    let registry = KeyedRegistry {
-        register: register_tx,
-        sub_cap,
-        what,
-        state,
+    let fanout = Fanout {
+        tx: data_tx,
+        shutdown: Shutdown {
+            signal: Some(shutdown_tx),
+            join: Some(join),
+        },
     };
-    let shutdown = Shutdown {
-        signal: Some(shutdown_tx),
-        join: Some(join),
-    };
-    (data_tx, registry, shutdown)
+    (fanout, register_tx, state)
 }
 
 fn spawn<K, T, F>(
@@ -410,59 +496,54 @@ fn remove_descending<K, T>(subscribers: &mut Vec<Subscriber<K, T>>, mut dead: Ve
 }
 
 /// Wake-ups for a level the subscribers read themselves. Owned by whatever
-/// moves the level, which calls [`wake`](Self::wake) right after each move.
-pub struct Wakes {
-    subscribers: Mutex<Vec<Sender<()>>>,
+/// moves the level ([`crate::Level`]), which calls [`wake`](Self::wake) right
+/// after each move and [`close`](Self::close) when it is gone.
+pub(crate) struct Wakes {
+    /// `None` once closed: every subscriber has been released.
+    subscribers: Mutex<Option<Vec<Sender<()>>>>,
     what: &'static str,
 }
 
 impl Wakes {
     #[must_use]
-    pub fn new(what: &'static str) -> Self {
+    pub(crate) fn new(what: &'static str) -> Self {
         Self {
-            subscribers: Mutex::new(Vec::new()),
+            subscribers: Mutex::new(Some(Vec::new())),
             what,
         }
     }
 
     /// A wake-up on every later move; read the level after each. Infinite:
-    /// it ends `Aborted` only when the owner is gone.
-    pub fn subscribe(&self) -> Channel<()> {
+    /// it ends `Aborted` only when the owner closes or drops it.
+    pub(crate) fn subscribe(&self) -> Channel<()> {
+        let mut guard = self.subscribers.lock();
+        let Some(subscribers) = guard.as_mut() else {
+            return Channel::aborted(self.what);
+        };
         let (tx, rx) = crossbeam_channel::bounded(1);
-        self.subscribers.lock().push(tx);
+        subscribers.push(tx);
         Channel::from_infinite(rx, self.what)
     }
 
     /// Wake every subscriber without blocking; a departed one is removed here.
-    pub fn wake(&self) {
-        self.subscribers
-            .lock()
-            .retain(|tx| !matches!(tx.try_send(()), Err(TrySendError::Disconnected(()))));
+    pub(crate) fn wake(&self) {
+        if let Some(subscribers) = self.subscribers.lock().as_mut() {
+            subscribers
+                .retain(|tx| !matches!(tx.try_send(()), Err(TrySendError::Disconnected(()))));
+        }
+    }
+
+    /// Release every subscriber: their streams end `Aborted(ProducerGone)`,
+    /// and later subscriptions end at once.
+    pub(crate) fn close(&self) {
+        self.subscribers.lock().take();
     }
 
     /// Test-only observation of the subscriber set.
     #[cfg(test)]
-    pub fn subscriber_count(&self) -> usize {
-        self.subscribers.lock().len()
+    pub(crate) fn subscriber_count(&self) -> usize {
+        self.subscribers.lock().as_ref().map_or(0, Vec::len)
     }
-}
-
-/// Bridge a `CancellationToken` to a fan-out shutdown under the `tokio` feature.
-///
-/// Takes the `Shutdown` by value: the task owns the shutdown path, cancels on
-/// the token, then waits on the blocking pool so the task does not complete
-/// before the distribution thread has joined.
-#[cfg(feature = "tokio")]
-#[must_use]
-pub fn shutdown_on_token(
-    mut shutdown: Shutdown,
-    token: tokio_util::sync::CancellationToken,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        token.cancelled().await;
-        shutdown.cancel();
-        let _ = tokio::task::spawn_blocking(move || shutdown.wait()).await;
-    })
 }
 
 #[cfg(test)]
@@ -475,54 +556,56 @@ mod tests {
         NonZeroUsize::new(n).unwrap()
     }
 
+    fn config(data: usize, register: usize, sub: usize) -> FanoutConfig {
+        FanoutConfig {
+            data_cap: cap(data),
+            register_cap: cap(register),
+            sub_cap: cap(sub),
+        }
+    }
+
     #[test]
     fn broadcast_delivers_to_every_subscriber() {
-        let (tx, registry, mut shutdown) =
-            broadcast("test", cap(4), cap(4), cap(4), OverflowPolicy::Shed);
+        let (fanout, registry) = broadcast("test", config(4, 4, 4), OverflowPolicy::Shed);
         let mut a = registry.subscribe().unwrap();
         let mut b = registry.subscribe().unwrap();
 
-        tx.send(1u32).unwrap();
-        tx.send(2u32).unwrap();
+        fanout.publish(1u32).unwrap();
+        fanout.publish(2u32).unwrap();
 
         assert_eq!(a.recv().unwrap(), 1);
         assert_eq!(a.recv().unwrap(), 2);
         assert_eq!(b.recv().unwrap(), 1);
         assert_eq!(b.recv().unwrap(), 2);
-        shutdown.cancel();
-        shutdown.wait();
+        fanout.shutdown();
     }
 
     #[test]
     fn keyed_routes_only_matching_subscribers() {
-        let (tx, registry, mut shutdown) = keyed(
+        let (fanout, registry) = keyed(
             "test",
             |n: &u32| Some(n % 2),
-            cap(4),
-            cap(4),
-            cap(4),
+            config(4, 4, 4),
             OverflowPolicy::Shed,
         );
         let mut even = registry.subscribe(0).unwrap();
         let mut odd = registry.subscribe(1).unwrap();
 
-        tx.send(2u32).unwrap();
-        tx.send(3u32).unwrap();
+        fanout.publish(2u32).unwrap();
+        fanout.publish(3u32).unwrap();
 
         assert_eq!(even.recv().unwrap(), 2);
         assert_eq!(odd.recv().unwrap(), 3);
-        shutdown.cancel();
-        shutdown.wait();
+        fanout.shutdown();
     }
 
     #[test]
     fn shed_removes_a_full_subscriber() {
-        let (tx, registry, mut shutdown) =
-            broadcast("test", cap(4), cap(4), cap(1), OverflowPolicy::Shed);
+        let (fanout, registry) = broadcast("test", config(4, 4, 1), OverflowPolicy::Shed);
         let mut sub = registry.subscribe().unwrap();
 
-        tx.send(1u32).unwrap();
-        tx.send(2u32).unwrap();
+        fanout.publish(1u32).unwrap();
+        fanout.publish(2u32).unwrap();
 
         assert_eq!(sub.recv().unwrap(), 1);
         assert!(matches!(
@@ -531,33 +614,28 @@ mod tests {
                 reason: AbortReason::ProducerGone { what: "test" }
             })
         ));
-        shutdown.cancel();
-        shutdown.wait();
+        fanout.shutdown();
     }
 
     #[test]
     fn block_waits_for_the_slowest_subscriber() {
-        let (tx, registry, mut shutdown) =
-            broadcast("test", cap(4), cap(4), cap(1), OverflowPolicy::Block);
+        let (fanout, registry) = broadcast("test", config(4, 4, 1), OverflowPolicy::Block);
         let mut sub = registry.subscribe().unwrap();
 
-        tx.send(1u32).unwrap();
-        tx.send(2u32).unwrap();
+        fanout.publish(1u32).unwrap();
+        fanout.publish(2u32).unwrap();
 
         assert_eq!(sub.recv().unwrap(), 1);
         assert_eq!(sub.recv().unwrap(), 2);
-        shutdown.cancel();
-        shutdown.wait();
+        fanout.shutdown();
     }
 
     #[test]
     fn shutdown_ends_subscribers_as_producer_gone() {
-        let (tx, registry, mut shutdown) =
-            broadcast::<u32>("test", cap(4), cap(4), cap(4), OverflowPolicy::Shed);
+        let (fanout, registry) = broadcast::<u32>("test", config(4, 4, 4), OverflowPolicy::Shed);
         let mut sub = registry.subscribe().unwrap();
 
-        shutdown.cancel();
-        shutdown.wait();
+        fanout.shutdown();
 
         assert!(matches!(
             sub.recv(),
@@ -565,15 +643,13 @@ mod tests {
                 reason: AbortReason::ProducerGone { what: "test" }
             })
         ));
-        drop(tx);
     }
 
     #[test]
     fn subscribe_infinite_aborts_instead_of_completing() {
-        let (tx, registry, mut shutdown) =
-            broadcast::<u32>("infinite", cap(4), cap(4), cap(4), OverflowPolicy::Shed);
-        shutdown.cancel();
-        shutdown.wait();
+        let (fanout, registry) =
+            broadcast::<u32>("infinite", config(4, 4, 4), OverflowPolicy::Shed);
+        fanout.shutdown();
 
         let mut sub = registry.subscribe_infinite();
         assert!(matches!(
@@ -582,21 +658,17 @@ mod tests {
                 reason: AbortReason::ProducerGone { what: "infinite" }
             })
         ));
-        drop(tx);
     }
 
     #[test]
     fn keyed_subscribe_infinite_uses_the_fanout_label() {
-        let (tx, registry, mut shutdown) = keyed(
+        let (fanout, registry) = keyed(
             "keyed infinite",
             |n: &u32| Some(n % 2),
-            cap(4),
-            cap(4),
-            cap(4),
+            config(4, 4, 4),
             OverflowPolicy::Shed,
         );
-        shutdown.cancel();
-        shutdown.wait();
+        fanout.shutdown();
 
         let mut sub = registry.subscribe_infinite(0);
         assert!(matches!(
@@ -607,48 +679,51 @@ mod tests {
                 }
             })
         ));
-        drop(tx);
     }
 
     #[test]
-    fn dropping_the_data_sender_drains_then_ends() {
-        let (tx, registry, mut shutdown) =
-            broadcast("test", cap(4), cap(4), cap(4), OverflowPolicy::Shed);
+    fn dropping_the_fanout_ends_subscribers_after_delivered_items() {
+        let (fanout, registry) = broadcast("test", config(4, 4, 4), OverflowPolicy::Shed);
         let mut sub = registry.subscribe().unwrap();
-        tx.send(7u32).unwrap();
-        drop(tx);
-
+        fanout.publish(7u32).unwrap();
         assert_eq!(sub.recv().unwrap(), 7);
+        drop(fanout);
         assert!(matches!(
             sub.recv(),
             Err(End::Aborted {
                 reason: AbortReason::ProducerGone { what: "test" }
             })
         ));
-        shutdown.cancel();
-        shutdown.wait();
     }
 
-    #[cfg(feature = "tokio")]
     #[test]
-    fn token_bridge_cancels_and_waits() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        runtime.block_on(async {
-            let (tx, registry, shutdown) =
-                broadcast::<u32>("bridge", cap(4), cap(4), cap(4), OverflowPolicy::Shed);
-            let mut sub = registry.subscribe().unwrap();
-            let token = tokio_util::sync::CancellationToken::new();
-            let task = shutdown_on_token(shutdown, token.clone());
-            token.cancel();
-            task.await.unwrap();
-            assert!(matches!(
-                sub.recv(),
-                Err(End::Aborted {
-                    reason: AbortReason::ProducerGone { what: "bridge" }
-                })
-            ));
-            drop(tx);
-        });
+    fn publish_after_shutdown_hands_the_item_back() {
+        let (fanout, registry) = broadcast::<u32>("test", config(4, 4, 4), OverflowPolicy::Shed);
+        let probe = registry.subscribe().unwrap();
+        let tx = fanout.tx.clone();
+        fanout.shutdown();
+        drop(probe);
+        assert!(tx.send(1).is_err(), "the thread dropped its receiver");
+    }
+
+    #[test]
+    fn try_publish_reports_full_and_stopped() {
+        let (fanout, registry) = broadcast::<u32>("test", config(1, 4, 1), OverflowPolicy::Block);
+        let _slow = registry.subscribe().unwrap();
+        // The thread takes 1 and blocks delivering 2 to the full subscriber;
+        // 3 fills the data queue; 4 finds it full.
+        let mut full = None;
+        for v in 1..=50u32 {
+            if let Err(e) = fanout.try_publish(v) {
+                full = Some(e);
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert!(matches!(full, Some(TryPublishError::Full(_))));
+        let tx = fanout.tx.clone();
+        fanout.shutdown();
+        assert!(tx.try_send(9).is_err());
     }
 
     #[test]

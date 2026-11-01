@@ -140,8 +140,14 @@ fn writer_loop(
     mut outcomes: Channel<Result<crate::api::WriteOutcome, Error>>,
 ) {
     loop {
-        let Some(batch) = outcomes.ready_batch(MAX_BATCH) else {
-            return; // disconnected
+        let batch = match outcomes.ready_batch(MAX_BATCH) {
+            Ok(batch) => batch,
+            // Connection-scoped and infinite: any end is the connection going
+            // away; the peer retries.
+            Err(end) => {
+                tracing::debug!(?end, "write stream: outcomes ended, closing the connection");
+                return;
+            }
         };
         for item in batch {
             let outcome = match item {
@@ -228,18 +234,24 @@ pub(in crate::network) async fn run_subscribe(
 /// bought nothing over closing the connection.
 fn subscribe_writer_loop(mut sink: TcpFrameSink, mut items: crate::ordered::ReplicaStream) {
     loop {
-        let Some(batch) = items.ready_batch(MAX_BATCH) else {
-            if let End::Aborted {
+        let batch = match items.ready_batch(MAX_BATCH) {
+            Ok(batch) => batch,
+            Err(End::Aborted {
                 reason: AbortReason::OrderViolation { what },
-            } = items.end_reason()
-            {
+            }) => {
                 crate::metrics::subscription_reorder();
                 tracing::error!(
                     what,
                     "subscription stream closed: replica log index violated strict order"
                 );
+                return;
             }
-            return; // disconnected or order violation
+            // Any other end is the replica's live tail going away; the learner
+            // reconnects and resumes from its cursor.
+            Err(end) => {
+                tracing::debug!(?end, "subscription stream ended, closing the connection");
+                return;
+            }
         };
         for item in batch {
             let (idx, record) = match item {

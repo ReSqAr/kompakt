@@ -721,11 +721,9 @@ name = "crossbeam-combinators"
 version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
- "futures",
  "parking_lot 0.13.0",
  "proptest",
  "tokio",
- "tokio-stream",
  "tokio-util",
  "tracing",
 ]
@@ -3567,7 +3565,6 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
- "tokio-util",
 ]
 
 [[package]]
@@ -4398,7 +4395,6 @@ dependencies = [
  "time",
  "tokio",
  "tokio-metrics",
- "tokio-stream",
  "tokio-util",
  "tracing",
  "tracing-subscriber",

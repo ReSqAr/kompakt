@@ -39,11 +39,6 @@ use console_subscriber as _;
 #[cfg(feature = "jemalloc")]
 use tikv_jemallocator as _;
 
-// The examples use `tokio_stream::StreamExt`; the lib test target receives the
-// dev-dependency too and would otherwise be flagged as not using it.
-#[cfg(test)]
-use tokio_stream as _;
-
 pub(crate) mod api;
 mod database;
 pub(crate) mod error;
@@ -65,6 +60,8 @@ pub(crate) mod raft;
 pub(crate) mod replica;
 pub(crate) mod replica_node;
 pub(crate) mod shutdown;
+#[cfg(test)]
+pub(crate) mod test_stream;
 #[cfg(test)]
 mod tests;
 mod unit;
