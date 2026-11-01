@@ -1605,29 +1605,46 @@ mod tests {
         handle.replace(covering_manifest(snap_id, 2));
 
         let (_dir, reader) = scripted_reader(stable_log, store, handle).await;
-        let mut stream = reader
+        let mut ch = reader
             .subscribe_stable_log(LogIndex(0))
             .into_channel()
             .filter_map(|item| match item {
                 Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
                 Ok(StableLogEvent::Watermark(_)) => None,
                 Err(e) => Some(Err(e)),
-            })
-            .into_test_stream();
+            });
 
-        // 0,1 (local) then 2 (archive) come through; then the untiled 3 errors.
-        for expected in [(0u64, 100u64), (1, 101), (2, 102)] {
-            let (idx, data) = stream.next().await.expect("item").expect("ok");
-            assert_eq!((idx.raw(), data.data_id.hlc().raw()), expected);
-        }
-        let err = stream
-            .next()
-            .await
-            .expect("an item")
-            .expect_err("an untiled hole must surface as an error");
+        // 0,1 (local) then 2 (archive) come through; then the untiled 3 ends
+        // the stream: the archive's window is short, and a short window is not
+        // a hang-up, so the resync loop does not reopen it.
+        let (got, end) = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            tokio::task::spawn_blocking(move || {
+                let mut got = Vec::new();
+                let end = loop {
+                    match ch.recv() {
+                        Ok(Ok((idx, data))) => got.push((idx.raw(), data.data_id.hlc().raw())),
+                        Ok(Err(e)) => panic!("unexpected error item: {e}"),
+                        Err(end) => break end,
+                    }
+                };
+                (got, end)
+            }),
+        )
+        .await
+        .expect("the stream ends")
+        .expect("drain");
+        assert_eq!(got, vec![(0, 100), (1, 101), (2, 102)]);
         assert!(
-            matches!(err, crate::Error::StableLogGap(ref m) if m.contains("not fully tiled")),
-            "expected a StableLogGap completeness error, got: {err:?}"
+            matches!(
+                end,
+                End::Aborted {
+                    reason: crossbeam_combinators::AbortReason::OrderViolation {
+                        what: "archive window"
+                    }
+                }
+            ),
+            "an untiled hole ends the stream short, got: {end:?}"
         );
     }
 

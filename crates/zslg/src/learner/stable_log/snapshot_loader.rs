@@ -445,7 +445,7 @@ mod tests {
             .await
             .expect_err("disconnected snapshot must be rejected");
         assert!(
-            matches!(err, Error::StreamTruncated { ref what } if what.contains("archive stream")),
+            matches!(err, Error::StreamTruncated { ref what } if what == "archive tiling"),
             "archive-layer gap error expected, got: {err:?}"
         );
         assert_eq!(log.end_index(), None, "nothing committed above a hole");
@@ -475,7 +475,7 @@ mod tests {
             .await
             .expect_err("a gap between covering snapshots must be rejected");
         assert!(
-            matches!(err, Error::StreamTruncated { ref what } if what.contains("archive stream")),
+            matches!(err, Error::StreamTruncated { ref what } if what == "archive tiling"),
             "archive contiguity error expected, got: {err:?}"
         );
         assert_eq!(
@@ -486,8 +486,8 @@ mod tests {
     }
 
     /// An HLC-non-monotonic snapshot (index ascends, HLC descends) is caught by
-    /// the archive stream's monotonicity guard — the read path has no downstream
-    /// HLC assert, so this must fire at the source.
+    /// the archive stream's `NonDecreasing<Hlc>` guard at the source, as an
+    /// abort the loader refuses — not a panic.
     #[tokio::test]
     async fn integrate_rejects_hlc_regression_in_snapshot() {
         let (_dir, log) = fresh_stable_log().await;
@@ -517,9 +517,8 @@ mod tests {
             .await
             .expect_err("HLC regression must be rejected");
         assert!(
-            matches!(err, Error::Storage(ref m)
-                if m.contains("archive stream reader panicked")),
-            "HLC regression panics in spawn_blocking → Err sent on tx → append returns Err, got: {err:?}"
+            matches!(err, Error::StreamTruncated { ref what } if what == "archive HLC"),
+            "an HLC regression aborts the archive stream (no panic), got: {err:?}"
         );
         assert_eq!(
             log.end_index(),
