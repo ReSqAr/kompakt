@@ -300,3 +300,14 @@ fan-out owner; (2) archive — sync `stream`, deferred tiling, lazy
 (4) `Resumable`/`resync` for stable, unstable and nvzn, delete
 `Tail`/`Ranged`/`blend_chain`. Each slice is green before the next. Further
 residue spotted on the way may be picked up in this round.
+
+### D18. Resumers resume only on `ProducerGone` (answers R2; narrows D4)
+
+`Resumable` and `resync` reopen a segment only when it ended
+`Aborted(ProducerGone)` — the fan-out hang-up / producer death that a resync
+repairs. Every other reason (`Cancelled`, `CancelHandleDropped`,
+`OrderViolation`, `ConsumerGone`, `RoutingViolation`) ends the resumed stream
+with that reason unchanged. The factory still receives the reason (logging,
+metrics) and may still decline with `None`, but cannot resume a stop request or
+a contract violation. Consequences: `until` is safe inside or outside a
+segment; a corrupt log cannot spin a resync loop.

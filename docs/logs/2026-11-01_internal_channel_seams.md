@@ -174,7 +174,7 @@ sends). My ranking of the open review points by leverage:
    problem fall out of it. Expected answer: drop `Recv`, `Resumable` is a
    private `Source`, combinators take `FnMut`.
 2. R8 scope — SETTLED D17 (all four slices, in order; more if found).
-3. R2 cancel-vs-resume — expected: resumers never resume `Cancelled`/
+3. R2 cancel-vs-resume — SETTLED D18 (resume only on ProducerGone).
    `CancelHandleDropped`; node `until` sits outside.
 4. R4 cursor — expected: always "next expected" via `Successor`.
 5. R3 `Live` — expected: drop it; `Segment::open` is the guarantee.
