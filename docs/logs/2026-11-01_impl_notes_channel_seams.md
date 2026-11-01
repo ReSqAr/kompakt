@@ -185,3 +185,31 @@ post-implementation doc. Not a design doc; the design is
   whole previous `Option<End>`; it now sees `First` or
   `AfterProducerGone { what }`, the only two cases the D18 rule lets through.
   The warn logs print `what` instead of `?previous`.
+
+## Verification: the load sensitivity
+
+- **A real fan-out race, found by stressing the zslg lib under CPU load** (four
+  to six busy loops on four cores; 1 failing run in 3 before the fix). The
+  failure was `subscribe_unstable_tail_replays_then_follows_live` seeing an
+  entry twice. Cause, in `Fanout` from the polish round, not from these slices:
+  `subscribe` queues a registration, the distribution thread prefers
+  registrations over queued data, and `publish` only queues. So an element
+  published *and returned* before `subscribe` was called could still be
+  delivered to the new subscriber if the thread had not dequeued it yet. The
+  unstable tail's scan then also read it from the store: a duplicate. The
+  contract allows duplicates there (at-least-once), so production was not
+  wrong, but the crate's ordering promise was weaker than its docs implied,
+  and the test (rightly) assumed the strong one.
+- **Fix:** `Fanout` numbers every publish (`State::published`); `subscribe`
+  records the count when it registers; the thread withholds every element
+  numbered below a subscriber's record. "A subscriber sees exactly what is
+  published after its `subscribe` returns" is now true; the existing bias
+  (a registration queued before an element is live for it) still holds. A
+  failed publish consumes a number, which is harmless. Regression test
+  `a_subscriber_never_sees_what_was_published_before_it_subscribed`, which
+  deadlocks the old code (the late subscriber's unread queue blocks the
+  thread) and so runs behind a 10 s watchdog: it fails in 10 s without the
+  fix.
+- **Not reproduced on its own:** `three_node_tcp_write_round_trip` passed 12 of
+  12 repeats with six CPU hogs running. The one failure seen in a full
+  workspace run is unexplained; see the post doc.

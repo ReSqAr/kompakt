@@ -97,20 +97,26 @@ Deviations (details in the impl notes):
   longer be expressed.
 - **Lazy beats eager for test helpers.** A test-only `items()` that collected
   eagerly hung every test taking a prefix of an infinite tail; it is now lazy.
+- **Stressing found a bug that was not ours.** Running the zslg lib under
+  CPU load (about 1 run in 3 failed) exposed a race in `Fanout`: a subscriber
+  could be handed elements published before it subscribed, because the thread
+  prefers registrations over queued data. Fixed with a publish count
+  (`Fanout` numbers publishes; `subscribe` records the count; the thread
+  withholds older elements) and a regression test that deadlocks the old
+  code. It predates these slices, and a plain `cargo test` rarely hits it.
 - **Verification traps.** A full disk (`target/debug/incremental` at 15 GB)
   produced spurious test failures and a spurious proptest seed; verification
-  now runs with `CARGO_INCREMENTAL=0`. A full-workspace run under load once hit
-  the timeout and failed `three_node_tcp_write_round_trip`; both it and the
-  slow proptest pass alone and in a zslg-only run. Treat that as load, but it
-  was not root-caused.
+  now runs with `CARGO_INCREMENTAL=0`. One full-workspace run timed out and
+  failed `three_node_tcp_write_round_trip`; the test passes alone and 12 of 12
+  with six CPU hogs, so that failure is still unexplained.
 - **One rule in one place.** D18 existed as two hand-written closures that both
   had to remember it; it is now the resume source's `ended`. A third consumer
   cannot forget it.
 
 ## 4. What is next
 
-- Root-cause the load sensitivity of the full-workspace run, or give the heavy
-  cluster tests their own target.
+- The one unexplained `three_node_tcp_write_round_trip` failure (see §3). If
+  it recurs, run the cluster tests as their own target with the output kept.
 - `Fanout`'s drop-cancel is biased ahead of queued data: elements still in the
   queue at drop may be discarded (slice 1 note). Decide whether any consumer
   needs a draining shutdown.

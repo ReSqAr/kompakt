@@ -25,6 +25,7 @@
 
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread::{self, JoinHandle};
 
 use crossbeam_channel::{Receiver, Select, Sender, TrySendError};
@@ -84,6 +85,20 @@ pub enum RegistryError {
     Closed,
 }
 
+/// What the producer, the registries and the thread share: whether
+/// registration is closed, and how many elements have been published.
+///
+/// The count orders publishes against subscribes. A publish takes the next
+/// number before it queues; a subscribe records the count when it registers;
+/// the thread then withholds from a subscriber every element numbered below its
+/// record. Without it, a registration (which the thread prefers over queued
+/// data) could hand a new subscriber elements that were published — and
+/// returned — before `subscribe` was called.
+struct State {
+    closed: Mutex<bool>,
+    published: AtomicU64,
+}
+
 /// The distribution thread is gone (shut down or panicked); the item is
 /// handed back.
 #[derive(Debug, PartialEq, Eq)]
@@ -103,8 +118,9 @@ pub enum TryPublishError<T> {
 /// Dropping it cancels the thread without joining; [`shutdown`](Self::shutdown)
 /// cancels and joins.
 pub struct Fanout<T> {
-    tx: Sender<T>,
+    tx: Sender<(u64, T)>,
     shutdown: Shutdown,
+    state: Arc<State>,
 }
 
 impl<T> Fanout<T> {
@@ -114,7 +130,10 @@ impl<T> Fanout<T> {
     ///
     /// [`Stopped`] with the item when the distribution thread is gone.
     pub fn publish(&self, item: T) -> Result<(), Stopped<T>> {
-        self.tx.send(item).map_err(|e| Stopped(e.into_inner()))
+        let seq = self.state.published.fetch_add(1, Ordering::SeqCst);
+        self.tx
+            .send((seq, item))
+            .map_err(|e| Stopped(e.into_inner().1))
     }
 
     /// Queue `item` without waiting.
@@ -123,16 +142,17 @@ impl<T> Fanout<T> {
     ///
     /// The item and why: the data queue is full, or the thread is gone.
     pub fn try_publish(&self, item: T) -> Result<(), TryPublishError<T>> {
-        self.tx.try_send(item).map_err(|e| match e {
-            TrySendError::Full(item) => TryPublishError::Full(item),
-            TrySendError::Disconnected(item) => TryPublishError::Stopped(item),
+        let seq = self.state.published.fetch_add(1, Ordering::SeqCst);
+        self.tx.try_send((seq, item)).map_err(|e| match e {
+            TrySendError::Full((_, item)) => TryPublishError::Full(item),
+            TrySendError::Disconnected((_, item)) => TryPublishError::Stopped(item),
         })
     }
 
     /// Stop the distribution thread and wait for it. Blocking: from async code,
     /// call it on the blocking pool.
     pub fn shutdown(self) {
-        let Self { tx, shutdown } = self;
+        let Self { tx, shutdown, .. } = self;
         drop(tx);
         shutdown.wait();
     }
@@ -168,10 +188,10 @@ impl Drop for Shutdown {
 
 /// The broadcast subscribe side.
 pub struct Registry<T> {
-    register: Sender<((), Sender<T>)>,
+    register: Sender<((), Sender<T>, u64)>,
     sub_cap: NonZeroUsize,
     what: &'static str,
-    state: Arc<Mutex<bool>>,
+    state: Arc<State>,
 }
 
 impl<T> Clone for Registry<T> {
@@ -213,10 +233,10 @@ impl<T: Clone + Send + 'static> Registry<T> {
 
 /// The keyed subscribe side.
 pub struct KeyedRegistry<K, T> {
-    register: Sender<(K, Sender<T>)>,
+    register: Sender<(K, Sender<T>, u64)>,
     sub_cap: NonZeroUsize,
     what: &'static str,
-    state: Arc<Mutex<bool>>,
+    state: Arc<State>,
 }
 
 impl<K, T> Clone for KeyedRegistry<K, T> {
@@ -254,8 +274,8 @@ impl<K: Eq + Copy + Send + 'static, T: Clone + Send + 'static> KeyedRegistry<K, 
 }
 
 fn subscribe<K, T>(
-    register: &Sender<(K, Sender<T>)>,
-    state: &Mutex<bool>,
+    register: &Sender<(K, Sender<T>, u64)>,
+    state: &State,
     key: K,
     sub_cap: NonZeroUsize,
     what: &'static str,
@@ -264,11 +284,14 @@ where
     T: Clone + Send + 'static,
 {
     let (tx, rx) = crossbeam_channel::bounded(sub_cap.get());
-    let closed = state.lock();
+    let closed = state.closed.lock();
     if *closed {
         return Err(RegistryError::Closed);
     }
-    match register.try_send((key, tx)) {
+    // Read under the lock and before the registration queues: everything
+    // numbered below this was published before this call.
+    let since = state.published.load(Ordering::SeqCst);
+    match register.try_send((key, tx, since)) {
         Ok(()) => Ok(Channel::from_infinite(rx, what)),
         Err(TrySendError::Full(_)) => Err(RegistryError::Full),
         Err(TrySendError::Disconnected(_)) => Err(RegistryError::Closed),
@@ -278,6 +301,8 @@ where
 struct Subscriber<K, T> {
     key: K,
     tx: Sender<T>,
+    /// Elements numbered below this were published before it subscribed.
+    since: u64,
 }
 
 /// Spawn a broadcast fan-out: every subscriber receives every element.
@@ -332,7 +357,7 @@ fn start<K, T, F>(
     config: FanoutConfig,
     route: F,
     overflow: OverflowPolicy,
-) -> (Fanout<T>, Sender<(K, Sender<T>)>, Arc<Mutex<bool>>)
+) -> (Fanout<T>, Sender<(K, Sender<T>, u64)>, Arc<State>)
 where
     K: Eq + Copy + Send + 'static,
     T: Clone + Send + 'static,
@@ -341,7 +366,10 @@ where
     let (data_tx, data_rx) = crossbeam_channel::bounded(config.data_cap.get());
     let (register_tx, register_rx) = crossbeam_channel::bounded(config.register_cap.get());
     let (shutdown_tx, shutdown_rx) = crossbeam_channel::bounded(1);
-    let state = Arc::new(Mutex::new(false));
+    let state = Arc::new(State {
+        closed: Mutex::new(false),
+        published: AtomicU64::new(0),
+    });
     let join = spawn(
         data_rx,
         register_rx,
@@ -356,17 +384,18 @@ where
             signal: Some(shutdown_tx),
             join: Some(join),
         },
+        state: Arc::clone(&state),
     };
     (fanout, register_tx, state)
 }
 
 fn spawn<K, T, F>(
-    data_rx: Receiver<T>,
-    register_rx: Receiver<(K, Sender<T>)>,
+    data_rx: Receiver<(u64, T)>,
+    register_rx: Receiver<(K, Sender<T>, u64)>,
     shutdown_rx: Receiver<()>,
     route: F,
     overflow: OverflowPolicy,
-    state: Arc<Mutex<bool>>,
+    state: Arc<State>,
 ) -> JoinHandle<()>
 where
     K: Eq + Copy + Send + 'static,
@@ -380,12 +409,12 @@ where
 }
 
 fn run<K, T, F>(
-    data_rx: Receiver<T>,
-    register_rx: Receiver<(K, Sender<T>)>,
+    data_rx: Receiver<(u64, T)>,
+    register_rx: Receiver<(K, Sender<T>, u64)>,
     shutdown_rx: Receiver<()>,
     route: F,
     overflow: OverflowPolicy,
-    state: Arc<Mutex<bool>>,
+    state: Arc<State>,
 ) where
     K: Eq + Copy + Send + 'static,
     T: Clone + Send + 'static,
@@ -408,20 +437,21 @@ fn run<K, T, F>(
         }
         if Some(op.index()) == register_op {
             match op.recv(&register_rx) {
-                Ok((key, tx)) => subscribers.push(Subscriber { key, tx }),
+                Ok((key, tx, since)) => subscribers.push(Subscriber { key, tx, since }),
                 Err(_) => register_open = false,
             }
             continue;
         }
         debug_assert_eq!(op.index(), data_op);
-        let element = match op.recv(&data_rx) {
-            Ok(element) => element,
+        let (seq, element) = match op.recv(&data_rx) {
+            Ok(numbered) => numbered,
             Err(_) => break 'fanout,
         };
 
         // Phase 2: the current element's recipient set is fixed.
         let key = route(&element);
-        let matches = |subscriber: &Subscriber<K, T>| key == Some(subscriber.key);
+        let matches =
+            |subscriber: &Subscriber<K, T>| key == Some(subscriber.key) && seq >= subscriber.since;
 
         match overflow {
             OverflowPolicy::Shed => {
@@ -460,7 +490,7 @@ fn run<K, T, F>(
                     }
                     if Some(op.index()) == register_op {
                         match op.recv(&register_rx) {
-                            Ok((key, tx)) => subscribers.push(Subscriber { key, tx }),
+                            Ok((key, tx, since)) => subscribers.push(Subscriber { key, tx, since }),
                             Err(_) => register_open = false,
                         }
                         continue;
@@ -483,7 +513,7 @@ fn run<K, T, F>(
 
     // Close registration first, then drain queued registrations so their
     // subscriber senders drop even if the registry handle is still alive.
-    let mut closed = state.lock();
+    let mut closed = state.closed.lock();
     *closed = true;
     while register_rx.try_recv().is_ok() {}
     drop(closed);
@@ -687,6 +717,50 @@ mod tests {
         ));
     }
 
+    /// `subscribe` after `publish` returned must not see that element, however
+    /// far behind the distribution thread is. The registration is preferred
+    /// over queued data, so without the publish count a lagging thread would
+    /// hand the newcomer elements that predate it.
+    #[test]
+    fn a_subscriber_never_sees_what_was_published_before_it_subscribed() {
+        // Regressed, this deadlocks (the newcomer's unread queue blocks the
+        // thread, which blocks `slow`), so the body runs behind a watchdog.
+        let (done_tx, done_rx) = crossbeam_channel::bounded(1);
+        std::thread::spawn(move || {
+            let config = FanoutConfig {
+                data_cap: NonZeroUsize::new(8).unwrap(),
+                register_cap: NonZeroUsize::new(8).unwrap(),
+                sub_cap: NonZeroUsize::new(1).unwrap(),
+            };
+            let (fanout, registry) = broadcast::<u32>("order", config, OverflowPolicy::Block);
+            let mut slow = registry.subscribe().unwrap();
+
+            // 1 fills the slow subscriber's queue; the thread then blocks
+            // sending 2 to it, so 3 stays queued behind it: the thread is
+            // provably behind when `late` subscribes.
+            fanout.publish(1).unwrap();
+            fanout.publish(2).unwrap();
+            fanout.publish(3).unwrap();
+            let mut late = registry.subscribe().unwrap();
+
+            // Release the thread, then publish after the subscription.
+            assert_eq!(slow.recv(), Ok(1));
+            assert_eq!(slow.recv(), Ok(2));
+            assert_eq!(slow.recv(), Ok(3));
+            fanout.publish(4).unwrap();
+            assert_eq!(late.recv(), Ok(4), "only what followed the subscription");
+            assert_eq!(slow.recv(), Ok(4));
+            fanout.shutdown();
+            let _ = done_tx.send(());
+        });
+        assert!(
+            done_rx
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .is_ok(),
+            "a subscriber was handed elements published before it subscribed"
+        );
+    }
+
     #[test]
     fn publish_after_shutdown_hands_the_item_back() {
         let (fanout, registry) = broadcast::<u32>("test", config(4, 4, 4), OverflowPolicy::Shed);
@@ -694,7 +768,7 @@ mod tests {
         let tx = fanout.tx.clone();
         fanout.shutdown();
         drop(probe);
-        assert!(tx.send(1).is_err(), "the thread dropped its receiver");
+        assert!(tx.send((0, 1)).is_err(), "the thread dropped its receiver");
     }
 
     #[test]
@@ -714,7 +788,7 @@ mod tests {
         assert!(matches!(full, Some(TryPublishError::Full(_))));
         let tx = fanout.tx.clone();
         fanout.shutdown();
-        assert!(tx.try_send(9).is_err());
+        assert!(tx.try_send((0, 9)).is_err());
     }
 
     #[test]
