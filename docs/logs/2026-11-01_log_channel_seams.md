@@ -291,3 +291,12 @@ implementation.
   policy argument.
 - A public `Recv` or a non-tokio `produce_thread` can be added later without a
   breaking change, if a caller appears.
+
+### D17. Scope: all four slices this round (answers Q5/R8)
+
+Order: (1) mechanical — split-HLC test, `produce_*` + nine producer sites,
+fan-out owner; (2) archive — sync `stream`, deferred tiling, lazy
+`HistoricalReplay`; (3) kind marker + `Segment::open`, replica path end to end;
+(4) `Resumable`/`resync` for stable, unstable and nvzn, delete
+`Tail`/`Ranged`/`blend_chain`. Each slice is green before the next. Further
+residue spotted on the way may be picked up in this round.

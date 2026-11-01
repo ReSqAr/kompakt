@@ -173,7 +173,7 @@ sends). My ranking of the open review points by leverage:
 1. R1 `Recv`/pump — SETTLED D16 (dropped; add later if needed).
    problem fall out of it. Expected answer: drop `Recv`, `Resumable` is a
    private `Source`, combinators take `FnMut`.
-2. R8 scope — expected: full revised set, ordered so steps 1–2 stand alone.
+2. R8 scope — SETTLED D17 (all four slices, in order; more if found).
 3. R2 cancel-vs-resume — expected: resumers never resume `Cancelled`/
    `CancelHandleDropped`; node `until` sits outside.
 4. R4 cursor — expected: always "next expected" via `Successor`.
