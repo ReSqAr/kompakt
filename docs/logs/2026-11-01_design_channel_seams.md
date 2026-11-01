@@ -1,6 +1,6 @@
 # Channel seams — design
 
-Process: IAIC. Decision log: `2026-11-01_log_channel_seams.md` (D1–D31).
+Process: IAIC. Decision log: `2026-11-01_log_channel_seams.md` (D1–D32).
 Internal model: `2026-11-01_internal_channel_seams.md`. Branch
 `channel-extraction`. The last polish round of the extraction (D17).
 
@@ -93,9 +93,9 @@ for x in channel drops the verdict (compaction merge feeder)
                    │                       │                   │
    write side      │        composition    │                   │
    produce_blocking│        Segment::open(&seam)  ─ chain/merge│
-   produce_async_infinite   Resumable::new(what, after, make)  │
-                   │        resync(what, make)                 │
-   defer_async ────┘        (all private Sources)              │
+   produce_async   │        Resumable::new(what, after, make)  │
+   defer_async ────┘        resync(what, make)                 │
+   (each ::<T, K>)          (one private resume Source)        │
    Fanout ── Registry::subscribe_infinite ─────────────────────┘
    Level  ── level.changes() / changed().await / get()
 ```
@@ -111,7 +111,9 @@ other read-side channels, lazily, on the consumer's thread.
 
 ```rust
 pub struct Finite;   pub struct Infinite;
-pub trait Kind: sealed::Sealed { type End; }     // Finite::End = End, Infinite::End = AbortReason
+pub trait Kind: sealed::Sealed { type End; type Proof; }
+// Finite:   End = End,         Proof = Closed   (a body proves it closed)
+// Infinite: End = AbortReason, Proof = ()       (nothing to prove: no close)
 
 Channel<T, Finite>   recv -> Result<T, End>          // End = Complete | Aborted{reason}
 Channel<T, Infinite> recv -> Result<T, AbortReason>  // ending is always an error
@@ -143,9 +145,9 @@ public type never lies (D26.8).
 | --- | --- |
 | `from(rx, what) -> (Channel, Closer)`, `closed(rx)`, `Feed::channel` | `Finite` |
 | `empty()`, `once(item)`, `from_vec(items)` | `Finite` |
-| `produce_blocking`, `defer_async` | `Finite` |
+| `produce_blocking`, `produce_async`, `defer_async` | either: `::<T, K>` (D32) |
 | `from_infinite(rx, what)`, `aborted(what)` | `Infinite` |
-| `produce_async_infinite`, `Level::changes` | `Infinite` |
+| `Level::changes` | `Infinite` |
 | `Registry::subscribe` (in `Ok`), `Registry::subscribe_infinite` | `Infinite` |
 
 `aborted` is the only empty infinite channel; `empty` is finite. The previous
@@ -164,13 +166,19 @@ public type never lies (D26.8).
 | `covers`, `also` | on `OrderedChannel` (§9.1) |
 
 An infinite stream never reaches a `chain` argument, so the API does not offer
-it. `take_at_least(n: NonZeroUsize, key: FnMut(&T) -> Option<K>)` with
-`K: PartialEq` yields at least `n` keyed items, then finishes the current key
+it. `take_at_least::<K: Key<T>>(n: NonZeroUsize)` yields at least `n` keyed
+items, then finishes the current key
 group and stops at the first item with a different key (that item is dropped,
 as in `take_while`). `n` counts keyed items, not groups, so the last group may
 push the total past `n` — that is the intent (D24). A `None`-key item (an
 `Err`) passes through and does not count. `NonZeroUsize` leaves no zero rule
 to define.
+
+A position is always named by a `Key<T>` type, never by a closure (D32):
+`ordered::<P>`, `covers`, `take_at_least::<K>`, `filter_above::<K>` and
+`Resumable` all read the key the same way, and the key type is visible in the
+signature. `take_until` and `take_at_least` are thin layers over `take_while`,
+whose `FnMut` predicate carries their state — one private `Source` (D32).
 
 `OrderedChannel` carries only order-preserving operations (`until`, `covers`,
 `also`, `stitch`); anything else goes through `into_channel()`.
@@ -195,32 +203,33 @@ ArchiveStream    = OrderedChannel<Result<SnapshotEntry, Error>, Contiguous<LogIn
 ### 6.1 Producers
 
 ```rust
-Channel::produce_blocking(cap, what, |feed: Feed<T, Finite>| -> Closed { ..; feed.close() })
-Channel::produce_async_infinite(cap, what, |feed: Feed<T, Infinite>| async move { .. })
+Channel::<T, K>::produce_blocking(cap, what, |feed: Feed<T, K>| -> K::Proof { .. })
+Channel::<T, K>::produce_async(cap, what, |feed: Feed<T, K>| async move { .. /* -> K::Proof */ })
 ```
 
-All return at once. A finite body must return the `Closed` proof, which only
-`Feed::close(self)` produces (D26.6): a normal return is provably a close, and
-the close precedes the sender drop. A panic drops the feed:
-`Aborted(ProducerGone)`. An infinite `Feed` has no `close()`; its body returns
-`()`, and return and panic both end `ProducerGone` (D22). Sites:
+Both return at once and are generic over the kind (D32). A finite body must
+return `Closed`, which only `Feed::close(self)` produces (D26.6): a normal
+return is provably a close, and the close precedes the sender drop. An
+infinite `Feed` has no `close()` and its body returns `()`: return and panic
+both end `ProducerGone` (D22). A panic always drops the feed:
+`Aborted(ProducerGone)`. Sites:
 
 ```text
 produce_blocking        stream_above_hlc, stream_window, StableLog::range,
                         replica pump_range, read_snapshot's decode (the GET
                         stays in read_snapshot's async body)
-produce_async_infinite  client subscribe_stream, client write_stream
+produce_async::<_, Infinite>  client subscribe_stream, client write_stream
 declarations instead    archive stream (§9.3), compaction merge feeder (§9.5),
                         HistoricalReplay (§9.4)
 ```
 
-There is no finite `produce_async`: every async site is either a declaration
-(`defer_async`) or infinite (D30). The window scan becomes
+Finite `produce_async` has no site today but costs nothing: the constructor
+is generic (D32). The window scan becomes
 `stream_window(above, upto)`: no cap, no terminal, the same plain scan as
 `stream_above_hlc` with an upper bound. Slice 1 audits every remaining
 `Channel::from` / `from_infinite` in production: each becomes a producer or is
-a §3 multi-sender receiver. Before slice 3, `produce_async_infinite` returns a
-plain `Channel`.
+a §3 multi-sender receiver. Before slice 3 (no kinds yet), the network
+bridges use a pre-kind `produce_async` returning a plain `Channel`.
 
 ### 6.2 `Feed<T, K>`
 
@@ -308,9 +317,10 @@ the subscription.
 
 ### 7.2 `above` helpers
 
-`filter_above::<K: Key<Item>>(live, cut: Option<K>)` (stable, replica: key
-and cut are `LogIndex`) and `filter_above_by(live, cut, key_fn)` (unstable, nvzn: cut
-`Hlc`, key `DataId`). Each seam's `above` is one line.
+One helper (D32): `filter_above::<K: Key<Item>>(live, cut: Option<K>)` drops
+live items whose key is `<= cut`. Stable and replica use `K = LogIndex`;
+unstable and nvzn use `K = Hlc`, via `Key` impls that read `data_id.hlc()`
+from `UnstableStep` and `FoldItem`. Each seam's `above` is one line.
 
 ### 7.3 The four uses
 
@@ -376,7 +386,10 @@ starts wrong; `NonDecreasing` also requires the first key `> after`.
 resync(what: &'static str, make: impl FnMut(Opening) -> Option<S>) -> Channel<T, Infinite>
 ```
 
-Same loop, no cursor. The unstable tail uses it; `WatermarkGate` becomes plain
+Same loop, no cursor: `resync` and `Resumable` share one private resume
+`Source` whose cursor is optional, so the D18 rule exists once (D32). The two
+public constructors stay because their signatures differ. The unstable tail
+uses it; `WatermarkGate` becomes plain
 `FnMut` state in the trailing `filter_map`, reading `Level::get`.
 
 ### 8.4 Stable boundary
@@ -419,8 +432,8 @@ monotonicity).
 ### 9.2 `defer_async` (D21)
 
 ```rust
-Channel::defer_async(handle: &Handle, || async move { /* -> Channel<T, Finite> */ })
-    -> Channel<T, Finite>
+Channel::<T, K>::defer_async(handle: &Handle, || async move { /* -> Channel<T, K> */ })
+    -> Channel<T, K>
 ```
 
 On first poll: spawn the future on `handle`, wait (selectably) on the
@@ -498,7 +511,7 @@ refuses to finalize (`StreamTruncated`).
 ```rust
 let mut window = local_store.stream_window(lower, cutoff)   // plain scan (lower, cutoff], no cap
     .into_channel()
-    .take_at_least(cap, |r| r.as_ref().ok().map(|d| d.data_id.hlc()));
+    .take_at_least::<Hlc>(cap);                              // Key<Result<Data, Error>> for Hlc
 let first = match window.recv() { .. };                     // the peek: empty → commit cutoff, no object
 let entries = Channel::once(Ok(first)).chain(window)
     .map(index_from(next_index_start));                     // FnMut counter
@@ -564,7 +577,7 @@ observers, and the fold's correctness does not depend on them.
 - The kind parameter on every signature (D1): verbose by design.
 - `defer_async`'s hand-off wait: one private `Source` state.
 - `also` as a runtime-only second policy, so the type names one order.
-- Two `Feed` kinds; two producer constructors.
+- `Kind::Proof` so one constructor serves both kinds; two `Feed` kinds.
 - `Level` holds a mutex plus private `Wakes`, with a tokio-gated async wait:
   two notification paths behind one setter.
 
@@ -622,7 +635,8 @@ observers, and the fold's correctness does not depend on them.
 | `IntoIterator` for `Channel` | drops the verdict; hid a compaction data-loss path (D25) |
 | Unbounded `covers` | an open bound has no end to check (D26.5) |
 | Keep `into_stream` | drops the verdict; no production user (D29) |
-| Finite `produce_async` | no caller once the archive and merge feeder are declarations (D30) |
+| Kind-specific producers (`produce_async_infinite`) | a `Kind::Proof` makes one constructor cover both (D32) |
+| Closure keys (`filter_above_by`, `take_at_least(n, f)`) | two ways to name a position; `Key<T>` is the one (D32) |
 
 ## 15. Testing
 
@@ -633,7 +647,9 @@ observers, and the fold's correctness does not depend on them.
 - Combinators: `FnMut` state; kind transitions; `take_until` on infinite ends
   `Complete`, source abort preserved.
 - Producers: a finite body must return `Closed`; close/panic verdicts for
-  both constructors; `send_timeout`.
+  both constructors in both kinds; `send_timeout`. `defer_async` in both kinds.
+- `take_while`/`take_until`/`take_at_least` share one `Source`; `filter_above`
+  for `LogIndex` and `Hlc` keys.
 - `defer_async`: lazy start (no spawn before first poll), verdict delegation,
   phases open sequentially in `chain_all`.
 - `covers`: reached, short, empty-window both ways, aborted source keeps reason.
@@ -669,7 +685,8 @@ Each slice is green (tests, clippy, fmt) before the next.
 1. **Mechanical.** Split-HLC test fix; `FnMut` combinators; remove
    `IntoIterator` and `into_stream` with their dead surface and dependencies
    (D31); `ready_batch` returns the verdict;
-   `take_at_least`; `produce_blocking` with `Closed`, `produce_async_infinite`,
+   `take_until`/`take_at_least` over `FnMut` `take_while`; `produce_blocking`
+   with `Closed`, pre-kind `produce_async` for the network bridges,
    `Feed::send_timeout` (pre-kind: plain `Channel`); migrate producer sites and
    audit remaining `from`/`from_infinite`; snapshot window via
    `take_at_least` and `write_snapshot` metadata, `WindowItem` deleted;
@@ -679,10 +696,13 @@ Each slice is green (tests, clippy, fmt) before the next.
    `defer_async`; archive declaration; compaction merge feeder; lazy
    `HistoricalReplay`.
 3. **Kinds + seam.** `Kind`, `Channel<T, K>`, `Feed<T, K>`,
-   `OrderedChannel<T, P, K>`, kind rules, `compile_fail` tests; `Seam` +
+   `OrderedChannel<T, P, K>`, kind rules, `Kind::Proof` (producers and
+   `defer_async` become kind-generic), `Key<T>` for `Hlc` on the unstable and
+   nvzn items, `compile_fail` tests; `Seam` +
    `Segment::open` + `filter_above*`, end to end on the replica path; then all
    signatures in zslg/nvzn.
-4. **Resumption.** `Opening`, `Resumable`, `resync`;
+4. **Resumption.** `Opening`, one resume `Source` behind `Resumable` and
+   `resync`;
    `subscribe_stable_log(after)`; stable/unstable/nvzn migrated; delete
    `Tail`/`Ranged`/`blend_chain`, `resume_on_abort`'s public form if unused,
    `stable_stream`.

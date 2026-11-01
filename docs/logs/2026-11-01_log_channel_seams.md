@@ -551,3 +551,22 @@ deleted in slice 1:
 - workspace `Cargo.toml`: `tokio-stream` once no crate uses it.
 
 `Guarded` stays: `until` uses it.
+
+### D32. Generalise and merge (G1, G2, M1–M3)
+
+- **G1. Kind-generic producers.** `Kind` gains `type Proof` (`Finite`:
+  `Closed`; `Infinite`: `()`). `produce_blocking`, `produce_async` and
+  `defer_async` are `::<T, K>`; `produce_async_infinite` goes, and finite
+  `produce_async` returns at no cost (supersedes D30's first point).
+- **G2. `Key<T>` is the one way to name a position.** No closure keys:
+  `take_at_least::<K>(n)`, `filter_above::<K>`. New impls: `Hlc` for the window
+  item, `UnstableStep` and `FoldItem`.
+- **M1.** `filter_above_by` merges into `filter_above` (follows from G2).
+- **M2.** `Resumable` and `resync` share one private resume `Source` with an
+  optional cursor; both constructors stay.
+- **M3.** `take_until` and `take_at_least` are layers over the `FnMut`
+  `take_while`: one `Source`.
+
+Not merged: `Fanout`/`Level` (every item with a pacing thread vs latest value
+without one), `ordered`/`also`/`covers` (three roles), a generic window clip
+(one caller).
