@@ -1,432 +1,526 @@
 # Channel seams — design
 
-Process: IAIC. Decision log: `2026-11-01_log_channel_seams.md`. Internal model:
-`2026-11-01_internal_channel_seams.md`. Branch `channel-extraction`, base
-`08a1dd3`.
+Process: IAIC. Decision log: `2026-11-01_log_channel_seams.md` (D1–D23).
+Internal model: `2026-11-01_internal_channel_seams.md`. Branch
+`channel-extraction`. The last polish round of the extraction (D17).
 
-## 1. Goals, non-goals, success criteria
+## 1. Intent
 
-**Goal.** The channel crate owns transport: completion vs abort, subscribe
-failure, the history/live seam, resync, producer/pump lifecycles, and fan-out
-wiring. `zslg` and `nvzn` declare the pipeline — source, cut, key, metric — and
-nothing else.
+### 1.1 Goal
 
-**Non-goals.** No user-defined order policies, no fusion or cached `Select`, no
-public `Closer::abort`/`Feed::abort`, and no forced thread for a lazy
-single-source pipeline. `channel-experiment` stays local.
+The crate owns every transport decision; `zslg` and `nvzn` declare pipelines.
 
-**Success criteria.**
+```text
+crate owns      verdicts (Complete/Aborted), finite vs infinite, order checks,
+                completeness, history/live seams, resumption, producer and
+                fan-out lifecycles, watched values
+domain declares sources, keys, cuts, fallbacks, policies (overflow, stall),
+                metrics and log lines
+```
 
-- No hand-built `bounded + Channel::from + Closer::close` producers in
-  `zslg`/`nvzn`; no hand-written fan-out `Drop`/cap wiring; no
-  `AtomicU64`/`Mutex` purely to hold channel state.
-- `HistoricalReplay` is a lazy source with no `block_on`; the archive `stream`
-  is synchronous.
-- A finite source cannot be used where an infinite one is required, and vice
-  versa; the previous `Channel::empty()`-for-a-subscription bug does not
-  compile.
-- The full crate/zslg/nvzn suites, clippy, and fmt are green; the split-HLC
-  watermark test is deterministic under load.
+### 1.2 Non-goals
+
+- No public `Recv` trait, `pump`, or spawn-policy type (D16). Addable later
+  without a break if a caller appears.
+- No user-defined order policies; no fusion or cached `Select`.
+- No public `Closer::abort` / `Feed::abort`: callers cannot fabricate a reason.
+- No non-tokio producer (`produce_thread`) until a caller needs it.
+
+### 1.3 Success criteria
+
+- No hand-built producer in `zslg`/`nvzn` (`bounded` + `Channel::from` +
+  spawn + close). Remaining `from_infinite` sites are multi-sender receivers
+  only (§3).
+- No hand-written fan-out owner (`tx`/`registry`/`shutdown` + `Drop`), no
+  `watch` + `Wakes` pair, no `AtomicU64`/`Mutex` holding channel state.
+- No `block_on`; `HistoricalReplay` and the archive are lazy declarations.
+- Returning `Channel::empty()` for a subscription does not compile.
+- A window that stops short of its bound aborts (no trailing-gap hole).
+- Crate/zslg/nvzn suites, clippy, fmt green; the split-HLC watermark test is
+  deterministic under parallel load.
 
 ## 2. Current state
 
-The crate already has `Channel<T>`, `OrderedChannel<T,P>`, typed order
-boundaries, a threaded fan-out returning `(tx, registry, shutdown)`, `Feed`,
-`Tail`/`Ranged`/`blend_chain`, and `resume_on_abort`. The residue this round
-removes:
+The crate has `Channel<T>`, `OrderedChannel<T, P>`, `stitch`, a threaded
+fan-out returning `(tx, registry, shutdown)`, `Feed`, `Wakes`,
+`Tail`/`Ranged`/`blend_chain`, `resume_on_abort`. Residue this round removes:
 
 ```text
-seam assembled three ways: blend_chain / open().chain / range().merge
-above written four times
-producer spawn written nine times; Feed has no production user
-fan-out owner tuple + Drop repeated four times
-HistoricalReplay: tokio::spawn + spawn_blocking + hand-closed channel + block_on
-finite/infinite is a constructor choice, not a type
-resync cursor is AtomicU64; WatermarkGate holds a Mutex
+seam assembled three ways (blend_chain / blend / open+merge); above ×4
+producer wiring hand-written ×11 (9 finite scans/reads, 2 network bridges)
+fan-out owner tuple + Drop ×4; watermark watch + Wakes moved together ×3
+HistoricalReplay: tokio::spawn + spawn_blocking + second channel + block_on
+archive: hand-tracked expected / last_hlc / open_failed, HLC assert!, tiling check
+finite vs infinite is a constructor choice, not a type
+resume cursor AtomicU64; WatermarkGate Mutex; resume on any abort
+nvzn live scan: sentinel error chained after an infinite stream
 ```
 
-## 3. Architecture
+## 3. Constraints and assumptions
+
+- **One consumer per channel.** A `Channel` is pulled by one thread at a time;
+  closures may hold mutable state (`FnMut + Send`).
+- **Tokio is the runtime** for every producer site. Producer constructors and
+  `defer_async` live behind the `tokio` feature and capture a runtime handle at
+  construction, so a first poll from a blocking thread works.
+- **`Source` stays crate-private.** New lazy types (`Resumable`, deferred
+  phases) are private `Source`s; nothing public exposes the select model.
+- **Multi-sender receivers stay `from_infinite`.** Coordinator fan, write-stream
+  ingress/drift, replica commit outcomes end by sender refcount, not by a
+  producer body; they are not producer sites.
+- **Windows are half-open** `(after, until)` in zslg: starts exclusive (D19),
+  ends exclusive (`range(from, until)`, `IndexExclusive`).
+- Public API breaks are fine: zslg/nvzn migrate in the same change.
+
+## 4. Architecture
 
 ```text
-                 ┌─────────────────────────────┐
-                 │  Finite / Infinite marker    │
-                 └──────────────┬──────────────┘
-                                │
-        ┌───────────────────────┴───────────────────────┐
-        │                                               │
-   Recv<T,K>                                      Channel<T,K>
-   public read surface                            Source-backed
-   single-source combinators                      merge / chain / batches
-        │                                               │
-   Resumable<T,P>                                OrderedChannel<T,P,K>
-   HistoricalReplay                              (order policy)
-        │
-   pump(policy) ────────────────────────────────> Channel<T,K>
-
-   Seam ── open() ──> Segment { live, cut } ── chain/merge ──> Channel
-   produce_blocking / produce_async ──> Channel (write side)
-   Fanout (producer) + Registry (readers)
+            ┌──────────────────────── read side ────────────────────────┐
+            │ Channel<T, K>          K = Finite | Infinite (no default)  │
+            │ OrderedChannel<T,P,K>  P = Contiguous | StrictlyIncreasing │
+            │                            | NonDecreasing                 │
+            │ combinators (FnMut) · ordered · covers · stitch · until    │
+            └──────▲───────────────────────▲───────────────────▲─────────┘
+                   │                       │                   │
+   write side      │        composition    │                   │
+   produce_blocking│        Segment::open(&seam)  ─ chain/merge│
+   produce_async   │        Resumable::new(after, make)        │
+   produce_async_infinite   resync(make)                       │
+   defer_async ────┘        (all private Sources)              │
+   Fanout ── Registry::subscribe ──────────────────────────────┘
+   Level  ── level.changes() / changed().await / get()
 ```
 
-The split is deliberate: `Recv` is lazy and single-consumer; `Channel` is
-source-backed and can merge multiple sources; a `pump` is the explicit bridge
-when a lazy source must run on a chosen thread. `Seam` and `Resumable` are
-domain-facing; `Source` remains crate-private.
+Three layers: the **read side** is one type family with the kind and the order
+in the type; the **write side** turns a producer body, a fan-out, or a watched
+value into read-side channels; **composition** builds read-side channels from
+other read-side channels, lazily, on the consumer's thread.
 
-## 4. Kind marker: `Channel<T, K>`
+## 5. Kind: `Channel<T, K>`
 
-`Channel` has **no default kind**. Every value names `Finite` or `Infinite`:
+### 5.1 The two kinds
 
 ```rust
-pub struct Finite;
-pub struct Infinite;
+pub struct Finite;   pub struct Infinite;
 
-Channel<T, Finite>    recv -> Result<T, End>           // Complete possible
-Channel<T, Infinite>  recv -> Result<T, AbortReason>   // termination is an error
+Channel<T, Finite>   recv -> Result<T, End>          // End = Complete | Aborted{reason}
+Channel<T, Infinite> recv -> Result<T, AbortReason>  // ending is always an error
 ```
 
-`End` stays the finite verdict (`Complete` or `Aborted`); `AbortReason` is the
-infinite verdict. `end_reason` follows the same split, so a consumer of an
-infinite stream cannot accidentally match `Complete`.
+No default kind (D1): every signature, constructor and test double names it.
+`end_reason` follows the same split. `ready_batch`, `try_recv`, `into_stream`
+exist for both. `OrderedChannel<T, P, K>` and `Feed<T, K>` carry the kind too.
 
-### 4.1 Constructors
+### 5.2 Constructors
 
 | constructor | kind |
 | --- | --- |
-| `from(rx, what) -> (Channel, Closer)` | `Finite` |
-| `closed(rx)` | `Finite` |
+| `from(rx, what) -> (Channel, Closer)`, `closed(rx)` | `Finite` |
 | `empty()`, `once(item)`, `from_vec(items)` | `Finite` |
-| `Feed::channel(cap, what)` | `Finite` |
-| `produce_blocking(..)`, `produce_async(..)` | `Finite` |
-| `from_infinite(rx, what)` | `Infinite` |
-| `aborted(what)` | `Infinite` |
-| `Registry::subscribe(..)`, `subscribe_infinite(..)` | `Infinite` |
-| `Wakes::subscribe()` | `Infinite` |
+| `produce_blocking`, `produce_async`, `defer_async` | `Finite` |
+| `from_infinite(rx, what)`, `aborted(what)` | `Infinite` |
+| `produce_async_infinite`, `Registry::subscribe`, `Level::changes` | `Infinite` |
 
-### 4.2 Combinator kinds
+`aborted` is the only empty infinite channel; `empty` is finite. The previous
+`Channel::empty()`-as-subscription bug is a type error.
 
-| combinator | result |
+### 5.3 Combinators
+
+| combinator | kind rule |
 | --- | --- |
-| `map`, `filter_map`, `dedup_by_key`, `until` | same kind |
-| `take_while`, `take_until` | `Finite` (a consumer bound is completion) |
-| `chain` | `Finite.chain(K) -> K`; `Infinite` has no `chain` |
-| `merge` | `Infinite` if either side is; `Finite` only for two finite sides |
-| `resume_on_abort` | `Infinite` only -> `Infinite` |
-| `stitch` | preserves finite; the fallback is finite |
-| `into_channel` on `OrderedChannel` | same kind |
+| `map`, `filter_map`, `dedup_by_key`, `until` | preserves |
+| `take_while`, `take_until` | → `Finite` (a consumer bound is completion) |
+| `chain` | only on `Finite`: `Finite.chain(K) -> K`; `chain_all` of finite phases |
+| `merge` | `Infinite` if either side is |
+| `stitch` | preserves; the fallback is `Finite` |
+| `covers` | `Finite` only (§9.1) |
 
-`take_until` turning `Infinite` into `Finite` is what makes nvzn's live scan a
-finite window without a separate “scan” type. `chain` starts only from a finite
-phase; an infinite phase never reaches its second argument, so the API does not
-offer it.
+An infinite stream never reaches a `chain` argument, so the API does not offer
+it. Closures are `FnMut + Send` (D16): `FilterMap`/`TakeWhile`/`DedupByKey`
+store `Box<dyn FnMut + Send>` instead of `Arc<dyn Fn + Send + Sync>`.
 
-### 4.3 Boundaries
+### 5.4 Domain boundaries
 
 ```rust
-StableStream = Resumable<Result<StableLogEvent, Error>, Contiguous<LogIndex>>
-ReplicaStream = OrderedChannel<Result<(LogIndex, Data), Error>,
-                               StrictlyIncreasing<LogIndex>, Infinite>
-LocalStoreStream = OrderedChannel<Result<Data, Error>,
-                                  StrictlyIncreasing<DataId>, Finite>
-WindowStream = OrderedChannel<Result<WindowItem, Error>,
-                             StrictlyIncreasing<DataId>, Finite>
-ArchiveStream = OrderedChannel<Result<SnapshotEntry, Error>,
-                              Contiguous<LogIndex>, Finite>
+StableStream     = OrderedChannel<Result<StableLogEvent, Error>, Contiguous<LogIndex>,         Infinite>
+ReplicaStream    = OrderedChannel<Result<(LogIndex, Data), Error>, StrictlyIncreasing<LogIndex>, Infinite>
+LocalStoreStream = OrderedChannel<Result<Data, Error>,      StrictlyIncreasing<DataId>, Finite>
+WindowStream     = OrderedChannel<Result<WindowItem, Error>, StrictlyIncreasing<DataId>, Finite>
+ArchiveStream    = OrderedChannel<Result<SnapshotEntry, Error>, Contiguous<LogIndex>,  Finite>
 ```
 
-`Ranged::range` returns `Finite`; `Seam::subscribe` returns `Infinite`.
-`subscribe_from` returns an infinite replica stream; a historic scan is finite.
+`subscribe_*` return `Infinite`; scans, ranges and archive reads `Finite`.
 
-## 5. `Recv`: the lazy read surface
+## 6. Write side
+
+### 6.1 Producers
 
 ```rust
-pub trait Recv<T, K> {
-    type End;
-    fn recv(&mut self) -> Result<T, Self::End>;
-    fn try_recv(&mut self) -> Option<T>;
-    fn end_reason(&mut self) -> Self::End;
-    fn ready_batch(&mut self, max: usize) -> Option<Batch<'_, Self, T>>;
+Channel::produce_blocking(cap, what, |feed: Feed<T, Finite>| { .. })            // spawn_blocking
+Channel::produce_async(cap, what, |feed: Feed<T, Finite>| async move { .. })    // tokio::spawn
+Channel::produce_async_infinite(cap, what, |feed: Feed<T, Infinite>| async move { .. })
+```
+
+All return at once. A finite body that returns closes (`Complete`); a panic
+drops the feed (`Aborted(ProducerGone)`). An infinite `Feed` has no `close()`:
+return and panic both end `ProducerGone` (D22). Sites:
+
+```text
+produce_blocking        stream_above_hlc, stream_window_ordered, StableLog::range,
+                        replica pump_range, read_snapshot (decode after the GET)
+produce_async           compaction merge feeder — or, if `feed_sources` is only
+                        "read each snapshot in order", the archive's shape:
+                        chain_all(defer_async(read_snapshot)) with no feeder
+produce_async_infinite  client subscribe_stream, client write_stream
+gone                    HistoricalReplay (§9.4), archive stream (§9.3)
+```
+
+The exact list is audited in slice 1; every remaining `Channel::from` /
+`from_infinite` in production either becomes a producer or is a §3
+multi-sender receiver.
+
+### 6.2 `Feed<T, K>`
+
+`send(item) -> Result<(), Disconnected<T>>` (consumer gone), `try_send`,
+`send_timeout(item, d) -> Result<(), SendTimeoutError<T>>`. `send_timeout`
+keeps the client's `CONSUMER_STALL_TIMEOUT` policy in zslg (D22).
+`Closer::abort`/`Feed::abort` stay `pub(crate)` (D8) and exist only if an
+implementation needs to forward an exact reason.
+
+### 6.3 Fan-out owner (D11–D13, D15)
+
+```rust
+let (fanout, registry) = broadcast(what, FanoutConfig { data_cap, register_cap, sub_cap }, overflow);
+let (fanout, registry) = keyed(what, route, config, overflow);
+
+impl<T> Fanout<T> {
+    pub fn publish(&self, item: T) -> Result<(), Stopped<T>>;            // thread gone
+    pub fn try_publish(&self, item: T) -> Result<(), TryPublishError<T>>; // Full(T) | Stopped(T)
+    pub fn shutdown(self);                                               // cancel + join
 }
 ```
 
-`Channel`, `OrderedChannel`, `Resumable`, and `HistoricalReplay` implement
-`Recv`. `Source` stays private; a `Recv` is not necessarily selectable or
-mergeable.
+`Drop` cancels without joining. `OverflowPolicy` is required; caps may
+default. `Registry::subscribe` returns `Channel<T, Infinite>` and maps a failed
+registration to `aborted(what)` (the `Result` form goes; `subscribe_infinite`
+becomes `subscribe`). A departed subscriber never surfaces at the producer.
 
-### 5.1 Single-source combinators
-
-`Recv` carries `map`, `filter_map`, `take_until`, `take_while`, `chain`,
-`until`, and `dedup_by_key` as lazy adapters. They return `Recv` values, so a
-`Resumable` composes through a scan without a pump. The adapters take `FnMut`
-state: a channel has one consumer, so a cursor or watermark gate is plain
-mutable state, not an `AtomicU64` or `Mutex`.
-
-`merge` stays on `Channel` (or an explicit pump): a blocking `recv` cannot wait
-on two sources without a thread, and the selectable `Source` already solves it.
-
-### 5.2 `pump` and spawn policy
-
-A `pump` moves a blocking `Recv` onto a caller-chosen thread and feeds a
-`Channel`:
+### 6.4 `Level<T>` (D23)
 
 ```rust
-pub trait SpawnBlocking {
-    fn spawn<F: FnOnce() + Send + 'static>(&self, f: F);
-}
-pub trait SpawnTask { /* tokio::spawn for produce_async */ }
-
-pump(source, cap, what, policy) -> Channel<T, K>
+let (setter, level) = Level::new(initial);
+setter.set(v);                              // value, then wake — order owned here
+level.get() -> T;
+level.changes() -> Channel<(), Infinite>;   // blocking / selectable wake-ups
+level.changed().await;                      // async, tokio feature
 ```
 
-Policies are zero-sized marker types (`Tokio`, `StdThread`, `CurrentThread` for
-tests); the tokio one is feature-gated. The pump reads `end_reason` and forwards
-the exact verdict (see §8.2). `pump` is only needed at a thread/async/multi-source
-boundary; a `Resumable` consumed directly by `recv` never needs it.
+Replaces `StableLog.watermark` + `watermark_wakes` and the test double's pair.
+`Wakes` becomes private. Readers: `WatermarkGate`, unstable seam, `purge.rs`,
+`quorum.rs`.
 
-## 6. Seam: subscribe, then cut
+## 7. Seam
 
-One trait replaces `Tail` + `Ranged` + `blend_chain`:
+### 7.1 Trait and `Segment::open` (D2, D14, D20)
 
 ```rust
 pub trait Seam {
     type Item;
     type Cut: Copy;
-
-    fn subscribe(&self) -> Live<Self::Item>;              // Infinite channel
-    fn cut(&self, live: &Live<Self::Item>) -> Self::Cut;  // proof required
-    fn above(&self, live: Live<Self::Item>, cut: Self::Cut) -> Live<Self::Item>;
+    fn subscribe(&self) -> Channel<Self::Item, Infinite>;
+    fn cut(&self) -> Self::Cut;
+    fn above(&self, live: Channel<Self::Item, Infinite>, cut: Self::Cut)
+        -> Channel<Self::Item, Infinite>;
     fn range(&self, cut: Self::Cut) -> Channel<Self::Item, Finite>;
 }
 
-pub fn open<S: Seam>(seam: &S) -> Segment<'_, S>;
-
-pub struct Segment<'a, S: Seam> { /* live, cut, seam */ }
-
-impl<'a, S: Seam> Segment<'a, S> {
+impl<S: Seam> Segment<'_, S> {
+    pub fn open(seam: &S) -> Self;              // subscribe → cut → above
     pub fn cut(&self) -> S::Cut;
-    pub fn chain(self) -> Channel<S::Item, Infinite>;   // range(cut) then live
+    pub fn chain(self) -> Channel<S::Item, Infinite>;   // range(cut), then live
     pub fn merge(self) -> Channel<S::Item, Infinite>;   // range(cut) ∥ live
 }
 ```
 
-`Live<T>` is the proof that `subscribe` ran; `cut` cannot be called without it.
-`open` is a free function, so no implementation can reorder subscribe and cut.
-`Segment` is the only assembly point; the three shapes disappear:
+The methods are hooks only `Segment::open` calls; the module docs say so. The
+order (subscribe before cut) is the seam's whole correctness argument:
+anything at or below the cut is in `range`, anything above it is already on
+the subscription.
+
+### 7.2 `above` helpers
+
+`filter_above::<K>(live, cut: Option<K>)` (stable, replica: key and cut are
+`LogIndex`) and `filter_above_by(live, cut, key_fn)` (unstable, nvzn: cut
+`Hlc`, key `DataId`). Each seam's `above` is one line.
+
+### 7.3 The four uses
 
 ```text
-replica        : open(seam).chain()
-stable resync  : open(seam).chain()  (inside Resumable)
-unstable       : open(seam).chain()
-nvzn live view : open(seam).merge()
+replica          Segment::open(&seam).chain()              one cycle; the learner reconnects
+stable           Segment::open(&seam).chain()              inside Resumable (§8.2)
+unstable         Segment::open(&seam).chain()              inside resync (§8.3)
+nvzn live view   Segment::open(&seam) → cut → .merge()     (§10.1)
 ```
 
-`above` stays required (D2). `filter_above::<K>(live, cut: Option<K>)` covers
-stable/replica; `filter_above_by(live, cut, key_fn)` covers unstable/nvzn,
-whose cut is `Hlc` and whose key is `DataId`. Four implementations become four
-one-line calls.
+`Tail`, `Ranged`, `blend_chain`, `Tail::blend` are deleted.
 
-## 7. Resumable and resync
+## 8. Resumption
 
-### 7.1 `Resumable`
+### 8.1 The rule (D18)
+
+A resumer reopens only after `Aborted(ProducerGone)` — the fan-out hang-up or
+a dead producer that a fresh cycle repairs. Every other reason ends the resumed
+stream unchanged; `until` is therefore safe inside or outside a segment, and a
+corrupt log cannot spin a resync loop.
 
 ```rust
-pub struct Resumable<T, P> { /* inner segment state, cursor: P::Key */ }
+enum Opening { First, AfterProducerGone { what: &'static str } }
+```
 
-impl<T, P> Resumable<T, P> {
-    pub fn new<S>(start: P::Key, make: impl FnMut(P::Key, Option<AbortReason>) -> Option<S>) -> Self
-    where
-        S: Seam<Item = T>;
+The factory receives the `Opening` (for its metric and warning) and may decline
+with `None` (its `Weak` upgrades failed); a decline ends the stream with the
+previous segment's reason.
+
+### 8.2 `Resumable` (D19)
+
+```rust
+Resumable::<T, P>::new(after: Option<P::Key>,
+                       make: impl FnMut(Option<P::Key>, Opening) -> Option<S>)
+    -> OrderedChannel<T, P, Infinite>          where S: Seam<Item = T>
+```
+
+```text
+        ┌───────── make(after, First) ─────────┐
+        ▼                                      │
+   [segment open] ── item k ──> emit, after := k
+        │
+        ├─ Aborted(ProducerGone) ──> make(after, AfterProducerGone) ──┐
+        │                                      ▲                      │
+        │                                      └──── Some(seam) ──────┘
+        ├─ make → None ──────────────> end: previous reason
+        └─ any other abort ──────────> end: that reason
+```
+
+`after` is always exclusive: `None` = from the beginning; first open passes
+the caller's, a resync the last emitted key. No dedup (D3): the factory starts
+after `after`; the policy check (`first > after` for `StrictlyIncreasing`,
+`== Successor::next_after(after)` for `Contiguous`) catches a factory that
+starts wrong. `Successor` becomes `fn next_after(prev: Option<Self>) -> Self`.
+
+### 8.3 `resync` for streams without a position
+
+```rust
+resync(make: impl FnMut(Opening) -> Option<S>) -> Channel<T, Infinite>
+```
+
+Same loop, no cursor. The unstable tail uses it; `WatermarkGate` becomes plain
+`FnMut` state in the trailing `filter_map`, reading `Level::get`.
+
+### 8.4 Stable boundary
+
+```rust
+Reader::subscribe_stable_log(after: Option<LogIndex>) -> StableStream
+```
+
+Aligned with `Replica::subscribe_from(Option<LogIndex>)`. `resyncing_tail`
+becomes `Resumable::new(after, |after, opening| { upgrade; log; Some(StableSeam{..}) })`
+plus `.until(&shutdown)`. The `AtomicU64` cursor, the outer cursor filter and
+`stable_stream` disappear.
+
+## 9. Completeness and the archive
+
+### 9.1 `covers(..until)` (D21)
+
+```rust
+impl<T, K: Successor> OrderedChannel<T, Contiguous<K>, Finite> {
+    pub fn covers(self, range: RangeTo<K>) -> Self;
 }
 ```
 
-`Resumable` implements `Recv<T, Infinite>`; it is not a `Source`. It advances
-the cursor on every emitted key and passes the cursor to `make` on a resync.
-It does **not** dedup: the factory starts after the cursor (its inclusive or
-exclusive rule). The ordered policy is the safety net for a bad factory.
+Ends `Complete` only if the stream reached `until`: last key's successor
+`== until`, or, for an empty stream, `next_after(after) == until`. Otherwise
+`Aborted(OrderViolation("short"))`. An `Aborted` source keeps its own reason.
+Order policies check steps between items; `covers` checks the end.
 
-`make` receives `(cursor, previous)` so zslg can log or measure for free; there
-is no separate resync hook. The factory's weak upgrades stay domain-owned.
-
-### 7.2 `resync` for streams without a position
-
-The unstable tail has no cursor. It uses the same skeleton without the cursor:
+### 9.2 `defer_async` (D21)
 
 ```rust
-resync<S>(make: impl FnMut(Option<AbortReason>) -> Option<S>) -> Channel<T, Infinite>
-where
-    S: Seam<Item = T>;
+Channel::defer_async(|| async move { /* -> Channel<T, Finite> */ }) -> Channel<T, Finite>
 ```
 
-`WatermarkGate` remains domain policy, now as `FnMut` state in a `filter_map`
-rather than a `Mutex`.
+On first poll: spawn the future, wait (selectably) on the hand-off, then
+delegate to the resolved channel, verdict included. In `chain_all`, only the
+front phase is polled, so phases open one at a time.
 
-### 7.3 Stable boundary
-
-`Reader::subscribe_stable_log` returns `StableStream = Resumable<...,
-Contiguous<LogIndex>>`. The old `stable_stream` wrapper disappears because the
-resumable type is the order check. `AtomicU64` and the outer cursor filter are
-gone; the cursor is the `Resumable` state.
-
-## 8. Producers, pumps, and the archive
-
-### 8.1 `produce_blocking` / `produce_async`
+### 9.3 The archive
 
 ```rust
-Channel::produce_blocking(cap, what, policy, |feed| { ... })
-Channel::produce_async(cap, what, policy, |feed| async move { ... })
-```
-
-The body owns a `Feed<T>`, which pairs the sender with the close proof. Normal
-return closes; panic drops the feed and aborts. The async form is the dual,
-behind the `tokio` feature. Both return immediately and are `Finite`.
-
-### 8.2 Exact `End`, crate-internal
-
-```rust
-Closer::close()            // None          -> Complete
-Closer::abort(reason)      // Some(reason)  -> Aborted { reason }   (pub(crate))
-drop(Closer)               // disconnected  -> ProducerGone { what }
-```
-
-`Feed::abort(reason)` is `pub(crate)`. External users cannot fabricate an
-`OrderViolation` or `Cancelled`; the crate's pumps/adapters can forward a
-source's exact verdict. This is what keeps a stitched archive's order violation
-visible through a pump.
-
-### 8.3 Archive and `HistoricalReplay`
-
-`ObjectStoreArchiveReader::stream` becomes:
-
-```rust
-fn stream(&self, bounds: ArchiveBounds) -> ArchiveStream
-```
-
-It does the sync manifest lookup, then `produce_async` for the snapshot opens.
-Open errors are the first `Err` item; the item type already carries them. No
-`block_on` remains.
-
-`HistoricalReplay` is one lazy expression:
-
-```rust
-let scan = stable_log.range(start, until).map(..);
-let ordered = OrderedChannel::<_, StrictlyIncreasing<LogIndex>, Finite>::named(scan, ..);
-let stitched = ordered.stitch(move |gap| archive.stream(bounds).map(..));
-let hlc_checked = OrderedChannel::<_, NonDecreasing<Hlc>, Finite>::named(
-    stitched.into_channel(), None, "historical replay HLC");
-hlc_checked.into_channel()
-```
-
-No `tokio::spawn`, no `spawn_blocking` consumer, no second hand-closed channel.
-The HLC regression is now an `OrderViolation`, not an `assert!` panic.
-
-## 9. Fan-out owner
-
-```rust
-pub struct FanoutConfig { data_cap, register_cap, sub_cap }
-// OverflowPolicy is a required argument, not a config default.
-
-let (fanout, registry) = broadcast(what, config, overflow);
-let (fanout, registry) = keyed(what, route, config, overflow);
-
-impl<T> Fanout<T> {
-    pub fn publish(&self, item: T) -> bool;      // false: consumer gone
-    pub fn try_publish(&self, item: T) -> ...;
-    pub fn shutdown(self);                       // cancel + join
+fn stream(&self, bounds: ArchiveBounds) -> ArchiveStream {   // no longer async
+    let covering = covering_snapshots(&manifest, bounds);    // sync read
+    Channel::chain_all(covering.into_iter().map(|m| {
+        let store = self.snapshot_store.clone();
+        Channel::defer_async(move || async move {
+            store.read_snapshot(m.snapshot_id, ArchiveRead).await
+                 .unwrap_or_else(|e| Channel::once(Err(e)))
+        })
+    }))
+    .take_while(not_above(bounds)).filter_map(within(bounds))
+    .ordered::<Contiguous<LogIndex>>(after(bounds), "archive tiling")
+    .ordered::<NonDecreasing<Hlc>>(None, "archive HLC")      // replaces assert!
+    .covers(..until(bounds))                                  // replaces "not fully tiled"
 }
 ```
 
-`Fanout` owns `tx` + `Shutdown`; `Drop` cancels (no join). `Registry`/
-`KeyedRegistry` stays independent and cloneable; `subscribe` maps a failed
-registration through `Channel::aborted(what)`, and `subscribe_infinite` returns
-the always-infinite convenience. Caps can have defaults; `Block` vs `Shed`
-cannot.
+`read_snapshot` stays async (11 callers). `StableArchiveReader::stream`
+becomes synchronous.
 
-This reverses the earlier “no `Fanout` wrapper” decision on purpose: the
-wrapper is producer-side and the reader side stays visible.
+### 9.4 `HistoricalReplay`
 
-## 10. Edge cases and invariants
+```rust
+stable_log.range(after, until)                               // Finite scan, may have gaps
+    .ordered::<StrictlyIncreasing<LogIndex>>(after, "stable scan")
+    .stitch(|gap| archive.stream(gap.bounds()).into_channel())
+    .ordered::<NonDecreasing<Hlc>>(None, "historical replay HLC")
+    .covers(..until)                                          // trailing gap now aborts
+```
 
-- **Subscribe before cut.** `open` is the only public assembly; `cut` needs a
-  `Live`. A caller cannot read the cut before subscribing.
-- **No generic dedup.** The resumable factory owns the resume position; the
-  ordered policy catches a factory that starts too early.
-- **Completion.** An infinite stream never returns `Complete`; `aborted` is the
-  only empty infinite constructor. `take_until`/`take_while` are the only
-  infinite→finite transitions.
-- **Panic.** A panicking producer body drops its `Feed`/`Closer`, so the
-  consumer sees `ProducerGone`; a `produce_async` task panicking is the same.
-- **Runtime.** `produce_async` and `Tokio` need a runtime handle; the archive
-  caller already has one. `HistoricalReplay` no longer needs a non-worker
-  thread.
-- **Cancellation.** `until` preserves the kind; on an infinite stream it is an
-  abort, so `resume_on_abort` sees it as a resumable segment.
-- **Fan-out send.** `publish` returns consumer-gone; producers may log or stop
-  instead of silently ignoring a stopped fan-out.
-- **Test timing.** The split-HLC watermark test receives its expected count
-  with a timeout; `try_recv` is kept only for “nothing else arrives” assertions
-  where order makes it valid.
+One lazy expression on the consumer's thread: no task, no second channel, no
+`block_on`, no `assert!`. The stitch fallback's hand endpoint check is replaced
+by `covers` on the fallback.
 
-## 11. Alternatives considered
+## 10. nvzn
+
+### 10.1 Live view
+
+```rust
+fn range(&self, cut: Option<Hlc>) -> Channel<FoldItem, Finite> {
+    let Some(until) = cut else { return Channel::empty() };
+    self.reader.subscribe_stable_log(self.after).into_channel()
+        .until(&self.cancelled)
+        .take_until(move |item| matches!(item, Ok(ev) if at_or_after_cut(until, ev)))
+        .filter_map(scan_item)
+        .chain(Channel::once(FoldItem::ReplayDone))
+}
+```
+
+The sentinel error is gone: an infinite source can only end aborted, so an
+early end is an `Aborted` finite range and `ReplayDone` is not emitted.
+`begin` uses `Segment::open(&seam)`, reads `cut()` for `Coverage`, then
+`.merge()`.
+
+### 10.2 Fold and subscribers
+
+The fold subscribes with `after = log_index_watermark()` directly. The
+subscriber fan-out uses `keyed(..) -> (Fanout, KeyedRegistry)`;
+`Subscribers::publish` returns `Stopped` instead of ignoring it.
+
+## 11. Complexity budget
+
+**Essential, and where it lives.**
+
+- Seam order (subscribe → cut) — `Segment::open`, one place.
+- Resume rule and cursor — `Resumable`, one state machine (§8.2).
+- Order and completeness — policies + `covers`, per item and at the end.
+- Fan-out pacing (`Block`/`Shed`) — the distribution thread.
+
+**Accepted accidental complexity.**
+
+- The kind parameter on every signature (D1): verbose by design.
+- `defer_async`'s hand-off wait: one private `Source` state.
+- Two `Feed` kinds; three producer constructors.
+- `Level` wraps tokio `watch` plus private `Wakes`: two notification paths
+  behind one setter.
+
+## 12. Edge cases
+
+- **Empty window.** `covers` on an empty stream compares `next_after(after)`
+  with `until`; `range(cut)` for `cut = None` is `empty()`.
+- **Cancellation.** `until` preserves the kind and ends `Cancelled`; resumers
+  never resume it (D18).
+- **Order violation in a resumed stream** ends the stream; no loop.
+- **Archive open error** is the first item of its phase; the consumer stops on
+  `Err` as today.
+- **`defer_async` without a runtime**: construction captures the handle;
+  constructing outside a runtime panics at construction, not at first poll.
+- **Panic** in any producer body or deferred future: `ProducerGone`.
+- **Fan-out stopped**: `publish` returns `Stopped(item)`; the producer logs and
+  stops or drops, per site.
+- **HLC groups** across a resync: `after` is an index, not an HLC, so a group
+  split by a resync is not re-filtered (D3).
+
+## 13. Operations
+
+- **Threads**: one per fan-out (zslg: replica live, local-store unstable,
+  stable log; nvzn: one per dispatcher), unchanged. `defer_async` and producers
+  use the tokio pools.
+- **Metrics/logs**: resync metrics and warnings move into `make(.., Opening)`;
+  unchanged names. New `OrderViolation` labels — `archive tiling`,
+  `archive HLC`, `historical replay HLC`, `short` — surface as
+  `StreamTruncated { what }` at the zslg boundary, as today.
+- **Behaviour changes**: an HLC regression is an abort, not a panic; a short
+  replay window aborts instead of ending early; `subscribe_stable_log` takes
+  `after`.
+
+## 14. Alternatives considered
 
 | rejected | why |
 | --- | --- |
-| Default `Finite` kind | hides the decision; the previous bug remains representable |
-| Runtime `End` only (no marker) | `resume_on_abort`/`range` cannot state their contract |
-| `Infinite<T>` newtype only at boundaries | conversions remain an escape hatch |
-| Second `KeyedSeam` trait | one extra line saved, two seam traits to learn |
-| Read-only `Recv` | forces a pump/thread for lazy `take_until`/`filter_map`/`chain` |
-| `Resumable` as `Source` | pulls the private select model into the public surface |
-| Keep the `(tx, registry, shutdown)` tuple | repeats wiring, `Drop`, caps, and error handling |
-| Keep the archive async + `block_on` | thread-affinity hazard with no benefit |
-| Public `Closer::abort` | lets callers fabricate order/cancel verdicts |
-| `pump` takes a closure | a marker policy makes the thread choice a type, not a value |
-| Resumable dedup filter | bakes in “<=” semantics that are wrong for HLC groups |
+| Default `Finite` kind | the `empty()` bug stays representable (D1) |
+| Public `Recv` + `pump` + spawn policy | `until` cannot race cancel lazily; nvzn merge would need a thread (D16) |
+| `Resumable` outside `Source` | false premise: `Source` stays private either way (D16) |
+| `Live` proof token | forgeable; `Segment::open` is the guarantee (D20) |
+| Factory decides what to resume | every factory repeats one match; forgetting it loops (D18) |
+| Inclusive / mixed cursor, contiguous-only `Resumable` | off-by-one between first open and resync (D19) |
+| `bool` publish | names the wrong event; drops the item (D15) |
+| `through(last)` inclusive | every zslg window is exclusive (D21) |
+| Sync `defer` | no caller (D21) |
+| Archive async + `block_on` | thread-affinity hazard (D9) |
+| Keep `watch` + `Wakes` | the value-then-wake order repeated at each writer (D23) |
 
-## 12. Testing strategy
+## 15. Testing
 
 **Crate.**
 
-- Kind compile tests: `Finite` cannot be passed where `Infinite` is required;
-  `take_until` on `Infinite` yields `Finite`; `chain` starts only from
-  `Finite`; `resume_on_abort` rejects `Finite`.
-- `Recv` combinators are lazy and preserve the end; `pump` forwards `Complete`
-  and each `AbortReason` (including `OrderViolation`).
-- Spawn policies: `Tokio`, `StdThread`, `CurrentThread`; a panicking body
-  aborts.
-- Seam: `cut` cannot be called without `Live`; `open` order; `Segment::chain`
-  vs `merge`; `filter_above` covers the four seams.
-- `Resumable`: cursor advances, no duplicate filtering, factory receives the
-  cursor and previous reason, abort mid-stream resumes.
-- Fan-out owner: `publish` consumer-gone, `Drop` cancels, `shutdown` joins,
-  caps/config, explicit overflow.
+- Kind: `compile_fail` doctests — finite as infinite, `chain` on infinite,
+  `empty()` as a subscription, `covers` on infinite.
+- Combinators: `FnMut` state; kind transitions; `take_until` on infinite ends
+  `Complete`, source abort preserved.
+- Producers: close/panic verdicts for all three; `send_timeout`.
+- `defer_async`: lazy start (no spawn before first poll), verdict delegation,
+  phases open sequentially in `chain_all`.
+- `covers`: reached, short, empty-window both ways, aborted source keeps reason.
+- `Segment`: open order, `chain` vs `merge`, `filter_above*`.
+- `Resumable`/`resync`: resume only on `ProducerGone`; `Cancelled` and
+  `OrderViolation` end; `after` passed exactly; decline ends with previous
+  reason.
+- `Fanout`: `publish`→`Stopped`, `Drop` cancels, `shutdown` joins. `Level`:
+  set-then-wake ordering, both readers.
 
 **zslg/nvzn.**
 
-- Migrate the four fan-out owners; remove the three-field structs and `Drop`.
-- Migrate the nine producer sites to `produce_blocking`/`produce_async`; remove
-  `Feed`-less closers.
-- `HistoricalReplay` lazy and HLC `NonDecreasing`; archive `stream` sync.
-- Split-HLC watermark test uses timeout; full suites under parallel load.
-- Stable/unstable resync tests: cursor, no dedup, WatermarkGate, shutdown.
-- nvzn live view: `Segment::merge`, cancellation, fold stop.
+- Split-HLC watermark test receives its count with a timeout.
+- Archive: tiled, gap, short, HLC regression, open error.
+- `HistoricalReplay`: mid gap stitched, trailing gap aborts, HLC regression
+  aborts.
+- Stable/unstable resync: cursor continuity, shutdown ends (no resync).
+- nvzn live view: early stable end aborts, cancellation, `ReplayDone` order.
+- Full suites under parallel load, clippy, fmt.
 
-## 13. Implementation order
+## 16. Implementation order (D17)
 
-Each slice is green before the next; the first is a thin vertical cut.
+Each slice is green (tests, clippy, fmt) before the next.
 
-1. **Kind + `Recv` core.** `Channel<T, Finite|Infinite>`, `Recv`, constructors,
-   kind rules, `Ordinary`/`Ordered` boundaries. Update crate tests and the
-   public examples. This is the widest churn; keep the old names as aliases only
-   where a migration needs them.
-2. **Producer/pump.** `produce_blocking`, `produce_async`, spawn policies,
-   internal `Closer::abort`/`Feed::abort`, `pump`. Migrate the nine scan
-   producers; remove `empty_historic`.
-3. **Seam + Resumable.** `Seam`, `Live`, `Segment`, `filter_above`;
-   `Resumable`, `resync`; migrate replica/stable/unstable; delete
-   `Tail`/`Ranged`/`blend_chain`; remove `AtomicU64`/`Mutex` state.
-4. **Archive + HistoricalReplay.** Sync `stream` with `produce_async`; lazy
-   `HistoricalReplay`; HLC `NonDecreasing`; no `block_on`.
-5. **Fan-out owner.** `Fanout`/`FanoutConfig`; migrate zslg/nvzn; `publish`
-   consumer-gone.
-6. **Test + cleanup.** Split-HLC timeout; remaining `try_recv` audit; cap
-   helper; full workspace suite, clippy, fmt.
+1. **Mechanical.** Split-HLC test fix; `FnMut` combinators; `produce_*` and
+   `Feed::send_timeout` (pre-kind: plain `Channel`); migrate producer sites and
+   audit remaining `from`/`from_infinite`; `Fanout`/`FanoutConfig`/`Stopped`;
+   `Level`, private `Wakes`.
+2. **Completeness + archive.** `OrderedChannel` start → `after`,
+   `Successor::next_after`; `covers`; `defer_async`; archive declaration;
+   lazy `HistoricalReplay`; stitch fallback via `covers`.
+3. **Kinds + seam.** `Channel<T, K>`, `Feed<T, K>`, `OrderedChannel<T, P, K>`,
+   kind rules, `compile_fail` tests; `Seam` + `Segment::open` +
+   `filter_above*`, end to end on the replica path; then all signatures in
+   zslg/nvzn.
+4. **Resumption.** `Opening`, `Resumable`, `resync`; `subscribe_stable_log(after)`;
+   stable/unstable/nvzn migrated; delete `Tail`/`Ranged`/`blend_chain`,
+   `resume_on_abort`'s public form if unused, `stable_stream`.

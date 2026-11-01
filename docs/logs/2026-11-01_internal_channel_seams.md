@@ -180,3 +180,17 @@ sends). My ranking of the open review points by leverage:
 5. R3 `Live` — SETTLED D20 (dropped; Segment::open is the guarantee).
 6. R5 archive — SETTLED D21 (defer_async + covers(..until)).
 7. R6/R7 — doc structure; no decision needed beyond agreeing the order.
+
+## Design rewritten (after D23)
+
+Design doc rewritten against D1–D4, D8, D9, D11–D23. Points I filled in without
+a question (expected to be unsurprising; check at sign-off):
+
+- `Registry::subscribe` returns `Channel<T, Infinite>` directly (failed
+  registration → `aborted`); the `Result` form and `subscribe_infinite` merge.
+- `Feed::send` returns `Result<(), Disconnected<T>>` (consistent with D15).
+- `OrderedChannel` start becomes `after` too, with `Successor::next_after`.
+- Compaction merge feeder may become `chain_all(defer_async(read_snapshot))`
+  like the archive — to be confirmed against `feed_sources` in slice 1.
+- Multi-sender receivers keep `from_infinite`.
+- `defer_async` panics at construction outside a runtime.
