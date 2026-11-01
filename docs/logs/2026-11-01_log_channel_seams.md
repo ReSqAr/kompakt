@@ -274,3 +274,20 @@ The error names what actually happened: the distribution thread is gone
 or skipped inside the thread and never reaches the producer. The item is handed
 back, as crossbeam's `SendError` does. `#[must_use]` on `Result` replaces the
 silent `let _ = tx.send(..)`.
+
+### D16. No `Recv`, no `pump`, no spawn policy (reverses D5, D6, D7, D10)
+
+Threads are needed only where a producer runs (blocking scan, async open,
+socket, the fan-out's own thread), never to read or compose. With `Resumable`
+as a crate-private `Source`, `until` keeps racing cancellation while blocked and
+`Segment::merge` composes without a thread, so `pump` has no caller. Every
+producer site runs on tokio, so a spawn-policy type would have one
+implementation.
+
+- `Resumable` is a private `Source`; it yields an ordered infinite channel.
+- Combinators take `FnMut + Send` (one consumer per channel); this removes the
+  `AtomicU64` cursor and the `WatermarkGate` `Mutex`.
+- `produce_blocking` / `produce_async` live behind the `tokio` feature with no
+  policy argument.
+- A public `Recv` or a non-tokio `produce_thread` can be added later without a
+  breaking change, if a caller appears.

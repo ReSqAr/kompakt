@@ -170,7 +170,7 @@ config struct carries the three caps.
 Review restarted the interview. Settled: D14 (`Segment::open`), D15 (`Result`
 sends). My ranking of the open review points by leverage:
 
-1. R1 `Recv`/pump — removes ~a third of the design; R2 and the nvzn merge
+1. R1 `Recv`/pump — SETTLED D16 (dropped; add later if needed).
    problem fall out of it. Expected answer: drop `Recv`, `Resumable` is a
    private `Source`, combinators take `FnMut`.
 2. R8 scope — expected: full revised set, ordered so steps 1–2 stand alone.
