@@ -416,3 +416,73 @@ level.changed().await;                     // async, tokio feature
 
 R6 (missing sections) and R7 (order) need no decision: D17 fixes the order, and
 the design doc is rewritten against D1–D4, D8, D9, D11–D23.
+
+## Second review round
+
+### D24. Group-aware cap is `take_at_least`; the window terminal goes
+
+The local-store window's `WindowItem::Complete | TruncatedAt(hlc)` answered
+"how far did this snapshot chunk get" in-band, because the cap lived in the
+storage scan. The cap moves into the crate:
+
+```rust
+.take_at_least(n, key)   // ≥ n items, then finish the current key group → Finite
+```
+
+The scan becomes a plain range scan; `WindowItem` is deleted. The snapshot job
+decides the watermark itself: `count < cap → cutoff`, else the last written
+HLC (conservative: an exact-cap window costs one extra empty iteration, which
+the empty-window path commits as `cutoff`). `write_snapshot` returns
+`(count, first, last)` metadata, removing the `terminal` mutex and the
+`end_hlc` atomic; the index counter is `FnMut` state. A full chunk splitter
+(one scan → many snapshots) is rejected: Raft commits sit between chunks and
+the job resumes from the committed watermark. A typed end value
+(`Finite<R>`) is rejected: this was its only use case.
+
+### D25. `Channel` loses `IntoIterator`
+
+`for x in channel` calls `recv().ok()` and drops the verdict. Its one
+production use (`compaction/merge.rs` `feed_sources`) treats an aborted
+`read_snapshot` as done and can write a merged snapshot missing entries under
+metadata claiming full coverage. `recv`/`ready_batch` are the only read paths.
+The merge feeder becomes `chain_all(defer_async(read_snapshot)).until(cancel)`,
+the archive's shape, so an abort reaches `write_snapshot` as `StreamTruncated`.
+
+### D26. Fixes from the external design review
+
+1. **Secondary checks keep the primary type.** `OrderedChannel::also::<Q>(after,
+   what)` enforces a second policy at runtime without changing `P`. `covers`
+   runs before it; `ArchiveStream` stays `Contiguous<LogIndex>`. The HLC check
+   is `.also::<NonDecreasing<Hlc>>(None, "archive HLC")`.
+2. **Fallback item type.** The stitch fallback maps
+   `SnapshotEntry → (global_index, data)`.
+3. **Every start is exclusive (extends D19).** `StableLogSnapshot::range(after:
+   Option<LogIndex>, until)`; `ArchiveLowerBound::After(Option<LogIndex>)`
+   replaces `Earliest`/`FromIndex`; `Gap { after: Option<K>, got: K }` names
+   the window `(after, got)` to fill. No inclusive/exclusive conversion remains.
+4. **Registry keeps both forms.** `subscribe() -> Result<Channel<T, Infinite>,
+   RegistryError>` (nvzn maps `Full` to `TooManyPendingSubscriptions`) and
+   `subscribe_infinite() -> Channel<T, Infinite>` (failure → `aborted`).
+5. **`covers` is bounded only.** `covers(..until, what)`; an `Unbounded` archive
+   branches and skips it.
+6. **Producer bodies return a close proof.** `Feed::close(self) -> Closed`. A
+   finite body is `FnOnce(Feed<T, Finite>) -> Closed` (async: a future of
+   `Closed`), so a normal return is provably closed and the close precedes the
+   sender drop; a panic is `ProducerGone`. An infinite body returns `()`.
+7. **`defer_async` takes the runtime handle explicitly**
+   (`defer_async(&handle, || ..)`); the archive reader stores the handle it was
+   built with. Dropping a deferred phase aborts its spawned task.
+8. **Infinite never completes, internally either.** A first-open decline in
+   `Resumable`/`resync` ends `Aborted(ProducerGone { what })`. Infinite
+   wrappers map an inner `Complete` to `Aborted(ProducerGone)` with a
+   `debug_assert!`.
+
+Clarified: `Level` has a sync core (mutex + private `Wakes`), only
+`changed().await` is tokio-gated; `NonDecreasing`'s first key must be `> after`;
+`take_while(not_above)` passes `Err` items and `within` only skips below;
+`produce_async_infinite` returns a plain `Channel` until slice 3 adds kinds;
+`Subscribers::publish` on `Stopped` warns once and continues (subscribers are
+observers); `read_snapshot` does the GET in its async body and decodes through
+`produce_blocking`; `Seam::cut` being callable alone is an accepted trade-off;
+`.ordered` exists only on `Channel` (an `OrderedChannel` goes through
+`into_channel()`).

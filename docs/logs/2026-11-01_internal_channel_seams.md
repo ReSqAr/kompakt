@@ -194,3 +194,17 @@ a question (expected to be unsurprising; check at sign-off):
   like the archive — to be confirmed against `feed_sources` in slice 1.
 - Multi-sender receivers keep `from_infinite`.
 - `defer_async` panics at construction outside a runtime.
+
+## Second review round
+
+Settled D24 (`take_at_least`, window terminal gone), D25 (no `IntoIterator`;
+compaction feeder declared), D26 (external review: `also`, exclusive starts
+everywhere, Registry keeps both forms, bounded `covers`, `Closed` proof,
+explicit `defer_async` handle, infinite never completes internally). My
+earlier gap-fill "Registry::subscribe returns Infinite directly" was wrong and
+is reversed by D26.4.
+
+Calls I made without a question (check at sign-off): the `Closed` proof token
+for producer bodies (D26.6), `also` as the name for a type-preserving second
+policy, `ArchiveLowerBound::After`, `stream_window(above, upto)`, and
+`Subscribers::publish` warning-and-continuing on `Stopped`.

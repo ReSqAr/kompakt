@@ -1,6 +1,6 @@
 # Channel seams — design
 
-Process: IAIC. Decision log: `2026-11-01_log_channel_seams.md` (D1–D23).
+Process: IAIC. Decision log: `2026-11-01_log_channel_seams.md` (D1–D26).
 Internal model: `2026-11-01_internal_channel_seams.md`. Branch
 `channel-extraction`. The last polish round of the extraction (D17).
 
@@ -32,7 +32,9 @@ domain declares sources, keys, cuts, fallbacks, policies (overflow, stall),
   spawn + close). Remaining `from_infinite` sites are multi-sender receivers
   only (§3).
 - No hand-written fan-out owner (`tx`/`registry`/`shutdown` + `Drop`), no
-  `watch` + `Wakes` pair, no `AtomicU64`/`Mutex` holding channel state.
+  `watch` + `Wakes` pair, no `AtomicU64`/`Mutex` holding channel state, no
+  in-band terminal item (`WindowItem`).
+- No read path that drops a verdict: `Channel` has no `IntoIterator` (D25).
 - No `block_on`; `HistoricalReplay` and the archive are lazy declarations.
 - Returning `Channel::empty()` for a subscription does not compile.
 - A window that stops short of its bound aborts (no trailing-gap hole).
@@ -54,6 +56,8 @@ archive: hand-tracked expected / last_hlc / open_failed, HLC assert!, tiling che
 finite vs infinite is a constructor choice, not a type
 resume cursor AtomicU64; WatermarkGate Mutex; resume on any abort
 nvzn live scan: sentinel error chained after an infinite stream
+window scan: cap + in-band terminal (WindowItem) smuggled out via Arc<Mutex>/atomics
+for x in channel drops the verdict (compaction merge feeder)
 ```
 
 ## 3. Constraints and assumptions
@@ -68,8 +72,9 @@ nvzn live scan: sentinel error chained after an infinite stream
 - **Multi-sender receivers stay `from_infinite`.** Coordinator fan, write-stream
   ingress/drift, replica commit outcomes end by sender refcount, not by a
   producer body; they are not producer sites.
-- **Windows are half-open** `(after, until)` in zslg: starts exclusive (D19),
-  ends exclusive (`range(from, until)`, `IndexExclusive`).
+- **Windows are open at both ends** `(after, until)`: every start is an
+  exclusive `after: Option<K>` (D19, D26.3) — stable `range`, archive lower
+  bound, `Gap`, resume cursor; every end is an exclusive `until`.
 - Public API breaks are fine: zslg/nvzn migrate in the same change.
 
 ## 4. Architecture
@@ -102,14 +107,22 @@ other read-side channels, lazily, on the consumer's thread.
 
 ```rust
 pub struct Finite;   pub struct Infinite;
+pub trait Kind: sealed::Sealed { type End; }     // Finite::End = End, Infinite::End = AbortReason
 
 Channel<T, Finite>   recv -> Result<T, End>          // End = Complete | Aborted{reason}
 Channel<T, Infinite> recv -> Result<T, AbortReason>  // ending is always an error
 ```
 
 No default kind (D1): every signature, constructor and test double names it.
-`end_reason` follows the same split. `ready_batch`, `try_recv`, `into_stream`
-exist for both. `OrderedChannel<T, P, K>` and `Feed<T, K>` carry the kind too.
+Kind-generic code (combinators, `integrate_loop`, which takes an infinite
+subscription in production and finite vectors in tests) is generic over
+`K: Kind` and reads `K::End`. `end_reason`, `ready_batch`, `try_recv`,
+`into_stream` exist for both. `OrderedChannel<T, P, K>` and `Feed<T, K>` carry
+the kind too. `Channel` has no `IntoIterator` (D25).
+
+**Internal contract.** `Source` still reports `End`; an infinite wrapper maps
+an inner `Complete` to `Aborted(ProducerGone)` behind a `debug_assert!`, so the
+public type never lies (D26.8).
 
 ### 5.2 Constructors
 
@@ -129,63 +142,74 @@ exist for both. `OrderedChannel<T, P, K>` and `Feed<T, K>` carry the kind too.
 | combinator | kind rule |
 | --- | --- |
 | `map`, `filter_map`, `dedup_by_key`, `until` | preserves |
-| `take_while`, `take_until` | → `Finite` (a consumer bound is completion) |
+| `take_while`, `take_until`, `take_at_least` | → `Finite` (a consumer bound is completion) |
 | `chain` | only on `Finite`: `Finite.chain(K) -> K`; `chain_all` of finite phases |
 | `merge` | `Infinite` if either side is |
 | `stitch` | preserves; the fallback is `Finite` |
-| `covers` | `Finite` only (§9.1) |
+| `ordered::<P>(after, what)` | on `Channel` only; preserves |
+| `covers`, `also` | on `OrderedChannel` (§9.1) |
 
 An infinite stream never reaches a `chain` argument, so the API does not offer
-it. Closures are `FnMut + Send` (D16): `FilterMap`/`TakeWhile`/`DedupByKey`
-store `Box<dyn FnMut + Send>` instead of `Arc<dyn Fn + Send + Sync>`.
+it. `take_at_least(n, key: FnMut(&T) -> Option<K>)` yields at least `n` keyed
+items, then finishes the current key group and stops (D24); a `None`-key item
+(an `Err`) passes through and does not count. `OrderedChannel` carries only
+order-preserving operations (`until`, `covers`, `also`, `stitch`); anything
+else goes through `into_channel()`.
+
+Closures are `FnMut + Send` (D16): `FilterMap`/`TakeWhile`/`DedupByKey` store
+`Box<dyn FnMut + Send>` instead of `Arc<dyn Fn + Send + Sync>`.
 
 ### 5.4 Domain boundaries
 
 ```rust
 StableStream     = OrderedChannel<Result<StableLogEvent, Error>, Contiguous<LogIndex>,         Infinite>
 ReplicaStream    = OrderedChannel<Result<(LogIndex, Data), Error>, StrictlyIncreasing<LogIndex>, Infinite>
-LocalStoreStream = OrderedChannel<Result<Data, Error>,      StrictlyIncreasing<DataId>, Finite>
-WindowStream     = OrderedChannel<Result<WindowItem, Error>, StrictlyIncreasing<DataId>, Finite>
+LocalStoreStream = OrderedChannel<Result<Data, Error>, StrictlyIncreasing<DataId>, Finite>   // scans and windows
 ArchiveStream    = OrderedChannel<Result<SnapshotEntry, Error>, Contiguous<LogIndex>,  Finite>
 ```
 
 `subscribe_*` return `Infinite`; scans, ranges and archive reads `Finite`.
+`WindowStream` and `WindowItem` are gone: a window is a plain scan (D24).
 
 ## 6. Write side
 
 ### 6.1 Producers
 
 ```rust
-Channel::produce_blocking(cap, what, |feed: Feed<T, Finite>| { .. })            // spawn_blocking
-Channel::produce_async(cap, what, |feed: Feed<T, Finite>| async move { .. })    // tokio::spawn
+Channel::produce_blocking(cap, what, |feed: Feed<T, Finite>| -> Closed { ..; feed.close() })
+Channel::produce_async(cap, what, |feed: Feed<T, Finite>| async move { ..; feed.close() })
 Channel::produce_async_infinite(cap, what, |feed: Feed<T, Infinite>| async move { .. })
 ```
 
-All return at once. A finite body that returns closes (`Complete`); a panic
-drops the feed (`Aborted(ProducerGone)`). An infinite `Feed` has no `close()`:
-return and panic both end `ProducerGone` (D22). Sites:
+All return at once. A finite body must return the `Closed` proof, which only
+`Feed::close(self)` produces (D26.6): a normal return is provably a close, and
+the close precedes the sender drop. A panic drops the feed:
+`Aborted(ProducerGone)`. An infinite `Feed` has no `close()`; its body returns
+`()`, and return and panic both end `ProducerGone` (D22). Sites:
 
 ```text
-produce_blocking        stream_above_hlc, stream_window_ordered, StableLog::range,
-                        replica pump_range, read_snapshot (decode after the GET)
-produce_async           compaction merge feeder — or, if `feed_sources` is only
-                        "read each snapshot in order", the archive's shape:
-                        chain_all(defer_async(read_snapshot)) with no feeder
+produce_blocking        stream_above_hlc, StableLog::range, replica pump_range,
+                        read_snapshot's decode (the GET stays in read_snapshot's
+                        async body; the decoded stream is the producer)
 produce_async_infinite  client subscribe_stream, client write_stream
-gone                    HistoricalReplay (§9.4), archive stream (§9.3)
+declarations instead    archive stream (§9.3), compaction merge feeder (§9.5),
+                        HistoricalReplay (§9.4)
 ```
 
-The exact list is audited in slice 1; every remaining `Channel::from` /
-`from_infinite` in production either becomes a producer or is a §3
-multi-sender receiver.
+The window scan becomes `stream_window(above, upto)`: no cap, no terminal,
+the same plain scan as `stream_above_hlc` with an upper bound. Slice 1 audits every remaining
+`Channel::from` / `from_infinite` in production: each becomes a producer or is
+a §3 multi-sender receiver. Before slice 3, `produce_async_infinite` returns a
+plain `Channel`.
 
 ### 6.2 `Feed<T, K>`
 
 `send(item) -> Result<(), Disconnected<T>>` (consumer gone), `try_send`,
-`send_timeout(item, d) -> Result<(), SendTimeoutError<T>>`. `send_timeout`
-keeps the client's `CONSUMER_STALL_TIMEOUT` policy in zslg (D22).
-`Closer::abort`/`Feed::abort` stay `pub(crate)` (D8) and exist only if an
-implementation needs to forward an exact reason.
+`send_timeout(item, d) -> Result<(), SendTimeoutError<T>>`, and for `Finite`
+`close(self) -> Closed`. `send_timeout` keeps the client's
+`CONSUMER_STALL_TIMEOUT` policy in zslg (D22). `Closer::abort`/`Feed::abort`
+stay `pub(crate)` (D8) and exist only if an implementation needs to forward an
+exact reason.
 
 ### 6.3 Fan-out owner (D11–D13, D15)
 
@@ -201,9 +225,11 @@ impl<T> Fanout<T> {
 ```
 
 `Drop` cancels without joining. `OverflowPolicy` is required; caps may
-default. `Registry::subscribe` returns `Channel<T, Infinite>` and maps a failed
-registration to `aborted(what)` (the `Result` form goes; `subscribe_infinite`
-becomes `subscribe`). A departed subscriber never surfaces at the producer.
+default. The reader side keeps both forms (D26.4):
+`subscribe() -> Result<Channel<T, Infinite>, RegistryError>` — nvzn maps
+`Full` to `TooManyPendingSubscriptions` — and
+`subscribe_infinite() -> Channel<T, Infinite>`, where a failed registration is
+`aborted(what)`. A departed subscriber never surfaces at the producer.
 
 ### 6.4 `Level<T>` (D23)
 
@@ -215,8 +241,11 @@ level.changes() -> Channel<(), Infinite>;   // blocking / selectable wake-ups
 level.changed().await;                      // async, tokio feature
 ```
 
-Replaces `StableLog.watermark` + `watermark_wakes` and the test double's pair.
-`Wakes` becomes private. Readers: `WatermarkGate`, unstable seam, `purge.rs`,
+The core is synchronous (a mutex plus the private `Wakes`); only
+`changed().await` is behind the `tokio` feature. Replaces `StableLog.watermark`
++ `watermark_wakes` and the test double's pair: `StableLogSnapshot` exposes
+`watermark() -> Level<Option<Hlc>>` instead of `watch_watermark` and
+`watermark_moves`. Readers: `WatermarkGate`, unstable seam, `purge.rs`,
 `quorum.rs`.
 
 ## 7. Seam
@@ -242,7 +271,9 @@ impl<S: Seam> Segment<'_, S> {
 }
 ```
 
-The methods are hooks only `Segment::open` calls; the module docs say so. The
+The methods are hooks only `Segment::open` calls; the module docs say so. That
+`cut` stays callable on its own is an accepted trade-off (D20): every seam is
+used from one place, and sealing would stop zslg implementing the trait. The
 order (subscribe before cut) is the seam's whole correctness argument:
 anything at or below the cut is in `range`, anything above it is already on
 the subscription.
@@ -278,8 +309,10 @@ enum Opening { First, AfterProducerGone { what: &'static str } }
 ```
 
 The factory receives the `Opening` (for its metric and warning) and may decline
-with `None` (its `Weak` upgrades failed); a decline ends the stream with the
-previous segment's reason.
+with `None` (its `Weak` upgrades failed). A decline after a `ProducerGone` ends
+the stream with that reason; a decline at the first open ends it
+`Aborted(ProducerGone { what })` under the resumer's label, never `Complete`
+(D26.8).
 
 ### 8.2 `Resumable` (D19)
 
@@ -305,7 +338,8 @@ Resumable::<T, P>::new(after: Option<P::Key>,
 the caller's, a resync the last emitted key. No dedup (D3): the factory starts
 after `after`; the policy check (`first > after` for `StrictlyIncreasing`,
 `== Successor::next_after(after)` for `Contiguous`) catches a factory that
-starts wrong. `Successor` becomes `fn next_after(prev: Option<Self>) -> Self`.
+starts wrong; `NonDecreasing` also requires the first key `> after`.
+`Successor` becomes `fn next_after(prev: Option<Self>) -> Self`.
 
 ### 8.3 `resync` for streams without a position
 
@@ -322,7 +356,8 @@ Same loop, no cursor. The unstable tail uses it; `WatermarkGate` becomes plain
 Reader::subscribe_stable_log(after: Option<LogIndex>) -> StableStream
 ```
 
-Aligned with `Replica::subscribe_from(Option<LogIndex>)`. `resyncing_tail`
+Aligned with `Replica::subscribe_from(Option<LogIndex>)` and with
+`StableLogSnapshot::range(after: Option<LogIndex>, until)` (D26.3). `resyncing_tail`
 becomes `Resumable::new(after, |after, opening| { upgrade; log; Some(StableSeam{..}) })`
 plus `.until(&shutdown)`. The `AtomicU64` cursor, the outer cursor filter and
 `stable_stream` disappear.
@@ -333,60 +368,112 @@ plus `.until(&shutdown)`. The `AtomicU64` cursor, the outer cursor filter and
 
 ```rust
 impl<T, K: Successor> OrderedChannel<T, Contiguous<K>, Finite> {
-    pub fn covers(self, range: RangeTo<K>) -> Self;
+    pub fn covers(self, range: RangeTo<K>, what: &'static str) -> Self;
+    pub fn also<Q: OrderPolicy>(self, after: Option<Q::Key>, what: &'static str) -> Self
+        where Q::Key: Key<T>;                      // any P, not only Contiguous
 }
 ```
 
-Ends `Complete` only if the stream reached `until`: last key's successor
-`== until`, or, for an empty stream, `next_after(after) == until`. Otherwise
-`Aborted(OrderViolation("short"))`. An `Aborted` source keeps its own reason.
-Order policies check steps between items; `covers` checks the end.
+`covers` ends `Complete` only if the stream reached `until`: last key's
+successor `== until`, or, for an empty stream, `next_after(after) == until`
+(the channel holds its `after`). Otherwise
+`Aborted(OrderViolation { what })`. An `Aborted` source keeps its own reason.
+Order policies check steps between items; `covers` checks the end. There is no
+unbounded form: a caller with an open upper bound does not call it.
+
+`also` enforces a second policy at runtime and keeps `P` in the type (D26.1):
+the primary order is what consumers rely on; the secondary is a guard (HLC
+monotonicity).
 
 ### 9.2 `defer_async` (D21)
 
 ```rust
-Channel::defer_async(|| async move { /* -> Channel<T, Finite> */ }) -> Channel<T, Finite>
+Channel::defer_async(handle: &Handle, || async move { /* -> Channel<T, Finite> */ })
+    -> Channel<T, Finite>
 ```
 
-On first poll: spawn the future, wait (selectably) on the hand-off, then
-delegate to the resolved channel, verdict included. In `chain_all`, only the
-front phase is polled, so phases open one at a time.
+On first poll: spawn the future on `handle`, wait (selectably) on the
+hand-off, then delegate to the resolved channel, verdict included. The handle
+is explicit (D26.7): the construction site may be a blocking-pool or test
+thread; the archive reader and the snapshot store hold the handle they were
+built with. Dropping a deferred phase aborts its task (reads have no side
+effects). In `chain_all`, only the front phase is polled, so phases open one at
+a time.
 
 ### 9.3 The archive
 
 ```rust
 fn stream(&self, bounds: ArchiveBounds) -> ArchiveStream {   // no longer async
     let covering = covering_snapshots(&manifest, bounds);    // sync read
-    Channel::chain_all(covering.into_iter().map(|m| {
-        let store = self.snapshot_store.clone();
-        Channel::defer_async(move || async move {
-            store.read_snapshot(m.snapshot_id, ArchiveRead).await
-                 .unwrap_or_else(|e| Channel::once(Err(e)))
-        })
-    }))
-    .take_while(not_above(bounds)).filter_map(within(bounds))
-    .ordered::<Contiguous<LogIndex>>(after(bounds), "archive tiling")
-    .ordered::<NonDecreasing<Hlc>>(None, "archive HLC")      // replaces assert!
-    .covers(..until(bounds))                                  // replaces "not fully tiled"
+    let ch = Channel::chain_all(covering.into_iter().map(|m| {
+            let store = self.snapshot_store.clone();
+            Channel::defer_async(&self.handle, move || async move {
+                store.read_snapshot(m.snapshot_id, ArchiveRead).await
+                     .unwrap_or_else(|e| Channel::once(Err(e)))
+            })
+        }))
+        .take_while(not_above(bounds))     // Err items pass; the first entry ≥ until ends
+        .filter_map(skip_below(bounds))    // only drops entries ≤ after
+        .ordered::<Contiguous<LogIndex>>(bounds.after, "archive tiling");
+    let ch = match bounds.until {
+        IndexExclusive(until) => ch.covers(..until, "archive window"),
+        Unbounded => ch,
+    };
+    ch.also::<NonDecreasing<Hlc>>(None, "archive HLC")   // replaces the assert!
 }
 ```
 
-`read_snapshot` stays async (11 callers). `StableArchiveReader::stream`
-becomes synchronous.
+`ArchiveStream` stays `OrderedChannel<Result<SnapshotEntry, Error>,
+Contiguous<LogIndex>, Finite>`. `read_snapshot` stays async (11 callers);
+`StableArchiveReader::stream` becomes synchronous; `ArchiveLowerBound` becomes
+`After(Option<LogIndex>)`.
 
 ### 9.4 `HistoricalReplay`
 
 ```rust
-stable_log.range(after, until)                               // Finite scan, may have gaps
+stable_log.range(after, until)                               // (after, until), may have gaps
     .ordered::<StrictlyIncreasing<LogIndex>>(after, "stable scan")
-    .stitch(|gap| archive.stream(gap.bounds()).into_channel())
-    .ordered::<NonDecreasing<Hlc>>(None, "historical replay HLC")
-    .covers(..until)                                          // trailing gap now aborts
+    .stitch(move |gap: Gap<LogIndex>| {                      // fill (gap.after, gap.got)
+        archive.stream(ArchiveBounds { after: gap.after, until: IndexExclusive(gap.got) })
+            .into_channel()
+            .map(|r| r.map(|e| (e.global_index, e.data)))
+    })                                                       // → Contiguous
+    .covers(..until, "historical replay")                    // trailing gap now aborts
+    .also::<NonDecreasing<Hlc>>(None, "historical replay HLC")
 ```
 
 One lazy expression on the consumer's thread: no task, no second channel, no
-`block_on`, no `assert!`. The stitch fallback's hand endpoint check is replaced
-by `covers` on the fallback.
+`block_on`, no `assert!`. `Gap` becomes `{ after: Option<K>, got: K }`. The
+archive stream already `covers` its window, which replaces the fallback's hand
+endpoint check.
+
+### 9.5 Compaction merge feeder (D25)
+
+```rust
+Channel::chain_all(ids.map(|id| Channel::defer_async(&handle, move || async move {
+        store.read_snapshot(id, Compaction).await.unwrap_or_else(|e| Channel::once(Err(e)))
+    })))
+    .until(&cancel)
+```
+
+Replaces `feed_sources`, its `Feed` enum and the `for item in ch` loop that
+swallowed an aborted source. An abort now reaches `write_snapshot`, which
+refuses to finalize (`StreamTruncated`).
+
+### 9.6 Snapshot window (D24)
+
+```rust
+local_store.stream_window(lower, cutoff)                    // plain scan (lower, cutoff], no cap
+    .into_channel()
+    .take_at_least(cap, |r| r.as_ref().ok().map(|d| d.data_id.hlc()))
+    .map(index_from(next_index_start))                       // FnMut counter
+// write_snapshot(..) -> (count, first, last)
+// watermark = if count < cap { cutoff } else { last.hlc }
+```
+
+`WindowItem`, the `terminal` mutex, the `end_hlc` and `index` atomics, and the
+scan's `finishing`/`capped` state go. The empty-window path is unchanged (no
+first item → commit `cutoff` with no object).
 
 ## 10. nvzn
 
@@ -411,8 +498,9 @@ early end is an `Aborted` finite range and `ReplayDone` is not emitted.
 ### 10.2 Fold and subscribers
 
 The fold subscribes with `after = log_index_watermark()` directly. The
-subscriber fan-out uses `keyed(..) -> (Fanout, KeyedRegistry)`;
-`Subscribers::publish` returns `Stopped` instead of ignoring it.
+subscriber fan-out uses `keyed(..) -> (Fanout, KeyedRegistry)`. On
+`Stopped`, `Subscribers::publish` warns once and continues: subscribers are
+observers, and the fold's correctness does not depend on them.
 
 ## 11. Complexity budget
 
@@ -427,6 +515,7 @@ subscriber fan-out uses `keyed(..) -> (Fanout, KeyedRegistry)`;
 
 - The kind parameter on every signature (D1): verbose by design.
 - `defer_async`'s hand-off wait: one private `Source` state.
+- `also` as a runtime-only second policy, so the type names one order.
 - Two `Feed` kinds; three producer constructors.
 - `Level` wraps tokio `watch` plus private `Wakes`: two notification paths
   behind one setter.
@@ -440,8 +529,10 @@ subscriber fan-out uses `keyed(..) -> (Fanout, KeyedRegistry)`;
 - **Order violation in a resumed stream** ends the stream; no loop.
 - **Archive open error** is the first item of its phase; the consumer stops on
   `Err` as today.
-- **`defer_async` without a runtime**: construction captures the handle;
-  constructing outside a runtime panics at construction, not at first poll.
+- **`defer_async`** runs on the handle it is given; a dropped phase aborts
+  its task.
+- **Exact-cap snapshot window**: the watermark lands on the last HLC; the next
+  iteration finds `(h, cutoff]` empty and commits `cutoff`.
 - **Panic** in any producer body or deferred future: `ProducerGone`.
 - **Fan-out stopped**: `publish` returns `Stopped(item)`; the producer logs and
   stops or drops, per site.
@@ -455,11 +546,13 @@ subscriber fan-out uses `keyed(..) -> (Fanout, KeyedRegistry)`;
   use the tokio pools.
 - **Metrics/logs**: resync metrics and warnings move into `make(.., Opening)`;
   unchanged names. New `OrderViolation` labels — `archive tiling`,
-  `archive HLC`, `historical replay HLC`, `short` — surface as
+  `archive window`, `archive HLC`, `historical replay`,
+  `historical replay HLC` — surface as
   `StreamTruncated { what }` at the zslg boundary, as today.
 - **Behaviour changes**: an HLC regression is an abort, not a panic; a short
-  replay window aborts instead of ending early; `subscribe_stable_log` takes
-  `after`.
+  replay window aborts instead of ending early; a compaction source that aborts
+  fails the merge instead of shortening it; an exact-cap snapshot chunk costs
+  one empty iteration; every start bound is `after`.
 
 ## 14. Alternatives considered
 
@@ -476,6 +569,10 @@ subscriber fan-out uses `keyed(..) -> (Fanout, KeyedRegistry)`;
 | Sync `defer` | no caller (D21) |
 | Archive async + `block_on` | thread-affinity hazard (D9) |
 | Keep `watch` + `Wakes` | the value-then-wake order repeated at each writer (D23) |
+| Typed end value `Finite<R>` | its only use was the window terminal (D24) |
+| Chunk splitter (one scan → many snapshots) | Raft commits sit between chunks (D24) |
+| `IntoIterator` for `Channel` | drops the verdict; hid a compaction data-loss path (D25) |
+| Unbounded `covers` | an open bound has no end to check (D26.5) |
 
 ## 15. Testing
 
@@ -489,6 +586,10 @@ subscriber fan-out uses `keyed(..) -> (Fanout, KeyedRegistry)`;
 - `defer_async`: lazy start (no spawn before first poll), verdict delegation,
   phases open sequentially in `chain_all`.
 - `covers`: reached, short, empty-window both ways, aborted source keeps reason.
+  `also`: secondary violation aborts with its label; type unchanged.
+- `take_at_least`: below cap, exact cap, group finished past cap, `Err` items.
+- Producers: a finite body must return `Closed`; a panic aborts.
+- `compile_fail`: `for x in channel`.
 - `Segment`: open order, `chain` vs `merge`, `filter_above*`.
 - `Resumable`/`resync`: resume only on `ProducerGone`; `Cancelled` and
   `OrderViolation` end; `after` passed exactly; decline ends with previous
@@ -499,7 +600,9 @@ subscriber fan-out uses `keyed(..) -> (Fanout, KeyedRegistry)`;
 **zslg/nvzn.**
 
 - Split-HLC watermark test receives its count with a timeout.
-- Archive: tiled, gap, short, HLC regression, open error.
+- Archive: tiled, gap, short, unbounded, HLC regression, open error.
+- Compaction merge: an aborted source fails the merge.
+- Snapshot window: below cap, exact cap (one empty follow-up), capped.
 - `HistoricalReplay`: mid gap stitched, trailing gap aborts, HLC regression
   aborts.
 - Stable/unstable resync: cursor continuity, shutdown ends (no resync).
@@ -510,17 +613,22 @@ subscriber fan-out uses `keyed(..) -> (Fanout, KeyedRegistry)`;
 
 Each slice is green (tests, clippy, fmt) before the next.
 
-1. **Mechanical.** Split-HLC test fix; `FnMut` combinators; `produce_*` and
+1. **Mechanical.** Split-HLC test fix; `FnMut` combinators; remove
+   `IntoIterator`; `take_at_least`; `produce_*` with `Closed`, and
    `Feed::send_timeout` (pre-kind: plain `Channel`); migrate producer sites and
-   audit remaining `from`/`from_infinite`; `Fanout`/`FanoutConfig`/`Stopped`;
-   `Level`, private `Wakes`.
-2. **Completeness + archive.** `OrderedChannel` start → `after`,
-   `Successor::next_after`; `covers`; `defer_async`; archive declaration;
-   lazy `HistoricalReplay`; stitch fallback via `covers`.
-3. **Kinds + seam.** `Channel<T, K>`, `Feed<T, K>`, `OrderedChannel<T, P, K>`,
-   kind rules, `compile_fail` tests; `Seam` + `Segment::open` +
-   `filter_above*`, end to end on the replica path; then all signatures in
-   zslg/nvzn.
-4. **Resumption.** `Opening`, `Resumable`, `resync`; `subscribe_stable_log(after)`;
-   stable/unstable/nvzn migrated; delete `Tail`/`Ranged`/`blend_chain`,
-   `resume_on_abort`'s public form if unused, `stable_stream`.
+   audit remaining `from`/`from_infinite`; snapshot window via
+   `take_at_least` and `write_snapshot` metadata, `WindowItem` deleted;
+   `Fanout`/`FanoutConfig`/`Stopped`; `Level`, private `Wakes`.
+2. **Completeness + archive.** Exclusive starts everywhere (`after`, `Gap`,
+   `range`, `ArchiveLowerBound`), `Successor::next_after`; `covers`, `also`;
+   `defer_async`; archive declaration; compaction merge feeder; lazy
+   `HistoricalReplay`.
+3. **Kinds + seam.** `Kind`, `Channel<T, K>`, `Feed<T, K>`,
+   `OrderedChannel<T, P, K>`, kind rules, `compile_fail` tests; `Seam` +
+   `Segment::open` + `filter_above*`, end to end on the replica path; then all
+   signatures in zslg/nvzn.
+4. **Resumption.** `Opening`, `Resumable`, `resync`;
+   `subscribe_stable_log(after)`; stable/unstable/nvzn migrated; delete
+   `Tail`/`Ranged`/`blend_chain`, `resume_on_abort`'s public form if unused,
+   `stable_stream`.
+
