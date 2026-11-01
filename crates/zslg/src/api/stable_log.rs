@@ -52,7 +52,7 @@ pub(crate) trait StableLogSnapshot: Send + Sync + 'static {
     /// (`Error::StableLogGap`) rather than leaving a hole.
     async fn append(
         &self,
-        entries: Channel<Result<SnapshotEntry, crate::Error>>,
+        entries: Channel<Result<SnapshotEntry, crate::Error>, crossbeam_combinators::Finite>,
     ) -> Result<usize, crate::Error>;
 
     /// Record that the prefix is loaded up to the manifest watermark `end_hlc`.
@@ -68,7 +68,7 @@ pub(crate) trait StableLogSnapshot: Send + Sync + 'static {
     /// is to replay from your cursor and subscribe again — see
     /// the fan-out and `learner::read`.
     #[must_use]
-    fn subscribe_events(&self) -> Channel<StableLogEvent>;
+    fn subscribe_events(&self) -> Channel<StableLogEvent, crossbeam_combinators::Infinite>;
 
     /// The current watermark, level-triggered — for consumers that want log
     /// *state*, not its data. No payload crosses it and it cannot lag: a slow
@@ -87,7 +87,7 @@ pub(crate) trait StableLogSnapshot: Send + Sync + 'static {
         &self,
         after: Option<LogIndex>,
         until: LogIndex,
-    ) -> Channel<Result<(LogIndex, Data), crate::Error>>;
+    ) -> Channel<Result<(LogIndex, Data), crate::Error>, crossbeam_combinators::Finite>;
 
     /// Durably delete everything at or below `hlc_threshold`: a `WriteBatch`
     /// range-delete, fenced before returning. The threshold is clamped

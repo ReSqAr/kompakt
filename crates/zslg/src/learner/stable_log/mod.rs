@@ -122,7 +122,8 @@ use crate::ids::LogIndex;
 use crate::meta::{Data, SnapshotEntry, StableLogEvent};
 use crate::metrics::{self, LogType, OpState};
 use crossbeam_combinators::{
-    Channel, Fanout, FanoutConfig, Level, LevelSetter, OverflowPolicy, Registry, broadcast,
+    Channel, Fanout, FanoutConfig, Finite, Infinite, Level, LevelSetter, OverflowPolicy, Registry,
+    broadcast,
 };
 
 // ── key codec ───────────────────────────────────────────────────────────────
@@ -483,6 +484,7 @@ struct BatchAppender {
     rx: crossbeam_combinators::OrderedChannel<
         Result<SnapshotEntry, Error>,
         crossbeam_combinators::Contiguous<LogIndex>,
+        crossbeam_combinators::Finite,
     >,
     storage: Arc<Storage>,
     end_index: Arc<SyncMutex<Option<LogIndex>>>,
@@ -632,7 +634,10 @@ impl crate::api::StableLogSnapshot for StableLog {
         *self.end_hlc.lock()
     }
 
-    async fn append(&self, entries: Channel<Result<SnapshotEntry, Error>>) -> Result<usize, Error> {
+    async fn append(
+        &self,
+        entries: Channel<Result<SnapshotEntry, Error>, Finite>,
+    ) -> Result<usize, Error> {
         // The entire drain → encode → commit → fsync → frontier-advance →
         // broadcast loop runs on ONE blocking thread (CLAUDE.md §8; mirrors
         // `replica/log.rs::flush_loop_blocking`). The caller (`integrate_manifest`)
@@ -704,7 +709,7 @@ impl crate::api::StableLogSnapshot for StableLog {
         Ok(())
     }
 
-    fn subscribe_events(&self) -> Channel<StableLogEvent> {
+    fn subscribe_events(&self) -> Channel<StableLogEvent, Infinite> {
         self.events_registry.subscribe_infinite()
     }
 
@@ -716,7 +721,7 @@ impl crate::api::StableLogSnapshot for StableLog {
         &self,
         after: Option<LogIndex>,
         until: LogIndex,
-    ) -> Channel<Result<(LogIndex, Data), Error>> {
+    ) -> Channel<Result<(LogIndex, Data), Error>, Finite> {
         // `(after, until)`, scanned as the inclusive `[from, until)` storage
         // takes, off a blocking scan through a bounded channel.
         let from = LogIndex::next_after(after);
@@ -802,7 +807,7 @@ mod tests {
     /// sender at end-of-stream).
     fn rx_of(
         items: impl IntoIterator<Item = Result<(LogIndex, Data), Error>>,
-    ) -> Channel<Result<SnapshotEntry, Error>> {
+    ) -> Channel<Result<SnapshotEntry, Error>, Finite> {
         Channel::from_vec(
             items
                 .into_iter()

@@ -20,7 +20,7 @@ use crate::meta::{RaftState, ReplicaMembership, ReplicaStatus};
 use crate::raft::RaftStateHandle;
 use crate::replica::ReplicaLogStore;
 use crate::replica::ReplicaService;
-use crossbeam_combinators::Channel;
+use crossbeam_combinators::{Channel, Finite, Infinite};
 
 /// Control handle for a [`FaultyReplica`]. Clone freely; clones share state.
 #[derive(Clone)]
@@ -98,7 +98,10 @@ impl Replica for FaultyReplica {
     /// the rest are forwarded to the inner replica's own stream. Both outcome
     /// sources are merged onto one channel by a forwarder thread, so a wedged or
     /// failing write never blocks the ones behind it.
-    fn write(&self, input: Channel<StampedWrite>) -> Channel<Result<WriteOutcome, Error>> {
+    fn write(
+        &self,
+        input: Channel<StampedWrite, Finite>,
+    ) -> Channel<Result<WriteOutcome, Error>, Infinite> {
         let (out_tx, out_rx) = crossbeam_channel::unbounded::<Result<WriteOutcome, Error>>();
 
         let faults = self.faults.clone();
@@ -161,7 +164,7 @@ impl Replica for FaultyReplica {
             }
         });
 
-        Channel::closed(out_rx)
+        Channel::from_infinite(out_rx, "faulty replica")
     }
 
     fn subscribe_from(&self, from: Option<LogIndex>) -> crate::ordered::ReplicaStream {
@@ -187,7 +190,10 @@ pub(crate) struct ReadyReplica {
 
 #[async_trait]
 impl Replica for ReadyReplica {
-    fn write(&self, _: Channel<StampedWrite>) -> Channel<Result<WriteOutcome, Error>> {
+    fn write(
+        &self,
+        _: Channel<StampedWrite, Finite>,
+    ) -> Channel<Result<WriteOutcome, Error>, Infinite> {
         unimplemented!("ReadyReplica does not serve writes")
     }
     fn subscribe_from(&self, _: Option<LogIndex>) -> crate::ordered::ReplicaStream {
@@ -460,7 +466,10 @@ impl Replica for DuplicateReplica {
     /// exercising the resend path — then collapses the N outcomes back to one: the
     /// `Accepted` if there is one, else the first. (With dedup removed each copy now
     /// simply appends and is `Accepted`; the collapse still yields one.)
-    fn write(&self, input: Channel<StampedWrite>) -> Channel<Result<WriteOutcome, Error>> {
+    fn write(
+        &self,
+        input: Channel<StampedWrite, Finite>,
+    ) -> Channel<Result<WriteOutcome, Error>, Infinite> {
         let (out_tx, out_rx) = crossbeam_channel::unbounded::<Result<WriteOutcome, Error>>();
         let (inner_tx, inner_rx) = crossbeam_channel::unbounded::<StampedWrite>();
         let mut outcomes = self.inner.write(Channel::closed(inner_rx));
@@ -526,7 +535,7 @@ impl Replica for DuplicateReplica {
             }
         });
 
-        Channel::closed(out_rx)
+        Channel::from_infinite(out_rx, "faulty replica")
     }
 
     fn subscribe_from(&self, from: Option<LogIndex>) -> crate::ordered::ReplicaStream {

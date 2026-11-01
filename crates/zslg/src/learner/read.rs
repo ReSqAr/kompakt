@@ -157,14 +157,16 @@ impl Reader for GatedReader {
         self.inner.subscribe_stable_log(from)
     }
 
-    fn unstable_tail(&self) -> Channel<Result<Data, Error>> {
+    fn unstable_tail(&self) -> Channel<Result<Data, Error>, crossbeam_combinators::Finite> {
         if !self.ready() {
             return Channel::once(Err(self.not_ready()));
         }
         self.inner.unstable_tail()
     }
 
-    fn subscribe_unstable_tail(&self) -> Channel<Result<UnstableEvent, Error>> {
+    fn subscribe_unstable_tail(
+        &self,
+    ) -> Channel<Result<UnstableEvent, Error>, crossbeam_combinators::Infinite> {
         if !self.ready() {
             return Channel::once(Err(self.not_ready())).chain(Channel::aborted("gated reader"));
         }
@@ -235,7 +237,7 @@ fn historical_replay(
     stable_log: &dyn StableLogSnapshot,
     after: Option<LogIndex>,
     until: LogIndex,
-) -> Channel<Result<(LogIndex, Data), Error>> {
+) -> Channel<Result<(LogIndex, Data), Error>, crossbeam_combinators::Finite> {
     stable_log
         .range(after, until)
         .map(|item| {
@@ -296,7 +298,7 @@ impl Tail for StableSeam {
     type Item = Result<StableLogEvent, Error>;
     type Cut = StableCut;
 
-    fn subscribe(&self) -> Channel<Self::Item> {
+    fn subscribe(&self) -> Channel<Self::Item, crossbeam_combinators::Infinite> {
         self.stable_log.subscribe_events().map(Ok)
     }
 
@@ -311,7 +313,11 @@ impl Tail for StableSeam {
         }
     }
 
-    fn above(&self, live: Channel<Self::Item>, cut: Self::Cut) -> Channel<Self::Item> {
+    fn above(
+        &self,
+        live: Channel<Self::Item, crossbeam_combinators::Infinite>,
+        cut: Self::Cut,
+    ) -> Channel<Self::Item, crossbeam_combinators::Infinite> {
         // Drop the live overlap with the replay at the cut. The outer cursor
         // filter still advances across cycles; this keeps the seam correct on
         // its own rather than relying on that downstream pass.
@@ -329,7 +335,7 @@ impl Tail for StableSeam {
 impl Ranged<StableCut> for StableSeam {
     type Item = Result<StableLogEvent, Error>;
 
-    fn range(&self, cut: StableCut) -> Channel<Self::Item> {
+    fn range(&self, cut: StableCut) -> Channel<Self::Item, crossbeam_combinators::Finite> {
         // `at` is the first index wanted; the replay takes the exclusive start.
         let replay = historical_replay(
             Arc::clone(&self.archive),
@@ -390,7 +396,7 @@ fn resyncing_tail(
     archive: Arc<dyn StableArchiveReader>,
     stable_log: Arc<dyn StableLogSnapshot>,
     from: LogIndex,
-) -> Channel<Result<StableLogEvent, Error>> {
+) -> Channel<Result<StableLogEvent, Error>, crossbeam_combinators::Infinite> {
     let cursor = Arc::new(AtomicU64::new(from.raw()));
     let read_cursor = Arc::clone(&cursor);
 
@@ -525,7 +531,7 @@ impl Tail for UnstableSeam {
     type Item = Result<UnstableStep, Error>;
     type Cut = Option<Hlc>;
 
-    fn subscribe(&self) -> Channel<Self::Item> {
+    fn subscribe(&self) -> Channel<Self::Item, crossbeam_combinators::Infinite> {
         self.local_store
             .subscribe_unstable()
             .map(|data| Ok(UnstableStep::Entry(data)))
@@ -541,7 +547,11 @@ impl Tail for UnstableSeam {
         self.stable_log.end_hlc()
     }
 
-    fn above(&self, live: Channel<Self::Item>, cut: Self::Cut) -> Channel<Self::Item> {
+    fn above(
+        &self,
+        live: Channel<Self::Item, crossbeam_combinators::Infinite>,
+        cut: Self::Cut,
+    ) -> Channel<Self::Item, crossbeam_combinators::Infinite> {
         // Drop live entries at or below the cut: they are stable, and the
         // stable log — not the scan, which reads only above the cut — covers
         // them. `WatermarkGate` still handles the moving level; this
@@ -556,7 +566,7 @@ impl Tail for UnstableSeam {
 impl Ranged<Option<Hlc>> for UnstableSeam {
     type Item = Result<UnstableStep, Error>;
 
-    fn range(&self, cut: Option<Hlc>) -> Channel<Self::Item> {
+    fn range(&self, cut: Option<Hlc>) -> Channel<Self::Item, crossbeam_combinators::Finite> {
         let opening = Channel::once(Ok(UnstableStep::Opened(cut)));
         let scan = self
             .local_store
@@ -591,7 +601,7 @@ impl Ranged<Option<Hlc>> for UnstableSeam {
 fn resyncing_unstable_tail(
     local_store: Arc<dyn LocalStoreView>,
     stable_log: Arc<dyn StableLogSnapshot>,
-) -> Channel<Result<UnstableEvent, Error>> {
+) -> Channel<Result<UnstableEvent, Error>, crossbeam_combinators::Infinite> {
     let mut gate = WatermarkGate {
         level: stable_log.watermark(),
         emitted: None,
@@ -672,7 +682,7 @@ impl Reader for ReaderImpl {
         )
     }
 
-    fn unstable_tail(&self) -> Channel<Result<Data, Error>> {
+    fn unstable_tail(&self) -> Channel<Result<Data, Error>, crossbeam_combinators::Finite> {
         metrics::read_request(ReadSource::Unstable);
         let local_store = self.local_store.clone();
         let stable_log = self.stable_log.clone();
@@ -693,7 +703,9 @@ impl Reader for ReaderImpl {
             .until(&self.shutdown)
     }
 
-    fn subscribe_unstable_tail(&self) -> Channel<Result<UnstableEvent, Error>> {
+    fn subscribe_unstable_tail(
+        &self,
+    ) -> Channel<Result<UnstableEvent, Error>, crossbeam_combinators::Infinite> {
         metrics::read_request(ReadSource::UnstableSubscription);
         resyncing_unstable_tail(self.local_store.clone(), self.stable_log.clone())
             .until(&self.shutdown)
@@ -717,7 +729,7 @@ mod tests {
     use crate::api::QuorumCheck;
     use crate::api::{LocalStoreMut, StableLogSnapshot};
     use crate::{Reader, StableLogEvent};
-    use crossbeam_combinators::{Cancellation, Channel};
+    use crossbeam_combinators::{Cancellation, Channel, Finite, Infinite};
 
     use crate::hlc::Hlc;
     use crate::ids::{LogIndex, NodeId};
@@ -822,6 +834,7 @@ mod tests {
             _id: crate::ids::SnapshotId,
             _entries: crossbeam_combinators::Channel<
                 Result<crate::meta::SnapshotEntry, crate::Error>,
+                Finite,
             >,
             _compression: crate::object_store::CompressionLevel,
             _reason: crate::metrics::ObjectStoreReason,
@@ -833,7 +846,10 @@ mod tests {
             id: crate::ids::SnapshotId,
             _reason: crate::metrics::ObjectStoreReason,
         ) -> Result<
-            crossbeam_combinators::Channel<Result<crate::meta::SnapshotEntry, crate::Error>>,
+            crossbeam_combinators::Channel<
+                Result<crate::meta::SnapshotEntry, crate::Error>,
+                Finite,
+            >,
             crate::Error,
         > {
             let entries = self
@@ -871,7 +887,8 @@ mod tests {
     /// Pre-load a closed `Channel` for the channel-based `append`.
     fn rx_of(
         items: impl IntoIterator<Item = Result<(LogIndex, Data), crate::Error>>,
-    ) -> crossbeam_combinators::Channel<Result<crate::meta::SnapshotEntry, crate::Error>> {
+    ) -> crossbeam_combinators::Channel<Result<crate::meta::SnapshotEntry, crate::Error>, Finite>
+    {
         crossbeam_combinators::Channel::from_vec(
             items
                 .into_iter()
@@ -1223,14 +1240,14 @@ mod tests {
         }
         async fn append(
             &self,
-            _entries: Channel<Result<crate::meta::SnapshotEntry, crate::Error>>,
+            _entries: Channel<Result<crate::meta::SnapshotEntry, crate::Error>, Finite>,
         ) -> Result<usize, crate::Error> {
             unimplemented!("scripted stable log is read-only")
         }
         async fn record_end_hlc(&self, _end_hlc: Hlc) -> Result<(), crate::Error> {
             unimplemented!("scripted stable log is read-only")
         }
-        fn subscribe_events(&self) -> Channel<crate::meta::StableLogEvent> {
+        fn subscribe_events(&self) -> Channel<crate::meta::StableLogEvent, Infinite> {
             self.events_registry.subscribe_infinite()
         }
         fn watermark(&self) -> crossbeam_combinators::Level<Option<Hlc>> {
@@ -1240,7 +1257,7 @@ mod tests {
             &self,
             after: Option<LogIndex>,
             until: LogIndex,
-        ) -> Channel<Result<(LogIndex, Data), crate::Error>> {
+        ) -> Channel<Result<(LogIndex, Data), crate::Error>, Finite> {
             self.ranges
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let items: Vec<Result<(LogIndex, Data), crate::Error>> = self
@@ -1638,10 +1655,8 @@ mod tests {
         assert!(
             matches!(
                 end,
-                crossbeam_combinators::End::Aborted {
-                    reason: crossbeam_combinators::AbortReason::OrderViolation {
-                        what: "archive window"
-                    }
+                crossbeam_combinators::AbortReason::OrderViolation {
+                    what: "archive window"
                 }
             ),
             "an untiled hole ends the stream short, got: {end:?}"
@@ -1714,7 +1729,7 @@ mod tests {
 
     // ── subscribe_unstable_tail ─────────────────────────────────────────────
 
-    type UnstableStream = Channel<Result<crate::UnstableEvent, crate::Error>>;
+    type UnstableStream = Channel<Result<crate::UnstableEvent, crate::Error>, Infinite>;
 
     /// A reader over a local store and the stable log it reads its watermark
     /// from, on one `Storage` (the production shape), with the stable
@@ -1923,12 +1938,7 @@ mod tests {
             .await
             .expect("shutdown did not wake the subscription")
             .expect("recv panicked");
-        assert_eq!(
-            end,
-            crossbeam_combinators::End::Aborted {
-                reason: crossbeam_combinators::AbortReason::Cancelled,
-            }
-        );
+        assert_eq!(end, crossbeam_combinators::AbortReason::Cancelled);
     }
 
     #[derive(Debug, Clone)]
@@ -2143,12 +2153,7 @@ mod tests {
             .await
             .expect("shutdown did not wake the subscription")
             .expect("recv panicked");
-        assert_eq!(
-            end,
-            crossbeam_combinators::End::Aborted {
-                reason: crossbeam_combinators::AbortReason::Cancelled,
-            }
-        );
+        assert_eq!(end, crossbeam_combinators::AbortReason::Cancelled);
         drop(stable_log);
     }
 

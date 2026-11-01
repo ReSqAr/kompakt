@@ -79,10 +79,8 @@ async fn cancelling_the_node_stops_an_idle_fold_and_its_subscribers() {
     .expect("recv panicked");
     assert_eq!(
         end,
-        crossbeam_combinators::End::Aborted {
-            reason: crossbeam_combinators::AbortReason::ProducerGone {
-                what: "nvzn-subscribe",
-            },
+        crossbeam_combinators::AbortReason::ProducerGone {
+            what: "nvzn-subscribe",
         }
     );
 }

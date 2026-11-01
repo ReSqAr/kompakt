@@ -20,6 +20,7 @@
 use std::marker::PhantomData;
 
 use crate::channel::{AbortReason, Channel, End, Poll, ReadyBatch, Source};
+use crate::kind::{Finite, Kind};
 
 /// The position of an item in an ordered stream.
 ///
@@ -256,40 +257,39 @@ where
 ///
 /// The read surface delegates to the inner channel, so this is a drop-in
 /// replacement for `recv`/`try_recv`/`ready_batch`/`end_reason`.
-pub struct OrderedChannel<T, P>
+pub struct OrderedChannel<T, P, K>
 where
     P: OrderPolicy,
 {
-    inner: Channel<T>,
+    inner: Channel<T, K>,
     after: Option<P::Key>,
     what: &'static str,
     _policy: PhantomData<P>,
 }
 
-impl<T, P> OrderedChannel<T, P>
+impl<T, P, K> OrderedChannel<T, P, K>
 where
     T: Send + 'static,
     P: OrderPolicy,
     P::Key: Key<T>,
+    K: Kind,
 {
     /// Wrap `inner` with policy `P`, checked from `after` — the last position
     /// already delivered (exclusive; `None` = from the beginning). The
     /// violation label is the policy name; use [`named`](Self::named) at a
     /// boundary.
     #[must_use]
-    pub fn new(inner: Channel<T>, after: Option<P::Key>) -> Self {
+    pub fn new(inner: Channel<T, K>, after: Option<P::Key>) -> Self {
         Self::named(inner, after, P::LABEL)
     }
 
     /// As [`new`](Self::new), but names the boundary in an
     /// [`AbortReason::OrderViolation`].
     #[must_use]
-    pub fn named(inner: Channel<T>, after: Option<P::Key>, what: &'static str) -> Self {
+    pub fn named(inner: Channel<T, K>, after: Option<P::Key>, what: &'static str) -> Self {
         let source = OrderSource::<T, P>::new(inner.source, after, what);
         Self {
-            inner: Channel {
-                source: Box::new(source),
-            },
+            inner: Channel::wrap(Box::new(source)),
             after,
             what,
             _policy: PhantomData,
@@ -307,14 +307,12 @@ where
     {
         let source = OrderSource::<T, Q>::new(self.inner.source, after, what);
         Self {
-            inner: Channel {
-                source: Box::new(source),
-            },
+            inner: Channel::wrap(Box::new(source)),
             ..self
         }
     }
 
-    pub fn recv(&mut self) -> Result<T, End> {
+    pub fn recv(&mut self) -> Result<T, K::End> {
         self.inner.recv()
     }
 
@@ -327,26 +325,35 @@ where
     /// # Errors
     ///
     /// The verdict once the stream has ended.
-    pub fn ready_batch(&mut self, max: usize) -> Result<ReadyBatch<'_, T>, End> {
+    pub fn ready_batch(&mut self, max: usize) -> Result<ReadyBatch<'_, T, K>, K::End> {
         self.inner.ready_batch(max)
     }
 
-    pub fn end_reason(&mut self) -> End {
+    pub fn end_reason(&mut self) -> K::End {
         self.inner.end_reason()
+    }
+
+    /// The order check, applied until `cancel` fires; see [`Channel::until`].
+    #[must_use]
+    pub fn until(self, cancel: &crate::Cancellation) -> Self {
+        Self {
+            inner: self.inner.until(cancel),
+            ..self
+        }
     }
 
     /// Give up the type-level order guarantee and keep the already-checked
     /// channel.
     #[must_use]
-    pub fn into_channel(self) -> Channel<T> {
+    pub fn into_channel(self) -> Channel<T, K> {
         self.inner
     }
 }
 
-impl<T: Send + 'static> Channel<T> {
+impl<T: Send + 'static, K: Kind> Channel<T, K> {
     /// Wrap in policy `P`, checked from `after`; see [`OrderedChannel::named`].
     #[must_use]
-    pub fn ordered<P>(self, after: Option<P::Key>, what: &'static str) -> OrderedChannel<T, P>
+    pub fn ordered<P>(self, after: Option<P::Key>, what: &'static str) -> OrderedChannel<T, P, K>
     where
         P: OrderPolicy,
         P::Key: Key<T>,
@@ -355,10 +362,10 @@ impl<T: Send + 'static> Channel<T> {
     }
 }
 
-impl<T, K> OrderedChannel<T, Contiguous<K>>
+impl<T, Pos> OrderedChannel<T, Contiguous<Pos>, Finite>
 where
     T: Send + 'static,
-    K: Key<T> + Successor,
+    Pos: Key<T> + Successor,
 {
     /// Require the stream to reach `until` (exclusive): a clean end before it
     /// becomes `Aborted(OrderViolation { what })`.
@@ -368,7 +375,7 @@ where
     /// stream with no keyed item — when `next_after(after)` is. A source that
     /// aborts keeps its own reason.
     #[must_use]
-    pub fn covers(self, range: std::ops::RangeTo<K>, what: &'static str) -> Self {
+    pub fn covers(self, range: std::ops::RangeTo<Pos>, what: &'static str) -> Self {
         let source = CoversSource {
             inner: Some(self.inner.source),
             last: self.after,
@@ -377,9 +384,7 @@ where
             done: None,
         };
         Self {
-            inner: Channel {
-                source: Box::new(source),
-            },
+            inner: Channel::wrap(Box::new(source)),
             ..self
         }
     }
@@ -478,10 +483,11 @@ where
     }
 }
 
-impl<T, K> OrderedChannel<T, StrictlyIncreasing<K>>
+impl<T, Pos, K> OrderedChannel<T, StrictlyIncreasing<Pos>, K>
 where
     T: Send + 'static,
-    K: Key<T> + Successor,
+    Pos: Key<T> + Successor,
+    K: Kind,
 {
     /// Fill forward gaps from `fallback`, strengthening `StrictlyIncreasing` to
     /// `Contiguous`.
@@ -490,9 +496,9 @@ where
     /// `gap.got` is buffered and emitted after the fallback. A short, overlong,
     /// gapped, or aborted fallback fails the stitched stream.
     #[must_use]
-    pub fn stitch<F>(self, fallback: F) -> OrderedChannel<T, Contiguous<K>>
+    pub fn stitch<F>(self, fallback: F) -> OrderedChannel<T, Contiguous<Pos>, K>
     where
-        F: FnMut(Gap<K>) -> Channel<T> + Send + 'static,
+        F: FnMut(Gap<Pos>) -> Channel<T, Finite> + Send + 'static,
     {
         let stitched = StitchSource {
             primary: Some(self.inner.source),
@@ -507,13 +513,11 @@ where
             done: None,
             _key: PhantomData,
         };
-        let inner = Channel {
-            source: Box::new(stitched),
-        };
+        let inner = Channel::wrap(Box::new(stitched));
         // `StitchSource` already returns a gapless sequence. The outer
         // Contiguous check is deliberate defence-in-depth: do not remove it as
         // "redundant" without preserving the same guarantee another way.
-        OrderedChannel::<T, Contiguous<K>>::named(inner, self.after, self.what)
+        OrderedChannel::<T, Contiguous<Pos>, K>::named(inner, self.after, self.what)
     }
 }
 
@@ -545,7 +549,7 @@ impl<T, K, F> StitchSource<T, K, F>
 where
     T: Send + 'static,
     K: Key<T> + Successor,
-    F: FnMut(Gap<K>) -> Channel<T> + Send + 'static,
+    F: FnMut(Gap<K>) -> Channel<T, Finite> + Send + 'static,
 {
     fn expected(&self) -> K {
         K::next_after(self.last.or(self.after))
@@ -650,7 +654,7 @@ impl<T, K, F> Source<T> for StitchSource<T, K, F>
 where
     T: Send + 'static,
     K: Key<T> + Successor,
-    F: FnMut(Gap<K>) -> Channel<T> + Send + 'static,
+    F: FnMut(Gap<K>) -> Channel<T, Finite> + Send + 'static,
 {
     fn register<'a>(&'a mut self, sel: &mut crossbeam_channel::Select<'a>) -> usize {
         if let Some(fallback) = self.fallback_source.as_mut() {
@@ -844,7 +848,10 @@ mod tests {
         }
     }
 
-    fn strict(items: Vec<u64>, after: Option<u64>) -> OrderedChannel<u64, StrictlyIncreasing<u64>> {
+    fn strict(
+        items: Vec<u64>,
+        after: Option<u64>,
+    ) -> OrderedChannel<u64, StrictlyIncreasing<u64>, Finite> {
         OrderedChannel::new(Channel::from_vec(items), after)
     }
 
@@ -887,8 +894,10 @@ mod tests {
 
     #[test]
     fn gapless_rejects_a_gap() {
-        let mut ch =
-            OrderedChannel::<_, Contiguous<u64>>::new(Channel::from_vec(vec![1, 3]), Some(0));
+        let mut ch = OrderedChannel::<_, Contiguous<u64>, Finite>::new(
+            Channel::from_vec(vec![1, 3]),
+            Some(0),
+        );
         assert_eq!(ch.recv(), Ok(1));
         assert_eq!(
             ch.recv(),
@@ -900,8 +909,10 @@ mod tests {
 
     #[test]
     fn non_decreasing_allows_duplicates() {
-        let mut ch =
-            OrderedChannel::<_, NonDecreasing<u64>>::new(Channel::from_vec(vec![1, 1, 2]), Some(0));
+        let mut ch = OrderedChannel::<_, NonDecreasing<u64>, Finite>::new(
+            Channel::from_vec(vec![1, 1, 2]),
+            Some(0),
+        );
         assert_eq!(ch.recv(), Ok(1));
         assert_eq!(ch.recv(), Ok(1));
         assert_eq!(ch.recv(), Ok(2));
@@ -910,7 +921,7 @@ mod tests {
 
     #[test]
     fn no_key_items_pass_without_advancing() {
-        let mut ch = OrderedChannel::<_, Contiguous<u64>>::new(
+        let mut ch = OrderedChannel::<_, Contiguous<u64>, Finite>::new(
             Channel::from_vec(vec![Some(1), None, Some(2)]),
             Some(0),
         );
@@ -979,7 +990,7 @@ mod tests {
 
     #[test]
     fn stitch_passes_no_key_fallback_items() {
-        let ordered = OrderedChannel::<_, StrictlyIncreasing<u64>>::new(
+        let ordered = OrderedChannel::<_, StrictlyIncreasing<u64>, Finite>::new(
             Channel::from_vec(vec![Some(1u64), Some(4)]),
             Some(0),
         );
@@ -995,7 +1006,7 @@ mod tests {
     #[test]
     fn stitch_with_empty_fallback_aborts_instead_of_completing() {
         let mut ch = strict(vec![1, 4, 5], Some(0))
-            .stitch(|_| Channel::chain_all(Vec::<Channel<u64>>::new()));
+            .stitch(|_| Channel::chain_all(Vec::<Channel<u64, Finite>>::new()));
         assert_eq!(ch.recv(), Ok(1));
         assert_eq!(
             ch.recv(),
@@ -1040,13 +1051,8 @@ mod tests {
 
     #[test]
     fn stitch_propagates_a_fallback_abort() {
-        let mut ch = strict(vec![1, 4], Some(0)).stitch(|_| {
-            let (tx, rx) = crossbeam_channel::bounded(4);
-            tx.send(2).unwrap();
-            tx.send(3).unwrap();
-            drop(tx);
-            Channel::from_infinite(rx, "fallback")
-        });
+        let mut ch = strict(vec![1, 4], Some(0))
+            .stitch(|_| crate::channel::aborted_of(vec![2, 3], "fallback"));
         assert_eq!(ch.recv(), Ok(1));
         assert_eq!(ch.recv(), Ok(2));
         assert_eq!(ch.recv(), Ok(3));
@@ -1058,11 +1064,14 @@ mod tests {
         );
     }
 
-    fn contiguous(items: Vec<u64>, after: Option<u64>) -> OrderedChannel<u64, Contiguous<u64>> {
+    fn contiguous(
+        items: Vec<u64>,
+        after: Option<u64>,
+    ) -> OrderedChannel<u64, Contiguous<u64>, Finite> {
         Channel::from_vec(items).ordered(after, "test window")
     }
 
-    fn drain<P: OrderPolicy>(mut ch: OrderedChannel<u64, P>) -> (Vec<u64>, End)
+    fn drain<P: OrderPolicy>(mut ch: OrderedChannel<u64, P, Finite>) -> (Vec<u64>, End)
     where
         P::Key: Key<u64>,
     {
@@ -1116,10 +1125,7 @@ mod tests {
 
     #[test]
     fn covers_keeps_a_source_abort() {
-        let (tx, rx) = crossbeam_channel::bounded(2);
-        tx.send(1u64).unwrap();
-        drop(tx);
-        let ch = Channel::from_infinite(rx, "src")
+        let ch = crate::channel::aborted_of(vec![1u64], "src")
             .ordered::<Contiguous<u64>>(Some(0), "w")
             .covers(..5, "window");
         assert_eq!(
@@ -1147,7 +1153,7 @@ mod tests {
     #[test]
     fn also_guards_a_second_order_without_changing_the_type() {
         // Index order holds, the secondary (descending is a violation) trips.
-        let ch: OrderedChannel<u64, StrictlyIncreasing<u64>> =
+        let ch: OrderedChannel<u64, StrictlyIncreasing<u64>, Finite> =
             strict(vec![1, 5, 3], None).also::<NonDecreasing<u64>>(None, "secondary");
         let (got, end) = drain(ch);
         assert_eq!(got, vec![1, 5]);

@@ -122,7 +122,10 @@ impl ReplicaService {
 impl Replica for ReplicaService {
     /// Wall-clock skew is not checked here: it is enforced at ingress, against
     /// the fresh per-RPC envelope HLC rather than the write's own.
-    fn write(&self, input: Channel<StampedWrite>) -> Channel<Result<WriteOutcome, Error>> {
+    fn write(
+        &self,
+        input: Channel<StampedWrite, crossbeam_combinators::Finite>,
+    ) -> Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> {
         // No thread: the gate is a `filter_map` stage that runs when the *consumer*
         // pulls the returned channel. A rejection short-circuits onto the output; an
         // accepted write is submitted (durably, inline) and the stage yields
@@ -317,7 +320,10 @@ impl WriteSubmitter {
         Gated::Pass(data, guard)
     }
 
-    fn write(self, input: Channel<Data>) -> Channel<Result<WriteOutcome, Error>> {
+    fn write(
+        self,
+        input: Channel<Data, crossbeam_combinators::Finite>,
+    ) -> Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> {
         // Bounded: the flush loop sends here on the shared flush thread and must
         // never block it, so cap ≥ the in-flight window the writer's permits
         // enforce (a Full here is a sizing bug, not a steady state).

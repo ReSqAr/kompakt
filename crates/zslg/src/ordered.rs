@@ -5,7 +5,7 @@
 //! putting it on the item.
 
 use crossbeam_combinators::{
-    Channel, Contiguous, Key, OrderedChannel, StrictlyIncreasing, Successor,
+    Channel, Contiguous, Finite, Infinite, Key, OrderedChannel, StrictlyIncreasing, Successor,
 };
 
 use crate::error::Error;
@@ -70,29 +70,32 @@ impl Key<Result<Data, Error>> for Hlc {
 /// The replica append stream: strictly increasing indices, forward purge gaps
 /// allowed.
 pub(crate) type ReplicaStream =
-    OrderedChannel<Result<(LogIndex, Data), Error>, StrictlyIncreasing<LogIndex>>;
+    OrderedChannel<Result<(LogIndex, Data), Error>, StrictlyIncreasing<LogIndex>, Infinite>;
 
 /// Wrap a replica stream with the strict policy, after the subscriber's cursor.
 pub(crate) fn replica_stream(
-    ch: Channel<Result<(LogIndex, Data), Error>>,
+    ch: Channel<Result<(LogIndex, Data), Error>, Infinite>,
     after: Option<LogIndex>,
 ) -> ReplicaStream {
     OrderedChannel::named(ch, after, "replica subscription")
 }
 
 /// The stable-log read: gapless indices, replaying from `from` inclusive.
-pub type StableStream = OrderedChannel<Result<StableLogEvent, Error>, Contiguous<LogIndex>>;
+pub type StableStream =
+    OrderedChannel<Result<StableLogEvent, Error>, Contiguous<LogIndex>, Infinite>;
 
 /// A local-store scan (above an HLC, or a bounded window): strictly increasing
 /// `DataId`s.
-pub(crate) type LocalStoreStream = OrderedChannel<Result<Data, Error>, StrictlyIncreasing<DataId>>;
+pub(crate) type LocalStoreStream =
+    OrderedChannel<Result<Data, Error>, StrictlyIncreasing<DataId>, Finite>;
 
 /// The archive stream: gapless indices, tiled from snapshots.
-pub(crate) type ArchiveStream = OrderedChannel<Result<SnapshotEntry, Error>, Contiguous<LogIndex>>;
+pub(crate) type ArchiveStream =
+    OrderedChannel<Result<SnapshotEntry, Error>, Contiguous<LogIndex>, Finite>;
 
 /// Wrap a local-store scan with its `StrictlyIncreasing` contract.
 pub(crate) fn local_store_stream(
-    ch: Channel<Result<Data, Error>>,
+    ch: Channel<Result<Data, Error>, Finite>,
     what: &'static str,
 ) -> LocalStoreStream {
     OrderedChannel::named(ch, None, what)
@@ -101,7 +104,7 @@ pub(crate) fn local_store_stream(
 /// Wrap a stable-log stream with the gapless policy, from its inclusive start
 /// (the subscription takes `from` until it takes `after`).
 pub(crate) fn stable_stream(
-    ch: Channel<Result<StableLogEvent, Error>>,
+    ch: Channel<Result<StableLogEvent, Error>, Infinite>,
     from: LogIndex,
 ) -> StableStream {
     OrderedChannel::named(ch, from.before(), "stable log stream")

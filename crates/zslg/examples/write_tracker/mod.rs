@@ -65,7 +65,7 @@ use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crossbeam_combinators::{CancelHandle, Channel};
+use crossbeam_combinators::{CancelHandle, Channel, Kind};
 use dashmap::DashMap;
 use tokio_util::sync::CancellationToken;
 
@@ -486,7 +486,7 @@ impl WriteTracker {
 /// pool. Dropping the receiver ends the drain: the handle travels with it, and
 /// the drain is bound to its cancellation — so a quiet infinite stream cannot
 /// leave a blocking thread parked in `recv` past the receiver.
-fn drain<T: Send + 'static>(ch: Channel<T>) -> Drained<T> {
+fn drain<T: Send + 'static, K: Kind>(ch: Channel<T, K>) -> Drained<T> {
     let (handle, cancellation) = CancelHandle::new();
     let mut ch = ch.until(&cancellation);
     let (tx, rx) = tokio::sync::mpsc::channel(256);

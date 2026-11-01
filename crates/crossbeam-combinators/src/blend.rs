@@ -16,6 +16,7 @@
 //! it, and the blend does not inspect the cut.
 
 use crate::channel::Channel;
+use crate::kind::{Finite, Infinite};
 
 /// A live tail and the cut it is anchored to.
 pub trait Tail {
@@ -25,7 +26,7 @@ pub trait Tail {
     type Cut: Copy;
 
     /// Open the live subscription. Called first by [`Tail::open`].
-    fn subscribe(&self) -> Channel<Self::Item>;
+    fn subscribe(&self) -> Channel<Self::Item, Infinite>;
 
     /// Read the cut. Called second by [`Tail::open`].
     fn cut(&self) -> Self::Cut;
@@ -35,10 +36,14 @@ pub trait Tail {
     /// A pure filter: the item type does not change. The cut is how the
     /// subscription recognises the overlap; the implementation may use its own
     /// state (a cursor, a watermark) instead.
-    fn above(&self, live: Channel<Self::Item>, cut: Self::Cut) -> Channel<Self::Item>;
+    fn above(
+        &self,
+        live: Channel<Self::Item, Infinite>,
+        cut: Self::Cut,
+    ) -> Channel<Self::Item, Infinite>;
 
     /// The only ordering-safe way to obtain the live half and the cut.
-    fn open(&self) -> (Channel<Self::Item>, Self::Cut) {
+    fn open(&self) -> (Channel<Self::Item, Infinite>, Self::Cut) {
         let live = self.subscribe();
         let cut = self.cut();
         (self.above(live, cut), cut)
@@ -51,7 +56,7 @@ pub trait Tail {
     /// resuming loop needs both: opening the two halves by hand and calling
     /// `range(...).chain(live)` repeats the seam's one ordering rule outside
     /// the crate.
-    fn blend<R>(&self, ranged: &R) -> (Channel<Self::Item>, Self::Cut)
+    fn blend<R>(&self, ranged: &R) -> (Channel<Self::Item, Infinite>, Self::Cut)
     where
         Self: Sized,
         Self::Item: Send + 'static,
@@ -70,11 +75,11 @@ pub trait Ranged<C> {
     /// A finite stream covering the range through `cut`, closing only after it
     /// has been served. An abort is an incomplete range; a clean end is the
     /// domain's claim that it reached the cut.
-    fn range(&self, cut: C) -> Channel<Self::Item>;
+    fn range(&self, cut: C) -> Channel<Self::Item, Finite>;
 }
 
 /// History, then live. The chain's phase change is the handoff.
-pub fn blend_chain<T, R>(tail: &T, ranged: &R) -> Channel<T::Item>
+pub fn blend_chain<T, R>(tail: &T, ranged: &R) -> Channel<T::Item, Infinite>
 where
     T: Tail,
     R: Ranged<T::Cut, Item = T::Item>,
@@ -89,7 +94,6 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
-    use crate::End;
     use crate::channel::AbortReason;
 
     /// Records the calls `Tail::open` makes, in order.
@@ -103,9 +107,9 @@ mod tests {
         type Item = u32;
         type Cut = u32;
 
-        fn subscribe(&self) -> Channel<u32> {
+        fn subscribe(&self) -> Channel<u32, Infinite> {
             self.seen.lock().unwrap().push("subscribe");
-            Channel::from_vec(self.live.clone())
+            crate::channel::infinite_of(self.live.clone(), "live")
         }
 
         fn cut(&self) -> u32 {
@@ -113,7 +117,7 @@ mod tests {
             10
         }
 
-        fn above(&self, live: Channel<u32>, cut: u32) -> Channel<u32> {
+        fn above(&self, live: Channel<u32, Infinite>, cut: u32) -> Channel<u32, Infinite> {
             self.seen.lock().unwrap().push("above");
             live.filter_map(move |v| (v > cut).then_some(v))
         }
@@ -122,14 +126,14 @@ mod tests {
     impl Ranged<u32> for Scripted {
         type Item = u32;
 
-        fn range(&self, cut: u32) -> Channel<u32> {
+        fn range(&self, cut: u32) -> Channel<u32, Finite> {
             assert_eq!(cut, 10, "range receives the cut that open read");
             self.seen.lock().unwrap().push("range");
             Channel::from_vec(self.history.clone())
         }
     }
 
-    fn drain(mut ch: Channel<u32>) -> Vec<u32> {
+    fn drain(mut ch: Channel<u32, Infinite>) -> Vec<u32> {
         let mut out = Vec::new();
         while let Ok(v) = ch.recv() {
             out.push(v);
@@ -137,7 +141,7 @@ mod tests {
         out
     }
 
-    fn end_of(mut ch: Channel<u32>) -> End {
+    fn end_of(mut ch: Channel<u32, Infinite>) -> AbortReason {
         loop {
             match ch.recv() {
                 Ok(_) => {}
@@ -196,27 +200,25 @@ mod tests {
         impl Tail for Seam {
             type Item = u32;
             type Cut = ();
-            fn subscribe(&self) -> Channel<u32> {
+            fn subscribe(&self) -> Channel<u32, Infinite> {
                 if self.fail_live {
                     let (tx, rx) = crossbeam_channel::bounded(1);
                     drop(tx);
                     Channel::from_infinite(rx, "live")
                 } else {
-                    Channel::from_vec(vec![2])
+                    crate::channel::infinite_of(vec![2], "live")
                 }
             }
             fn cut(&self) {}
-            fn above(&self, live: Channel<u32>, _cut: ()) -> Channel<u32> {
+            fn above(&self, live: Channel<u32, Infinite>, _cut: ()) -> Channel<u32, Infinite> {
                 live
             }
         }
         impl Ranged<()> for Seam {
             type Item = u32;
-            fn range(&self, _: ()) -> Channel<u32> {
+            fn range(&self, _: ()) -> Channel<u32, Finite> {
                 if self.fail_history {
-                    let (tx, rx) = crossbeam_channel::bounded(1);
-                    drop(tx);
-                    Channel::from_infinite(rx, "history")
+                    crate::channel::aborted_of(Vec::new(), "history")
                 } else {
                     Channel::from_vec(vec![1])
                 }
@@ -229,9 +231,7 @@ mod tests {
         };
         assert_eq!(
             end_of(blend_chain(&history, &history)),
-            End::Aborted {
-                reason: AbortReason::ProducerGone { what: "history" }
-            }
+            AbortReason::ProducerGone { what: "history" }
         );
         let live = Seam {
             fail_history: false,
@@ -239,9 +239,7 @@ mod tests {
         };
         assert_eq!(
             end_of(blend_chain(&live, &live)),
-            End::Aborted {
-                reason: AbortReason::ProducerGone { what: "live" }
-            }
+            AbortReason::ProducerGone { what: "live" }
         );
     }
 
@@ -257,17 +255,17 @@ mod tests {
         impl Tail for Seam {
             type Item = Item;
             type Cut = ();
-            fn subscribe(&self) -> Channel<Item> {
-                Channel::from_vec(vec![Item::Data(2)])
+            fn subscribe(&self) -> Channel<Item, Infinite> {
+                crate::channel::infinite_of(vec![Item::Data(2)], "live")
             }
             fn cut(&self) {}
-            fn above(&self, live: Channel<Item>, _cut: ()) -> Channel<Item> {
+            fn above(&self, live: Channel<Item, Infinite>, _cut: ()) -> Channel<Item, Infinite> {
                 live
             }
         }
         impl Ranged<()> for Seam {
             type Item = Item;
-            fn range(&self, _: ()) -> Channel<Item> {
+            fn range(&self, _: ()) -> Channel<Item, Finite> {
                 Channel::from_vec(vec![Item::Data(1), Item::Done])
             }
         }

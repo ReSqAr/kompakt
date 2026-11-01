@@ -37,7 +37,7 @@ use crate::meta::{SnapshotEntry, SnapshotMetadata};
 use crate::metrics::{self, SnapshotState, SnapshotStep};
 use crate::object_store::CompressionLevel;
 use crate::quorum::{FanOutResponse, fan_out_quorum};
-use crossbeam_combinators::Channel;
+use crossbeam_combinators::{Channel, Finite};
 
 pub(in crate::leader) struct SnapshotEntryInputs<'a> {
     pub(in crate::leader) local_store: &'a dyn LocalStoreView,
@@ -136,7 +136,7 @@ pub(in crate::leader) async fn create_snapshot_entry(
         .into_channel()
         .take_at_least::<Hlc>(cap);
 
-    type PeekOk = Option<(Channel<Result<SnapshotEntry, Error>>, Hlc)>;
+    type PeekOk = Option<(Channel<Result<SnapshotEntry, Error>, Finite>, Hlc)>;
 
     // The peek: it runs before the upload starts, so an empty window creates no
     // object, and it is where a lagging stable log is caught.

@@ -40,7 +40,7 @@
 
 use crate::{RocksDBStore, Store};
 use bytes::Bytes;
-use crossbeam_combinators::Channel;
+use crossbeam_combinators::{Channel, Finite, Infinite};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use zslg::{Data, DataId, Hlc, LogIndex, StableLogEvent, UnstableEvent};
@@ -301,7 +301,7 @@ impl zslg::Reader for TestReader {
         zslg::StableStream::new(Channel::from_infinite(rx, "test-log"), from.before())
     }
 
-    fn unstable_tail(&self) -> Channel<Result<Data, zslg::Error>> {
+    fn unstable_tail(&self) -> Channel<Result<Data, zslg::Error>, Finite> {
         let items = self
             .shared
             .lock()
@@ -316,7 +316,7 @@ impl zslg::Reader for TestReader {
 
     /// One cycle of zslg's: the watermark, the staged entries above it, then
     /// live. No resync — a hang-up ends it `Aborted`.
-    fn subscribe_unstable_tail(&self) -> Channel<Result<UnstableEvent, zslg::Error>> {
+    fn subscribe_unstable_tail(&self) -> Channel<Result<UnstableEvent, zslg::Error>, Infinite> {
         let (tx, rx) = crossbeam_channel::unbounded();
 
         let shared = self.shared.lock().expect("test mutex");
@@ -409,10 +409,8 @@ mod tests {
         log.hang_up_unstable();
         assert_eq!(
             sub.recv().err(),
-            Some(crossbeam_combinators::End::Aborted {
-                reason: crossbeam_combinators::AbortReason::ProducerGone {
-                    what: "test-log unstable",
-                },
+            Some(crossbeam_combinators::AbortReason::ProducerGone {
+                what: "test-log unstable",
             })
         );
     }

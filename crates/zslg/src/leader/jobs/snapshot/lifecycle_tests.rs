@@ -111,7 +111,10 @@ async fn snapshot_refuses_to_commit_an_aborted_window() {
         fn subscribe_integrated(&self) -> watch::Receiver<()> {
             self.inner.subscribe_integrated()
         }
-        fn subscribe_unstable(&self) -> crossbeam_combinators::Channel<crate::meta::Data> {
+        fn subscribe_unstable(
+            &self,
+        ) -> crossbeam_combinators::Channel<crate::meta::Data, crossbeam_combinators::Infinite>
+        {
             self.inner.subscribe_unstable()
         }
         async fn subscription_cursor(&self, upstream: NodeId) -> Result<Option<LogIndex>, Error> {
@@ -629,7 +632,10 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
             self.inner.subscribe_integrated()
         }
 
-        fn subscribe_unstable(&self) -> crossbeam_combinators::Channel<crate::meta::Data> {
+        fn subscribe_unstable(
+            &self,
+        ) -> crossbeam_combinators::Channel<crate::meta::Data, crossbeam_combinators::Infinite>
+        {
             self.inner.subscribe_unstable()
         }
 
@@ -966,7 +972,7 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
         async fn write_snapshot(
             &self,
             id: SnapshotId,
-            entries: Channel<Result<SnapshotEntry, Error>>,
+            entries: Channel<Result<SnapshotEntry, Error>, crossbeam_combinators::Finite>,
             compression: CompressionLevel,
             _reason: crate::metrics::ObjectStoreReason,
         ) -> Result<crate::api::SnapshotWrite, Error> {
@@ -985,7 +991,8 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
             &self,
             id: SnapshotId,
             _reason: crate::metrics::ObjectStoreReason,
-        ) -> Result<Channel<Result<SnapshotEntry, Error>>, Error> {
+        ) -> Result<Channel<Result<SnapshotEntry, Error>, crossbeam_combinators::Finite>, Error>
+        {
             self.inner
                 .read_snapshot(id, crate::metrics::ObjectStoreReason::ArchiveRead)
                 .await

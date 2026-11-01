@@ -34,7 +34,10 @@ pub(crate) trait LocalStoreMut: LocalStoreView {
     /// slow commit stalls every caller, not just the one behind it.
     async fn integrate_loop(
         &self,
-        records: Channel<Result<(NodeId, LogIndex, Data), crate::Error>>,
+        records: Channel<
+            Result<(NodeId, LogIndex, Data), crate::Error>,
+            crossbeam_combinators::Finite,
+        >,
     ) -> Result<(), crate::Error>;
 
     /// Purge all local-store rows whose HLC is strictly below `threshold`.

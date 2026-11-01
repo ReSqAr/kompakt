@@ -46,7 +46,7 @@ use std::time::{Duration, Instant};
 
 use crossbeam_channel::Sender;
 
-use crossbeam_combinators::Channel;
+use crossbeam_combinators::{Channel, Infinite};
 
 /// Items pulled per timed round, split evenly across the leaves.
 const ITEMS_PER_ROUND: usize = 120_000;
@@ -58,7 +58,7 @@ const ROUNDS: usize = 9;
 /// The senders must outlive the timed loop: a leaf whose last `Sender` dropped
 /// disconnects, and the collapse would change the topology mid-measurement.
 struct Rig {
-    ch: Channel<u64>,
+    ch: Channel<u64, Infinite>,
     keepalive: Vec<Sender<u64>>,
     items: usize,
 }
@@ -67,7 +67,7 @@ struct Rig {
 /// left-leaning. Pre-filling is what keeps `ready()` from ever parking.
 fn merged(leaves: usize, per_leaf: usize) -> Rig {
     let mut keepalive = Vec::with_capacity(leaves);
-    let mut built: Option<Channel<u64>> = None;
+    let mut built: Option<Channel<u64, Infinite>> = None;
     for _ in 0..leaves {
         let (tx, rx) = crossbeam_channel::bounded::<u64>(per_leaf);
         for n in 0..per_leaf {
@@ -82,7 +82,7 @@ fn merged(leaves: usize, per_leaf: usize) -> Rig {
         });
     }
     Rig {
-        ch: built.unwrap_or_else(|| Channel::from_vec(Vec::new())),
+        ch: built.unwrap_or_else(|| Channel::aborted("bench: no leaves")),
         keepalive,
         items: leaves.saturating_mul(per_leaf),
     }

@@ -39,7 +39,7 @@ use crate::network::framing::{
     AsyncFrameSink, AsyncFrameStream, TcpFrameSink, TcpFrameStream, adopt_blocking,
 };
 use crate::network::messages::{RpcReplicaRequest, RpcRequest, WriteOutcome, WriteStreamResponse};
-use crossbeam_combinators::{AbortReason, Channel, End};
+use crossbeam_combinators::{AbortReason, Channel};
 
 /// In-flight window between the socket reader and the replica's write pipeline.
 /// Backpressure, not buffering: a peer that outruns the replica's flush loop
@@ -75,7 +75,7 @@ pub(in crate::network) async fn run_write(
     // peer is an error it retries — never a declared completion.
     let data_ch = Channel::from_infinite(data_rx, "write stream ingress");
     let drift_ch = Channel::from_infinite(drift_rx, "write stream drift");
-    let outcomes = client.write(data_ch).merge(drift_ch);
+    let outcomes = client.write(data_ch.into_finite()).merge(drift_ch);
     // `outcomes` owns everything now (§ header: a parked loop must not pin it).
     drop(client);
 
@@ -137,7 +137,7 @@ fn reader_loop(
 /// breaks.
 fn writer_loop(
     mut sink: TcpFrameSink,
-    mut outcomes: Channel<Result<crate::api::WriteOutcome, Error>>,
+    mut outcomes: Channel<Result<crate::api::WriteOutcome, Error>, crossbeam_combinators::Infinite>,
 ) {
     loop {
         let batch = match outcomes.ready_batch(MAX_BATCH) {
@@ -236,9 +236,7 @@ fn subscribe_writer_loop(mut sink: TcpFrameSink, mut items: crate::ordered::Repl
     loop {
         let batch = match items.ready_batch(MAX_BATCH) {
             Ok(batch) => batch,
-            Err(End::Aborted {
-                reason: AbortReason::OrderViolation { what },
-            }) => {
+            Err(AbortReason::OrderViolation { what }) => {
                 crate::metrics::subscription_reorder();
                 tracing::error!(
                     what,

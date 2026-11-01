@@ -210,7 +210,11 @@ fn run_replica(weak: Weak<Coordinator>, node: NodeId, mut ids_rx: Receiver<DataI
         let input = prime_stamped.merge(ids_stamped);
 
         metrics::writer_replica_reopen();
-        let mut outcomes = this.streams.router().remote(node).write(input);
+        let mut outcomes = this
+            .streams
+            .router()
+            .remote(node)
+            .write(input.into_finite());
         drop(this);
 
         while let Ok(Ok(outcome)) = outcomes.recv() {
@@ -485,6 +489,7 @@ fn fanout_state(outcome: &WriteOutcome) -> FanoutResponseState {
     reason = "test code"
 )]
 mod tests {
+    use crossbeam_combinators::{Finite, Infinite};
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -523,7 +528,10 @@ mod tests {
 
     #[async_trait]
     impl Replica for FakeReplica {
-        fn write(&self, input: Channel<StampedWrite>) -> Channel<Result<WriteOutcome, Error>> {
+        fn write(
+            &self,
+            input: Channel<StampedWrite, Finite>,
+        ) -> Channel<Result<WriteOutcome, Error>, Infinite> {
             let (tx, rx) = crossbeam_channel::unbounded();
             let resp = self.resp.clone();
             // This double measures nothing, so it drops the stamp immediately.
@@ -552,16 +560,14 @@ mod tests {
                     }
                 }
             });
-            let (ch, closer) = Channel::from(rx, "test replica");
-            closer.close();
-            ch
+            Channel::from_infinite(rx, "test replica")
         }
 
         async fn fetch_status(&self) -> Result<ReplicaStatus, Error> {
             unimplemented!()
         }
         fn subscribe_from(&self, _: Option<LogIndex>) -> crate::ordered::ReplicaStream {
-            crate::ordered::replica_stream(Channel::empty(), None)
+            crate::ordered::replica_stream(Channel::aborted("test replica"), None)
         }
         async fn subscribe_status(
             &self,

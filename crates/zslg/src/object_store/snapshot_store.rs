@@ -184,7 +184,7 @@ impl RemoteSnapshotStore {
     async fn write_snapshot_inner(
         &self,
         path: &Path,
-        mut entries: Channel<Result<SnapshotEntry, Error>>,
+        mut entries: Channel<Result<SnapshotEntry, Error>, crossbeam_combinators::Finite>,
         compression: CompressionLevel,
     ) -> Result<SnapshotWrite, Error> {
         let upload = self
@@ -273,7 +273,7 @@ impl SnapshotStore for RemoteSnapshotStore {
     async fn write_snapshot(
         &self,
         id: SnapshotId,
-        entries: Channel<Result<SnapshotEntry, Error>>,
+        entries: Channel<Result<SnapshotEntry, Error>, crossbeam_combinators::Finite>,
         compression: CompressionLevel,
         reason: crate::metrics::ObjectStoreReason,
     ) -> Result<SnapshotWrite, Error> {
@@ -294,7 +294,7 @@ impl SnapshotStore for RemoteSnapshotStore {
         &self,
         id: SnapshotId,
         reason: crate::metrics::ObjectStoreReason,
-    ) -> Result<Channel<Result<SnapshotEntry, Error>>, Error> {
+    ) -> Result<Channel<Result<SnapshotEntry, Error>, crossbeam_combinators::Finite>, Error> {
         let path = snapshot_path(id);
 
         let probe = metrics::object_store_request_probe(ObjectStoreOp::Get);
@@ -468,6 +468,7 @@ async fn list_orphans(
 )]
 mod tests {
     use crate::test_stream::ChannelTestExt as _;
+    use crossbeam_combinators::Finite;
     use std::sync::Arc;
     use std::time::{Duration, SystemTime};
 
@@ -487,7 +488,9 @@ mod tests {
     /// Pre-load a bounded channel with `records` for `write_snapshot`, the test-side
     /// mirror of the production producer tasks. The capacity covers every record so
     /// `try_send` never blocks.
-    fn entries_channel(records: Vec<SnapshotEntry>) -> Channel<Result<SnapshotEntry, Error>> {
+    fn entries_channel(
+        records: Vec<SnapshotEntry>,
+    ) -> Channel<Result<SnapshotEntry, Error>, Finite> {
         Channel::from_vec(records.into_iter().map(Ok).collect())
     }
 

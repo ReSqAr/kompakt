@@ -31,6 +31,7 @@ use crossbeam_channel::{Receiver, Select, Sender, TrySendError};
 use parking_lot::Mutex;
 
 use crate::channel::Channel;
+use crate::kind::Infinite;
 
 /// What the distribution thread does when a subscriber's queue is full.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,7 +192,7 @@ impl<T: Clone + Send + 'static> Registry<T> {
     /// # Errors
     ///
     /// [`RegistryError`] when the subscriber could not be registered.
-    pub fn subscribe(&self) -> Result<Channel<T>, RegistryError> {
+    pub fn subscribe(&self) -> Result<Channel<T, Infinite>, RegistryError> {
         subscribe(&self.register, &self.state, (), self.sub_cap, self.what)
     }
 
@@ -204,7 +205,7 @@ impl<T: Clone + Send + 'static> Registry<T> {
     /// carrying this fan-out's label, which is the cue to retry rather than to
     /// stop.
     #[must_use]
-    pub fn subscribe_infinite(&self) -> Channel<T> {
+    pub fn subscribe_infinite(&self) -> Channel<T, Infinite> {
         self.subscribe()
             .unwrap_or_else(|_| Channel::aborted(self.what))
     }
@@ -236,7 +237,7 @@ impl<K: Eq + Copy + Send + 'static, T: Clone + Send + 'static> KeyedRegistry<K, 
     /// # Errors
     ///
     /// [`RegistryError`] when the subscriber could not be registered.
-    pub fn subscribe(&self, key: K) -> Result<Channel<T>, RegistryError> {
+    pub fn subscribe(&self, key: K) -> Result<Channel<T, Infinite>, RegistryError> {
         subscribe(&self.register, &self.state, key, self.sub_cap, self.what)
     }
 
@@ -246,7 +247,7 @@ impl<K: Eq + Copy + Send + 'static, T: Clone + Send + 'static> KeyedRegistry<K, 
     /// stream that ends immediately `Aborted(ProducerGone { what })` under this
     /// fan-out's label, never `Complete`.
     #[must_use]
-    pub fn subscribe_infinite(&self, key: K) -> Channel<T> {
+    pub fn subscribe_infinite(&self, key: K) -> Channel<T, Infinite> {
         self.subscribe(key)
             .unwrap_or_else(|_| Channel::aborted(self.what))
     }
@@ -258,7 +259,7 @@ fn subscribe<K, T>(
     key: K,
     sub_cap: NonZeroUsize,
     what: &'static str,
-) -> Result<Channel<T>, RegistryError>
+) -> Result<Channel<T, Infinite>, RegistryError>
 where
     T: Clone + Send + 'static,
 {
@@ -515,7 +516,7 @@ impl Wakes {
 
     /// A wake-up on every later move; read the level after each. Infinite:
     /// it ends `Aborted` only when the owner closes or drops it.
-    pub(crate) fn subscribe(&self) -> Channel<()> {
+    pub(crate) fn subscribe(&self) -> Channel<(), Infinite> {
         let mut guard = self.subscribers.lock();
         let Some(subscribers) = guard.as_mut() else {
             return Channel::aborted(self.what);
@@ -550,7 +551,7 @@ impl Wakes {
 #[allow(clippy::unwrap_used, clippy::panic, reason = "test code")]
 mod tests {
     use super::*;
-    use crate::channel::{AbortReason, End};
+    use crate::channel::AbortReason;
 
     fn cap(n: usize) -> NonZeroUsize {
         NonZeroUsize::new(n).unwrap()
@@ -610,9 +611,7 @@ mod tests {
         assert_eq!(sub.recv().unwrap(), 1);
         assert!(matches!(
             sub.recv(),
-            Err(End::Aborted {
-                reason: AbortReason::ProducerGone { what: "test" }
-            })
+            Err(AbortReason::ProducerGone { what: "test" })
         ));
         fanout.shutdown();
     }
@@ -639,9 +638,7 @@ mod tests {
 
         assert!(matches!(
             sub.recv(),
-            Err(End::Aborted {
-                reason: AbortReason::ProducerGone { what: "test" }
-            })
+            Err(AbortReason::ProducerGone { what: "test" })
         ));
     }
 
@@ -654,9 +651,7 @@ mod tests {
         let mut sub = registry.subscribe_infinite();
         assert!(matches!(
             sub.recv(),
-            Err(End::Aborted {
-                reason: AbortReason::ProducerGone { what: "infinite" }
-            })
+            Err(AbortReason::ProducerGone { what: "infinite" })
         ));
     }
 
@@ -673,10 +668,8 @@ mod tests {
         let mut sub = registry.subscribe_infinite(0);
         assert!(matches!(
             sub.recv(),
-            Err(End::Aborted {
-                reason: AbortReason::ProducerGone {
-                    what: "keyed infinite"
-                }
+            Err(AbortReason::ProducerGone {
+                what: "keyed infinite"
             })
         ));
     }
@@ -690,9 +683,7 @@ mod tests {
         drop(fanout);
         assert!(matches!(
             sub.recv(),
-            Err(End::Aborted {
-                reason: AbortReason::ProducerGone { what: "test" }
-            })
+            Err(AbortReason::ProducerGone { what: "test" })
         ));
     }
 

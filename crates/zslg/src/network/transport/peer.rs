@@ -120,7 +120,10 @@ impl Replica for TcpPeerClient {
     /// for as long as the caller drives it. Only a *registered* peer can be
     /// written to: `Target::Direct` exists for cluster join (membership + status
     /// only), before the peer's `NodeId` is even known.
-    fn write(&self, input: Channel<StampedWrite>) -> Channel<Result<WriteOutcome, Error>> {
+    fn write(
+        &self,
+        input: Channel<StampedWrite, crossbeam_combinators::Finite>,
+    ) -> Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> {
         match &self.target {
             Target::Registered(node_id) => self.rpc_client.write(*node_id, input),
             Target::Direct(addr) => {
@@ -129,6 +132,7 @@ impl Replica for TcpPeerClient {
                 Channel::once(Err(Error::Rpc(format!(
                     "direct-dialed peer {addr:?} does not accept writes (join-time transport)"
                 ))))
+                .chain(Channel::aborted("direct-dialed peer"))
             }
         }
     }
@@ -136,7 +140,9 @@ impl Replica for TcpPeerClient {
     fn subscribe_from(&self, from: Option<LogIndex>) -> crate::ordered::ReplicaStream {
         match &self.target {
             Target::Registered(node_id) => self.rpc_client.subscribe_from(*node_id, from),
-            Target::Direct(_) => crate::ordered::replica_stream(Channel::empty(), from),
+            Target::Direct(_) => {
+                crate::ordered::replica_stream(Channel::aborted("direct-dialed peer"), from)
+            }
         }
     }
 

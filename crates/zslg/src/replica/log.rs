@@ -49,7 +49,7 @@ use crate::ids::{DataId, LogIndex};
 use crate::meta::Data;
 use crate::metrics::{self, FlushTrigger, LogType, OpState};
 use crossbeam_combinators::{
-    Channel, Fanout, FanoutConfig, OverflowPolicy, Ranged, Registry, Tail, blend_chain, broadcast,
+    Channel, Fanout, FanoutConfig, OverflowPolicy, Registry, Seam, Segment, broadcast,
 };
 
 /// Fallback sizing for [`ReplicaLogStore::open_with_flush`], the
@@ -671,12 +671,12 @@ impl ReplicaLogStore {
             log: Arc::clone(self),
             from,
         };
-        crate::ordered::replica_stream(blend_chain(&seam, &seam), from)
+        crate::ordered::replica_stream(Segment::open(&seam).chain(), from)
     }
 
     /// An empty historic phase: complete by construction — the window *was*
     /// fully served, it just held nothing.
-    fn empty_historic() -> Channel<Result<(LogIndex, Data), Error>> {
+    fn empty_historic() -> Channel<Result<(LogIndex, Data), Error>, crossbeam_combinators::Finite> {
         Channel::empty()
     }
 
@@ -685,7 +685,11 @@ impl ReplicaLogStore {
     /// distinguishes "the window was fully served" from "the scan died" — a
     /// panic here would otherwise truncate a subscriber's catch-up and still look
     /// like a clean handoff to the live tail.
-    fn pump_range(&self, from: LogIndex, to: LogIndex) -> Channel<Result<(LogIndex, Data), Error>> {
+    fn pump_range(
+        &self,
+        from: LogIndex,
+        to: LogIndex,
+    ) -> Channel<Result<(LogIndex, Data), Error>, crossbeam_combinators::Finite> {
         debug_assert!(from <= to);
         let storage = Arc::clone(&self.storage);
         Channel::produce_blocking(
@@ -774,11 +778,11 @@ struct ReplicaSeam {
     from: Option<LogIndex>,
 }
 
-impl Tail for ReplicaSeam {
+impl Seam for ReplicaSeam {
     type Item = Result<(LogIndex, Data), Error>;
     type Cut = Option<LogIndex>;
 
-    fn subscribe(&self) -> Channel<Self::Item> {
+    fn subscribe(&self) -> Channel<Self::Item, crossbeam_combinators::Infinite> {
         let live = self.log.live_registry.subscribe_infinite();
         #[cfg(test)]
         subscribe_handoff_pause();
@@ -789,18 +793,15 @@ impl Tail for ReplicaSeam {
         self.log.frontier.index()
     }
 
-    fn above(&self, live: Channel<Self::Item>, cut: Self::Cut) -> Channel<Self::Item> {
-        live.filter_map(move |item| match item {
-            Ok((idx, _)) if cut.is_some_and(|c| idx <= c) => None,
-            other => Some(other),
-        })
+    fn above(
+        &self,
+        live: Channel<Self::Item, crossbeam_combinators::Infinite>,
+        cut: Self::Cut,
+    ) -> Channel<Self::Item, crossbeam_combinators::Infinite> {
+        live.filter_above::<LogIndex>(cut)
     }
-}
 
-impl Ranged<Option<LogIndex>> for ReplicaSeam {
-    type Item = Result<(LogIndex, Data), Error>;
-
-    fn range(&self, cut: Option<LogIndex>) -> Channel<Self::Item> {
+    fn range(&self, cut: Option<LogIndex>) -> Channel<Self::Item, crossbeam_combinators::Finite> {
         let start = LogIndex::next_after(self.from);
         // How far behind this subscriber is resuming. Rising across
         // successive connects for the same peer = the deficit is diverging,

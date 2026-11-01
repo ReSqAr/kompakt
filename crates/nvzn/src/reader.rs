@@ -7,7 +7,7 @@ use crate::{
     ArcReadTransaction, ArcStore, Error, EventSet, Index, Projection, ProjectionTypeId,
     ReadTransactionExt, Ref, ResultSet, SubEventOf, Syncer, Tenant, TenantId, View, WithWireFormat,
 };
-use crossbeam_combinators::{Channel, RegistryError};
+use crossbeam_combinators::{Channel, Infinite, RegistryError};
 use std::collections::{BTreeMap, BTreeSet};
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -156,7 +156,7 @@ impl<Ev> Reader<Ev> {
     ///     let _ = reader.subscribe_stable_log::<P>();
     /// }
     /// ```
-    pub fn subscribe_stable_log<P>(&self) -> Result<Channel<Ref<P>>, Error>
+    pub fn subscribe_stable_log<P>(&self) -> Result<Channel<Ref<P>, Infinite>, Error>
     where
         P: Projection,
         for<'a> P::Event<'a>: SubEventOf<'a, Ev>,
@@ -472,7 +472,7 @@ mod tests {
             EventWriter, StopReason,
             testsupport::{NewTodoV1, Todo, TodoDeletedV1, TodoId},
         };
-        use crossbeam_combinators::End;
+        use crossbeam_combinators::{AbortReason, Infinite};
         use tokio::time::{Duration, timeout};
 
         const WAIT: Duration = Duration::from_secs(5);
@@ -515,9 +515,9 @@ mod tests {
 
         /// The next `n` receives, off the runtime: `recv` blocks.
         async fn recv_n<T: Send + 'static>(
-            ch: Channel<T>,
+            ch: Channel<T, Infinite>,
             n: usize,
-        ) -> (Channel<T>, Vec<Result<T, End>>) {
+        ) -> (Channel<T, Infinite>, Vec<Result<T, AbortReason>>) {
             timeout(
                 WAIT,
                 tokio::task::spawn_blocking(move || {
@@ -583,7 +583,7 @@ mod tests {
 
             let (_todos, got) = recv_n(todos, 2).await;
             assert_eq!(got[0], Ok(todo_ref(1)), "what was sent is still delivered");
-            assert!(matches!(got[1], Err(End::Aborted { .. })));
+            assert!(got[1].is_err());
             assert!(matches!(
                 reader.subscribe_stable_log::<Todo>().map(|_| ()),
                 Err(Error::FoldStopped(StopReason::SubscriptionAborted))
@@ -626,7 +626,7 @@ mod tests {
 
             for ch in [before, after] {
                 let (_ch, got) = recv_n(ch, 1).await;
-                assert!(matches!(got[0], Err(End::Aborted { .. })));
+                assert!(got[0].is_err());
             }
         }
 

@@ -38,7 +38,7 @@ use crate::{
     ArcStore, Error, EventSet, Projection, ProjectionTypeId, Snapshot, Tenant, TenantId, Watermark,
     WithWireFormat, WriteTransactionImpl,
 };
-use crossbeam_combinators::{AbortReason, Channel, End, Ranged, Tail};
+use crossbeam_combinators::{AbortReason, Channel, Finite, Infinite, Seam, Segment};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
@@ -495,11 +495,11 @@ struct LiveSeam {
     cancelled: crossbeam_combinators::Cancellation,
 }
 
-impl Tail for LiveSeam {
+impl Seam for LiveSeam {
     type Item = FoldItem;
     type Cut = Option<Hlc>;
 
-    fn subscribe(&self) -> Channel<Self::Item> {
+    fn subscribe(&self) -> Channel<FoldItem, Infinite> {
         self.reader
             .subscribe_unstable_tail()
             .until(&self.cancelled)
@@ -510,11 +510,15 @@ impl Tail for LiveSeam {
             })
     }
 
-    fn cut(&self) -> Self::Cut {
+    fn cut(&self) -> Option<Hlc> {
         self.reader.stable_watermark()
     }
 
-    fn above(&self, live: Channel<Self::Item>, cut: Self::Cut) -> Channel<Self::Item> {
+    fn above(
+        &self,
+        live: Channel<FoldItem, Infinite>,
+        cut: Option<Hlc>,
+    ) -> Channel<FoldItem, Infinite> {
         // Drop live entries the scan already covered. `Held` still dedups by
         // DataId above the cut; the seam does not rely on that for the overlap.
         live.filter_map(move |item| match item {
@@ -522,12 +526,11 @@ impl Tail for LiveSeam {
             other => Some(other),
         })
     }
-}
 
-impl Ranged<Option<Hlc>> for LiveSeam {
-    type Item = FoldItem;
-
-    fn range(&self, cut: Option<Hlc>) -> Channel<Self::Item> {
+    /// The stable log up to the cut, then `ReplayDone`. The subscription is
+    /// infinite, so a scan that ends before the cut ends the range aborted and
+    /// `ReplayDone` is never sent — no sentinel needed.
+    fn range(&self, cut: Option<Hlc>) -> Channel<FoldItem, Finite> {
         let Some(until) = cut else {
             return Channel::empty();
         };
@@ -535,9 +538,6 @@ impl Ranged<Option<Hlc>> for LiveSeam {
             .subscribe_stable_log(self.from)
             .into_channel()
             .until(&self.cancelled)
-            .chain(Channel::once(Err(zslg::Error::StreamTruncated {
-                what: "live scan ended before the cut".into(),
-            })))
             .take_until(move |item| matches!(item, Ok(ev) if at_or_after_cut(until, ev)))
             .filter_map(|item| match item {
                 Ok(StableLogEvent::Appended { data, .. }) => Some(FoldItem::Scan(data)),
@@ -577,7 +577,7 @@ impl<Ev: WithWireFormat> Drop for FinishScanOnDrop<'_, Ev> {
 }
 
 /// The single live consumer: stable scan, then/while the unstable tail.
-fn run<Ev: WithWireFormat>(inner: &Inner<Ev>, mut stream: Channel<FoldItem>) {
+fn run<Ev: WithWireFormat>(inner: &Inner<Ev>, mut stream: Channel<FoldItem, Infinite>) {
     let _finish = FinishScanOnDrop(inner);
     let started = Instant::now();
     let mut entries: u64 = 0;
@@ -606,12 +606,10 @@ fn run<Ev: WithWireFormat>(inner: &Inner<Ev>, mut stream: Channel<FoldItem>) {
                 scan_done(inner, entries, started);
                 return;
             }
-            Err(End::Aborted {
-                reason: AbortReason::Cancelled | AbortReason::CancelHandleDropped,
-            }) => return,
+            Err(AbortReason::Cancelled | AbortReason::CancelHandleDropped) => return,
             Err(end) => {
-                // A scan and the tail are both unrecoverable here; the `End`
-                // label says which source stopped.
+                // A scan and the tail are both unrecoverable here; the
+                // reason's label says which source stopped.
                 error!(
                     tenant = inner.tenant.name(),
                     ?end,
@@ -675,7 +673,8 @@ pub(crate) fn begin<Ev: WithWireFormat>(
     // The seam opens the live tail first and reads the stable watermark
     // second; nothing falls between them. `f`/`from` bound the scan only, so
     // reading them first is safe.
-    let (tail, until) = seam.open();
+    let segment = Segment::open(&seam);
+    let until = segment.cut();
     {
         let mut state = inner.lock();
         state.coverage = match until {
@@ -698,7 +697,7 @@ pub(crate) fn begin<Ev: WithWireFormat>(
         "live view started"
     );
 
-    let stream = seam.range(until).merge(tail);
+    let stream = segment.merge();
     let integrator = Arc::clone(inner);
     tokio::task::spawn_blocking(move || run(&integrator, stream));
 
@@ -1470,11 +1469,15 @@ mod tests {
             zslg::StableStream::new(Channel::from_infinite(rx, "stalled stable"), from.before())
         }
 
-        fn unstable_tail(&self) -> Channel<Result<Data, zslg::Error>> {
+        fn unstable_tail(
+            &self,
+        ) -> Channel<Result<Data, zslg::Error>, crossbeam_combinators::Finite> {
             Channel::from_vec(Vec::new())
         }
 
-        fn subscribe_unstable_tail(&self) -> Channel<Result<UnstableEvent, zslg::Error>> {
+        fn subscribe_unstable_tail(
+            &self,
+        ) -> Channel<Result<UnstableEvent, zslg::Error>, crossbeam_combinators::Infinite> {
             let (tx, rx) = crossbeam_channel::bounded(1);
             *self.tail.lock().expect("test mutex") = Some(tx);
             Channel::from_infinite(rx, "stalled tail")

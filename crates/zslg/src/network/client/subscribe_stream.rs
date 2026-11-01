@@ -56,7 +56,7 @@ pub(in crate::network) fn open_subscribe(
     from: Option<LogIndex>,
     capacity: std::num::NonZeroUsize,
     cancel: CancellationToken,
-) -> Channel<Result<(LogIndex, Data), Error>> {
+) -> Channel<Result<(LogIndex, Data), Error>, crossbeam_combinators::Infinite> {
     let (out_tx, out_rx) =
         crossbeam_channel::bounded::<Result<(LogIndex, Data), Error>>(capacity.get());
 

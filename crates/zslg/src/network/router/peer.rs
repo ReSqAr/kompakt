@@ -80,19 +80,25 @@ struct ErrorTransport;
 
 #[async_trait::async_trait]
 impl Replica for ErrorTransport {
-    fn write(&self, input: Channel<StampedWrite>) -> Channel<Result<WriteOutcome, Error>> {
-        // Node is shutting down: fail every write. As a pull-time map — no thread.
-        input.map(|stamped| {
-            Ok(WriteOutcome::Failed {
-                data_id: stamped.data.data_id,
-                error: Error::Shutdown,
+    fn write(
+        &self,
+        input: Channel<StampedWrite, crossbeam_combinators::Finite>,
+    ) -> Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> {
+        // Node is shutting down: fail every write (a pull-time map, no thread),
+        // then end the outcome stream as the shutdown it is — never cleanly.
+        input
+            .map(|stamped| {
+                Ok(WriteOutcome::Failed {
+                    data_id: stamped.data.data_id,
+                    error: Error::Shutdown,
+                })
             })
-        })
+            .chain(Channel::aborted("router shutting down"))
     }
 
     fn subscribe_from(&self, from: Option<LogIndex>) -> crate::ordered::ReplicaStream {
-        // Node is shutting down: a deliberately empty, already-complete stream.
-        crate::ordered::replica_stream(Channel::empty(), from)
+        // Node is shutting down: an empty subscription that ends aborted.
+        crate::ordered::replica_stream(Channel::aborted("router shutting down"), from)
     }
 
     async fn fetch_status(&self) -> Result<ReplicaStatus, crate::Error> {

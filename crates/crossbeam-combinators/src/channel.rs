@@ -59,6 +59,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crossbeam_channel::{Receiver, Select, TryRecvError};
 
+use std::marker::PhantomData;
+
+use crate::kind::{Finite, Infinite, Kind, MergeKind};
 use crate::ordered::Key;
 
 /// Why a [`Channel`] stopped yielding items.
@@ -1009,7 +1012,7 @@ impl Cancellation {
 struct ResumeOnAbort<S, T> {
     state: S,
     #[allow(clippy::type_complexity, reason = "one boxed closure, named inline")]
-    next: Box<dyn FnMut(&mut S, Option<End>) -> Option<Channel<T>> + Send>,
+    next: Box<dyn FnMut(&mut S, Option<End>) -> Option<Channel<T, Infinite>> + Send>,
     current: Option<Box<dyn Source<T>>>,
     /// The end of the segment before `current`, reported once by `end_reason`
     /// when `next` finally declines.
@@ -1089,7 +1092,13 @@ impl<S: Send + 'static, T: Send + 'static> Source<T> for ResumeOnAbort<S, T> {
         match &mut self.current {
             Some(src) => src.end_reason(),
             // `next` declined: the last segment's own verdict is the stream's.
-            None => self.last_end.unwrap_or(End::Complete),
+            // Declining the first open is still an abort: the stream is
+            // infinite, and a clean end would claim a finish it never had.
+            None => self.last_end.unwrap_or(End::Aborted {
+                reason: AbortReason::ProducerGone {
+                    what: "resume_on_abort",
+                },
+            }),
         }
     }
 }
@@ -1340,7 +1349,7 @@ struct Deferred<T> {
 #[cfg(feature = "tokio")]
 enum DeferredState<T> {
     Waiting {
-        handoff: Receiver<Channel<T>>,
+        handoff: Receiver<Box<dyn Source<T>>>,
         start: Option<Box<dyn FnOnce() -> tokio::task::AbortHandle + Send>>,
         task: Option<tokio::task::AbortHandle>,
     },
@@ -1367,8 +1376,8 @@ impl<T: Send + 'static> Deferred<T> {
             return false;
         };
         match handoff.try_recv() {
-            Ok(ch) => {
-                self.state = DeferredState::Running(ch.source);
+            Ok(source) => {
+                self.state = DeferredState::Running(source);
                 true
             }
             Err(TryRecvError::Empty) => false,
@@ -1466,11 +1475,21 @@ impl<T> Drop for Deferred<T> {
 /// let ch = crossbeam_combinators::Channel::from_vec(vec![1u32]);
 /// for item in ch {}
 /// ```
-pub struct Channel<T> {
+pub struct Channel<T, K> {
     pub(crate) source: Box<dyn Source<T>>,
+    _kind: PhantomData<K>,
 }
 
-impl<T: Send + 'static> Channel<T> {
+impl<T, K> Channel<T, K> {
+    pub(crate) fn wrap(source: Box<dyn Source<T>>) -> Self {
+        Self {
+            source,
+            _kind: PhantomData,
+        }
+    }
+}
+
+impl<T: Send + 'static> Channel<T, Finite> {
     /// Wrap a **finite** receiver, handing back the producer's [`Closer`].
     ///
     /// `what` names the producer in an [`End::Aborted`] verdict, so keep it
@@ -1490,36 +1509,13 @@ impl<T: Send + 'static> Channel<T> {
     pub fn from(rx: Receiver<T>, what: &'static str) -> (Self, Closer) {
         let (close_tx, close_rx) = crossbeam_channel::bounded(1);
         (
-            Self {
-                source: Box::new(LeafState::Alive {
-                    rx,
-                    close_rx: Some(close_rx),
-                    what,
-                }),
-            },
+            Self::wrap(Box::new(LeafState::Alive {
+                rx,
+                close_rx: Some(close_rx),
+                what,
+            })),
             Closer(close_tx),
         )
-    }
-
-    /// A stream the application expects to **never end**: socket-backed, or an
-    /// internal fan replaced wholesale on reconnect.
-    ///
-    /// There is deliberately no [`Closer`] — nothing may declare completion,
-    /// because completion is not something that happens to this stream. Any
-    /// termination is an error: [`recv`](Self::recv) reports [`End::Aborted`],
-    /// which is the consumer's cue to back off and resume from its last
-    /// position. Whether the peer closed politely, crashed, or the socket reset
-    /// is visible in the channel lifecycle and irrelevant to the caller — the
-    /// response is the same either way.
-    #[must_use]
-    pub fn from_infinite(rx: Receiver<T>, what: &'static str) -> Self {
-        Self {
-            source: Box::new(LeafState::Alive {
-                rx,
-                close_rx: None,
-                what,
-            }),
-        }
     }
 
     /// A receiver whose producer has already declared completion.
@@ -1546,6 +1542,78 @@ impl<T: Send + 'static> Channel<T> {
         Self::from_vec(vec![item])
     }
 
+    /// A complete, finite stream: everything is already here, so it closes
+    /// itself and can never be `Aborted`.
+    #[must_use]
+    pub fn from_vec(items: Vec<T>) -> Self {
+        let (tx, rx) = crossbeam_channel::bounded(items.len().max(1));
+        for item in items {
+            let _ = tx.send(item);
+        }
+        drop(tx);
+        let (ch, closer) = Self::from(rx, "from_vec");
+        closer.close();
+        ch
+    }
+
+    /// Fixed phases in order. Only the front phase is registered; when it
+    /// closes cleanly the next one is pulled. An [`End::Aborted`] or
+    /// [`End::Aborted { reason: AbortReason::Cancelled }`] phase ends the chain there and drops the remaining
+    /// phases, exactly like [`chain`](Self::chain).
+    ///
+    /// An empty phase list is an empty [`End::Complete`] stream. A single phase
+    /// is returned as-is.
+    #[must_use]
+    pub fn chain_all<I>(phases: I) -> Channel<T, Finite>
+    where
+        I: IntoIterator<Item = Channel<T, Finite>>,
+    {
+        let mut phases: VecDeque<Box<dyn Source<T>>> =
+            phases.into_iter().map(|ch| ch.source).collect();
+        if phases.len() == 1 {
+            let source = phases.pop_front().expect("checked one phase");
+            return Channel::wrap(source);
+        }
+        Channel::wrap(Box::new(ChainState::Active { phases }))
+    }
+
+    #[must_use]
+    pub fn chain<K: Kind>(self, next: Channel<T, K>) -> Channel<T, K> {
+        Channel::wrap(Box::new(ChainState::Active {
+            phases: VecDeque::from([self.source, next.source]),
+        }))
+    }
+}
+
+impl<T: Send + 'static> Channel<T, Infinite> {
+    /// View this stream as finite: the one sound widening. An infinite stream
+    /// is a finite stream that never completes, so a consumer that accepts
+    /// either kind (a `dyn` trait method cannot be generic) takes `Finite`
+    /// and an infinite caller widens. The reverse does not exist.
+    #[must_use]
+    pub fn into_finite(self) -> Channel<T, Finite> {
+        Channel::wrap(self.source)
+    }
+
+    /// A stream the application expects to **never end**: socket-backed, or an
+    /// internal fan replaced wholesale on reconnect.
+    ///
+    /// There is deliberately no [`Closer`] — nothing may declare completion,
+    /// because completion is not something that happens to this stream. Any
+    /// termination is an error: [`recv`](Self::recv) reports [`End::Aborted`],
+    /// which is the consumer's cue to back off and resume from its last
+    /// position. Whether the peer closed politely, crashed, or the socket reset
+    /// is visible in the channel lifecycle and irrelevant to the caller — the
+    /// response is the same either way.
+    #[must_use]
+    pub fn from_infinite(rx: Receiver<T>, what: &'static str) -> Self {
+        Self::wrap(Box::new(LeafState::Alive {
+            rx,
+            close_rx: None,
+            what,
+        }))
+    }
+
     /// An aborted, empty stream: `Aborted(ProducerGone { what })` immediately.
     ///
     /// Use this when a producer cannot be started (a closed registry, a full
@@ -1558,6 +1626,34 @@ impl<T: Send + 'static> Channel<T> {
         Self::from_infinite(rx, what)
     }
 
+    /// Rebuild the stream after an **abort**: `next` is called at start with
+    /// `None`, and again with the aborted segment's [`End`] after an
+    /// [`End::Aborted`] segment. It may return the next segment, or `None` to
+    /// finish. A [`End::Complete`] segment ends the stream; it is not resumed.
+    ///
+    /// This is [`chain`](Self::chain)'s resumable sibling. A chain condemns the
+    /// rest on an abort; here the caller chooses, because for a stable tail a
+    /// hung-up subscription is the signal to replay from a cursor and
+    /// resubscribe. The library makes no policy: a panic is still
+    /// [`End::Aborted`], and `next` decides whether that fault is recoverable.
+    pub fn resume_on_abort<S, F>(state: S, next: F) -> Channel<T, Infinite>
+    where
+        S: Send + 'static,
+        F: FnMut(&mut S, Option<End>) -> Option<Channel<T, Infinite>> + Send + 'static,
+    {
+        let mut source = ResumeOnAbort {
+            state,
+            next: Box::new(next),
+            current: None,
+            last_end: None,
+        };
+        // Eagerly, so `leaf_count()` is accurate before the first `register`.
+        source.start();
+        Channel::wrap(Box::new(source))
+    }
+}
+
+impl<T: Send + 'static, K: Kind> Channel<T, K> {
     /// A phase whose channel comes from an async opener, started on first use.
     ///
     /// Nothing runs at construction: the first time the stream is read (or
@@ -1572,79 +1668,36 @@ impl<T: Send + 'static> Channel<T> {
     pub fn defer_async<F, Fut>(handle: &tokio::runtime::Handle, open: F) -> Self
     where
         F: FnOnce() -> Fut + Send + 'static,
-        Fut: std::future::Future<Output = Channel<T>> + Send + 'static,
+        Fut: std::future::Future<Output = Channel<T, K>> + Send + 'static,
     {
         let (tx, handoff) = crossbeam_channel::bounded(1);
         let handle = handle.clone();
         let start: Box<dyn FnOnce() -> tokio::task::AbortHandle + Send> = Box::new(move || {
             handle
                 .spawn(async move {
-                    let _ = tx.send(open().await);
+                    let _ = tx.send(open().await.source);
                 })
                 .abort_handle()
         });
-        Self {
-            source: Box::new(Deferred {
-                state: DeferredState::Waiting {
-                    handoff,
-                    start: Some(start),
-                    task: None,
-                },
-            }),
-        }
+        Self::wrap(Box::new(Deferred {
+            state: DeferredState::Waiting {
+                handoff,
+                start: Some(start),
+                task: None,
+            },
+        }))
     }
 
-    /// A complete, finite stream: everything is already here, so it closes
-    /// itself and can never be `Aborted`.
     #[must_use]
-    pub fn from_vec(items: Vec<T>) -> Self {
-        let (tx, rx) = crossbeam_channel::bounded(items.len().max(1));
-        for item in items {
-            let _ = tx.send(item);
-        }
-        drop(tx);
-        let (ch, closer) = Channel::from(rx, "from_vec");
-        closer.close();
-        ch
-    }
-
-    /// Rebuild the stream after an **abort**: `next` is called at start with
-    /// `None`, and again with the aborted segment's [`End`] after an
-    /// [`End::Aborted`] segment. It may return the next segment, or `None` to
-    /// finish. A [`End::Complete`] segment ends the stream; it is not resumed.
-    ///
-    /// This is [`chain`](Self::chain)'s resumable sibling. A chain condemns the
-    /// rest on an abort; here the caller chooses, because for a stable tail a
-    /// hung-up subscription is the signal to replay from a cursor and
-    /// resubscribe. The library makes no policy: a panic is still
-    /// [`End::Aborted`], and `next` decides whether that fault is recoverable.
-    pub fn resume_on_abort<S, F>(state: S, next: F) -> Channel<T>
+    pub fn merge<K2: Kind>(self, other: Channel<T, K2>) -> Channel<T, <K as MergeKind<K2>>::Out>
     where
-        S: Send + 'static,
-        F: FnMut(&mut S, Option<End>) -> Option<Channel<T>> + Send + 'static,
+        K: MergeKind<K2>,
     {
-        let mut source = ResumeOnAbort {
-            state,
-            next: Box::new(next),
-            current: None,
-            last_end: None,
-        };
-        // Eagerly, so `leaf_count()` is accurate before the first `register`.
-        source.start();
-        Channel {
-            source: Box::new(source),
-        }
-    }
-
-    #[must_use]
-    pub fn merge(self, other: Channel<T>) -> Channel<T> {
-        Channel {
-            source: Box::new(MergeState::Both {
-                left: self.source,
-                right: other.source,
-                next: Side::Left,
-            }),
-        }
+        Channel::wrap(Box::new(MergeState::Both {
+            left: self.source,
+            right: other.source,
+            next: Side::Left,
+        }))
     }
 
     /// End this stream as soon as `cancel` fires, even while `recv` is
@@ -1658,64 +1711,32 @@ impl<T: Send + 'static> Channel<T> {
     /// survivor — the cancellation — and never end. Here either side ending
     /// ends the stream, and a clean [`End::Complete`] keeps its verdict.
     #[must_use]
-    pub fn until(self, cancel: &Cancellation) -> Channel<T> {
+    pub fn until(self, cancel: &Cancellation) -> Channel<T, K> {
         let Some(rx) = &cancel.rx else {
             return self;
         };
-        Channel {
-            source: Box::new(Guarded {
-                inner: self.source,
-                alive: LeafState::Alive {
-                    rx: rx.clone(),
-                    close_rx: None,
-                    what: "cancellation",
-                },
-                fired: Arc::clone(&cancel.fired),
-            }),
-        }
-    }
-
-    /// Fixed phases in order. Only the front phase is registered; when it
-    /// closes cleanly the next one is pulled. An [`End::Aborted`] or
-    /// [`End::Aborted { reason: AbortReason::Cancelled }`] phase ends the chain there and drops the remaining
-    /// phases, exactly like [`chain`](Self::chain).
-    ///
-    /// An empty phase list is an empty [`End::Complete`] stream. A single phase
-    /// is returned as-is.
-    #[must_use]
-    pub fn chain_all<I>(phases: I) -> Channel<T>
-    where
-        I: IntoIterator<Item = Channel<T>>,
-    {
-        let mut phases: VecDeque<Box<dyn Source<T>>> =
-            phases.into_iter().map(|ch| ch.source).collect();
-        if phases.len() == 1 {
-            let source = phases.pop_front().expect("checked one phase");
-            return Channel { source };
-        }
-        Channel {
-            source: Box::new(ChainState::Active { phases }),
-        }
-    }
-
-    #[must_use]
-    pub fn chain(self, next: Channel<T>) -> Channel<T> {
-        Self::chain_all([self, next])
+        Channel::wrap(Box::new(Guarded {
+            inner: self.source,
+            alive: LeafState::Alive {
+                rx: rx.clone(),
+                close_rx: None,
+                what: "cancellation",
+            },
+            fired: Arc::clone(&cancel.fired),
+        }))
     }
 
     /// Transform and filter at pull time. `f` may hold state: a channel has
     /// one consumer, so it runs on one thread at a time.
-    pub fn filter_map<U, F>(self, f: F) -> Channel<U>
+    pub fn filter_map<U, F>(self, f: F) -> Channel<U, K>
     where
         U: Send + 'static,
         F: FnMut(T) -> Option<U> + Send + 'static,
     {
-        Channel {
-            source: Box::new(FilterMap {
-                inner: self.source,
-                f: Box::new(f),
-            }),
-        }
+        Channel::wrap(Box::new(FilterMap {
+            inner: self.source,
+            f: Box::new(f),
+        }))
     }
 
     /// End the stream at the first item for which `pred` returns `false`.
@@ -1728,17 +1749,15 @@ impl<T: Send + 'static> Channel<T> {
     /// This is a consumer-imposed bound, not a producer close. The channel does
     /// not distinguish "the bound was reached" from "the source closed early";
     /// that is a domain completeness question.
-    pub fn take_while<F>(self, pred: F) -> Channel<T>
+    pub fn take_while<F>(self, pred: F) -> Channel<T, Finite>
     where
         F: FnMut(&T) -> bool + Send + 'static,
     {
-        Channel {
-            source: Box::new(TakeWhile {
-                inner: Some(self.source),
-                pred: Box::new(pred),
-                done: None,
-            }),
-        }
+        Channel::wrap(Box::new(TakeWhile {
+            inner: Some(self.source),
+            pred: Box::new(pred),
+            done: None,
+        }))
     }
 
     /// End the stream at the first item for which `pred` returns `true`.
@@ -1746,7 +1765,7 @@ impl<T: Send + 'static> Channel<T> {
     /// The matching item is consumed and dropped, like
     /// `take_while(|item| !pred(item))`. The stream then ends
     /// [`End::Complete`]; a source abort is preserved.
-    pub fn take_until<F>(self, mut pred: F) -> Channel<T>
+    pub fn take_until<F>(self, mut pred: F) -> Channel<T, Finite>
     where
         F: FnMut(&T) -> bool + Send + 'static,
     {
@@ -1760,7 +1779,7 @@ impl<T: Send + 'static> Channel<T> {
     /// `n` counts keyed items, not groups, so the last group may push the total
     /// past `n`; a group is never split. No-key items pass and do not count.
     #[must_use]
-    pub fn take_at_least<Pos: Key<T>>(self, n: std::num::NonZeroUsize) -> Channel<T> {
+    pub fn take_at_least<Pos: Key<T>>(self, n: std::num::NonZeroUsize) -> Channel<T, Finite> {
         let mut seen: usize = 0;
         let mut finishing: Option<Pos> = None;
         self.take_while(move |item| {
@@ -1784,27 +1803,25 @@ impl<T: Send + 'static> Channel<T> {
     /// stream transform, not an order policy; pair it with a contiguous policy
     /// when exact succession is required.
     #[must_use]
-    pub fn dedup_by_key<Pos: Key<T>>(self) -> Channel<T> {
-        Channel {
-            source: Box::new(DedupByKey::<T, Pos> {
-                inner: Some(self.source),
-                last: None,
-                done: None,
-            }),
-        }
+    pub fn dedup_by_key<Pos: Key<T>>(self) -> Channel<T, K> {
+        Channel::wrap(Box::new(DedupByKey::<T, Pos> {
+            inner: Some(self.source),
+            last: None,
+            done: None,
+        }))
     }
 
     /// Drop items whose key is at or below `cut`; no-key items pass. `None`
     /// keeps everything.
     #[must_use]
-    pub fn filter_above<Pos: Key<T>>(self, cut: Option<Pos>) -> Channel<T> {
+    pub fn filter_above<Pos: Key<T>>(self, cut: Option<Pos>) -> Channel<T, K> {
         self.filter_map(move |item| match (Pos::key(&item), cut) {
             (Some(key), Some(cut)) if key <= cut => None,
             _ => Some(item),
         })
     }
 
-    pub fn map<U, F>(self, mut f: F) -> Channel<U>
+    pub fn map<U, F>(self, mut f: F) -> Channel<U, K>
     where
         U: Send + 'static,
         F: FnMut(T) -> U + Send + 'static,
@@ -1812,7 +1829,13 @@ impl<T: Send + 'static> Channel<T> {
         self.filter_map(move |t| Some(f(t)))
     }
 
-    pub fn recv(&mut self) -> Result<T, End> {
+    /// Block for the next item; `Err` is the stream's verdict once it ended.
+    pub fn recv(&mut self) -> Result<T, K::End> {
+        self.recv_end().map_err(K::end)
+    }
+
+    /// `recv` with the internal verdict, before the kind narrows it.
+    pub(crate) fn recv_end(&mut self) -> Result<T, End> {
         loop {
             let leaf_count = self.source.leaf_count();
             if leaf_count == 0 {
@@ -1850,8 +1873,8 @@ impl<T: Send + 'static> Channel<T> {
 
     /// Why the stream finished, for a stream already known to have stopped.
     /// `recv` and `ready_batch` return the same verdict in their `Err`.
-    pub fn end_reason(&mut self) -> End {
-        self.source.end_reason()
+    pub fn end_reason(&mut self) -> K::End {
+        K::end(self.source.end_reason())
     }
 
     /// Block for the first item, then non-blocking drain up to `max` items.
@@ -1859,7 +1882,7 @@ impl<T: Send + 'static> Channel<T> {
     /// [`recv`](Self::recv) does; the returned iterator yields at least one
     /// item. Each subsequent `next()` calls `try_recv()`, so items that arrive
     /// while you iterate are still captured.
-    pub fn ready_batch(&mut self, max: usize) -> Result<ReadyBatch<'_, T>, End> {
+    pub fn ready_batch(&mut self, max: usize) -> Result<ReadyBatch<'_, T, K>, K::End> {
         let first = self.recv()?;
         Ok(ReadyBatch {
             channel: self,
@@ -1869,13 +1892,13 @@ impl<T: Send + 'static> Channel<T> {
     }
 }
 
-pub struct ReadyBatch<'a, T> {
-    channel: &'a mut Channel<T>,
+pub struct ReadyBatch<'a, T, K> {
+    channel: &'a mut Channel<T, K>,
     head: Option<T>,
     remaining: usize,
 }
 
-impl<T: Send + 'static> Iterator for ReadyBatch<'_, T> {
+impl<T: Send + 'static, K: Kind> Iterator for ReadyBatch<'_, T, K> {
     type Item = T;
 
     fn next(&mut self) -> Option<T> {
@@ -1896,6 +1919,38 @@ impl<T: Send + 'static> Iterator for ReadyBatch<'_, T> {
     }
 }
 
+/// Test support: an infinite channel holding `items`, whose producer is then
+/// gone — `Aborted(ProducerGone { what })` after the last item.
+#[cfg(test)]
+pub(crate) fn infinite_of<T: Send + 'static>(
+    items: Vec<T>,
+    what: &'static str,
+) -> Channel<T, Infinite> {
+    let (tx, rx) = crossbeam_channel::bounded(items.len().max(1));
+    for item in items {
+        let _ = tx.send(item);
+    }
+    drop(tx);
+    Channel::from_infinite(rx, what)
+}
+
+/// Test support: a finite channel holding `items` whose producer never closed
+/// — `Aborted(ProducerGone { what })` after the last item.
+#[cfg(test)]
+pub(crate) fn aborted_of<T: Send + 'static>(
+    items: Vec<T>,
+    what: &'static str,
+) -> Channel<T, Finite> {
+    let (tx, rx) = crossbeam_channel::bounded(items.len().max(1));
+    for item in items {
+        let _ = tx.send(item);
+    }
+    drop(tx);
+    let (ch, closer) = Channel::from(rx, what);
+    drop(closer);
+    ch
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::panic, reason = "test code")]
 mod tests {
@@ -1905,7 +1960,7 @@ mod tests {
 
     /// Most tests care about item flow, not the verdict: wrap a receiver in a
     /// channel whose producer has already declared completion.
-    fn closed<T: Send + 'static>(rx: Receiver<T>) -> Channel<T> {
+    fn closed<T: Send + 'static>(rx: Receiver<T>) -> Channel<T, Finite> {
         let (ch, closer) = Channel::from(rx, "test");
         closer.close();
         ch
@@ -1920,23 +1975,6 @@ mod tests {
         assert_eq!(ch.recv(), Ok(2));
         drop(tx);
         assert_eq!(ch.recv(), Err(End::Complete));
-    }
-
-    /// A clean segment is final: `resume_on_abort` does not call the factory
-    /// again after `Complete`.
-    #[test]
-    fn resume_on_abort_does_not_resume_after_complete() {
-        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let seen = calls.clone();
-        let mut ch = Channel::resume_on_abort(0u32, move |n, _prev| {
-            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            *n = n.saturating_add(1);
-            (*n == 1).then(|| Channel::from_vec(vec![10, 11]))
-        });
-        let got: Vec<u32> = std::iter::from_fn(|| ch.recv().ok()).collect();
-        assert_eq!(got, vec![10, 11]);
-        assert_eq!(ch.end_reason(), End::Complete);
-        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     /// The load-bearing difference from `chain`, which an aborted phase
@@ -1958,7 +1996,7 @@ mod tests {
                     drop(tx);
                     Some(Channel::from_infinite(rx, "seg"))
                 }
-                2 => Some(Channel::from_vec(vec![8])),
+                2 => Some(infinite_of(vec![8], "seg 2")),
                 _ => None,
             }
         });
@@ -1974,9 +2012,12 @@ mod tests {
                 None,
                 Some(End::Aborted {
                     reason: AbortReason::ProducerGone { what: "seg" }
+                }),
+                Some(End::Aborted {
+                    reason: AbortReason::ProducerGone { what: "seg 2" }
                 })
             ],
-            "next sees no verdict first, then only the abort"
+            "next sees no verdict first, then each segment's abort"
         );
     }
 
@@ -2101,7 +2142,7 @@ mod tests {
     fn assert_ordinals_reach(
         parts: usize,
         ordinal_to_part: &[usize],
-        build: impl Fn(Vec<Channel<u32>>) -> Channel<u32>,
+        build: impl Fn(Vec<Channel<u32, Finite>>) -> Channel<u32, Finite>,
     ) {
         for (ordinal, &part) in ordinal_to_part.iter().enumerate() {
             let planted = u32::try_from(part).unwrap().saturating_add(100);
@@ -2174,17 +2215,15 @@ mod tests {
             // is *ready*, and would win the select on its own.
             let (alive_tx, alive_rx) = crossbeam_channel::bounded::<()>(1);
             let inner = closed(rx_a).merge(closed(rx_b));
-            let mut ch = Channel {
-                source: Box::new(Guarded {
-                    inner: inner.source,
-                    alive: LeafState::Alive {
-                        rx: alive_rx,
-                        close_rx: None,
-                        what: "test guard",
-                    },
-                    fired: Arc::new(AtomicBool::new(false)),
-                }),
-            };
+            let mut ch: Channel<u32, Finite> = Channel::wrap(Box::new(Guarded {
+                inner: inner.source,
+                alive: LeafState::Alive {
+                    rx: alive_rx,
+                    close_rx: None,
+                    what: "test guard",
+                },
+                fired: Arc::new(AtomicBool::new(false)),
+            }));
 
             let mut sel = Select::new();
             ch.source.register(&mut sel);
@@ -2224,9 +2263,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "register pushed 0 ops but leaf_count() is 1")]
     fn register_leaf_count_mismatch_is_caught() {
-        let mut ch = Channel {
-            source: Box::new(UnderRegistering),
-        };
+        let mut ch: Channel<u32, Finite> = Channel::wrap(Box::new(UnderRegistering));
         let _ = ch.recv();
     }
 
@@ -2445,18 +2482,11 @@ mod tests {
         tx.send(1).unwrap();
         drop(tx); // peer closed politely — still an error to the app
         assert_eq!(ch.recv(), Ok(1));
-        assert_eq!(
-            ch.recv(),
-            Err(End::Aborted {
-                reason: AbortReason::ProducerGone { what: "socket" }
-            })
-        );
+        assert_eq!(ch.recv(), Err(AbortReason::ProducerGone { what: "socket" }));
         // Idempotent: a drain loop may ask again after the loop breaks.
         assert_eq!(
             ch.end_reason(),
-            End::Aborted {
-                reason: AbortReason::ProducerGone { what: "socket" }
-            }
+            AbortReason::ProducerGone { what: "socket" }
         );
     }
 
@@ -2472,12 +2502,7 @@ mod tests {
         let ch_i = Channel::from_infinite(rx_i, "socket");
         drop(tx_i);
         let mut ch = ch_f.merge(ch_i);
-        assert_eq!(
-            ch.recv(),
-            Err(End::Aborted {
-                reason: AbortReason::ProducerGone { what: "socket" }
-            })
-        );
+        assert_eq!(ch.recv(), Err(AbortReason::ProducerGone { what: "socket" }));
     }
 
     #[test]
@@ -2651,18 +2676,13 @@ mod tests {
 
     #[test]
     fn aborted_is_producer_gone() {
-        let mut ch = Channel::<u32>::aborted("test");
-        assert_eq!(
-            ch.recv(),
-            Err(End::Aborted {
-                reason: AbortReason::ProducerGone { what: "test" }
-            })
-        );
+        let mut ch = Channel::<u32, Infinite>::aborted("test");
+        assert_eq!(ch.recv(), Err(AbortReason::ProducerGone { what: "test" }));
     }
 
     #[test]
     fn empty_is_complete() {
-        let mut ch = Channel::<u32>::empty();
+        let mut ch = Channel::<u32, Finite>::empty();
         assert_eq!(ch.recv(), Err(End::Complete));
     }
 
@@ -2747,9 +2767,7 @@ mod tests {
         let mut ch = Channel::from_infinite(rx, "gone");
         assert!(matches!(
             ch.ready_batch(4),
-            Err(End::Aborted {
-                reason: AbortReason::ProducerGone { what: "gone" }
-            })
+            Err(AbortReason::ProducerGone { what: "gone" })
         ));
     }
 
@@ -2829,7 +2847,7 @@ mod tests {
 
     #[test]
     fn chain_all_empty_is_a_closed_stream() {
-        let mut ch: Channel<u32> = Channel::chain_all([]);
+        let mut ch: Channel<u32, Finite> = Channel::chain_all([]);
         assert_eq!(ch.recv(), Err(End::Complete));
         assert_eq!(ch.end_reason(), End::Complete);
     }
@@ -2858,14 +2876,11 @@ mod tests {
     /// the third phase's item must never reach the consumer.
     #[test]
     fn chain_all_aborts_and_drops_the_remaining_phases() {
-        let (tx_b, rx_b) = crossbeam_channel::bounded(4);
-        tx_b.send(2u32).unwrap();
-        drop(tx_b);
         let (tx_c, rx_c) = crossbeam_channel::bounded::<u32>(4);
         drop(tx_c);
         let mut ch = Channel::chain_all([
             Channel::from_vec(vec![1]),
-            Channel::from_infinite(rx_b, "middle"),
+            aborted_of(vec![2u32], "middle"),
             closed(rx_c),
         ]);
         assert_eq!(ch.recv(), Ok(1));
@@ -2954,7 +2969,7 @@ mod tests {
 
     #[test]
     fn from_vec_empty_disconnects_immediately() {
-        let mut ch: Channel<u32> = Channel::from_vec(vec![]);
+        let mut ch: Channel<u32, Finite> = Channel::from_vec(vec![]);
         assert_eq!(ch.recv(), Err(End::Complete));
     }
 
@@ -2993,7 +3008,7 @@ mod tests {
         let open = Arc::new(AtomicUsize::new(0));
         let max_open = Arc::new(AtomicUsize::new(0));
         let handle = tokio::runtime::Handle::current();
-        let phases: Vec<Channel<u32>> = (0..3u32)
+        let phases: Vec<Channel<u32, Finite>> = (0..3u32)
             .map(|i| {
                 let (open, max_open) = (Arc::clone(&open), Arc::clone(&max_open));
                 Channel::defer_async(&handle, move || async move {
@@ -3023,7 +3038,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_deferred_opener_that_dies_aborts_the_phase() {
         let handle = tokio::runtime::Handle::current();
-        let ch: Channel<u32> = Channel::defer_async(&handle, || async { panic!("open blew up") });
+        let ch: Channel<u32, Finite> =
+            Channel::defer_async(&handle, || async { panic!("open blew up") });
         let end = tokio::task::spawn_blocking(move || {
             let mut ch = ch;
             ch.recv()
@@ -3054,20 +3070,10 @@ mod tests {
                 std::thread::sleep(std::time::Duration::from_millis(50));
                 handle.cancel();
             });
-            assert_eq!(
-                ch.recv(),
-                Err(End::Aborted {
-                    reason: AbortReason::Cancelled
-                })
-            );
+            assert_eq!(ch.recv(), Err(AbortReason::Cancelled));
         });
         assert!(cancellation.is_cancelled());
-        assert_eq!(
-            ch.end_reason(),
-            End::Aborted {
-                reason: AbortReason::Cancelled
-            }
-        );
+        assert_eq!(ch.end_reason(), AbortReason::Cancelled);
     }
 
     /// A race, not a merge: a finite stream that closes ends the bound stream
@@ -3095,12 +3101,7 @@ mod tests {
         let (handle, cancellation) = CancelHandle::new();
         let mut ch = Channel::from_infinite(rx, "quiet").until(&cancellation);
         drop(handle);
-        assert_eq!(
-            ch.recv(),
-            Err(End::Aborted {
-                reason: AbortReason::CancelHandleDropped
-            })
-        );
+        assert_eq!(ch.recv(), Err(AbortReason::CancelHandleDropped));
         assert!(!cancellation.is_cancelled());
     }
 
@@ -3115,12 +3116,7 @@ mod tests {
             let mut ch = Channel::from_infinite(rx, "source").until(&cancellation);
             handle.cancel();
             drop(tx);
-            assert_eq!(
-                ch.recv(),
-                Err(End::Aborted {
-                    reason: AbortReason::Cancelled
-                })
-            );
+            assert_eq!(ch.recv(), Err(AbortReason::Cancelled));
         }
     }
 
@@ -3132,12 +3128,7 @@ mod tests {
         handle.cancel();
         handle.cancel(); // idempotent
         let mut ch = Channel::from_infinite(rx, "quiet").until(&cancellation);
-        assert_eq!(
-            ch.recv(),
-            Err(End::Aborted {
-                reason: AbortReason::Cancelled
-            })
-        );
+        assert_eq!(ch.recv(), Err(AbortReason::Cancelled));
     }
 
     /// `Cancelled` condemns an enclosing merge like `Aborted` does: the
@@ -3151,12 +3142,7 @@ mod tests {
             .until(&cancellation)
             .merge(Channel::from_infinite(rx_b, "b"));
         handle.cancel();
-        assert_eq!(
-            ch.recv(),
-            Err(End::Aborted {
-                reason: AbortReason::Cancelled
-            })
-        );
+        assert_eq!(ch.recv(), Err(AbortReason::Cancelled));
     }
 
     /// `never` binds nothing: the stream and its verdict are untouched.
@@ -3187,12 +3173,7 @@ mod tests {
             .await
             .unwrap() // the cancel must wake recv within the bound
             .unwrap();
-        assert_eq!(
-            got,
-            Err(End::Aborted {
-                reason: AbortReason::Cancelled
-            })
-        );
+        assert_eq!(got, Err(AbortReason::Cancelled));
         drop(tx);
     }
 }

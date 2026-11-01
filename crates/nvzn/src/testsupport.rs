@@ -351,11 +351,13 @@ impl zslg::Reader for FailingSyncReader {
         self.inner.subscribe_stable_log(from)
     }
 
-    fn unstable_tail(&self) -> Channel<Result<Data, zslg::Error>> {
+    fn unstable_tail(&self) -> Channel<Result<Data, zslg::Error>, crossbeam_combinators::Finite> {
         self.inner.unstable_tail()
     }
 
-    fn subscribe_unstable_tail(&self) -> Channel<Result<zslg::UnstableEvent, zslg::Error>> {
+    fn subscribe_unstable_tail(
+        &self,
+    ) -> Channel<Result<zslg::UnstableEvent, zslg::Error>, crossbeam_combinators::Infinite> {
         self.inner.subscribe_unstable_tail()
     }
 }
@@ -460,7 +462,7 @@ impl zslg::Reader for ScriptedReader {
         zslg::StableStream::new(Channel::from_infinite(rx, "scripted"), from.before())
     }
 
-    fn unstable_tail(&self) -> Channel<Result<Data, zslg::Error>> {
+    fn unstable_tail(&self) -> Channel<Result<Data, zslg::Error>, crossbeam_combinators::Finite> {
         let items = self
             .unstable
             .lock()
@@ -474,7 +476,9 @@ impl zslg::Reader for ScriptedReader {
 
     /// The staged unstable entries above the watermark, once: a scripted
     /// reader has no live leg, so the stream then ends `Aborted`.
-    fn subscribe_unstable_tail(&self) -> Channel<Result<zslg::UnstableEvent, zslg::Error>> {
+    fn subscribe_unstable_tail(
+        &self,
+    ) -> Channel<Result<zslg::UnstableEvent, zslg::Error>, crossbeam_combinators::Infinite> {
         let watermark = self.stable_watermark();
         let entries = self.unstable.lock().expect("test mutex").clone();
         let (tx, rx) = crossbeam_channel::unbounded();

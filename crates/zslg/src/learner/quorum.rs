@@ -514,7 +514,10 @@ mod tests {
             drop(tx);
             rx
         }
-        fn subscribe_unstable(&self) -> crossbeam_combinators::Channel<crate::meta::Data> {
+        fn subscribe_unstable(
+            &self,
+        ) -> crossbeam_combinators::Channel<crate::meta::Data, crossbeam_combinators::Infinite>
+        {
             crossbeam_combinators::Channel::from_infinite(
                 crossbeam_channel::never(),
                 "stub unstable",

@@ -53,7 +53,10 @@ impl LocalReplicaClient {
 
 #[async_trait::async_trait]
 impl Replica for LocalReplicaClient {
-    fn write(&self, input: Channel<StampedWrite>) -> Channel<Result<WriteOutcome, Error>> {
+    fn write(
+        &self,
+        input: Channel<StampedWrite, crossbeam_combinators::Finite>,
+    ) -> Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> {
         // Straight through, timestamp intact, so the replica service measures
         // the server→raft dispatch wait for the leader's own (self) append too.
         self.replica.write(input)

@@ -44,7 +44,7 @@ use crate::meta::{Data, RaftState, ReplicaStatus};
 use crate::raft::RaftStateHandle;
 use crate::raft::build_raft_for_test;
 use crate::raft::{NodeInfo, Raft, TypeConfig};
-use crossbeam_combinators::Channel;
+use crossbeam_combinators::{Channel, Finite, Infinite};
 use dashmap::DashMap;
 use futures::stream::BoxStream;
 use openraft::Config;
@@ -480,7 +480,10 @@ struct ReplicaOnly(Arc<dyn Replica>);
 
 #[async_trait::async_trait]
 impl Replica for ReplicaOnly {
-    fn write(&self, input: Channel<StampedWrite>) -> Channel<Result<WriteOutcome, Error>> {
+    fn write(
+        &self,
+        input: Channel<StampedWrite, Finite>,
+    ) -> Channel<Result<WriteOutcome, Error>, Infinite> {
         self.0.write(input)
     }
 
@@ -601,7 +604,10 @@ impl LivenessProbe for ProbeOnly {
 
 #[async_trait::async_trait]
 impl Replica for ProbeOnly {
-    fn write(&self, _: Channel<StampedWrite>) -> Channel<Result<WriteOutcome, Error>> {
+    fn write(
+        &self,
+        _: Channel<StampedWrite, Finite>,
+    ) -> Channel<Result<WriteOutcome, Error>, Infinite> {
         unimplemented!("ProbeOnly: replica not used")
     }
 

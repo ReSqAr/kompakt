@@ -105,7 +105,10 @@ pub(crate) trait Replica: Send + Sync + 'static {
     /// stamps at the point it hands the write over; the stamp costs an
     /// `Instant` and is never optional, because a second unstamped entry point
     /// is how the measurement silently stops covering a path.
-    fn write(&self, input: Channel<StampedWrite>) -> Channel<Result<WriteOutcome, Error>>;
+    fn write(
+        &self,
+        input: Channel<StampedWrite, crossbeam_combinators::Finite>,
+    ) -> Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite>;
 
     /// Resumable subscription to the replica's append stream.
     fn subscribe_from(&self, from: Option<LogIndex>) -> crate::ordered::ReplicaStream;

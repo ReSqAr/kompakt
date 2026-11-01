@@ -33,7 +33,7 @@ use crate::ids::APP_ID_LEN;
 use crate::metrics::{self, EntryOutcome, StopReason};
 use crate::{Error, ReadTransaction, Store, TenantId, Watermark, WriteTransactionImpl};
 use bytes::Bytes;
-use crossbeam_combinators::{AbortReason, Channel, End};
+use crossbeam_combinators::{AbortReason, Channel, Infinite};
 use std::collections::BTreeMap;
 use std::sync::Weak;
 use tokio::sync::watch;
@@ -90,7 +90,7 @@ impl FoldStop {
 /// cannot be folded; `Ok` for an end that is not a fault.
 pub(super) fn run(
     mut inputs: FoldInputs,
-    mut ch: Channel<LogItem>,
+    mut ch: Channel<LogItem, Infinite>,
     cancel: &CancellationToken,
 ) -> Result<(), Error> {
     let _span = tracing::info_span!("nvzn_fold").entered();
@@ -126,7 +126,7 @@ impl FoldInputs {
 
     fn step(
         &mut self,
-        ch: &mut Channel<LogItem>,
+        ch: &mut Channel<LogItem, Infinite>,
         cancel: &CancellationToken,
     ) -> Result<(), FoldStop> {
         if cancel.is_cancelled() {
@@ -141,7 +141,11 @@ impl FoldInputs {
 
     /// `first`, then whatever is ready without waiting, in one commit, until
     /// the commit holds `fold_commit` bytes.
-    fn fold_batch(&mut self, first: LogItem, ch: &mut Channel<LogItem>) -> Result<(), FoldStop> {
+    fn fold_batch(
+        &mut self,
+        first: LogItem,
+        ch: &mut Channel<LogItem, Infinite>,
+    ) -> Result<(), FoldStop> {
         let Some(store) = self.store.upgrade() else {
             info!("dispatcher store dropped; fold loop stopping");
             return Err(FoldStop::clean(StopReason::StoreDropped));
@@ -229,27 +233,23 @@ impl FoldInputs {
 }
 
 /// The stop for a subscription that has ended: only an abort is a fault.
-fn ended(end: End) -> FoldStop {
-    match end {
-        End::Complete => {
-            info!("stable log subscription completed; fold loop finished");
-            FoldStop::clean(StopReason::SubscriptionClosed)
+fn ended(reason: AbortReason) -> FoldStop {
+    // The subscription is infinite: every end is an abort, and only a cancel
+    // is asked for.
+    match reason {
+        AbortReason::Cancelled | AbortReason::CancelHandleDropped => {
+            info!("stable log subscription cancelled; fold loop stopping");
+            FoldStop::clean(StopReason::Cancelled)
         }
-        End::Aborted { reason } => match reason {
-            AbortReason::Cancelled | AbortReason::CancelHandleDropped => {
-                info!("stable log subscription cancelled; fold loop stopping");
-                FoldStop::clean(StopReason::Cancelled)
-            }
-            AbortReason::ProducerGone { what } => {
-                // `what` names the leaf that ended — where to look upstream.
-                info!(what, "stable log subscription ended; fold loop stopping");
-                FoldStop::failed(StopReason::SubscriptionAborted, Error::SubscriptionAborted)
-            }
-            other => {
-                info!(reason = %other, "stable log subscription aborted; fold loop stopping");
-                FoldStop::failed(StopReason::SubscriptionAborted, Error::SubscriptionAborted)
-            }
-        },
+        AbortReason::ProducerGone { what } => {
+            // `what` names the leaf that ended — where to look upstream.
+            info!(what, "stable log subscription ended; fold loop stopping");
+            FoldStop::failed(StopReason::SubscriptionAborted, Error::SubscriptionAborted)
+        }
+        other => {
+            info!(reason = %other, "stable log subscription aborted; fold loop stopping");
+            FoldStop::failed(StopReason::SubscriptionAborted, Error::SubscriptionAborted)
+        }
     }
 }
 

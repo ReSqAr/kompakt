@@ -55,7 +55,7 @@ pub(crate) trait LocalStoreView: Send + Sync + 'static {
     /// after everything already queued — the cue to rescan above the watermark
     /// and subscribe again (`learner::read`).
     #[must_use]
-    fn subscribe_unstable(&self) -> Channel<Data>;
+    fn subscribe_unstable(&self) -> Channel<Data, crossbeam_combinators::Infinite>;
 
     async fn subscription_cursor(&self, upstream: NodeId)
     -> Result<Option<LogIndex>, crate::Error>;

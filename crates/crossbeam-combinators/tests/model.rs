@@ -12,11 +12,13 @@
 //! `try_recv` and `recv` to the same result, which is the contract the routing
 //! rewrites must preserve.
 
-use crossbeam_combinators::{AbortReason, Channel, End, Feed, Ranged, Tail, blend_chain};
+use crossbeam_combinators::{
+    AbortReason, Channel, End, Feed, Finite, Infinite, Ranged, Tail, blend_chain,
+};
 use proptest::prelude::*;
 
 /// A segment with items already queued, then a disconnect without a close.
-fn aborted(items: Vec<u64>) -> Channel<u64> {
+fn aborted(items: Vec<u64>) -> Channel<u64, Infinite> {
     let (tx, rx) = crossbeam_channel::bounded(items.len().max(1));
     for item in items {
         tx.send(item).unwrap();
@@ -48,13 +50,14 @@ fn arb_node() -> impl Strategy<Value = Node> {
 }
 
 impl Node {
-    fn build(&self) -> Channel<u64> {
+    fn build(&self) -> Channel<u64, Finite> {
         match self {
             Self::Leaf(items) => Channel::from_vec(items.clone()),
             Self::Aborted => {
+                // A finite producer that never closed.
                 let (tx, rx) = crossbeam_channel::bounded::<u64>(1);
                 drop(tx);
-                Channel::from_infinite(rx, "aborted")
+                Channel::from(rx, "aborted").0
             }
             Self::Merge(a, b) => a.build().merge(b.build()),
             Self::Chain(a, b) => a.build().chain(b.build()),
@@ -194,16 +197,8 @@ proptest! {
         let got: Vec<u64> = std::iter::from_fn(|| ch.recv().ok()).collect();
         let want: Vec<u64> = segments.iter().flatten().copied().collect();
         prop_assert_eq!(got, want);
-        if segments.is_empty() {
-            prop_assert_eq!(ch.end_reason(), End::Complete);
-        } else {
-            prop_assert_eq!(
-                ch.end_reason(),
-                End::Aborted {
-                    reason: AbortReason::ProducerGone { what: "aborted" }
-                }
-            );
-        }
+        let what = if segments.is_empty() { "resume_on_abort" } else { "aborted" };
+        prop_assert_eq!(ch.end_reason(), AbortReason::ProducerGone { what });
     }
 
     #[test]
@@ -252,15 +247,15 @@ impl Tail for TestSeam {
     type Item = u64;
     type Cut = u64;
 
-    fn subscribe(&self) -> Channel<u64> {
-        Channel::from_vec(self.live.clone())
+    fn subscribe(&self) -> Channel<u64, Infinite> {
+        aborted(self.live.clone())
     }
 
     fn cut(&self) -> u64 {
         self.cut
     }
 
-    fn above(&self, live: Channel<u64>, cut: u64) -> Channel<u64> {
+    fn above(&self, live: Channel<u64, Infinite>, cut: u64) -> Channel<u64, Infinite> {
         live.filter_map(move |v| (v > cut).then_some(v))
     }
 }
@@ -268,7 +263,7 @@ impl Tail for TestSeam {
 impl Ranged<u64> for TestSeam {
     type Item = u64;
 
-    fn range(&self, cut: u64) -> Channel<u64> {
+    fn range(&self, cut: u64) -> Channel<u64, Finite> {
         assert_eq!(cut, self.cut);
         Channel::from_vec(self.history.clone())
     }

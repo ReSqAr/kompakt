@@ -7,7 +7,7 @@
 //! stream owns — so dropping a stream on a quiet infinite channel cannot leave a
 //! blocking thread parked in `recv` and hang runtime shutdown.
 
-use crossbeam_combinators::{CancelHandle, Channel, Key, OrderPolicy, OrderedChannel};
+use crossbeam_combinators::{CancelHandle, Channel, Key, Kind, OrderPolicy, OrderedChannel};
 use futures::StreamExt;
 use futures::stream::BoxStream;
 
@@ -19,7 +19,7 @@ pub(crate) trait ChannelTestExt<T> {
     fn into_test_stream(self) -> BoxStream<'static, T>;
 }
 
-impl<T: Send + 'static> ChannelTestExt<T> for Channel<T> {
+impl<T: Send + 'static, K: Kind> ChannelTestExt<T> for Channel<T, K> {
     fn items(mut self) -> impl Iterator<Item = T> + Send {
         std::iter::from_fn(move || self.recv().ok())
     }
@@ -44,7 +44,7 @@ impl<T: Send + 'static> ChannelTestExt<T> for Channel<T> {
     }
 }
 
-impl<T: Send + 'static, P> ChannelTestExt<T> for OrderedChannel<T, P>
+impl<T: Send + 'static, P, K: Kind> ChannelTestExt<T> for OrderedChannel<T, P, K>
 where
     P: OrderPolicy,
     P::Key: Key<T>,

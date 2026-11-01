@@ -147,7 +147,7 @@ impl ReplicationSubscriber {
         // must be errors, because `manager` escalates its backoff ladder and
         // logs only on `Err`; returning `Ok` here re-subscribed every 250 ms
         // in silence, never climbing toward REPLICATION_MAX_BACKOFF.
-        match self.local_store.integrate_loop(stream).await {
+        match self.local_store.integrate_loop(stream.into_finite()).await {
             Ok(()) => Err(Error::subscription_ended(
                 peer_id,
                 "upstream declared the stream complete, but a \
@@ -186,7 +186,7 @@ mod tests {
     use crate::ids::LogIndex;
     use crate::meta::{Data, ReplicaStatus};
     use crate::tests::{fresh_local, make_meta, upstream as upstream_id};
-    use crossbeam_combinators::Channel;
+    use crossbeam_combinators::{Channel, Finite, Infinite};
 
     /// Drive a subscriber whose fake upstream declares completion. Even a
     /// *declared* close is an error (a subscription cannot complete), so these
@@ -221,7 +221,10 @@ mod tests {
 
     #[async_trait]
     impl Replica for FakeUpstreamReplica {
-        fn write(&self, _: Channel<StampedWrite>) -> Channel<Result<WriteOutcome, Error>> {
+        fn write(
+            &self,
+            _: Channel<StampedWrite, Finite>,
+        ) -> Channel<Result<WriteOutcome, Error>, Infinite> {
             unimplemented!()
         }
         async fn fetch_status(&self) -> Result<ReplicaStatus, Error> {
@@ -235,7 +238,8 @@ mod tests {
                         .into_iter()
                         .map(|(idx, data)| Ok((idx, data)))
                         .collect(),
-                ),
+                )
+                .chain(Channel::aborted("test replica")),
                 None,
             )
         }
@@ -252,7 +256,10 @@ mod tests {
 
     #[async_trait]
     impl Replica for DyingUpstreamReplica {
-        fn write(&self, _: Channel<StampedWrite>) -> Channel<Result<WriteOutcome, Error>> {
+        fn write(
+            &self,
+            _: Channel<StampedWrite, Finite>,
+        ) -> Channel<Result<WriteOutcome, Error>, Infinite> {
             unimplemented!()
         }
         async fn fetch_status(&self) -> Result<ReplicaStatus, Error> {

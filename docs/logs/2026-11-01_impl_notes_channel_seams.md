@@ -102,3 +102,41 @@ post-implementation doc. Not a design doc; the design is
   use `CARGO_INCREMENTAL=0`; with that, slice 2 is green.
 
 ## Slice 3
+- **The kinds caught four real bugs on first compile.** Each returned a
+  finite stream where a subscription was owed, which the old single-type
+  channel allowed silently (a clean `Complete` where a consumer expects a
+  subscription never to end): `ErrorTransport::write` (a finite map; now
+  chained with `Channel::aborted("router shutting down")`),
+  `ErrorTransport::subscribe_from` and the direct-dialed `subscribe_from`
+  (both `Channel::empty()`; now `Channel::aborted(..)`), and the direct-dialed
+  `write` (`once(Err)` with no infinite tail; now `.chain(Channel::aborted(
+  "direct-dialed peer"))`).
+- **`into_finite()` is new, not in the design.** `dyn` APIs that accept either
+  kind (`integrate_loop`, the coordinator's and stream handler's `write`
+  input) take `Channel<_, Finite>`; an infinite subscription is widened with
+  `into_finite()`, the only sound direction (an infinite stream never
+  reports `Complete`, so nothing can be misread).
+- **`resume_on_abort` now aborts when the first open is declined** (it used to
+  look like a clean `Complete`, which an infinite consumer could not tell from
+  success). The old test that resumed after `Complete` is deleted: an infinite
+  stream cannot complete.
+- **`StopReason::SubscriptionClosed` is deleted.** The fold's input is an
+  infinite channel, so a clean end is unrepresentable; the variant was only
+  reachable from `End::Complete`. Its metric label `subscription_closed`
+  disappears with it (a dashboard keyed on it would go quiet).
+- **The live range's sentinel is gone** (design §10.1). `LiveSeam` now
+  implements `Seam`; `range` ends the infinite stable subscription with
+  `take_until`, so a scan that stops before the cut aborts the range, and
+  `begin` uses `Segment::open(&seam).cut()` / `.merge()`. The
+  `FoldItem::ScanFailed` for the old `StreamTruncated` sentinel is still used
+  for error items on the stream itself.
+- **Test doubles that returned a closed channel from an infinite signature**
+  (`Channel::closed(out_rx)` in the faulty replicas, `from(rx)` + `close()` in
+  the coordinator's fake) now use `Channel::from_infinite`; their "end" is a
+  `ProducerGone` abort, which is what a real dropped connection looks like.
+- **A crate-level dependency gate.** nvzn's `crossbeam_channel` is only used by
+  test doubles and the `testing` feature; `-D unused-crate-dependencies` needed
+  a `cfg(not(any(test, feature = "testing")))` `use … as _`.
+- **Not done in slice 3: the network bridges** (`subscribe_stream.rs`,
+  `write_stream.rs`) still wire by hand rather than via
+  `produce_async::<_, Infinite>`; see the open items in the post doc.

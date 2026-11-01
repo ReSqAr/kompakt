@@ -49,8 +49,10 @@ mod blend;
 mod channel;
 mod fanout;
 mod feed;
+mod kind;
 mod level;
 mod ordered;
+mod seam;
 
 pub use blend::{Ranged, Tail, blend_chain};
 pub use channel::{AbortReason, CancelHandle, Cancellation, Channel, Closer, End, ReadyBatch};
@@ -59,7 +61,9 @@ pub use fanout::{
     TryPublishError, broadcast, keyed,
 };
 pub use feed::{Closed, Disconnected, Feed};
+pub use kind::{Finite, Infinite, Kind, MergeKind};
 pub use level::{Level, LevelGone, LevelSetter};
 pub use ordered::{
     Contiguous, Gap, Key, NonDecreasing, OrderPolicy, OrderedChannel, StrictlyIncreasing, Successor,
 };
+pub use seam::{Seam, Segment};

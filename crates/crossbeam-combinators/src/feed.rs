@@ -21,11 +21,16 @@ use std::time::Duration;
 use crossbeam_channel::{SendTimeoutError, Sender, TrySendError};
 
 use crate::channel::{Channel, Closer};
+use crate::kind::{Finite, Kind};
 
-/// The producer's handle on one [`Channel`].
-pub struct Feed<T> {
+/// The producer's handle on one [`Channel`] of kind `K`. A finite feed ends
+/// with [`close`](Feed::close); an infinite one has nothing to close — its
+/// stream ends `Aborted(ProducerGone)` when the feed is dropped.
+pub struct Feed<T, K> {
     tx: Sender<T>,
-    closer: Closer,
+    /// Always `Some` for a finite feed, `None` for an infinite one.
+    closer: Option<Closer>,
+    _kind: std::marker::PhantomData<K>,
 }
 
 /// Proof that a [`Feed`] was closed: only [`Feed::close`] makes one.
@@ -37,18 +42,25 @@ pub struct Closed(());
 #[derive(Debug, PartialEq, Eq)]
 pub struct Disconnected<T>(pub T);
 
-impl<T: Send + 'static> Feed<T> {
+impl<T: Send + 'static, K: Kind> Feed<T, K> {
     /// Create the write/read pair. The caller spawns the producer body; prefer
     /// [`Channel::produce_blocking`] when a blocking-pool body will do.
     #[must_use]
-    pub fn channel(cap: usize, what: &'static str) -> (Self, Channel<T>) {
+    pub fn channel(cap: usize, what: &'static str) -> (Self, Channel<T, K>) {
         let (tx, rx) = crossbeam_channel::bounded(cap);
-        let (ch, closer) = Channel::from(rx, what);
-        (Self { tx, closer }, ch)
+        let (ch, closer) = K::open(rx, what);
+        (
+            Self {
+                tx,
+                closer,
+                _kind: std::marker::PhantomData,
+            },
+            ch,
+        )
     }
 }
 
-impl<T> Feed<T> {
+impl<T, K> Feed<T, K> {
     /// Blocking send.
     ///
     /// # Errors
@@ -82,32 +94,53 @@ impl<T> Feed<T> {
     pub fn capacity(&self) -> Option<usize> {
         self.tx.capacity()
     }
+}
 
+impl<T> Feed<T, Finite> {
     /// Declare the stream complete: everything meant to be sent has been sent.
     /// This closes before the data sender drops, so the consumer sees
     /// `End::Complete` after draining.
     pub fn close(self) -> Closed {
-        let Self { tx, closer } = self;
-        closer.close();
+        let Self { tx, closer, .. } = self;
+        if let Some(closer) = closer {
+            closer.close();
+        }
         drop(tx);
         Closed(())
     }
 }
 
 #[cfg(feature = "tokio")]
-impl<T: Send + 'static> Channel<T> {
+impl<T: Send + 'static, K: Kind> Channel<T, K> {
     /// Run `body` on the blocking pool, feeding the returned channel.
     ///
-    /// The body must return [`Closed`], so its normal return is a close; a
-    /// panic drops the feed and the stream ends `Aborted(ProducerGone)`.
-    /// Spawns at the call, so it needs a tokio runtime context there.
-    pub fn produce_blocking<F>(cap: usize, what: &'static str, body: F) -> Channel<T>
+    /// The body returns `K::Proof`: for a finite stream the [`Closed`] proof,
+    /// so its normal return is a close; for an infinite one nothing. A panic
+    /// drops the feed and the stream ends `Aborted(ProducerGone)`. Spawns at
+    /// the call, so it needs a tokio runtime context there.
+    pub fn produce_blocking<F>(cap: usize, what: &'static str, body: F) -> Channel<T, K>
     where
-        F: FnOnce(Feed<T>) -> Closed + Send + 'static,
+        F: FnOnce(Feed<T, K>) -> K::Proof + Send + 'static,
     {
         let (feed, ch) = Feed::channel(cap, what);
         tokio::task::spawn_blocking(move || {
-            let Closed(()) = body(feed);
+            let _proof: K::Proof = body(feed);
+        });
+        ch
+    }
+
+    /// Run `body` as a tokio task, feeding the returned channel; the async dual
+    /// of [`produce_blocking`](Self::produce_blocking), with the same proof
+    /// and panic rules.
+    pub fn produce_async<F, Fut>(cap: usize, what: &'static str, body: F) -> Channel<T, K>
+    where
+        F: FnOnce(Feed<T, K>) -> Fut,
+        Fut: std::future::Future<Output = K::Proof> + Send + 'static,
+    {
+        let (feed, ch) = Feed::channel(cap, what);
+        let task = body(feed);
+        tokio::spawn(async move {
+            let _proof: K::Proof = task.await;
         });
         ch
     }
@@ -122,7 +155,7 @@ mod tests {
 
     #[test]
     fn close_yields_closed_after_draining() {
-        let (feed, mut ch) = Feed::channel(4, "test");
+        let (feed, mut ch) = Feed::<_, Finite>::channel(4, "test");
         assert!(feed.send(1).is_ok());
         assert!(feed.send(2).is_ok());
         let _ = feed.close();
@@ -133,7 +166,7 @@ mod tests {
 
     #[test]
     fn dropping_the_feed_without_close_aborts() {
-        let (feed, mut ch) = Feed::channel(4, "test");
+        let (feed, mut ch) = Feed::<_, Finite>::channel(4, "test");
         assert!(feed.send(1).is_ok());
         drop(feed);
         assert_eq!(ch.recv(), Ok(1));
@@ -147,7 +180,7 @@ mod tests {
 
     #[test]
     fn a_panicking_producer_aborts() {
-        let (feed, mut ch) = Feed::<u32>::channel(4, "scan");
+        let (feed, mut ch) = Feed::<u32, Finite>::channel(4, "scan");
         let handle = std::thread::spawn(move || {
             let _feed = feed;
             panic!("scan blew up");
@@ -163,21 +196,21 @@ mod tests {
 
     #[test]
     fn send_reports_a_departed_consumer() {
-        let (feed, ch) = Feed::<u32>::channel(4, "test");
+        let (feed, ch) = Feed::<u32, Finite>::channel(4, "test");
         drop(ch);
         assert_eq!(feed.send(1), Err(Disconnected(1)), "the consumer is gone");
     }
 
     #[test]
     fn try_send_reports_full() {
-        let (feed, _ch) = Feed::channel(1, "test");
+        let (feed, _ch) = Feed::<_, Finite>::channel(1, "test");
         assert!(feed.try_send(1).is_ok());
         assert!(matches!(feed.try_send(2), Err(TrySendError::Full(2))));
     }
 
     #[test]
     fn a_feed_discarded_before_it_runs_aborts() {
-        let (feed, mut ch) = Feed::<u32>::channel(4, "never ran");
+        let (feed, mut ch) = Feed::<u32, Finite>::channel(4, "never ran");
         drop(feed);
         assert_eq!(
             ch.recv(),
@@ -191,7 +224,7 @@ mod tests {
     /// close still lands after the item.
     #[test]
     fn recv_wakes_when_a_feed_sends_later() {
-        let (feed, mut ch) = Feed::channel(1, "wake");
+        let (feed, mut ch) = Feed::<_, Finite>::channel(1, "wake");
         let producer = std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(20));
             assert!(feed.send(7).is_ok());
@@ -205,7 +238,7 @@ mod tests {
     #[cfg(feature = "tokio")]
     #[tokio::test]
     async fn produce_blocking_closes_on_return_and_aborts_on_panic() {
-        let ch = Channel::produce_blocking(4, "ok", |feed| {
+        let ch = Channel::<_, Finite>::produce_blocking(4, "ok", |feed| {
             let _ = feed.send(1u32);
             feed.close()
         });
@@ -217,7 +250,8 @@ mod tests {
         .unwrap();
         assert_eq!(got, (Ok(1), Err(End::Complete)));
 
-        let ch = Channel::<u32>::produce_blocking(4, "boom", |_feed| panic!("scan blew up"));
+        let ch =
+            Channel::<u32, Finite>::produce_blocking(4, "boom", |_feed| panic!("scan blew up"));
         let got = tokio::task::spawn_blocking(move || {
             let mut ch = ch;
             ch.recv()

@@ -269,7 +269,10 @@ mod tests {
         async fn write_snapshot(
             &self,
             _id: SnapshotId,
-            _entries: crossbeam_combinators::Channel<Result<SnapshotEntry, Error>>,
+            _entries: crossbeam_combinators::Channel<
+                Result<SnapshotEntry, Error>,
+                crossbeam_combinators::Finite,
+            >,
             _compression: CompressionLevel,
             _reason: crate::metrics::ObjectStoreReason,
         ) -> Result<crate::api::SnapshotWrite, Error> {
@@ -280,7 +283,13 @@ mod tests {
             &self,
             id: SnapshotId,
             _reason: crate::metrics::ObjectStoreReason,
-        ) -> Result<crossbeam_combinators::Channel<Result<SnapshotEntry, Error>>, Error> {
+        ) -> Result<
+            crossbeam_combinators::Channel<
+                Result<SnapshotEntry, Error>,
+                crossbeam_combinators::Finite,
+            >,
+            Error,
+        > {
             self.reads.lock().expect("lock").push(id);
             let (entries, truncate_after) = self
                 .snapshots

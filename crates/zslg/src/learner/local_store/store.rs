@@ -35,7 +35,8 @@ use crate::learner::local_store::key::{
 };
 use bytes::Bytes;
 use crossbeam_combinators::{
-    Channel, Closed, Fanout, FanoutConfig, Feed, OverflowPolicy, Registry, broadcast,
+    Channel, Closed, Fanout, FanoutConfig, Feed, Finite, Infinite, OverflowPolicy, Registry,
+    broadcast,
 };
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
@@ -271,7 +272,7 @@ impl crate::api::LocalStoreView for LocalStore {
         self.integrated.subscribe()
     }
 
-    fn subscribe_unstable(&self) -> Channel<Data> {
+    fn subscribe_unstable(&self) -> Channel<Data, Infinite> {
         self.unstable_registry.subscribe_infinite()
     }
 
@@ -289,7 +290,7 @@ impl crate::api::LocalStoreView for LocalStore {
 impl crate::api::LocalStoreMut for LocalStore {
     async fn integrate_loop(
         &self,
-        mut records: Channel<Result<(NodeId, LogIndex, Data), Error>>,
+        mut records: Channel<Result<(NodeId, LogIndex, Data), Error>, Finite>,
     ) -> Result<(), Error> {
         let tx = self.integrate_tx.clone();
         // Forwarding blocks on both halves (Channel::recv and a bounded
@@ -775,7 +776,7 @@ fn above_hlc(hlc: Option<Hlc>) -> Bound<DataId> {
 fn stream_scan(
     storage: &Storage,
     range: (Bound<DataId>, Bound<DataId>),
-    feed: Feed<Result<Data, Error>>,
+    feed: Feed<Result<Data, Error>, Finite>,
 ) -> Closed {
     let scan = for_each_data(
         storage,

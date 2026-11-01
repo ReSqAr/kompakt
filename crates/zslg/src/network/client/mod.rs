@@ -382,8 +382,8 @@ impl StreamOpener {
     fn write(
         &self,
         node_id: NodeId,
-        input: Channel<StampedWrite>,
-    ) -> Channel<Result<WriteOutcome, Error>> {
+        input: Channel<StampedWrite, crossbeam_combinators::Finite>,
+    ) -> Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> {
         open_write(
             self.rpc_weak.clone(),
             Target::Registered(node_id),
@@ -570,8 +570,8 @@ impl RpcClient {
     pub(in crate::network) fn write(
         &self,
         node_id: NodeId,
-        input: Channel<StampedWrite>,
-    ) -> Channel<Result<WriteOutcome, Error>> {
+        input: Channel<StampedWrite, crossbeam_combinators::Finite>,
+    ) -> Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> {
         self.streams.write(node_id, input)
     }
 

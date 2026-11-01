@@ -297,7 +297,9 @@ impl LocalStoreView for FailingWindowStore {
         self.integrated.subscribe()
     }
 
-    fn subscribe_unstable(&self) -> crossbeam_combinators::Channel<crate::meta::Data> {
+    fn subscribe_unstable(
+        &self,
+    ) -> crossbeam_combinators::Channel<crate::meta::Data, crossbeam_combinators::Infinite> {
         crossbeam_combinators::Channel::from_infinite(crossbeam_channel::never(), "stub unstable")
     }
 
@@ -318,14 +320,16 @@ impl StableLogSnapshot for EmptyStableLog {
     }
     async fn append(
         &self,
-        _entries: Channel<Result<crate::meta::SnapshotEntry, Error>>,
+        _entries: Channel<Result<crate::meta::SnapshotEntry, Error>, crossbeam_combinators::Finite>,
     ) -> Result<usize, Error> {
         unimplemented!("pacing tests never append")
     }
     async fn record_end_hlc(&self, _end_hlc: Hlc) -> Result<(), Error> {
         unimplemented!("pacing tests never record an end hlc")
     }
-    fn subscribe_events(&self) -> Channel<crate::meta::StableLogEvent> {
+    fn subscribe_events(
+        &self,
+    ) -> Channel<crate::meta::StableLogEvent, crossbeam_combinators::Infinite> {
         unimplemented!("pacing tests never subscribe to stable-log events")
     }
     fn watermark(&self) -> crossbeam_combinators::Level<Option<Hlc>> {
@@ -335,7 +339,7 @@ impl StableLogSnapshot for EmptyStableLog {
         &self,
         _after: Option<LogIndex>,
         _until: LogIndex,
-    ) -> Channel<Result<(LogIndex, Data), Error>> {
+    ) -> Channel<Result<(LogIndex, Data), Error>, crossbeam_combinators::Finite> {
         unimplemented!("pacing tests never range the stable log")
     }
     fn set_purge_threshold(&self, _hlc_threshold: Hlc) -> Result<(), Error> {
@@ -352,7 +356,7 @@ impl SnapshotStore for UnusedSnapshotStore {
     async fn write_snapshot(
         &self,
         _id: SnapshotId,
-        _entries: Channel<Result<crate::meta::SnapshotEntry, Error>>,
+        _entries: Channel<Result<crate::meta::SnapshotEntry, Error>, crossbeam_combinators::Finite>,
         _compression: CompressionLevel,
         _reason: crate::metrics::ObjectStoreReason,
     ) -> Result<crate::api::SnapshotWrite, Error> {
@@ -362,7 +366,10 @@ impl SnapshotStore for UnusedSnapshotStore {
         &self,
         _id: SnapshotId,
         _reason: crate::metrics::ObjectStoreReason,
-    ) -> Result<Channel<Result<crate::meta::SnapshotEntry, Error>>, Error> {
+    ) -> Result<
+        Channel<Result<crate::meta::SnapshotEntry, Error>, crossbeam_combinators::Finite>,
+        Error,
+    > {
         unimplemented!("pacing tests never read a snapshot")
     }
     fn shutdown_token(&self) -> CancellationToken {

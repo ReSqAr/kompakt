@@ -134,7 +134,9 @@ impl LocalStoreView for StallingLocalStore {
         self.inner.subscribe_integrated()
     }
 
-    fn subscribe_unstable(&self) -> crossbeam_combinators::Channel<crate::meta::Data> {
+    fn subscribe_unstable(
+        &self,
+    ) -> crossbeam_combinators::Channel<crate::meta::Data, crossbeam_combinators::Infinite> {
         self.inner.subscribe_unstable()
     }
 

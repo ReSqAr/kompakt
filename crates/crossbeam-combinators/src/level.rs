@@ -19,6 +19,7 @@ use parking_lot::Mutex;
 
 use crate::channel::Channel;
 use crate::fanout::Wakes;
+use crate::kind::Infinite;
 
 /// The writing half of a [`Level`].
 pub struct LevelSetter<T> {
@@ -30,6 +31,10 @@ pub struct LevelSetter<T> {
 /// current value (like subscribing to a `tokio::sync::watch`).
 pub struct Level<T> {
     shared: Arc<Shared<T>>,
+    #[cfg_attr(
+        not(feature = "tokio"),
+        allow(dead_code, reason = "only the tokio-gated `changed` reads it")
+    )]
     seen: u64,
 }
 
@@ -83,7 +88,7 @@ impl<T: Clone + Send + 'static> Level<T> {
     /// Moves between two reads collapse into one wake-up. Infinite: it ends
     /// `Aborted(ProducerGone)` when the setter is dropped.
     #[must_use]
-    pub fn changes(&self) -> Channel<()> {
+    pub fn changes(&self) -> Channel<(), Infinite> {
         self.shared.wakes.subscribe()
     }
 
@@ -173,7 +178,7 @@ impl<T> Drop for LevelSetter<T> {
 #[allow(clippy::unwrap_used, clippy::panic, reason = "test code")]
 mod tests {
     use super::*;
-    use crate::{AbortReason, End};
+    use crate::AbortReason;
 
     #[test]
     fn set_moves_the_value_then_wakes() {
@@ -202,9 +207,7 @@ mod tests {
         drop(setter);
         assert_eq!(
             changes.recv(),
-            Err(End::Aborted {
-                reason: AbortReason::ProducerGone { what: "level" }
-            })
+            Err(AbortReason::ProducerGone { what: "level" })
         );
         let mut late = level.changes();
         assert!(
