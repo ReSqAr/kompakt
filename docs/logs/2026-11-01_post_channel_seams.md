@@ -4,7 +4,8 @@ Implementation: four slices on `channel-extraction` (mechanical; completeness
 and the archive; kinds and the seam; resumption). Design:
 `2026-11-01_design_channel_seams.md`; decisions `..._log_channel_seams.md`
 (D1–D36); running record of surprises `..._impl_notes_channel_seams.md`, which
-this document summarises and does not repeat.
+this document summarises and does not repeat. Two `Fanout` fixes found during
+verification (§3) ride along: publish numbering, and a draining shutdown.
 
 ## 1. Code review
 
@@ -130,3 +131,25 @@ Deviations (details in the impl notes):
   caller never needs it, `covers` alone could carry it.
 - Re-run the full matrix (both feature sets, clippy, doctests) once more
   before merging.
+
+## 5. Verification
+
+Final matrix, on a quiet machine, after the last commit:
+
+```text
+cargo fmt --all -- --check                                     ok
+cargo clippy --workspace --all-targets --all-features -D warnings   ok
+cargo clippy -p crossbeam-combinators --no-default-features    ok
+cargo test -p crossbeam-combinators --no-default-features      ok
+cargo test --workspace --all-features   (26 binaries + doctests)  ok
+```
+
+Stress, beyond the matrix: the zslg lib under four to six busy-loop CPU hogs on
+four cores (six full runs after the publish-numbering fix: five passed, one hit
+the 400 s limit with the heavy cluster proptest unfinished, none failed an
+assertion); `a_stopped_fold_ends_the_channel_after_its_last_ref` 40 runs under
+four hogs after the draining shutdown, 0 failures; `three_node_tcp_write_round_trip`
+12 runs under six hogs, 0 failures.
+
+Not explained: the single `three_node_tcp_write_round_trip` failure in an early
+full-workspace run (§4).
