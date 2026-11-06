@@ -566,7 +566,7 @@ mod tests {
         async fn fetch_status(&self) -> Result<ReplicaStatus, Error> {
             unimplemented!()
         }
-        fn subscribe_from(&self, _: Option<LogIndex>) -> crate::ordered::ReplicaStream {
+        fn subscribe_from(&self, _: Option<LogIndex>) -> crate::api::ReplicaStream {
             crate::ordered::replica_stream(Channel::aborted("test replica"), None)
         }
         async fn subscribe_status(

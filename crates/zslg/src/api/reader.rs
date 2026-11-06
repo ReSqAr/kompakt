@@ -33,8 +33,12 @@
 use crate::Error;
 use crate::hlc::Hlc;
 use crate::ids::LogIndex;
-use crate::meta::{Data, UnstableEvent};
-use crossbeam_combinators::Channel;
+use crate::meta::{Data, StableLogEvent, UnstableEvent};
+use crossbeam_combinators::{Channel, Contiguous, Infinite, OrderedChannel};
+
+/// The stable-log read: gapless indices, strictly after the caller's `after`.
+pub type StableStream =
+    OrderedChannel<Result<StableLogEvent, Error>, Contiguous<LogIndex>, Infinite>;
 
 #[async_trait::async_trait]
 pub trait Reader: Send + Sync + 'static {

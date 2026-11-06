@@ -404,11 +404,7 @@ impl StreamOpener {
         Ok((sink, stream))
     }
 
-    fn subscribe_from(
-        &self,
-        node_id: NodeId,
-        from: Option<LogIndex>,
-    ) -> crate::ordered::ReplicaStream {
+    fn subscribe_from(&self, node_id: NodeId, from: Option<LogIndex>) -> crate::api::ReplicaStream {
         crate::ordered::replica_stream(
             open_subscribe(
                 self.rpc_weak.clone(),
@@ -593,7 +589,7 @@ impl RpcClient {
         &self,
         node_id: NodeId,
         from: Option<LogIndex>,
-    ) -> crate::ordered::ReplicaStream {
+    ) -> crate::api::ReplicaStream {
         self.streams.subscribe_from(node_id, from)
     }
 }

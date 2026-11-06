@@ -167,7 +167,7 @@ impl Replica for FaultyReplica {
         Channel::from_infinite(out_rx, "faulty replica")
     }
 
-    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::ordered::ReplicaStream {
+    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::api::ReplicaStream {
         self.inner.subscribe_from(from)
     }
     async fn fetch_status(&self) -> Result<ReplicaStatus, crate::Error> {
@@ -196,7 +196,7 @@ impl Replica for ReadyReplica {
     ) -> Channel<Result<WriteOutcome, Error>, Infinite> {
         unimplemented!("ReadyReplica does not serve writes")
     }
-    fn subscribe_from(&self, _: Option<LogIndex>) -> crate::ordered::ReplicaStream {
+    fn subscribe_from(&self, _: Option<LogIndex>) -> crate::api::ReplicaStream {
         unimplemented!("ReadyReplica does not serve subscriptions")
     }
     async fn fetch_status(&self) -> Result<ReplicaStatus, crate::Error> {
@@ -538,7 +538,7 @@ impl Replica for DuplicateReplica {
         Channel::from_infinite(out_rx, "faulty replica")
     }
 
-    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::ordered::ReplicaStream {
+    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::api::ReplicaStream {
         self.inner.subscribe_from(from)
     }
 

@@ -93,14 +93,10 @@ async fn snapshot_refuses_to_commit_an_aborted_window() {
 
     #[async_trait::async_trait]
     impl LocalStoreView for TruncatingLocalStore {
-        fn stream_above_hlc(&self, threshold: Option<Hlc>) -> crate::ordered::LocalStoreStream {
+        fn stream_above_hlc(&self, threshold: Option<Hlc>) -> crate::api::LocalStoreStream {
             self.inner.stream_above_hlc(threshold)
         }
-        fn stream_window(
-            &self,
-            _above: Option<Hlc>,
-            _upto: Hlc,
-        ) -> crate::ordered::LocalStoreStream {
+        fn stream_window(&self, _above: Option<Hlc>, _upto: Hlc) -> crate::api::LocalStoreStream {
             let (tx, rx) = crossbeam_channel::bounded(4);
             let (ch, closer) = Channel::from(rx, "truncated window");
             tx.send(Ok(make_data(1, 100, b"a"))).unwrap();
@@ -620,11 +616,11 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
 
     #[async_trait::async_trait]
     impl LocalStoreView for InjectingLocalStore {
-        fn stream_above_hlc(&self, threshold: Option<Hlc>) -> crate::ordered::LocalStoreStream {
+        fn stream_above_hlc(&self, threshold: Option<Hlc>) -> crate::api::LocalStoreStream {
             self.inner.stream_above_hlc(threshold)
         }
 
-        fn stream_window(&self, above: Option<Hlc>, upto: Hlc) -> crate::ordered::LocalStoreStream {
+        fn stream_window(&self, above: Option<Hlc>, upto: Hlc) -> crate::api::LocalStoreStream {
             self.inner.stream_window(above, upto)
         }
 

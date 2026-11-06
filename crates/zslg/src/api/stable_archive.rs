@@ -9,8 +9,14 @@
 //! bounds. Callers specify only the [`ArchiveBounds`] — never a snapshot id or a
 //! manifest — so snapshot selection lives in exactly one place.
 
+use crate::error::Error;
 use crate::ids::LogIndex;
-use crate::ordered::ArchiveStream;
+use crate::meta::SnapshotEntry;
+use crossbeam_combinators::{Contiguous, Finite, OrderedChannel};
+
+/// The archive stream: gapless indices, tiled from snapshots.
+pub(crate) type ArchiveStream =
+    OrderedChannel<Result<SnapshotEntry, Error>, Contiguous<LogIndex>, Finite>;
 
 /// Upper bound of an archive stream. Because index order == HLC order in the
 /// stable log, any upper bound prunes entries at or above it; the implementor

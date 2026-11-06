@@ -69,7 +69,7 @@ pub(crate) mod warn_throttle;
 pub(crate) mod writer;
 pub(crate) mod writer_node;
 
-pub use crate::api::{RaftStateView, Reader, Writer};
+pub use crate::api::{RaftStateView, Reader, StableStream, Writer};
 pub use crate::error::Error;
 pub use crate::follower_node::{FollowerNode, FollowerNodeConfig};
 pub use crate::hlc::{Hlc, HlcClock};
@@ -86,7 +86,6 @@ pub use crate::object_store::{CompressionLevel, IntoArcObjectStore, ObjectStoreC
 #[cfg(feature = "prometheus")]
 pub use crate::observability::configure_prometheus;
 pub use crate::observability::{METRIC_NAMESPACE, describe_metrics, histogram_buckets};
-pub use crate::ordered::StableStream;
 pub use crate::raft::{RaftStateHandle, SpareSelectionStrategy};
 pub use crate::replica_node::{InitialisingReplicaNode, ReplicaNode, ReplicaNodeConfig};
 pub use crate::unit::ByteSize;

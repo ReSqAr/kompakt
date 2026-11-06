@@ -62,7 +62,7 @@ impl Replica for LocalReplicaClient {
         self.replica.write(input)
     }
 
-    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::ordered::ReplicaStream {
+    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::api::ReplicaStream {
         self.replica.subscribe_from(from)
     }
 

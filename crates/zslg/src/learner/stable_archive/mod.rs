@@ -11,13 +11,13 @@
 
 use std::sync::Arc;
 
+use crate::api::ArchiveStream;
 use crate::api::{
     ArchiveBounds, ArchiveUpperBound, RaftStateView, SnapshotStore, StableArchiveReader,
 };
 use crate::hlc::Hlc;
 use crate::ids::LogIndex;
 use crate::meta::{SnapshotEntry, SnapshotMetadata};
-use crate::ordered::ArchiveStream;
 use crossbeam_combinators::{Channel, Contiguous, NonDecreasing};
 
 /// Reads the archived (purged) prefix of the stable log from object-store

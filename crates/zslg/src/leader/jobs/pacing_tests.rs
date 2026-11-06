@@ -280,11 +280,11 @@ struct FailingWindowStore {
 
 #[async_trait::async_trait]
 impl LocalStoreView for FailingWindowStore {
-    fn stream_above_hlc(&self, _threshold: Option<Hlc>) -> crate::ordered::LocalStoreStream {
+    fn stream_above_hlc(&self, _threshold: Option<Hlc>) -> crate::api::LocalStoreStream {
         unimplemented!("pacing tests do not stream above an hlc")
     }
 
-    fn stream_window(&self, _above: Option<Hlc>, _upto: Hlc) -> crate::ordered::LocalStoreStream {
+    fn stream_window(&self, _above: Option<Hlc>, _upto: Hlc) -> crate::api::LocalStoreStream {
         let n = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         let _ = self.done.send(n);
         crate::ordered::local_store_stream(

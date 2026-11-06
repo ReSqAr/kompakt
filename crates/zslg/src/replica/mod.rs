@@ -150,7 +150,7 @@ impl Replica for ReplicaService {
         }))
     }
 
-    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::ordered::ReplicaStream {
+    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::api::ReplicaStream {
         self.replica_log.subscribe_from(from)
     }
 

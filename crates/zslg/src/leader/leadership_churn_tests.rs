@@ -98,7 +98,7 @@ struct StallingLocalStore {
 
 #[async_trait::async_trait]
 impl LocalStoreView for StallingLocalStore {
-    fn stream_above_hlc(&self, threshold: Option<Hlc>) -> crate::ordered::LocalStoreStream {
+    fn stream_above_hlc(&self, threshold: Option<Hlc>) -> crate::api::LocalStoreStream {
         self.inner.stream_above_hlc(threshold)
     }
 
@@ -111,7 +111,7 @@ impl LocalStoreView for StallingLocalStore {
     /// first pull is both legal and the stall point we actually want: after
     /// `create_snapshot_entry` captured its base generation, before the window
     /// is read.
-    fn stream_window(&self, above: Option<Hlc>, upto: Hlc) -> crate::ordered::LocalStoreStream {
+    fn stream_window(&self, above: Option<Hlc>, upto: Hlc) -> crate::api::LocalStoreStream {
         self.entered.notify_one();
         let release = self.release.clone();
         let mut released = false;

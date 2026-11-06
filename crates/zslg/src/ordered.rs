@@ -4,9 +4,9 @@
 //! differs by source. These impls keep the key concept at the boundary without
 //! putting it on the item.
 
-use crossbeam_combinators::{
-    Channel, Contiguous, Finite, Infinite, Key, OrderedChannel, StrictlyIncreasing, Successor,
-};
+use crossbeam_combinators::{Channel, Finite, Infinite, Key, OrderedChannel, Successor};
+
+use crate::api::{LocalStoreStream, ReplicaStream};
 
 use crate::error::Error;
 use crate::hlc::Hlc;
@@ -67,11 +67,6 @@ impl Key<Result<Data, Error>> for Hlc {
     }
 }
 
-/// The replica append stream: strictly increasing indices, forward purge gaps
-/// allowed.
-pub(crate) type ReplicaStream =
-    OrderedChannel<Result<(LogIndex, Data), Error>, StrictlyIncreasing<LogIndex>, Infinite>;
-
 /// Wrap a replica stream with the strict policy, after the subscriber's cursor.
 pub(crate) fn replica_stream(
     ch: Channel<Result<(LogIndex, Data), Error>, Infinite>,
@@ -79,19 +74,6 @@ pub(crate) fn replica_stream(
 ) -> ReplicaStream {
     OrderedChannel::named(ch, after, "replica subscription")
 }
-
-/// The stable-log read: gapless indices, replaying from `from` inclusive.
-pub type StableStream =
-    OrderedChannel<Result<StableLogEvent, Error>, Contiguous<LogIndex>, Infinite>;
-
-/// A local-store scan (above an HLC, or a bounded window): strictly increasing
-/// `DataId`s.
-pub(crate) type LocalStoreStream =
-    OrderedChannel<Result<Data, Error>, StrictlyIncreasing<DataId>, Finite>;
-
-/// The archive stream: gapless indices, tiled from snapshots.
-pub(crate) type ArchiveStream =
-    OrderedChannel<Result<SnapshotEntry, Error>, Contiguous<LogIndex>, Finite>;
 
 /// Wrap a local-store scan with its `StrictlyIncreasing` contract.
 pub(crate) fn local_store_stream(

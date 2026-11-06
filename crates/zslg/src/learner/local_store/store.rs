@@ -248,7 +248,7 @@ impl LocalStore {
 
 #[async_trait::async_trait]
 impl crate::api::LocalStoreView for LocalStore {
-    fn stream_above_hlc(&self, threshold: Option<Hlc>) -> crate::ordered::LocalStoreStream {
+    fn stream_above_hlc(&self, threshold: Option<Hlc>) -> crate::api::LocalStoreStream {
         let storage = self.storage.clone();
         let start = above_hlc(threshold);
         let ch =
@@ -258,7 +258,7 @@ impl crate::api::LocalStoreView for LocalStore {
         local_store_stream(ch, "local store above HLC")
     }
 
-    fn stream_window(&self, above: Option<Hlc>, upto: Hlc) -> crate::ordered::LocalStoreStream {
+    fn stream_window(&self, above: Option<Hlc>, upto: Hlc) -> crate::api::LocalStoreStream {
         let storage = self.storage.clone();
         let start = above_hlc(above);
         let end = Bound::Included(DataId::from_parts(upto, NodeId::MAX, u64::MAX));

@@ -230,7 +230,7 @@ mod tests {
         async fn fetch_status(&self) -> Result<ReplicaStatus, Error> {
             unimplemented!()
         }
-        fn subscribe_from(&self, _from: Option<LogIndex>) -> crate::ordered::ReplicaStream {
+        fn subscribe_from(&self, _from: Option<LogIndex>) -> crate::api::ReplicaStream {
             let items = self.items.lock().expect("lock").take().unwrap_or_default();
             crate::ordered::replica_stream(
                 Channel::from_vec(
@@ -265,7 +265,7 @@ mod tests {
         async fn fetch_status(&self) -> Result<ReplicaStatus, Error> {
             unimplemented!()
         }
-        fn subscribe_from(&self, _from: Option<LogIndex>) -> crate::ordered::ReplicaStream {
+        fn subscribe_from(&self, _from: Option<LogIndex>) -> crate::api::ReplicaStream {
             let (tx, rx) = crossbeam_channel::bounded::<Result<(LogIndex, Data), Error>>(1);
             drop(tx); // the peer went away
             crate::ordered::replica_stream(

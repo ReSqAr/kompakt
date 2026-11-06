@@ -232,7 +232,7 @@ pub(in crate::network) async fn run_subscribe(
 /// panic strategy, which a library does not control — under `unwind` it killed
 /// only this thread anyway (`run_subscribe` swallows the `JoinError`), so it
 /// bought nothing over closing the connection.
-fn subscribe_writer_loop(mut sink: TcpFrameSink, mut items: crate::ordered::ReplicaStream) {
+fn subscribe_writer_loop(mut sink: TcpFrameSink, mut items: crate::api::ReplicaStream) {
     loop {
         let batch = match items.ready_batch(MAX_BATCH) {
             Ok(batch) => batch,

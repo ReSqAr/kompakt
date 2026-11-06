@@ -137,7 +137,7 @@ impl Replica for TcpPeerClient {
         }
     }
 
-    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::ordered::ReplicaStream {
+    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::api::ReplicaStream {
         match &self.target {
             Target::Registered(node_id) => self.rpc_client.subscribe_from(*node_id, from),
             Target::Direct(_) => {

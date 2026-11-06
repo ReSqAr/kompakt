@@ -666,7 +666,7 @@ impl ReplicaLogStore {
     pub(in crate::replica) fn subscribe_from(
         self: &Arc<Self>,
         from: Option<LogIndex>,
-    ) -> crate::ordered::ReplicaStream {
+    ) -> crate::api::ReplicaStream {
         let seam = ReplicaSeam {
             log: Arc::clone(self),
             from,

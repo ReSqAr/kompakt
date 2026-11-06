@@ -17,11 +17,17 @@
 
 use tokio::sync::watch;
 
+use crate::error::Error;
 use crate::hlc::Hlc;
+use crate::ids::DataId;
 use crate::ids::{LogIndex, NodeId};
 use crate::meta::Data;
-use crate::ordered::LocalStoreStream;
-use crossbeam_combinators::Channel;
+use crossbeam_combinators::{Channel, Finite, OrderedChannel, StrictlyIncreasing};
+
+/// A local-store scan (above an HLC, or a bounded window): strictly increasing
+/// `DataId`s.
+pub(crate) type LocalStoreStream =
+    OrderedChannel<Result<Data, Error>, StrictlyIncreasing<DataId>, Finite>;
 
 #[async_trait::async_trait]
 pub(crate) trait LocalStoreView: Send + Sync + 'static {

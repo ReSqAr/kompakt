@@ -499,14 +499,10 @@ mod tests {
 
     #[async_trait]
     impl LocalStoreView for StubLocalStore {
-        fn stream_above_hlc(&self, _threshold: Option<Hlc>) -> crate::ordered::LocalStoreStream {
+        fn stream_above_hlc(&self, _threshold: Option<Hlc>) -> crate::api::LocalStoreStream {
             unimplemented!()
         }
-        fn stream_window(
-            &self,
-            _above: Option<Hlc>,
-            _upto: Hlc,
-        ) -> crate::ordered::LocalStoreStream {
+        fn stream_window(&self, _above: Option<Hlc>, _upto: Hlc) -> crate::api::LocalStoreStream {
             unimplemented!()
         }
         fn subscribe_integrated(&self) -> tokio::sync::watch::Receiver<()> {

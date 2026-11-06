@@ -487,7 +487,7 @@ impl Replica for ReplicaOnly {
         self.0.write(input)
     }
 
-    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::ordered::ReplicaStream {
+    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::api::ReplicaStream {
         self.0.subscribe_from(from)
     }
 
@@ -611,7 +611,7 @@ impl Replica for ProbeOnly {
         unimplemented!("ProbeOnly: replica not used")
     }
 
-    fn subscribe_from(&self, _from: Option<LogIndex>) -> crate::ordered::ReplicaStream {
+    fn subscribe_from(&self, _from: Option<LogIndex>) -> crate::api::ReplicaStream {
         unimplemented!("ProbeOnly: replica not used")
     }
 

@@ -27,7 +27,12 @@
 use crate::Error;
 use crate::ids::{DataId, LogIndex};
 use crate::meta::{Data, RaftState, ReplicaStatus};
-use crossbeam_combinators::Channel;
+use crossbeam_combinators::{Channel, Infinite, OrderedChannel, StrictlyIncreasing};
+
+/// The replica append stream: strictly increasing indices, forward purge gaps
+/// allowed.
+pub(crate) type ReplicaStream =
+    OrderedChannel<Result<(LogIndex, Data), Error>, StrictlyIncreasing<LogIndex>, Infinite>;
 
 /// A write with the wall-clock time it entered a queue, for *direct*
 /// queue-residency measurement (the write→replica triangulation). Threaded
@@ -111,7 +116,7 @@ pub(crate) trait Replica: Send + Sync + 'static {
     ) -> Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite>;
 
     /// Resumable subscription to the replica's append stream.
-    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::ordered::ReplicaStream;
+    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::api::ReplicaStream;
 
     /// Log frontier, Raft state, and the fully-drained effective HLC cutoff, in
     /// one call. All cheap in-memory reads, fetched together to keep the trait
