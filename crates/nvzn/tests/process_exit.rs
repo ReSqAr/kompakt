@@ -6,7 +6,7 @@
 //! have already started, and one of the writer's never finishes:
 //!
 //! ```text
-//!   crossbeam_combinators::Channel::recv                     channel.rs
+//!   crossbeam_combinators::Channel::recv                     channel/mod.rs
 //!   zslg::quorum::coordinator::run_replica            coordinator.rs
 //!   tokio::runtime::blocking::pool::Task::run
 //! ```

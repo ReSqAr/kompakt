@@ -10,8 +10,10 @@ verification (§3) ride along: publish numbering, and a draining shutdown.
 ## 1. Code review
 
 ```text
-channel.rs   Channel<T, K>, End/AbortReason, combinators, the private Source
-             tree, one resume source (Resume)
+channel/     Channel<T, K> and ReadyBatch (mod.rs); verdict.rs (End, AbortReason,
+             Closer); source.rs (the private Source tree) with one file per
+             source: leaf, merge, chain, guarded, resume, transform, deferred;
+             cancellation.rs; tests/ by topic
 kind.rs      Finite / Infinite, Kind, MergeKind              (new)
 ordered.rs   Key, Successor, policies, OrderedChannel, covers / also / stitch
 seam.rs      Seam, Segment::open → cut / chain / merge       (new)

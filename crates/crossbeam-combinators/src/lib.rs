@@ -32,10 +32,10 @@
 //! subscribe-then-cut pattern: open the live source, snapshot the cut, read the
 //! history up to it, then continue live.
 //!
-//! The `tokio` feature adds [`Channel::produce_blocking`],
-//! [`Channel::produce_async`], [`Channel::defer_async`],
-//! [`Cancellation::from_token`], [`Level::changed`] and [`Level::wait_for`]. The core is
-//! crossbeam-only.
+//! The `tokio` feature adds `Channel::produce_blocking`,
+//! `Channel::produce_async`, `Channel::defer_async`,
+//! `Cancellation::from_token`, `Level::changed` and `Level::wait_for`. The core
+//! is crossbeam-only.
 
 // Dev-dependencies used by feature-gated tests; keep the unused-dependency
 // lint quiet when the `tokio` feature is off.
