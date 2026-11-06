@@ -88,12 +88,10 @@ impl EntryOutcome {
 }
 
 /// Why the fold loop stopped. Every variant means the read model is frozen
-/// from that point on; `subscription_closed` and `cancelled` are the two that
-/// were asked for. Carried to readers as [`crate::Error::FoldStopped`], so a
+/// from that point on; `cancelled` is the one that was asked for. Carried to readers as [`crate::Error::FoldStopped`], so a
 /// call that cannot be served says which of these ended the fold.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StopReason {
-    SubscriptionClosed,
     SubscriptionAborted,
     Cancelled,
     /// A `data_id` went backwards: zslg's ordering guarantee is broken.
@@ -117,13 +115,14 @@ pub enum StopReason {
     /// A live view's cold-start scan of the stable log ended before reaching
     /// the stable watermark it set out for; as `UnstableTailEnded`.
     LiveScanEnded,
+    /// A live view's merged scan/tail stream ended; the `End` names the source.
+    LiveStreamEnded,
 }
 
 impl StopReason {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::SubscriptionClosed => "subscription_closed",
             Self::SubscriptionAborted => "subscription_aborted",
             Self::Cancelled => "cancelled",
             Self::NonMonotoneDataId => "non_monotone_data_id",
@@ -134,6 +133,7 @@ impl StopReason {
             Self::Panicked => "panicked",
             Self::UnstableTailEnded => "unstable_tail_ended",
             Self::LiveScanEnded => "live_scan_ended",
+            Self::LiveStreamEnded => "live_stream_ended",
         }
     }
 }

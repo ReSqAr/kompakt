@@ -216,15 +216,15 @@ impl DataId {
     }
 }
 
-/// Gapless, monotonic index into a replica or local log.
+/// Contiguous, monotonic index into a replica or local log.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct LogIndex(pub(crate) u64);
 
 impl LogIndex {
-    /// The first index of any log — and the only start point a caller with no
-    /// prior cursor can name, which is why it is public: `Reader::stable_tail`
-    /// and `Reader::subscribe_stable_log` require an explicit `from`.
+    /// The first index of any log. A subscription starts *after* a position
+    /// (`Reader::subscribe_stable_log(after)`), and `None` means from the
+    /// beginning; this is the first index that start yields.
     pub const ZERO: Self = Self(0);
 
     #[must_use]
@@ -252,6 +252,14 @@ impl LogIndex {
                     .expect("LogIndex overflow: log index space exhausted"),
             ),
         }
+    }
+
+    /// The exclusive start that names this index as the first one wanted:
+    /// the index before it, or `None` for the very first. The inverse of
+    /// [`next_after`](Self::next_after) — `next_after(i.before()) == i`.
+    #[must_use]
+    pub fn before(self) -> Option<LogIndex> {
+        self.0.checked_sub(1).map(LogIndex)
     }
 
     #[must_use]

@@ -41,12 +41,12 @@ use dashmap::mapref::entry::Entry as MapEntry;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
 use crate::api::{RaftStateTracker, Router, StampedWrite, WriteOutcome};
-use crate::channel::Channels;
 use crate::error::Error;
 use crate::ids::{DataId, NodeId};
 use crate::meta::Data;
 use crate::metrics::{self, FanoutResponseState, WriteRpcOutcome};
 use crate::quorum::{all_targets, is_quorum};
+use crossbeam_combinators::Channel;
 
 /// Global in-flight cap. A permit is held for a write's whole life, so this
 /// bounds `pending` and every per-stream channel with it (a `DataId` is 32 bytes;
@@ -197,10 +197,9 @@ fn run_replica(weak: Weak<Coordinator>, node: NodeId, mut ids_rx: Receiver<DataI
         // Both finite-by-drop rather than by declaration: the prime set is fully
         // sent above, and the fan is replaced wholesale on reopen. Nothing reads
         // this stream's verdict — an un-acked write is resent from `pending`.
-        let (prime_ch, prime_closer) = Channels::from(prime_rx, "coordinator prime");
-        prime_closer.close();
+        let prime_ch = Channel::closed(prime_rx);
         // Infinite: replaced wholesale on reopen, never completed.
-        let ids_ch = Channels::from_infinite(ids_rx, "coordinator fan");
+        let ids_ch = Channel::from_infinite(ids_rx, "coordinator fan");
         let prime_stamped = prime_ch.filter_map(|data| Some(StampedWrite::now(data)));
         let ids_stamped = ids_ch.filter_map(move |id| {
             if let Some(wait) = pending.elapsed_since_enqueued(&id) {
@@ -211,7 +210,11 @@ fn run_replica(weak: Weak<Coordinator>, node: NodeId, mut ids_rx: Receiver<DataI
         let input = prime_stamped.merge(ids_stamped);
 
         metrics::writer_replica_reopen();
-        let mut outcomes = this.streams.router().remote(node).write(input);
+        let mut outcomes = this
+            .streams
+            .router()
+            .remote(node)
+            .write(input.into_finite());
         drop(this);
 
         while let Ok(Ok(outcome)) = outcomes.recv() {
@@ -486,6 +489,7 @@ fn fanout_state(outcome: &WriteOutcome) -> FanoutResponseState {
     reason = "test code"
 )]
 mod tests {
+    use crossbeam_combinators::{Finite, Infinite};
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -524,7 +528,10 @@ mod tests {
 
     #[async_trait]
     impl Replica for FakeReplica {
-        fn write(&self, input: Channels<StampedWrite>) -> Channels<Result<WriteOutcome, Error>> {
+        fn write(
+            &self,
+            input: Channel<StampedWrite, Finite>,
+        ) -> Channel<Result<WriteOutcome, Error>, Infinite> {
             let (tx, rx) = crossbeam_channel::unbounded();
             let resp = self.resp.clone();
             // This double measures nothing, so it drops the stamp immediately.
@@ -553,16 +560,14 @@ mod tests {
                     }
                 }
             });
-            let (ch, closer) = Channels::from(rx, "test replica");
-            closer.close();
-            ch
+            Channel::from_infinite(rx, "test replica")
         }
 
         async fn fetch_status(&self) -> Result<ReplicaStatus, Error> {
             unimplemented!()
         }
-        fn subscribe_from(&self, _: Option<LogIndex>) -> Channels<Result<(LogIndex, Data), Error>> {
-            Channels::from_vec(vec![])
+        fn subscribe_from(&self, _: Option<LogIndex>) -> crate::api::ReplicaStream {
+            Channel::aborted("test replica").ordered(None, "replica subscription")
         }
         async fn subscribe_status(
             &self,

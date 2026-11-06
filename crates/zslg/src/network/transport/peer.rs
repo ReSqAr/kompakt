@@ -17,16 +17,16 @@ use crate::api::{
     AddMemberOutcome, LivenessProbe, RaftMembership, RaftTransport, Replica, StampedWrite,
     WriteOutcome,
 };
-use crate::channel::Channels;
 use crate::error::Error;
 use crate::ids::{LogIndex, NodeId, PeerAddr};
-use crate::meta::{Data, ReplicaStatus};
+use crate::meta::ReplicaStatus;
 use crate::network::client::{RpcClient, Target};
 use crate::network::messages::{
     RpcFrame, RpcRaftFrame, RpcRaftRequest, RpcReplicaFrame, RpcReplicaRequest, RpcRequest,
 };
 use crate::raft::TypeConfig;
 use async_trait::async_trait;
+use crossbeam_combinators::Channel;
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use openraft::error::{InstallSnapshotError, RaftError};
@@ -120,23 +120,29 @@ impl Replica for TcpPeerClient {
     /// for as long as the caller drives it. Only a *registered* peer can be
     /// written to: `Target::Direct` exists for cluster join (membership + status
     /// only), before the peer's `NodeId` is even known.
-    fn write(&self, input: Channels<StampedWrite>) -> Channels<Result<WriteOutcome, Error>> {
+    fn write(
+        &self,
+        input: Channel<StampedWrite, crossbeam_combinators::Finite>,
+    ) -> Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> {
         match &self.target {
             Target::Registered(node_id) => self.rpc_client.write(*node_id, input),
             Target::Direct(addr) => {
                 // A direct-dialed peer (join-time transport, before its NodeId is
                 // known) never accepts writes: yield one terminal error.
-                Channels::from_vec(vec![Err(Error::Rpc(format!(
+                Channel::once(Err(Error::Rpc(format!(
                     "direct-dialed peer {addr:?} does not accept writes (join-time transport)"
-                )))])
+                ))))
+                .chain(Channel::aborted("direct-dialed peer"))
             }
         }
     }
 
-    fn subscribe_from(&self, from: Option<LogIndex>) -> Channels<Result<(LogIndex, Data), Error>> {
+    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::api::ReplicaStream {
         match &self.target {
             Target::Registered(node_id) => self.rpc_client.subscribe_from(*node_id, from),
-            Target::Direct(_) => Channels::from_vec(vec![]),
+            Target::Direct(_) => {
+                Channel::aborted("direct-dialed peer").ordered(from, "replica subscription")
+            }
         }
     }
 

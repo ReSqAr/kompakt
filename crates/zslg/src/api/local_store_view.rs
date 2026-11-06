@@ -6,41 +6,37 @@
 //! scans. Hence the two very different read shapes:
 //!
 //! ```text
-//!   stream_above_hlc(t)                 unbounded tail  ─> reader's unstable view
-//!   stream_window_ordered(above, upto)  bounded chunk   ─> snapshot build
+//!   stream_above_hlc(t)           unbounded tail  ─> reader's unstable view
+//!   stream_window(above, upto)    bounded window  ─> snapshot build
 //! ```
 //!
-//! Only the second is ordered and terminating, because only a snapshot build
-//! needs to know it saw the *whole* window — a truncated scan silently treated
-//! as complete would advance the watermark past data never read, which
-//! [`WindowItem`]'s terminals exist to make impossible (CLAUDE.md §20).
+//! Both are plain ordered scans that close when they reach their end, so a
+//! scan that dies reads as `Aborted`, never as a short window (CLAUDE.md §20).
+//! A snapshot build bounds its chunk itself (`take_at_least`) and picks the
+//! watermark from what it wrote.
 
 use tokio::sync::watch;
 
-use crate::channel::Channels;
+use crate::error::Error;
 use crate::hlc::Hlc;
+use crate::ids::DataId;
 use crate::ids::{LogIndex, NodeId};
 use crate::meta::Data;
+use crossbeam_combinators::{Channel, Finite, OrderedChannel, StrictlyIncreasing};
+
+/// A local-store scan (above an HLC, or a bounded window): strictly increasing
+/// `DataId`s.
+pub(crate) type LocalStoreStream =
+    OrderedChannel<Result<Data, Error>, StrictlyIncreasing<DataId>, Finite>;
 
 #[async_trait::async_trait]
 pub(crate) trait LocalStoreView: Send + Sync + 'static {
     #[must_use]
-    fn stream_above_hlc(&self, threshold: Option<Hlc>) -> Channels<Result<Data, crate::Error>>;
+    fn stream_above_hlc(&self, threshold: Option<Hlc>) -> LocalStoreStream;
 
-    /// Stream `(above, upto]` in `(hlc, data_id)` order.
-    ///
-    /// `max_entries` bounds the chunk so a large backlog does not produce one
-    /// unbounded snapshot object. It is a **floor**: the scan stops at the first
-    /// HLC boundary at or after the cap, never inside an HLC, because the caller
-    /// resumes by excluding everything at the last HLC it saw. `None` streams the
-    /// whole window.
+    /// Stream `(above, upto]` in `(hlc, data_id)` order; it closes at `upto`.
     #[must_use]
-    fn stream_window_ordered(
-        &self,
-        above: Option<Hlc>,
-        upto: Hlc,
-        max_entries: Option<std::num::NonZeroUsize>,
-    ) -> Channels<Result<WindowItem, crate::Error>>;
+    fn stream_window(&self, above: Option<Hlc>, upto: Hlc) -> LocalStoreStream;
 
     /// "Integration happened, go look" — level-triggered, carrying nothing.
     ///
@@ -61,26 +57,12 @@ pub(crate) trait LocalStoreView: Send + Sync + 'static {
     /// duplicate filter drops are not news and are not published.
     ///
     /// Infinite, with a bounded queue per subscriber: one that falls behind is
-    /// hung up on, which surfaces as [`End::Aborted`](crate::channel::End::Aborted)
+    /// hung up on, which surfaces as [`End::Aborted`](crossbeam_combinators::End::Aborted)
     /// after everything already queued — the cue to rescan above the watermark
     /// and subscribe again (`learner::read`).
     #[must_use]
-    fn subscribe_unstable(&self) -> Channels<Data>;
+    fn subscribe_unstable(&self) -> Channel<Data, crossbeam_combinators::Infinite>;
 
     async fn subscription_cursor(&self, upstream: NodeId)
     -> Result<Option<LogIndex>, crate::Error>;
-}
-
-/// An item of a window scan. A scan that reaches a conclusion ends with one of
-/// the two terminals, so a stream that stops without one is incomplete — an
-/// error to the consumer, never an empty window.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum WindowItem {
-    Entry(Data),
-    /// Terminal: the scan reached `upto`, so the whole window is covered.
-    Complete,
-    /// Terminal: the entry cap stopped the scan here. Everything above this HLC
-    /// is uncovered. Always a *complete* HLC — the scan runs to the end of the
-    /// one it lands in, so a resume excluding it skips nothing.
-    TruncatedAt(Hlc),
 }

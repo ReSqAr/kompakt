@@ -15,15 +15,15 @@
 //! | 3 | Remote-node connections | `RemoteRouter` (`router::remote`) |
 //! | 4 | Routing (this module) | `PeerRouter` |
 
+use crate::Error;
 use crate::api::{
     AddMemberOutcome, LivenessProbe, RaftMembership, RaftTransport, Replica, ReplicaClient, Router,
     StampedWrite, WriteOutcome,
 };
-use crate::channel::Channels;
 use crate::ids::{LogIndex, NodeId, PeerAddr};
 use crate::meta::ReplicaStatus;
 use crate::raft::TypeConfig;
-use crate::{Data, Error};
+use crossbeam_combinators::Channel;
 use futures::stream::BoxStream;
 use openraft::error::{InstallSnapshotError, RaftError};
 use openraft::raft::{
@@ -80,23 +80,25 @@ struct ErrorTransport;
 
 #[async_trait::async_trait]
 impl Replica for ErrorTransport {
-    fn write(&self, input: Channels<StampedWrite>) -> Channels<Result<WriteOutcome, Error>> {
-        // Node is shutting down: fail every write. As a pull-time map — no thread.
-        input.map(|stamped| {
-            Ok(WriteOutcome::Failed {
-                data_id: stamped.data.data_id,
-                error: Error::Shutdown,
+    fn write(
+        &self,
+        input: Channel<StampedWrite, crossbeam_combinators::Finite>,
+    ) -> Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> {
+        // Node is shutting down: fail every write (a pull-time map, no thread),
+        // then end the outcome stream as the shutdown it is — never cleanly.
+        input
+            .map(|stamped| {
+                Ok(WriteOutcome::Failed {
+                    data_id: stamped.data.data_id,
+                    error: Error::Shutdown,
+                })
             })
-        })
+            .chain(Channel::aborted("router shutting down"))
     }
 
-    fn subscribe_from(&self, _from: Option<LogIndex>) -> Channels<Result<(LogIndex, Data), Error>> {
-        let (tx, rx) = crossbeam_channel::bounded::<Result<(LogIndex, Data), Error>>(1);
-        drop(tx);
-        // Node is shutting down: a deliberately empty stream, so close it.
-        let (ch, closer) = Channels::from(rx, "shutdown stub");
-        closer.close();
-        ch
+    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::api::ReplicaStream {
+        // Node is shutting down: an empty subscription that ends aborted.
+        Channel::aborted("router shutting down").ordered(from, "replica subscription")
     }
 
     async fn fetch_status(&self) -> Result<ReplicaStatus, crate::Error> {

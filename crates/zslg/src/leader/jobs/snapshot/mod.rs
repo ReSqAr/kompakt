@@ -39,10 +39,6 @@ mod lifecycle_tests;
 #[cfg(test)]
 mod member_lifecycle_tests;
 
-/// Feeds `SnapshotStore::write_snapshot`. A full channel blocks the forwarder —
-/// the backpressure pacing the producer to the off-reactor encoder.
-pub(in crate::leader) const SNAPSHOT_WRITE_FORWARDER_CAP: usize = 256;
-
 /// Spawn `leader:snapshot` on the shutdown tree.
 pub(in crate::leader) fn spawn(
     shutdown: &mut crate::shutdown::Shutdown,
@@ -216,7 +212,7 @@ pub(crate) struct SnapshotConfig {
     /// produces one unbounded object that must be loaded monolithically.
     ///
     /// Soft because a chunk always runs to the end of the HLC it lands in
-    /// (`stream_window_ordered`), so the real count can exceed this slightly.
+    /// (`stream_window`), so the real count can exceed this slightly.
     pub(crate) max_snapshot_entries: std::num::NonZeroUsize,
 }
 

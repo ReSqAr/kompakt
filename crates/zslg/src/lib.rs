@@ -40,7 +40,6 @@ use console_subscriber as _;
 use tikv_jemallocator as _;
 
 pub(crate) mod api;
-pub(crate) mod channel;
 mod database;
 pub(crate) mod error;
 pub(crate) mod follower_node;
@@ -55,11 +54,14 @@ pub(crate) mod metrics;
 pub(crate) mod network;
 pub(crate) mod object_store;
 pub(crate) mod observability;
+mod ordered;
 pub(crate) mod quorum;
 pub(crate) mod raft;
 pub(crate) mod replica;
 pub(crate) mod replica_node;
 pub(crate) mod shutdown;
+#[cfg(test)]
+pub(crate) mod test_stream;
 #[cfg(test)]
 mod tests;
 mod unit;
@@ -67,8 +69,7 @@ pub(crate) mod warn_throttle;
 pub(crate) mod writer;
 pub(crate) mod writer_node;
 
-pub use crate::api::{RaftStateView, Reader, Writer};
-pub use crate::channel::{CancelHandle, Cancellation, Channels, End as ChannelEnd};
+pub use crate::api::{RaftStateView, Reader, StableStream, Writer};
 pub use crate::error::Error;
 pub use crate::follower_node::{FollowerNode, FollowerNodeConfig};
 pub use crate::hlc::{Hlc, HlcClock};

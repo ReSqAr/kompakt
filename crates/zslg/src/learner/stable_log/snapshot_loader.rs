@@ -14,8 +14,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use crate::api::{
-    ArchiveBounds, ArchiveLowerBound, ArchiveUpperBound, RaftStateView, StableArchiveReader,
-    StableLogSnapshot,
+    ArchiveBounds, ArchiveUpperBound, RaftStateView, StableArchiveReader, StableLogSnapshot,
 };
 use crate::error::Error;
 use crate::ids::LogIndex;
@@ -32,23 +31,17 @@ pub(in crate::learner) async fn integrate_manifest(
     // its own blocking thread (CLAUDE.md §8), commits contiguous batches, and
     // refuses an input that jumps past `end + 1`, so a missing or partial
     // snapshot cannot land as a durable gap (docs/STABLE_LOG_GAP_FIX.md).
-    let from = match stable_log.end_index() {
-        Some(end) => ArchiveLowerBound::FromIndex(LogIndex::next_after(Some(end))),
-        None => ArchiveLowerBound::Earliest,
-    };
     // Debug, not info: this runs on every raft-state change, which on an idle
     // cluster is every cutoff tick.
     debug!(
         manifest_entries = manifest_state.manifest.len(),
         "integrating stable-log manifest from object store",
     );
-    let rx = archive
-        .stream(ArchiveBounds {
-            from,
-            until: ArchiveUpperBound::Unbounded,
-        })
-        .await?;
-    stable_log.append(rx).await?;
+    let rx = archive.stream(ArchiveBounds {
+        after: stable_log.end_index(),
+        until: ArchiveUpperBound::Unbounded,
+    });
+    stable_log.append(rx.into_channel()).await?;
 
     // Completeness (belt to `append`'s gap fence): `append` returning Ok proves
     // the stream ended, not that it covered the manifest. A snapshot that
@@ -205,6 +198,7 @@ impl SnapshotLoader {
     reason = "test code"
 )]
 mod tests {
+    use crate::test_stream::ChannelTestExt as _;
     use std::collections::{BTreeSet, HashMap};
     use std::sync::Mutex;
     use std::time::Duration;
@@ -275,10 +269,13 @@ mod tests {
         async fn write_snapshot(
             &self,
             _id: SnapshotId,
-            _entries: crate::channel::Channels<Result<SnapshotEntry, Error>>,
+            _entries: crossbeam_combinators::Channel<
+                Result<SnapshotEntry, Error>,
+                crossbeam_combinators::Finite,
+            >,
             _compression: CompressionLevel,
             _reason: crate::metrics::ObjectStoreReason,
-        ) -> Result<usize, Error> {
+        ) -> Result<crate::api::SnapshotWrite, Error> {
             unimplemented!("loader tests never write snapshots")
         }
 
@@ -286,7 +283,13 @@ mod tests {
             &self,
             id: SnapshotId,
             _reason: crate::metrics::ObjectStoreReason,
-        ) -> Result<crate::channel::Channels<Result<SnapshotEntry, Error>>, Error> {
+        ) -> Result<
+            crossbeam_combinators::Channel<
+                Result<SnapshotEntry, Error>,
+                crossbeam_combinators::Finite,
+            >,
+            Error,
+        > {
             self.reads.lock().expect("lock").push(id);
             let (entries, truncate_after) = self
                 .snapshots
@@ -296,7 +299,7 @@ mod tests {
                 .cloned()
                 .ok_or_else(|| Error::ObjectStore(format!("no scripted snapshot {id:?}")))?;
             let deliver = truncate_after.unwrap_or(entries.len());
-            Ok(crate::channel::Channels::from_vec(
+            Ok(crossbeam_combinators::Channel::from_vec(
                 entries.into_iter().take(deliver).map(Ok).collect(),
             ))
         }
@@ -375,8 +378,8 @@ mod tests {
         assert_eq!(log.end_index(), Some(LogIndex(9)));
         assert_eq!(log.end_hlc(), Some(Hlc(200)), "watermark advances");
         let indices: Vec<u64> = log
-            .range(LogIndex(0), LogIndex(100))
-            .into_iter()
+            .range(None, LogIndex(100))
+            .items()
             .filter_map(|r| r.ok().map(|(i, _)| i.raw()))
             .collect();
         assert_eq!(indices, (0..=9).collect::<Vec<u64>>());
@@ -451,7 +454,7 @@ mod tests {
             .await
             .expect_err("disconnected snapshot must be rejected");
         assert!(
-            matches!(err, Error::StableLogGap(ref m) if m.contains("archive stream")),
+            matches!(err, Error::StreamTruncated { ref what } if what == "archive tiling"),
             "archive-layer gap error expected, got: {err:?}"
         );
         assert_eq!(log.end_index(), None, "nothing committed above a hole");
@@ -481,8 +484,7 @@ mod tests {
             .await
             .expect_err("a gap between covering snapshots must be rejected");
         assert!(
-            matches!(err, Error::StableLogGap(ref m)
-                if m.contains("archive stream") && m.contains("expected index 5")),
+            matches!(err, Error::StreamTruncated { ref what } if what == "archive tiling"),
             "archive contiguity error expected, got: {err:?}"
         );
         assert_eq!(
@@ -493,8 +495,8 @@ mod tests {
     }
 
     /// An HLC-non-monotonic snapshot (index ascends, HLC descends) is caught by
-    /// the archive stream's monotonicity guard — the read path has no downstream
-    /// HLC assert, so this must fire at the source.
+    /// the archive stream's `NonDecreasing<Hlc>` guard at the source, as an
+    /// abort the loader refuses — not a panic.
     #[tokio::test]
     async fn integrate_rejects_hlc_regression_in_snapshot() {
         let (_dir, log) = fresh_stable_log().await;
@@ -524,9 +526,8 @@ mod tests {
             .await
             .expect_err("HLC regression must be rejected");
         assert!(
-            matches!(err, Error::Storage(ref m)
-                if m.contains("archive stream reader panicked")),
-            "HLC regression panics in spawn_blocking → Err sent on tx → append returns Err, got: {err:?}"
+            matches!(err, Error::StreamTruncated { ref what } if what == "archive HLC"),
+            "an HLC regression aborts the archive stream (no panic), got: {err:?}"
         );
         assert_eq!(
             log.end_index(),
@@ -574,8 +575,8 @@ mod tests {
 
         // The log is complete and contiguous: every index 0..=9 present.
         let indices: Vec<u64> = log
-            .range(LogIndex(0), LogIndex(100))
-            .into_iter()
+            .range(None, LogIndex(100))
+            .items()
             .filter_map(|r| r.ok().map(|(i, _)| i.raw()))
             .collect();
         assert_eq!(indices, (0..=9).collect::<Vec<u64>>());

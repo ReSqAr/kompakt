@@ -13,14 +13,14 @@ use parking_lot::Mutex as SyncMutex;
 use tokio::sync::watch;
 
 use crate::api::{Clock, Replica, Router, StampedWrite, WriteOutcome};
-use crate::channel::Channels;
 use crate::error::Error;
 use crate::hlc::{Hlc, HlcClock, HlcGate};
 use crate::ids::{DataId, LogIndex, NodeId, PeerAddr};
-use crate::meta::{Data, RaftState, ReplicaMembership, ReplicaStatus};
+use crate::meta::{RaftState, ReplicaMembership, ReplicaStatus};
 use crate::raft::RaftStateHandle;
 use crate::replica::ReplicaLogStore;
 use crate::replica::ReplicaService;
+use crossbeam_combinators::{Channel, Finite, Infinite};
 
 /// Control handle for a [`FaultyReplica`]. Clone freely; clones share state.
 #[derive(Clone)]
@@ -98,7 +98,10 @@ impl Replica for FaultyReplica {
     /// the rest are forwarded to the inner replica's own stream. Both outcome
     /// sources are merged onto one channel by a forwarder thread, so a wedged or
     /// failing write never blocks the ones behind it.
-    fn write(&self, input: Channels<StampedWrite>) -> Channels<Result<WriteOutcome, Error>> {
+    fn write(
+        &self,
+        input: Channel<StampedWrite, Finite>,
+    ) -> Channel<Result<WriteOutcome, Error>, Infinite> {
         let (out_tx, out_rx) = crossbeam_channel::unbounded::<Result<WriteOutcome, Error>>();
 
         let faults = self.faults.clone();
@@ -115,7 +118,7 @@ impl Replica for FaultyReplica {
                 inner_tx
                     .get_or_insert_with(|| {
                         let (tx, rx) = crossbeam_channel::unbounded::<StampedWrite>();
-                        let mut outcomes = inner.write(Channels::closed_for_test(rx));
+                        let mut outcomes = inner.write(Channel::closed(rx));
                         let fwd_tx = out_tx.clone();
                         std::thread::spawn(move || {
                             while let Ok(outcome) = outcomes.recv() {
@@ -161,13 +164,10 @@ impl Replica for FaultyReplica {
             }
         });
 
-        Channels::closed_for_test(out_rx)
+        Channel::from_infinite(out_rx, "faulty replica")
     }
 
-    fn subscribe_from(
-        &self,
-        from: Option<LogIndex>,
-    ) -> Channels<Result<(LogIndex, Data), crate::Error>> {
+    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::api::ReplicaStream {
         self.inner.subscribe_from(from)
     }
     async fn fetch_status(&self) -> Result<ReplicaStatus, crate::Error> {
@@ -190,13 +190,13 @@ pub(crate) struct ReadyReplica {
 
 #[async_trait]
 impl Replica for ReadyReplica {
-    fn write(&self, _: Channels<StampedWrite>) -> Channels<Result<WriteOutcome, Error>> {
+    fn write(
+        &self,
+        _: Channel<StampedWrite, Finite>,
+    ) -> Channel<Result<WriteOutcome, Error>, Infinite> {
         unimplemented!("ReadyReplica does not serve writes")
     }
-    fn subscribe_from(
-        &self,
-        _: Option<LogIndex>,
-    ) -> Channels<Result<(LogIndex, Data), crate::Error>> {
+    fn subscribe_from(&self, _: Option<LogIndex>) -> crate::api::ReplicaStream {
         unimplemented!("ReadyReplica does not serve subscriptions")
     }
     async fn fetch_status(&self) -> Result<ReplicaStatus, crate::Error> {
@@ -466,10 +466,13 @@ impl Replica for DuplicateReplica {
     /// exercising the resend path — then collapses the N outcomes back to one: the
     /// `Accepted` if there is one, else the first. (With dedup removed each copy now
     /// simply appends and is `Accepted`; the collapse still yields one.)
-    fn write(&self, input: Channels<StampedWrite>) -> Channels<Result<WriteOutcome, Error>> {
+    fn write(
+        &self,
+        input: Channel<StampedWrite, Finite>,
+    ) -> Channel<Result<WriteOutcome, Error>, Infinite> {
         let (out_tx, out_rx) = crossbeam_channel::unbounded::<Result<WriteOutcome, Error>>();
         let (inner_tx, inner_rx) = crossbeam_channel::unbounded::<StampedWrite>();
-        let mut outcomes = self.inner.write(Channels::closed_for_test(inner_rx));
+        let mut outcomes = self.inner.write(Channel::closed(inner_rx));
 
         // How many outcomes are still expected per data_id, and the best one seen
         // so far. Only shared between this thread and the feeder below.
@@ -532,10 +535,10 @@ impl Replica for DuplicateReplica {
             }
         });
 
-        Channels::closed_for_test(out_rx)
+        Channel::from_infinite(out_rx, "faulty replica")
     }
 
-    fn subscribe_from(&self, from: Option<LogIndex>) -> Channels<Result<(LogIndex, Data), Error>> {
+    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::api::ReplicaStream {
         self.inner.subscribe_from(from)
     }
 

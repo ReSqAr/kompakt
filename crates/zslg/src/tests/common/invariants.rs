@@ -25,6 +25,7 @@
 //! `validate_replicated_state`: that runs on a proposal, so it cannot catch a
 //! bug on the apply path itself.
 
+use crate::test_stream::ChannelTestExt as _;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
@@ -32,7 +33,7 @@ use bytes::Bytes;
 use futures::StreamExt;
 
 use crate::StableLogEvent;
-use crate::ids::{DataId, LogIndex, NodeId};
+use crate::ids::{DataId, NodeId};
 use crate::meta::{RaftState, ReplicaMembership};
 use crate::tests::common::Cluster;
 
@@ -133,13 +134,13 @@ pub(crate) async fn assert_durability_chain_on(
             let seen = seen.clone();
             let want = want.clone();
             async move {
-                let mut stream = reader.subscribe_stable_log(LogIndex::ZERO).filter_map(|item| {
+                let mut stream = reader.subscribe_stable_log(None).into_channel().filter_map(|item| {
                     match item {
                         Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
                         Ok(StableLogEvent::Watermark(_)) => None,
                         Err(e) => Some(Err(e)),
                     }
-                }).into_stream();
+                }).into_test_stream();
                 loop {
                     // `want ⊆ seen` — the direction matters. Written the other
                     // way round (`seen ⊆ want`) it is trivially true on the
@@ -215,7 +216,7 @@ pub(crate) async fn assert_unstable_above_watermark(cluster: &Cluster) -> bool {
         let Some(watermark) = reader.stable_watermark() else {
             continue; // nothing promoted yet; the boundary is vacuous
         };
-        let mut stream = reader.unstable_tail().into_stream();
+        let mut stream = reader.unstable_tail().into_test_stream();
         while let Some(item) = stream.next().await {
             exercised = true;
             if let Ok(d) = item {

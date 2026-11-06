@@ -130,7 +130,7 @@ async fn wait_for_stable_caught_up(
     }
     let started = tokio::time::Instant::now();
     stable_log
-        .watch_watermark()
+        .watermark()
         .wait_for(|wm| wm.is_some_and(|hlc| hlc >= target))
         .await
         .map_err(|_| Error::Shutdown)?;
@@ -399,14 +399,11 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use crate::channel::Channels;
     use crate::hlc::Hlc;
     use crate::ids::{LogIndex, NodeId};
-    use crate::meta::Data;
     use crate::tests::upstream;
 
     use super::*;
-    use crate::api::WindowItem;
 
     use crate::api::QuorumCheck;
 
@@ -502,15 +499,10 @@ mod tests {
 
     #[async_trait]
     impl LocalStoreView for StubLocalStore {
-        fn stream_above_hlc(&self, _threshold: Option<Hlc>) -> Channels<Result<Data, Error>> {
+        fn stream_above_hlc(&self, _threshold: Option<Hlc>) -> crate::api::LocalStoreStream {
             unimplemented!()
         }
-        fn stream_window_ordered(
-            &self,
-            _above: Option<Hlc>,
-            _upto: Hlc,
-            _max_entries: Option<std::num::NonZeroUsize>,
-        ) -> Channels<Result<WindowItem, Error>> {
+        fn stream_window(&self, _above: Option<Hlc>, _upto: Hlc) -> crate::api::LocalStoreStream {
             unimplemented!()
         }
         fn subscribe_integrated(&self) -> tokio::sync::watch::Receiver<()> {
@@ -518,8 +510,14 @@ mod tests {
             drop(tx);
             rx
         }
-        fn subscribe_unstable(&self) -> crate::channel::Channels<crate::meta::Data> {
-            crate::channel::Channels::from_infinite(crossbeam_channel::never(), "stub unstable")
+        fn subscribe_unstable(
+            &self,
+        ) -> crossbeam_combinators::Channel<crate::meta::Data, crossbeam_combinators::Infinite>
+        {
+            crossbeam_combinators::Channel::from_infinite(
+                crossbeam_channel::never(),
+                "stub unstable",
+            )
         }
         async fn subscription_cursor(&self, upstream: NodeId) -> Result<Option<LogIndex>, Error> {
             Ok(self

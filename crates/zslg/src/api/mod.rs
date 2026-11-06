@@ -50,13 +50,13 @@ mod state_replicator;
 mod writer;
 
 pub(crate) use peers::PeersWatcher;
-pub use reader::Reader;
+pub use reader::{Reader, StableStream};
 pub use writer::Writer;
 
 pub(crate) use clock::Clock;
 pub(crate) use liveness_probe::LivenessProbe;
 pub(crate) use local_store_mut::LocalStoreMut;
-pub(crate) use local_store_view::{LocalStoreView, WindowItem};
+pub(crate) use local_store_view::{LocalStoreStream, LocalStoreView};
 pub(crate) use membership_gate::MembershipGate;
 pub(crate) use quorum_check::QuorumCheck;
 pub(crate) use raft_consensus::RaftConsensus;
@@ -65,13 +65,13 @@ pub(crate) use raft_membership::{AddMemberOutcome, RaftMembership};
 pub(crate) use raft_peer::RaftTransport;
 pub(crate) use raft_state::RaftStateTracker;
 pub use raft_state::RaftStateView;
-pub(crate) use replica::{Replica, StampedWrite, WriteOutcome};
+pub(crate) use replica::{Replica, ReplicaStream, StampedWrite, WriteOutcome};
 pub(crate) use replica_client::ReplicaClient;
 pub(crate) use router::Router;
-pub(crate) use snapshot_store::{CleanupReport, SnapshotStore};
+pub(crate) use snapshot_store::{CleanupReport, EntryMeta, SnapshotStore, SnapshotWrite};
 pub(crate) use spare_selection::{CandidateInfo, SpareSelector};
 pub(crate) use stable_archive::{
-    ArchiveBounds, ArchiveLowerBound, ArchiveUpperBound, StableArchiveReader,
+    ArchiveBounds, ArchiveStream, ArchiveUpperBound, StableArchiveReader,
 };
 pub(crate) use stable_log::StableLogSnapshot;
 pub(crate) use state_replicator::{ReplicatedRaftState, StateReplicator};

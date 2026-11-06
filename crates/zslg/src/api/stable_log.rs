@@ -24,7 +24,7 @@
 //! §8), fed straight from the off-reactor snapshot decode. A `blocking_send` on
 //! a full channel is the backpressure that paces decode to the commit rate.
 
-use crate::channel::Channels;
+use crossbeam_combinators::Channel;
 
 use crate::hlc::Hlc;
 use crate::ids::LogIndex;
@@ -48,11 +48,11 @@ pub(crate) trait StableLogSnapshot: Send + Sync + 'static {
     fn end_hlc(&self) -> Option<Hlc>;
 
     /// Append decoded snapshot entries (chunked commit + fsync + fan-out).
-    /// Gapless-ingest fence: an index past `end + 1` is rejected
+    /// Contiguous-ingest fence: an index past `end + 1` is rejected
     /// (`Error::StableLogGap`) rather than leaving a hole.
     async fn append(
         &self,
-        entries: Channels<Result<SnapshotEntry, crate::Error>>,
+        entries: Channel<Result<SnapshotEntry, crate::Error>, crossbeam_combinators::Finite>,
     ) -> Result<usize, crate::Error>;
 
     /// Record that the prefix is loaded up to the manifest watermark `end_hlc`.
@@ -63,32 +63,31 @@ pub(crate) trait StableLogSnapshot: Send + Sync + 'static {
     ///
     /// The subscription is infinite and its own queue is bounded: a consumer
     /// that falls too far behind is **hung up on** (the fan-out drops its
-    /// sender), which surfaces as [`crate::channel::End::Aborted`] after every
+    /// sender), which surfaces as [`crossbeam_combinators::End::Aborted`] after every
     /// event that was already queued. That is the lag signal, and the response
     /// is to replay from your cursor and subscribe again — see
-    /// `learner::fanout` and `learner::read`.
+    /// the fan-out and `learner::read`.
     #[must_use]
-    fn subscribe_events(&self) -> Channels<StableLogEvent>;
+    fn subscribe_events(&self) -> Channel<StableLogEvent, crossbeam_combinators::Infinite>;
 
     /// The current watermark, level-triggered — for consumers that want log
-    /// *state*, not its data. No payload crosses it and it cannot lag, so a
-    /// slow reader simply observes the latest value rather than a backlog.
+    /// *state*, not its data. No payload crosses it and it cannot lag: a slow
+    /// reader observes the latest value rather than a backlog. Blocking readers
+    /// use `changes()` (one wake-up stands for any number of moves), async
+    /// readers `changed()`/`wait_for`.
     #[must_use]
-    fn watch_watermark(&self) -> tokio::sync::watch::Receiver<Option<Hlc>>;
+    fn watermark(&self) -> crossbeam_combinators::Level<Option<Hlc>>;
 
-    /// The same level for a blocking consumer: a wake-up after each move,
-    /// carrying nothing — read `end_hlc` or the watch on waking. One pending
-    /// wake stands for any number of moves, so it cannot lag either. Infinite;
-    /// it ends `Aborted` only when the log is dropped.
-    #[must_use]
-    fn watermark_moves(&self) -> Channels<()>;
-
+    /// The stored entries in `(after, until)`, ascending; `after: None` starts
+    /// at the first index. The scan closes when it reaches `until` or the end of
+    /// what is stored, whichever is first — gaps (a retired prefix) are the
+    /// caller's to fill.
     #[must_use]
     fn range(
         &self,
-        from: LogIndex,
+        after: Option<LogIndex>,
         until: LogIndex,
-    ) -> Channels<Result<(LogIndex, Data), crate::Error>>;
+    ) -> Channel<Result<(LogIndex, Data), crate::Error>, crossbeam_combinators::Finite>;
 
     /// Durably delete everything at or below `hlc_threshold`: a `WriteBatch`
     /// range-delete, fenced before returning. The threshold is clamped

@@ -18,11 +18,12 @@ use crate::{
     },
 };
 use bytes::Bytes;
+use crossbeam_combinators::CancelHandle;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, timeout};
 use tokio_util::sync::CancellationToken;
-use zslg::{CancelHandle, StableLogEvent};
+use zslg::StableLogEvent;
 
 pub(super) const SYNC: Duration = Duration::from_secs(5);
 

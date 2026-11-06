@@ -7,10 +7,10 @@ use crate::{
     ArcReadTransaction, ArcStore, Error, EventSet, Index, Projection, ProjectionTypeId,
     ReadTransactionExt, Ref, ResultSet, SubEventOf, Syncer, Tenant, TenantId, View, WithWireFormat,
 };
+use crossbeam_combinators::{Channel, Infinite, RegistryError};
 use std::collections::{BTreeMap, BTreeSet};
 use std::marker::PhantomData;
 use std::sync::Arc;
-use zslg::Channels;
 
 impl Error {
     pub(crate) fn reference_not_found<P: Projection>(r: Ref<P>) -> Self {
@@ -20,9 +20,6 @@ impl Error {
         }
     }
 }
-
-/// Unread refs before the fold blocks on a subscriber.
-const SUBSCRIBER_CAPACITY: usize = 1024;
 
 /// One tenant's read side, typed by the tenant's event type `Ev` like the
 /// [`EventWriter`](crate::EventWriter) handed out beside it.
@@ -129,10 +126,11 @@ impl<Ev> Reader<Ev> {
 
     /// Every stable `P` committed from now on, deletions included, as a
     /// [`Ref`] to look up. The fold blocks on a subscriber that stops reading;
-    /// the channel ends only with the fold — with
-    /// [`ChannelEnd::Cancelled`](zslg::ChannelEnd::Cancelled) when the fold was
-    /// cancelled (its stop reason is [`StopReason::Cancelled`](crate::StopReason::Cancelled)),
-    /// `Aborted` when it stopped for any other reason.
+    /// the channel ends only with the fold, as
+    /// [`AbortReason::ProducerGone`](crossbeam_combinators::AbortReason::ProducerGone).
+    /// A caller that needs to distinguish a cancellation from a failure binds
+    /// its own [`Cancellation`](crossbeam_combinators::Cancellation) with
+    /// `until`.
     ///
     /// `P` must be over this tenant's events, as for
     /// [`register`](crate::AssociatedProjectorManager::register), and fails
@@ -158,7 +156,7 @@ impl<Ev> Reader<Ev> {
     ///     let _ = reader.subscribe_stable_log::<P>();
     /// }
     /// ```
-    pub fn subscribe_stable_log<P>(&self) -> Result<Channels<Ref<P>>, Error>
+    pub fn subscribe_stable_log<P>(&self) -> Result<Channel<Ref<P>, Infinite>, Error>
     where
         P: Projection,
         for<'a> P::Event<'a>: SubEventOf<'a, Ev>,
@@ -171,19 +169,18 @@ impl<Ev> Reader<Ev> {
                 tenant_id: self.tenant.id().as_u128(),
             });
         }
-        let (tx, rx) = crossbeam_channel::bounded(SUBSCRIBER_CAPACITY);
-        // Racy by a few concurrent subscribes, which is fine for this bound.
-        if self.subscriptions.register.len() >= PENDING_SUBSCRIBERS {
-            return Err(Error::TooManyPendingSubscriptions(PENDING_SUBSCRIBERS));
-        }
-        // If the fold is gone, `tx` is dropped here and the channel ends.
-        let _ = self
+        let stream = match self
             .subscriptions
-            .register
-            .send((self.tenant.id(), P::TYPE_ID, tx));
-        Ok(Channels::from_infinite(rx, "nvzn-subscribe")
-            .until(&self.subscriptions.cancelled)
-            .map(Ref::new))
+            .registry
+            .subscribe((self.tenant.id(), P::TYPE_ID))
+        {
+            Ok(stream) => stream,
+            Err(RegistryError::Full) => {
+                return Err(Error::TooManyPendingSubscriptions(PENDING_SUBSCRIBERS));
+            }
+            Err(RegistryError::Closed) => Channel::aborted("nvzn-subscribe"),
+        };
+        Ok(stream.map(|entry| Ref::new(entry.2)))
     }
 }
 
@@ -475,8 +472,8 @@ mod tests {
             EventWriter, StopReason,
             testsupport::{NewTodoV1, Todo, TodoDeletedV1, TodoId},
         };
+        use crossbeam_combinators::{AbortReason, Infinite};
         use tokio::time::{Duration, timeout};
-        use zslg::ChannelEnd;
 
         const WAIT: Duration = Duration::from_secs(5);
 
@@ -518,9 +515,9 @@ mod tests {
 
         /// The next `n` receives, off the runtime: `recv` blocks.
         async fn recv_n<T: Send + 'static>(
-            ch: Channels<T>,
+            ch: Channel<T, Infinite>,
             n: usize,
-        ) -> (Channels<T>, Vec<Result<T, ChannelEnd>>) {
+        ) -> (Channel<T, Infinite>, Vec<Result<T, AbortReason>>) {
             timeout(
                 WAIT,
                 tokio::task::spawn_blocking(move || {
@@ -586,7 +583,7 @@ mod tests {
 
             let (_todos, got) = recv_n(todos, 2).await;
             assert_eq!(got[0], Ok(todo_ref(1)), "what was sent is still delivered");
-            assert!(matches!(got[1], Err(ChannelEnd::Aborted { .. })));
+            assert!(got[1].is_err());
             assert!(matches!(
                 reader.subscribe_stable_log::<Todo>().map(|_| ()),
                 Err(Error::FoldStopped(StopReason::SubscriptionAborted))
@@ -594,24 +591,14 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn a_full_registration_queue_fails_rather_than_blocks() {
+        async fn many_registrations_are_admitted_and_see_a_commit() {
             let (_log, writer, reader, _handle) = rig().await;
-            // An idle fold takes up no registrations: fill the queue.
             let pending: Vec<_> = (0..PENDING_SUBSCRIBERS)
                 .map(|_| reader.subscribe_stable_log::<Todo>().unwrap())
                 .collect();
-            assert!(matches!(
-                reader.subscribe_stable_log::<Todo>().map(|_| ()),
-                Err(Error::TooManyPendingSubscriptions(PENDING_SUBSCRIBERS))
-            ));
 
-            // A commit drains the queue, and the queued ones see it.
             writer.write(&[new_todo(1)]).await.unwrap();
             reader.sync().await.unwrap();
-            let todos = reader
-                .subscribe_stable_log::<Todo>()
-                .expect("the queue drained");
-            drop(todos);
             let first = pending.into_iter().next().unwrap();
             let (_first, got) = recv_n(first, 1).await;
             assert_eq!(got, vec![Ok(todo_ref(1))]);
@@ -639,7 +626,7 @@ mod tests {
 
             for ch in [before, after] {
                 let (_ch, got) = recv_n(ch, 1).await;
-                assert!(matches!(got[0], Err(ChannelEnd::Aborted { .. })));
+                assert!(got[0].is_err());
             }
         }
 

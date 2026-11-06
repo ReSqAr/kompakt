@@ -14,7 +14,7 @@
 //! integrate worker publishes a batch's rows right after `Storage::write` —
 //! only rows the duplicate filter admitted, only those still above the stable
 //! watermark — and never waits on a subscriber: a full queue is a hang-up
-//! (`learner::fanout`). No fsync is awaited, so an announced entry can be
+//! (the fan-out). No fsync is awaited, so an announced entry can be
 //! lost to a crash; the subscription is at-least-once and the rescan that
 //! follows a hang-up, not the live path, is its recovery.
 
@@ -29,18 +29,20 @@ use rust_rocksdb::WriteBatch;
 
 use crate::database::Subsystem;
 use crate::database::storage::Storage;
-use crate::learner::fanout::Fanout;
 use crate::learner::local_store::Dedup;
 use crate::learner::local_store::key::{
     DATA_PRIMARY_WIDTH, decode_data_key, encode_cursor_key, encode_data_key,
 };
 use bytes::Bytes;
+use crossbeam_combinators::{
+    Channel, Closed, Fanout, FanoutConfig, Feed, Finite, Infinite, OverflowPolicy, Registry,
+    broadcast,
+};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tracing::error;
 
-use crate::api::{StableLogSnapshot, WindowItem};
-use crate::channel::Channels;
+use crate::api::StableLogSnapshot;
 use crate::error::{Error, ToStorage};
 use crate::hlc::Hlc;
 use crate::ids::{DataId, LogIndex, NodeId};
@@ -84,6 +86,7 @@ pub(crate) struct LocalStore {
     integrate_tx: crossbeam_channel::Sender<IntegrateItem>,
     /// Live subscribers to first-time integrations (`subscribe_unstable`).
     unstable: Fanout<Data>,
+    unstable_registry: Registry<Data>,
     /// Test-only fault injection for the commit fence.
     #[cfg(test)]
     fail_next_append: AtomicBool,
@@ -116,9 +119,10 @@ pub(in crate::learner::local_store) async fn create_local_store(
         stable_log,
         config.dedup_ring,
         integrate_tx,
-        Fanout::new(
-            config.unstable_subscriber_queue_capacity,
+        broadcast(
             "unstable tail subscription",
+            FanoutConfig::with_sub_cap(config.unstable_subscriber_queue_capacity),
+            OverflowPolicy::Shed,
         ),
     ));
     Ok((store, integrate_rx))
@@ -130,7 +134,7 @@ impl LocalStore {
         stable_log: Arc<dyn StableLogSnapshot>,
         dedup_ring: Option<std::num::NonZeroUsize>,
         integrate_tx: crossbeam_channel::Sender<IntegrateItem>,
-        unstable: Fanout<Data>,
+        (unstable, unstable_registry): (Fanout<Data>, Registry<Data>),
     ) -> Self {
         let (integrated, _) = watch::channel(());
         Self {
@@ -140,6 +144,7 @@ impl LocalStore {
             dirty: AtomicBool::new(false),
             integrate_tx,
             unstable,
+            unstable_registry,
             recent: parking_lot::Mutex::new(Dedup::new(dedup_ring)),
             #[cfg(test)]
             fail_next_append: AtomicBool::new(false),
@@ -194,11 +199,10 @@ impl LocalStore {
             .filter(|(data_id, _)| watermark.is_none_or(|w| data_id.hlc() > w))
             .map(|(data_id, blob)| Data { data_id, blob })
             .collect();
-        if !fresh.is_empty() {
-            let hung_up = self.unstable.send_all(&fresh);
-            if hung_up > 0 {
-                metrics::unstable_fanout_hangups(hung_up);
-            }
+        for data in fresh {
+            // `Stopped` only while the store is being dropped: no subscriber
+            // is left to miss it.
+            let _ = self.unstable.publish(data);
         }
     }
 
@@ -243,57 +247,32 @@ impl LocalStore {
 
 #[async_trait::async_trait]
 impl crate::api::LocalStoreView for LocalStore {
-    fn stream_above_hlc(&self, threshold: Option<Hlc>) -> Channels<Result<Data, Error>> {
+    fn stream_above_hlc(&self, threshold: Option<Hlc>) -> crate::api::LocalStoreStream {
         let storage = self.storage.clone();
-        let (tx, rx) =
-            crossbeam_channel::bounded::<Result<WindowItem, Error>>(STREAM_CHANNEL_CAPACITY);
-        let (ch, closer) = Channels::from(rx, "stream_above_hlc");
-        tokio::task::spawn_blocking(move || {
-            let start = match threshold {
-                None => Bound::Unbounded,
-                Some(wm) => Bound::Excluded(DataId::from_parts(wm, NodeId::MAX, u64::MAX)),
-            };
-            stream_scan(&storage, (start, Bound::Unbounded), &tx, None);
-            // Only on the normal path: a panic here drops `closer` instead, and
-            // the consumer sees `End::Aborted` rather than a clean end.
-            closer.close();
-        });
-        // Uncapped, so the terminal is always `Complete` and carries nothing
-        // this caller needs.
-        ch.filter_map(|r| match r {
-            Ok(WindowItem::Entry(d)) => Some(Ok(d)),
-            Ok(_) => None,
-            Err(e) => Some(Err(e)),
-        })
+        let start = above_hlc(threshold);
+        let ch =
+            Channel::produce_blocking(STREAM_CHANNEL_CAPACITY, "stream_above_hlc", move |feed| {
+                stream_scan(&storage, (start, Bound::Unbounded), feed)
+            });
+        ch.ordered(None, "local store above HLC")
     }
 
-    fn stream_window_ordered(
-        &self,
-        above: Option<Hlc>,
-        upto: Hlc,
-        max_entries: Option<std::num::NonZeroUsize>,
-    ) -> Channels<Result<WindowItem, Error>> {
+    fn stream_window(&self, above: Option<Hlc>, upto: Hlc) -> crate::api::LocalStoreStream {
         let storage = self.storage.clone();
-        let (tx, rx) = crossbeam_channel::bounded(STREAM_CHANNEL_CAPACITY);
-        let (ch, closer) = Channels::from(rx, "stream_window_ordered");
-        tokio::task::spawn_blocking(move || {
-            let start = match above {
-                None => Bound::Unbounded,
-                Some(a) => Bound::Excluded(DataId::from_parts(a, NodeId::MAX, u64::MAX)),
-            };
-            let end = Bound::Included(DataId::from_parts(upto, NodeId::MAX, u64::MAX));
-            stream_scan(&storage, (start, end), &tx, max_entries);
-            closer.close();
+        let start = above_hlc(above);
+        let end = Bound::Included(DataId::from_parts(upto, NodeId::MAX, u64::MAX));
+        let ch = Channel::produce_blocking(STREAM_CHANNEL_CAPACITY, "stream_window", move |feed| {
+            stream_scan(&storage, (start, end), feed)
         });
-        ch
+        ch.ordered(None, "local store window")
     }
 
     fn subscribe_integrated(&self) -> watch::Receiver<()> {
         self.integrated.subscribe()
     }
 
-    fn subscribe_unstable(&self) -> Channels<Data> {
-        self.unstable.subscribe()
+    fn subscribe_unstable(&self) -> Channel<Data, Infinite> {
+        self.unstable_registry.subscribe_infinite()
     }
 
     async fn subscription_cursor(&self, upstream: NodeId) -> Result<Option<LogIndex>, Error> {
@@ -310,37 +289,32 @@ impl crate::api::LocalStoreView for LocalStore {
 impl crate::api::LocalStoreMut for LocalStore {
     async fn integrate_loop(
         &self,
-        mut records: Channels<Result<(NodeId, LogIndex, Data), Error>>,
+        mut records: Channel<Result<(NodeId, LogIndex, Data), Error>, Finite>,
     ) -> Result<(), Error> {
         let tx = self.integrate_tx.clone();
-        // Forwarding blocks on both halves (Channels::recv and a bounded
+        // Forwarding blocks on both halves (Channel::recv and a bounded
         // send), so it belongs on the blocking pool. It does no IO — the
         // single worker owns every commit.
         let forwarded = tokio::task::spawn_blocking(move || -> (Result<(), Error>, bool) {
             let mut sent_any = false;
             loop {
-                let Some(batch) = records.ready_batch(MAX_BATCH) else {
-                    // A producer that *declared* completion finished its work,
-                    // so this is a clean end. Whether a completed stream is
-                    // acceptable is the caller's call — a subscription cannot
-                    // complete, and `subscriber/peer.rs` treats even a clean
-                    // end as a fault for that reason. An abort is a fault
-                    // here, though: items may be missing (CLAUDE.md §20).
-                    return match records.end_reason() {
-                        crate::channel::End::Closed => (Ok(()), sent_any),
-                        crate::channel::End::Aborted { what } => (
+                // A producer that *declared* completion finished its work, so
+                // `Complete` is a clean end. Whether a completed stream is
+                // acceptable is the caller's call — a subscription cannot
+                // complete, and `subscriber/peer.rs` treats even a clean end
+                // as a fault for that reason. An abort is a fault here, though:
+                // items may be missing (CLAUDE.md §20).
+                let batch = match records.ready_batch(MAX_BATCH) {
+                    Ok(batch) => batch,
+                    Err(crossbeam_combinators::End::Complete) => return (Ok(()), sent_any),
+                    Err(crossbeam_combinators::End::Aborted { reason }) => {
+                        return (
                             Err(Error::SubscriptionStreamEnded {
-                                reason: format!("stream {what} ended"),
+                                reason: reason.to_string(),
                             }),
                             sent_any,
-                        ),
-                        crate::channel::End::Cancelled => (
-                            Err(Error::SubscriptionStreamEnded {
-                                reason: "stream cancelled".to_owned(),
-                            }),
-                            sent_any,
-                        ),
-                    };
+                        );
+                    }
                 };
                 for item in batch {
                     let (node, idx, data) = match item {
@@ -787,28 +761,22 @@ fn commit_batch(
     store.storage.write(batch)
 }
 
-/// Drive one blocking range scan into the stream channel `tx`, ending with the
-/// terminal [`WindowItem`] that says whether the whole range was covered. A scan
-/// or decode error is the stream's final item; nothing follows it.
-/// [`for_each_data`] clamps at the retire threshold, so no purge-cutoff filter
-/// is needed here.
-///
-/// `max_entries` is a **floor, not a ceiling**: once the count reaches it the
-/// scan keeps emitting while the HLC is unchanged, then stops. Splitting an HLC
-/// would be a correctness bug — the consumer resumes with
-/// `Excluded(DataId::from_parts(hlc, NodeId::MAX, u64::MAX))`, which skips every
-/// entry at that HLC, so a mid-HLC stop would drop the remainder silently.
+/// The scan bound strictly above every entry at `hlc` (or the start).
+fn above_hlc(hlc: Option<Hlc>) -> Bound<DataId> {
+    match hlc {
+        None => Bound::Unbounded,
+        Some(h) => Bound::Excluded(DataId::from_parts(h, NodeId::MAX, u64::MAX)),
+    }
+}
+
+/// Drive one blocking range scan into `feed`. A scan or decode error is the
+/// stream's final item; nothing follows it. [`for_each_data`] clamps at the
+/// retire threshold, so no purge-cutoff filter is needed here.
 fn stream_scan(
     storage: &Storage,
     range: (Bound<DataId>, Bound<DataId>),
-    tx: &crossbeam_channel::Sender<Result<WindowItem, Error>>,
-    max_entries: Option<std::num::NonZeroUsize>,
-) {
-    let mut sent: usize = 0;
-    // Set once the cap is reached: the HLC we are finishing before stopping.
-    let mut finishing: Option<Hlc> = None;
-    let mut capped = false;
-    let mut consumer_gone = false;
+    feed: Feed<Result<Data, Error>, Finite>,
+) -> Closed {
     let scan = for_each_data(
         storage,
         range,
@@ -820,39 +788,13 @@ fn stream_scan(
                 data_id,
                 blob: Bytes::copy_from_slice(payload),
             };
-            let hlc = d.data_id.hlc();
-            if finishing.is_some_and(|b| hlc != b) {
-                capped = true;
-                return false;
-            }
-            if tx.send(Ok(WindowItem::Entry(d))).is_err() {
-                consumer_gone = true;
-                return false;
-            }
-            // Saturating: the count is only compared against the cap, so
-            // pinning at usize::MAX keeps the comparison true forever, which
-            // is the correct behaviour past any conceivable cap.
-            sent = sent.saturating_add(1);
-            if finishing.is_none() && max_entries.is_some_and(|c| sent >= c.get()) {
-                finishing = Some(hlc);
-            }
-            true
+            feed.send(Ok(d)).is_ok()
         },
     );
     if let Err(e) = scan {
-        let _ = tx.send(Err(e));
-        return;
+        let _ = feed.send(Err(e));
     }
-    if consumer_gone {
-        return;
-    }
-    // The cap alone does not truncate: it only matters if it actually stopped
-    // the scan short of the range's end.
-    let terminal = match finishing.filter(|_| capped) {
-        Some(hlc) => WindowItem::TruncatedAt(hlc),
-        None => WindowItem::Complete,
-    };
-    let _ = tx.send(Ok(terminal));
+    feed.close()
 }
 
 /// Periodically fsync the local store when it has writes that aren't on disk
@@ -920,6 +862,7 @@ async fn flush_if_dirty(store: &LocalStore) -> Result<(), Error> {
     reason = "test code"
 )]
 mod tests {
+    use crate::test_stream::ChannelTestExt as _;
     use std::path::Path;
     use std::sync::Arc;
 
@@ -947,7 +890,7 @@ mod tests {
         for (idx, rec) in records {
             let _ = tx.send(Ok((source, idx, rec)));
         }
-        let (ch, closer) = crate::channel::Channels::from(rx, "test integrate");
+        let (ch, closer) = crossbeam_combinators::Channel::from(rx, "test integrate");
         // Close before the last sender drops, or the consumer forms its
         // verdict as "disconnected, not yet closed" — an abort.
         closer.close();
@@ -1039,7 +982,7 @@ mod tests {
         use futures::TryStreamExt as _;
         let all: Vec<Data> = store
             .stream_above_hlc(None)
-            .into_stream()
+            .into_test_stream()
             .try_collect()
             .await
             .expect("ok");
@@ -1124,36 +1067,6 @@ mod tests {
         assert_eq!(live.try_recv(), None);
     }
 
-    /// The integrate worker never waits on a subscriber: one whose queue is
-    /// full is hung up on, after everything already queued.
-    #[tokio::test]
-    async fn an_overrun_unstable_subscriber_is_hung_up_on() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let mut config = crate::learner::local_store::LocalStoreConfig::for_test();
-        config.unstable_subscriber_queue_capacity = crate::unit::nonzero(2);
-        let store = store_with(dir.path(), &config, None).await;
-        let mut live = store.subscribe_unstable();
-
-        for i in 0..3u8 {
-            put_full(
-                &store,
-                upstream(1),
-                LogIndex(u64::from(i)),
-                make_data(i, 100 + u64::from(i), b"x"),
-            )
-            .await;
-        }
-
-        assert_eq!(live.recv().expect("first").data_id.hlc(), Hlc(100));
-        assert_eq!(live.recv().expect("second").data_id.hlc(), Hlc(101));
-        assert_eq!(
-            live.recv().err(),
-            Some(crate::channel::End::Aborted {
-                what: "unstable tail subscription"
-            })
-        );
-    }
-
     #[tokio::test]
     async fn integrate_skips_full_record_at_or_below_end_hlc() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1191,7 +1104,7 @@ mod tests {
         use futures::TryStreamExt as _;
         let all: Vec<Data> = store
             .stream_above_hlc(None)
-            .into_stream()
+            .into_test_stream()
             .try_collect()
             .await
             .expect("ok");
@@ -1275,7 +1188,7 @@ mod tests {
         for (src, idx, rec) in records {
             let _ = tx.send(Ok((src, idx, rec)));
         }
-        let (ch, closer) = crate::channel::Channels::from(rx, "test integrate");
+        let (ch, closer) = crossbeam_combinators::Channel::from(rx, "test integrate");
         // Close before the last sender drops, or the consumer forms its
         // verdict as "disconnected, not yet closed" — an abort.
         closer.close();
@@ -1463,7 +1376,7 @@ mod tests {
         use std::collections::BTreeSet;
         let all: Vec<Data> = store
             .stream_above_hlc(None)
-            .into_stream()
+            .into_test_stream()
             .try_collect()
             .await
             .expect("ok");
@@ -1472,7 +1385,7 @@ mod tests {
 
         let above: Vec<Data> = store
             .stream_above_hlc(Some(Hlc(150)))
-            .into_stream()
+            .into_test_stream()
             .try_collect()
             .await
             .expect("ok");
@@ -1481,7 +1394,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stream_window_ordered_sorts_by_hlc_then_data_id() {
+    async fn stream_window_sorts_by_hlc_then_data_id() {
         let (_dir, store) = fresh_store().await;
         // Build entries with known (HLC, random) values, where the random part
         // is in decreasing order — the HLC should dominate the sort.
@@ -1520,12 +1433,9 @@ mod tests {
         expected.sort();
 
         let got: Vec<Data> = store
-            .stream_window_ordered(None, Hlc(1_000), None)
-            .into_iter()
-            .filter_map(|r| match r {
-                Ok(WindowItem::Entry(d)) => Some(d),
-                _ => None,
-            })
+            .stream_window(None, Hlc(1_000))
+            .items()
+            .filter_map(Result::ok)
             .collect();
         let got_keys: Vec<(u64, [u8; 32])> = got
             .iter()
@@ -1535,7 +1445,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stream_window_ordered_respects_bounds() {
+    async fn stream_window_respects_bounds() {
         let (_dir, store) = fresh_store().await;
         for (seed, hlc) in [(1u8, 100u64), (2, 200), (3, 300)] {
             put_full(
@@ -1548,12 +1458,9 @@ mod tests {
         }
         // Lower bound exclusive, upper bound inclusive: (100, 300] → 200, 300.
         let got: Vec<Data> = store
-            .stream_window_ordered(Some(Hlc(100)), Hlc(300), None)
-            .into_iter()
-            .filter_map(|r| match r {
-                Ok(WindowItem::Entry(d)) => Some(d),
-                _ => None,
-            })
+            .stream_window(Some(Hlc(100)), Hlc(300))
+            .items()
+            .filter_map(Result::ok)
             .collect();
         let hlcs: Vec<u64> = got.iter().map(|d| d.data_id.hlc().raw()).collect();
         assert_eq!(hlcs, vec![200, 300]);
@@ -1562,7 +1469,8 @@ mod tests {
     /// The cap must never split an HLC. The next chunk's lower bound is
     /// `Excluded(DataId::from_parts(hlc, NodeId::MAX, u64::MAX))`, which skips
     /// every entry at that HLC — so a chunk that stopped mid-HLC would silently
-    /// drop the rest of it. The cap is therefore a floor, not a ceiling.
+    /// drop the rest of it. `take_at_least::<Hlc>` over the real scan makes the
+    /// cap a floor, not a ceiling.
     #[tokio::test]
     async fn a_capped_window_never_splits_an_hlc() {
         let (_dir, store) = fresh_store().await;
@@ -1586,30 +1494,24 @@ mod tests {
 
         // A cap of 2 lands inside the HLC-100 run; all five must still come out.
         let cap = std::num::NonZeroUsize::new(2).expect("nonzero");
-        let items: Vec<WindowItem> = store
-            .stream_window_ordered(None, Hlc(200), Some(cap))
-            .into_iter()
-            .filter_map(|r| r.ok())
-            .collect();
-
-        let (terminal, entries) = items.split_last().expect("a terminal item");
-        let hlcs: Vec<Hlc> = entries
-            .iter()
-            .map(|i| match i {
-                WindowItem::Entry(d) => d.data_id.hlc(),
-                other => panic!("expected an entry, got {other:?}"),
-            })
-            .collect();
+        let mut window = store
+            .stream_window(None, Hlc(200))
+            .into_channel()
+            .take_at_least::<Hlc>(cap);
+        let mut hlcs = Vec::new();
+        let end = loop {
+            match window.recv() {
+                Ok(Ok(d)) => hlcs.push(d.data_id.hlc()),
+                Ok(Err(e)) => panic!("scan error: {e}"),
+                Err(end) => break end,
+            }
+        };
         assert_eq!(
             hlcs,
             vec![Hlc(100); 5],
             "the cap must extend to the end of the HLC it lands in, and stop there",
         );
-        assert_eq!(
-            *terminal,
-            WindowItem::TruncatedAt(Hlc(100)),
-            "the HLC-101 run is uncovered, so the scan must say where it stopped",
-        );
+        assert_eq!(end, crossbeam_combinators::End::Complete);
     }
 
     /// A cap larger than the window is not a truncation.
@@ -1631,21 +1533,21 @@ mod tests {
             .await;
         }
         let cap = std::num::NonZeroUsize::new(100).expect("nonzero");
-        let items: Vec<WindowItem> = store
-            .stream_window_ordered(None, Hlc(200), Some(cap))
-            .into_iter()
-            .filter_map(|r| r.ok())
+        let entries: Vec<Data> = store
+            .stream_window(None, Hlc(200))
+            .into_channel()
+            .take_at_least::<Hlc>(cap)
+            .items()
+            .filter_map(Result::ok)
             .collect();
-        let (terminal, entries) = items.split_last().expect("a terminal item");
-        assert_eq!(entries.len(), 4);
         assert_eq!(
-            *terminal,
-            WindowItem::Complete,
-            "a cap the scan never reached is not a truncation",
+            entries.len(),
+            4,
+            "a cap the scan never reached cuts nothing"
         );
     }
 
-    /// `None` is exactly today's behaviour.
+    /// Without a cap the window is the whole range, and it closes cleanly.
     #[tokio::test]
     async fn no_cap_streams_the_whole_window() {
         let (_dir, store) = fresh_store().await;
@@ -1663,14 +1565,16 @@ mod tests {
             )
             .await;
         }
-        let items: Vec<WindowItem> = store
-            .stream_window_ordered(None, Hlc(200), None)
-            .into_iter()
-            .filter_map(|r| r.ok())
-            .collect();
-        let (terminal, entries) = items.split_last().expect("a terminal item");
-        assert_eq!(entries.len(), 6);
-        assert_eq!(*terminal, WindowItem::Complete);
+        let mut window = store.stream_window(None, Hlc(200));
+        let mut entries = 0;
+        let end = loop {
+            match window.recv() {
+                Ok(_) => entries += 1,
+                Err(end) => break end,
+            }
+        };
+        assert_eq!(entries, 6);
+        assert_eq!(end, crossbeam_combinators::End::Complete);
     }
 
     #[tokio::test]
@@ -1692,7 +1596,7 @@ mod tests {
         // compaction (CLAUDE.md §8).
         let remaining: Vec<Data> = store
             .stream_above_hlc(None)
-            .into_stream()
+            .into_test_stream()
             .try_collect()
             .await
             .expect("ok");
@@ -1728,7 +1632,7 @@ mod tests {
         use futures::TryStreamExt as _;
         let has_data = store
             .stream_above_hlc(None)
-            .into_stream()
+            .into_test_stream()
             .try_collect::<Vec<Data>>()
             .await
             .expect("stream")
@@ -1770,7 +1674,7 @@ mod tests {
         use futures::TryStreamExt as _;
         let remaining: Vec<Data> = store
             .stream_above_hlc(None)
-            .into_stream()
+            .into_test_stream()
             .try_collect()
             .await
             .expect("stream");

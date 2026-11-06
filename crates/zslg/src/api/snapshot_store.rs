@@ -21,20 +21,37 @@ use object_store::path::Path;
 use tokio_util::sync::CancellationToken;
 
 use crate::Error;
-use crate::channel::Channels;
 use crate::ids::SnapshotId;
 use crate::meta::SnapshotEntry;
 use crate::object_store::CompressionLevel;
+use crossbeam_combinators::Channel;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct CleanupReport {
     pub(crate) snapshots_deleted: Vec<Path>,
 }
 
+/// Where an entry sits: its global index and HLC.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct EntryMeta {
+    pub(crate) index: crate::ids::LogIndex,
+    pub(crate) hlc: crate::hlc::Hlc,
+}
+
+/// What a snapshot write produced: the entries and the object's sizes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SnapshotWrite {
+    pub(crate) count: usize,
+    /// The last entry written; `None` for an empty write.
+    pub(crate) last: Option<EntryMeta>,
+    pub(crate) stored_bytes: u64,
+    pub(crate) uncompressed_bytes: u64,
+}
+
 #[async_trait::async_trait]
 pub(crate) trait SnapshotStore: Send + Sync {
-    /// Write a snapshot object from `entries`, returning the entry count. The
-    /// feeder must cancel on [`shutdown_token`](Self::shutdown_token).
+    /// Write a snapshot object from `entries`. The feeder must cancel on
+    /// [`shutdown_token`](Self::shutdown_token).
     ///
     /// `reason` names *why* this transfer happens; it is a metric label, not
     /// behaviour. The caller states it because only the caller knows — see
@@ -42,10 +59,10 @@ pub(crate) trait SnapshotStore: Send + Sync {
     async fn write_snapshot(
         &self,
         id: SnapshotId,
-        entries: Channels<Result<SnapshotEntry, Error>>,
+        entries: Channel<Result<SnapshotEntry, Error>, crossbeam_combinators::Finite>,
         compression: CompressionLevel,
         reason: crate::metrics::ObjectStoreReason,
-    ) -> Result<usize, Error>;
+    ) -> Result<SnapshotWrite, Error>;
 
     /// Read a snapshot's decoded entries — the only way to get data out of a
     /// snapshot object. The outer `Result` is the open failure (e.g. missing
@@ -59,7 +76,7 @@ pub(crate) trait SnapshotStore: Send + Sync {
         &self,
         id: SnapshotId,
         reason: crate::metrics::ObjectStoreReason,
-    ) -> Result<Channels<Result<SnapshotEntry, Error>>, Error>;
+    ) -> Result<Channel<Result<SnapshotEntry, Error>, crossbeam_combinators::Finite>, Error>;
 
     /// The token this store's blocking workers cancel on. A feeder must cancel
     /// on *this* token, not its own: an encode worker parked on `blocking_recv`

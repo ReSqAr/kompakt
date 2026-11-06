@@ -43,10 +43,8 @@ use tracing::debug;
 
 use crate::ByteSize;
 use crate::api::{Clock, StampedWrite, WriteOutcome};
-use crate::channel::Channels;
 use crate::error::Error;
 use crate::ids::{LogIndex, NodeId, PeerAddr};
-use crate::meta::Data;
 use crate::metrics::OpState;
 use crate::network::framing::{AsyncFrameSink, AsyncFrameStream};
 use crate::network::messages::{
@@ -54,6 +52,7 @@ use crate::network::messages::{
     RpcStreamKind,
 };
 use crate::network::tcp::{self, SocketOpts};
+use crossbeam_combinators::Channel;
 
 mod write_stream;
 pub(super) use write_stream::open_write;
@@ -383,8 +382,8 @@ impl StreamOpener {
     fn write(
         &self,
         node_id: NodeId,
-        input: Channels<StampedWrite>,
-    ) -> Channels<Result<WriteOutcome, Error>> {
+        input: Channel<StampedWrite, crossbeam_combinators::Finite>,
+    ) -> Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> {
         open_write(
             self.rpc_weak.clone(),
             Target::Registered(node_id),
@@ -405,11 +404,7 @@ impl StreamOpener {
         Ok((sink, stream))
     }
 
-    fn subscribe_from(
-        &self,
-        node_id: NodeId,
-        from: Option<LogIndex>,
-    ) -> Channels<Result<(LogIndex, Data), Error>> {
+    fn subscribe_from(&self, node_id: NodeId, from: Option<LogIndex>) -> crate::api::ReplicaStream {
         open_subscribe(
             self.rpc_weak.clone(),
             Target::Registered(node_id),
@@ -417,6 +412,7 @@ impl StreamOpener {
             self.subscribe_channel_cap,
             self.cancel.clone(),
         )
+        .ordered(from, "replica subscription")
     }
 }
 
@@ -568,8 +564,8 @@ impl RpcClient {
     pub(in crate::network) fn write(
         &self,
         node_id: NodeId,
-        input: Channels<StampedWrite>,
-    ) -> Channels<Result<WriteOutcome, Error>> {
+        input: Channel<StampedWrite, crossbeam_combinators::Finite>,
+    ) -> Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> {
         self.streams.write(node_id, input)
     }
 
@@ -591,7 +587,7 @@ impl RpcClient {
         &self,
         node_id: NodeId,
         from: Option<LogIndex>,
-    ) -> Channels<Result<(LogIndex, Data), Error>> {
+    ) -> crate::api::ReplicaStream {
         self.streams.subscribe_from(node_id, from)
     }
 }

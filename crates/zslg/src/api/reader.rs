@@ -31,10 +31,14 @@
 //! shaped around.
 
 use crate::Error;
-use crate::channel::Channels;
 use crate::hlc::Hlc;
 use crate::ids::LogIndex;
 use crate::meta::{Data, StableLogEvent, UnstableEvent};
+use crossbeam_combinators::{Channel, Contiguous, Infinite, OrderedChannel};
+
+/// The stable-log read: gapless indices, strictly after the caller's `after`.
+pub type StableStream =
+    OrderedChannel<Result<StableLogEvent, Error>, Contiguous<LogIndex>, Infinite>;
 
 #[async_trait::async_trait]
 pub trait Reader: Send + Sync + 'static {
@@ -53,22 +57,24 @@ pub trait Reader: Send + Sync + 'static {
     fn hlc_now(&self) -> Hlc;
 
     /// Entries and watermark advances in causal order: a `Watermark` never
-    /// arrives before an `Appended` it covers. Replays historical entries from
-    /// `from` (inclusive), then follows live events.
+    /// arrives before an `Appended` it covers. Replays historical entries
+    /// strictly after `after` (`None`: from the first entry), then follows live
+    /// events.
     ///
-    /// `from` is required: the stable log is a complete history and a read of
+    /// `after` is required: the stable log is a complete history and a read of
     /// it is a position in that history, so there is no "only what is new"
-    /// mode. Knowing the consumer's position is also what makes the stream
+    /// mode. It is the last index the caller has already seen, which is what a
+    /// consumer holds; the first index it wants is `LogIndex::next_after(after)`. Knowing the consumer's position is also what makes the stream
     /// recoverable — **a slow consumer never sees a broadcast lag**. When the
     /// live ring laps this subscriber, the stream silently re-enters historical
     /// replay from its own cursor and rejoins the live tail, as often as
     /// necessary. What the caller observes is one gapless, index-ordered
     /// stream; falling behind costs latency, not data.
-    fn subscribe_stable_log(&self, from: LogIndex) -> Channels<Result<StableLogEvent, Error>>;
+    fn subscribe_stable_log(&self, after: Option<LogIndex>) -> crate::StableStream;
 
     /// One-shot scan of entries strictly above the watermark. Emitting one at or
     /// below it would duplicate `stable_tail` (CLAUDE.md §12).
-    fn unstable_tail(&self) -> Channels<Result<Data, Error>>;
+    fn unstable_tail(&self) -> Channel<Result<Data, Error>, crossbeam_combinators::Finite>;
 
     /// Live entries above the watermark, in arrival (integration) order, with
     /// the watermark in-band. At-least-once: an entry may repeat, so consumers
@@ -81,7 +87,9 @@ pub trait Reader: Send + Sync + 'static {
     ///
     /// Infinite: a consumer that falls behind is resynced silently (replay
     /// everything above the watermark, then live), so any termination is
-    /// [`End::Aborted`](crate::channel::End::Aborted), and node shutdown is
-    /// [`End::Cancelled`](crate::channel::End::Cancelled).
-    fn subscribe_unstable_tail(&self) -> Channels<Result<UnstableEvent, Error>>;
+    /// [`End::Aborted`](crossbeam_combinators::End::Aborted), and node shutdown is
+    /// [`AbortReason::Cancelled`](crossbeam_combinators::AbortReason::Cancelled).
+    fn subscribe_unstable_tail(
+        &self,
+    ) -> Channel<Result<UnstableEvent, Error>, crossbeam_combinators::Infinite>;
 }

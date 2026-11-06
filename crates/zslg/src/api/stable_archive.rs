@@ -9,19 +9,14 @@
 //! bounds. Callers specify only the [`ArchiveBounds`] — never a snapshot id or a
 //! manifest — so snapshot selection lives in exactly one place.
 
-use crate::channel::Channels;
 use crate::error::Error;
 use crate::ids::LogIndex;
 use crate::meta::SnapshotEntry;
+use crossbeam_combinators::{Contiguous, Finite, OrderedChannel};
 
-/// Inclusive lower bound of an archive stream.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum ArchiveLowerBound {
-    /// Start at the earliest entry any covering snapshot holds.
-    Earliest,
-    /// Start at this global index (inclusive).
-    FromIndex(LogIndex),
-}
+/// The archive stream: gapless indices, tiled from snapshots.
+pub(crate) type ArchiveStream =
+    OrderedChannel<Result<SnapshotEntry, Error>, Contiguous<LogIndex>, Finite>;
 
 /// Upper bound of an archive stream. Because index order == HLC order in the
 /// stable log, any upper bound prunes entries at or above it; the implementor
@@ -34,26 +29,19 @@ pub(crate) enum ArchiveUpperBound {
     IndexExclusive(LogIndex),
 }
 
-/// The window an [`StableArchiveReader::stream`] call covers.
+/// The window an [`StableArchiveReader::stream`] call covers: `(after, until)`.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ArchiveBounds {
-    pub(crate) from: ArchiveLowerBound,
+    /// The last index already held (exclusive start); `None` = from the first.
+    pub(crate) after: Option<LogIndex>,
     pub(crate) until: ArchiveUpperBound,
 }
 
-#[async_trait::async_trait]
 pub(crate) trait StableArchiveReader: Send + Sync {
     /// Archived entries within `bounds`, ascending by index, tiled from
-    /// whichever snapshots cover them. A bounded channel rather than a `Stream`
-    /// so the consumer can drain on its own blocking thread and batch commits
-    /// (CLAUDE.md §8) — the idiom of
-    /// [`SnapshotStore::read_snapshot`](crate::api::SnapshotStore::read_snapshot).
-    ///
-    /// The outer `Result` is a setup failure (nothing to stream); a per-snapshot
-    /// open or decode error arrives as an `Err` item, so a consumer that fences
-    /// on the first error still aborts cleanly.
-    async fn stream(
-        &self,
-        bounds: ArchiveBounds,
-    ) -> Result<Channels<Result<SnapshotEntry, Error>>, Error>;
+    /// whichever snapshots cover them, opened lazily one at a time. A bounded
+    /// window that the manifest does not tile ends `Aborted`, as does a gap or
+    /// an HLC regression; an open or decode error arrives as an `Err` item.
+    #[must_use]
+    fn stream(&self, bounds: ArchiveBounds) -> ArchiveStream;
 }

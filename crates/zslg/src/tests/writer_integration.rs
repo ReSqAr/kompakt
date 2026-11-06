@@ -24,6 +24,7 @@
     reason = "test code"
 )]
 
+use crate::test_stream::ChannelTestExt as _;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -78,7 +79,7 @@ async fn writer_node_writes_against_three_replica_nodes() {
     let writer_id = writer.node_id();
     let found = tokio::time::timeout(Duration::from_secs(20), async {
         loop {
-            let mut stream = reader.unstable_tail().into_stream();
+            let mut stream = reader.unstable_tail().into_test_stream();
             while let Some(item) = stream.next().await {
                 if let Ok(d) = item
                     && d.data_id.source_node() == writer_id

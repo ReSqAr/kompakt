@@ -25,8 +25,7 @@ use tokio::sync::watch;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-use crate::api::{LocalStoreView, RaftLeadership, SnapshotStore, StableLogSnapshot, WindowItem};
-use crate::channel::Channels;
+use crate::api::{LocalStoreView, RaftLeadership, SnapshotStore, StableLogSnapshot};
 use crate::error::Error;
 use crate::hlc::Hlc;
 use crate::ids::{LogIndex, NodeId, ServerName, SnapshotId};
@@ -40,6 +39,7 @@ use crate::leader::jobs::snapshot::{SNAPSHOT_LOOP_FLOOR, SnapshotJob};
 use crate::meta::{Data, RaftManifestState, RaftState, ReplicaMembership};
 use crate::object_store::CompressionLevel;
 use crate::raft::RaftStateHandle;
+use crossbeam_combinators::Channel;
 
 // ── the pure pacing primitive ────────────────────────────────────────────
 
@@ -280,27 +280,25 @@ struct FailingWindowStore {
 
 #[async_trait::async_trait]
 impl LocalStoreView for FailingWindowStore {
-    fn stream_above_hlc(&self, _threshold: Option<Hlc>) -> Channels<Result<Data, Error>> {
+    fn stream_above_hlc(&self, _threshold: Option<Hlc>) -> crate::api::LocalStoreStream {
         unimplemented!("pacing tests do not stream above an hlc")
     }
 
-    fn stream_window_ordered(
-        &self,
-        _above: Option<Hlc>,
-        _upto: Hlc,
-        _max_entries: Option<std::num::NonZeroUsize>,
-    ) -> Channels<Result<WindowItem, Error>> {
+    fn stream_window(&self, _above: Option<Hlc>, _upto: Hlc) -> crate::api::LocalStoreStream {
         let n = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         let _ = self.done.send(n);
-        Channels::from_vec(vec![Err(Error::Storage("pacing test: window read".into()))])
+        Channel::once(Err(Error::Storage("pacing test: window read".into())))
+            .ordered(None, "pacing test window")
     }
 
     fn subscribe_integrated(&self) -> watch::Receiver<()> {
         self.integrated.subscribe()
     }
 
-    fn subscribe_unstable(&self) -> crate::channel::Channels<crate::meta::Data> {
-        crate::channel::Channels::from_infinite(crossbeam_channel::never(), "stub unstable")
+    fn subscribe_unstable(
+        &self,
+    ) -> crossbeam_combinators::Channel<crate::meta::Data, crossbeam_combinators::Infinite> {
+        crossbeam_combinators::Channel::from_infinite(crossbeam_channel::never(), "stub unstable")
     }
 
     async fn subscription_cursor(&self, _upstream: NodeId) -> Result<Option<LogIndex>, Error> {
@@ -320,27 +318,26 @@ impl StableLogSnapshot for EmptyStableLog {
     }
     async fn append(
         &self,
-        _entries: Channels<Result<crate::meta::SnapshotEntry, Error>>,
+        _entries: Channel<Result<crate::meta::SnapshotEntry, Error>, crossbeam_combinators::Finite>,
     ) -> Result<usize, Error> {
         unimplemented!("pacing tests never append")
     }
     async fn record_end_hlc(&self, _end_hlc: Hlc) -> Result<(), Error> {
         unimplemented!("pacing tests never record an end hlc")
     }
-    fn watermark_moves(&self) -> Channels<()> {
-        Channels::from_infinite(crossbeam_channel::never(), "stub watermark moves")
-    }
-    fn subscribe_events(&self) -> Channels<crate::meta::StableLogEvent> {
+    fn subscribe_events(
+        &self,
+    ) -> Channel<crate::meta::StableLogEvent, crossbeam_combinators::Infinite> {
         unimplemented!("pacing tests never subscribe to stable-log events")
     }
-    fn watch_watermark(&self) -> tokio::sync::watch::Receiver<Option<Hlc>> {
+    fn watermark(&self) -> crossbeam_combinators::Level<Option<Hlc>> {
         unimplemented!("pacing tests never watch the stable-log watermark")
     }
     fn range(
         &self,
-        _from: LogIndex,
+        _after: Option<LogIndex>,
         _until: LogIndex,
-    ) -> Channels<Result<(LogIndex, Data), Error>> {
+    ) -> Channel<Result<(LogIndex, Data), Error>, crossbeam_combinators::Finite> {
         unimplemented!("pacing tests never range the stable log")
     }
     fn set_purge_threshold(&self, _hlc_threshold: Hlc) -> Result<(), Error> {
@@ -357,17 +354,20 @@ impl SnapshotStore for UnusedSnapshotStore {
     async fn write_snapshot(
         &self,
         _id: SnapshotId,
-        _entries: Channels<Result<crate::meta::SnapshotEntry, Error>>,
+        _entries: Channel<Result<crate::meta::SnapshotEntry, Error>, crossbeam_combinators::Finite>,
         _compression: CompressionLevel,
         _reason: crate::metrics::ObjectStoreReason,
-    ) -> Result<usize, Error> {
+    ) -> Result<crate::api::SnapshotWrite, Error> {
         unimplemented!("pacing tests never reach the object write")
     }
     async fn read_snapshot(
         &self,
         _id: SnapshotId,
         _reason: crate::metrics::ObjectStoreReason,
-    ) -> Result<Channels<Result<crate::meta::SnapshotEntry, Error>>, Error> {
+    ) -> Result<
+        Channel<Result<crate::meta::SnapshotEntry, Error>, crossbeam_combinators::Finite>,
+        Error,
+    > {
         unimplemented!("pacing tests never read a snapshot")
     }
     fn shutdown_token(&self) -> CancellationToken {

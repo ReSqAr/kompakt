@@ -27,6 +27,7 @@
     reason = "test code"
 )]
 
+use crate::test_stream::ChannelTestExt as _;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -149,7 +150,7 @@ async fn pooled_write_survives_peer_restart() {
     let reader = cluster.node(new_id).reader();
     let seen = tokio::time::timeout(Duration::from_secs(30), async {
         loop {
-            let mut stream = reader.unstable_tail().into_stream();
+            let mut stream = reader.unstable_tail().into_test_stream();
             while let Some(item) = stream.next().await {
                 if let Ok(d) = item
                     && d.blob.first() == Some(&0xBB)

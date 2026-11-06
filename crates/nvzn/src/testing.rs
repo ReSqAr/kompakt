@@ -40,9 +40,10 @@
 
 use crate::{RocksDBStore, Store};
 use bytes::Bytes;
+use crossbeam_combinators::{Channel, Finite, Infinite};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use zslg::{Channels, Data, DataId, Hlc, LogIndex, StableLogEvent, UnstableEvent};
+use zslg::{Data, DataId, Hlc, LogIndex, StableLogEvent, UnstableEvent};
 
 /// Long enough that the fence never fires mid-test; the tests that care
 /// about it set their own.
@@ -85,7 +86,7 @@ pub fn data_id(hlc_ms: u64, seed: u64) -> DataId {
 struct Shared {
     history: Vec<StableLogEvent>,
     unstable: Vec<Data>,
-    subscribed_from: Vec<LogIndex>,
+    subscribed_after: Vec<Option<LogIndex>>,
     next_index: u64,
     next_seed: u64,
 }
@@ -137,14 +138,14 @@ impl TestLog {
         })
     }
 
-    /// The `from` of every [`zslg::Reader::subscribe_stable_log`] served so
+    /// The `after` of every [`zslg::Reader::subscribe_stable_log`] served so
     /// far — what a test asserts on to show where a fold resumed.
     #[must_use]
-    pub fn subscribed_from(&self) -> Vec<LogIndex> {
+    pub fn subscribed_after(&self) -> Vec<Option<LogIndex>> {
         self.shared
             .lock()
             .expect("test mutex")
-            .subscribed_from
+            .subscribed_after
             .clone()
     }
 
@@ -277,17 +278,14 @@ impl zslg::Reader for TestReader {
         Hlc::from_bytes(next.saturating_sub(1).to_be_bytes())
     }
 
-    fn subscribe_stable_log(
-        &self,
-        from: LogIndex,
-    ) -> Channels<Result<StableLogEvent, zslg::Error>> {
+    fn subscribe_stable_log(&self, after: Option<LogIndex>) -> zslg::StableStream {
         let (tx, rx) = crossbeam_channel::bounded(4096);
 
         let mut shared = self.shared.lock().expect("test mutex");
-        shared.subscribed_from.push(from);
+        shared.subscribed_after.push(after);
         for ev in &shared.history {
             if let StableLogEvent::Appended { index, .. } = ev
-                && *index < from
+                && Some(*index) <= after
             {
                 continue;
             }
@@ -300,10 +298,10 @@ impl zslg::Reader for TestReader {
             senders.lock().expect("test mutex").push(tx);
         }
 
-        Channels::from_infinite(rx, "test-log")
+        zslg::StableStream::new(Channel::from_infinite(rx, "test-log"), after)
     }
 
-    fn unstable_tail(&self) -> Channels<Result<Data, zslg::Error>> {
+    fn unstable_tail(&self) -> Channel<Result<Data, zslg::Error>, Finite> {
         let items = self
             .shared
             .lock()
@@ -313,12 +311,12 @@ impl zslg::Reader for TestReader {
             .cloned()
             .map(Ok)
             .collect();
-        Channels::from_vec(items)
+        Channel::from_vec(items)
     }
 
     /// One cycle of zslg's: the watermark, the staged entries above it, then
     /// live. No resync — a hang-up ends it `Aborted`.
-    fn subscribe_unstable_tail(&self) -> Channels<Result<UnstableEvent, zslg::Error>> {
+    fn subscribe_unstable_tail(&self) -> Channel<Result<UnstableEvent, zslg::Error>, Infinite> {
         let (tx, rx) = crossbeam_channel::unbounded();
 
         let shared = self.shared.lock().expect("test mutex");
@@ -340,7 +338,7 @@ impl zslg::Reader for TestReader {
         }
         drop(shared);
 
-        Channels::from_infinite(rx, "test-log unstable")
+        Channel::from_infinite(rx, "test-log unstable")
     }
 }
 
@@ -411,8 +409,8 @@ mod tests {
         log.hang_up_unstable();
         assert_eq!(
             sub.recv().err(),
-            Some(zslg::ChannelEnd::Aborted {
-                what: "test-log unstable"
+            Some(crossbeam_combinators::AbortReason::ProducerGone {
+                what: "test-log unstable",
             })
         );
     }

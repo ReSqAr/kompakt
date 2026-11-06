@@ -12,6 +12,7 @@ async-trait = { workspace = true }
 bytes = { workspace = true }
 const-fnv1a-hash = { workspace = true }
 crossbeam-channel = { workspace = true }
+crossbeam-combinators = { workspace = true }
 futures = { workspace = true }
 itertools = { workspace = true }
 metrics = { workspace = true }

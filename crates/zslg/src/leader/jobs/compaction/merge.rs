@@ -34,13 +34,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::api::{RaftStateView, SnapshotStore};
-use crate::channel::Channels;
 use crate::error::Error;
 use crate::ids::SnapshotId;
 use crate::leader::integrator::{IntentOutcome, IntentSubmitter};
-use crate::meta::{SnapshotEntry, SnapshotMetadata};
+use crate::meta::SnapshotMetadata;
 use crate::metrics::{self, OpState};
 use crate::object_store::CompressionLevel;
+use crossbeam_combinators::{Cancellation, Channel};
 
 /// A time window; snapshots sharing a bucket at this width may merge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -210,70 +210,6 @@ fn group_by_tiers(
     buckets
 }
 
-/// Concatenate `ids` into `tx` in manifest order, returning once the merge is
-/// over for any reason. Errors are forwarded as items, so `write_snapshot` is
-/// the single place that surfaces them.
-async fn feed_sources(
-    store: &Arc<dyn SnapshotStore>,
-    ids: Vec<SnapshotId>,
-    tx: &crossbeam_channel::Sender<Result<SnapshotEntry, Error>>,
-    cancel: &tokio_util::sync::CancellationToken,
-) {
-    for id in ids {
-        if cancel.is_cancelled() {
-            return;
-        }
-        let ch = match store
-            .read_snapshot(id, crate::metrics::ObjectStoreReason::Compaction)
-            .await
-        {
-            Ok(ch) => ch,
-            Err(e) => {
-                let _ = tx.send(Err(e));
-                return;
-            }
-        };
-        // Awaited one source at a time, so entries never interleave and index
-        // order is preserved.
-        let send_tx = tx.clone();
-        let fed = tokio::task::spawn_blocking(move || {
-            for item in ch {
-                let is_err = item.is_err();
-                if send_tx.send(item).is_err() {
-                    return Feed::ConsumerGone;
-                }
-                if is_err {
-                    return Feed::ErrorForwarded;
-                }
-            }
-            Feed::Done
-        })
-        .await;
-        match fed {
-            Ok(Feed::Done) => {}
-            // The merge is over; opening the remaining sources would read them
-            // from the object store only to discard the bytes.
-            Ok(Feed::ConsumerGone | Feed::ErrorForwarded) => return,
-            Err(join_error) => {
-                let _ = tx.send(Err(Error::Storage(format!(
-                    "merge_group spawn_blocking panicked: {join_error}"
-                ))));
-                return;
-            }
-        }
-    }
-}
-
-/// Outcome of feeding one source snapshot into the merge.
-enum Feed {
-    /// Every entry forwarded; move to the next source.
-    Done,
-    /// `write_snapshot` is gone — it failed or was aborted.
-    ConsumerGone,
-    /// A read or decode error went into the channel for the writer to surface.
-    ErrorForwarded,
-}
-
 #[allow(
     clippy::expect_used,
     reason = "group is non-empty (caller checks len >= 2)"
@@ -299,20 +235,22 @@ async fn merge_group(
         snapshot_id: new_id,
     };
 
-    // The feeder concatenates the sources into `tx` in manifest order. Errors
-    // go into `tx` too, so `write_snapshot` is the one place that surfaces them.
-    let (tx, rx) =
-        crossbeam_channel::bounded(crate::leader::jobs::snapshot::SNAPSHOT_WRITE_FORWARDER_CAP);
-    let (entries_ch, entries_closer) = Channels::from(rx, "merge_group feeder");
-    let store = snapshot_store.clone();
-    let cancel = snapshot_store.shutdown_token();
-    let feeder = tokio::spawn(async move {
-        feed_sources(&store, ids, &tx, &cancel).await;
-        // `tx` is still owned here, so it drops after the close — the ordering
-        // `Closer::close` requires. Only a panic skips this, which is exactly
-        // when the writer should see `End::Aborted` (CLAUDE.md §20).
-        entries_closer.close();
-    });
+    // The sources in manifest order, each opened only when the one before it
+    // is drained. An open error is that phase's first item and an aborted
+    // source aborts the whole stream, so `write_snapshot` — the one place that
+    // surfaces them — refuses to finalize a short merge.
+    let runtime = tokio::runtime::Handle::current();
+    let cancel = Cancellation::from_token(&snapshot_store.shutdown_token());
+    let entries_ch = Channel::chain_all(ids.into_iter().map(|id| {
+        let store = Arc::clone(snapshot_store);
+        Channel::defer_async(&runtime, move || async move {
+            store
+                .read_snapshot(id, crate::metrics::ObjectStoreReason::Compaction)
+                .await
+                .unwrap_or_else(|e| Channel::once(Err(e)))
+        })
+    }))
+    .until(&cancel);
 
     let write_result = snapshot_store
         .write_snapshot(
@@ -322,8 +260,6 @@ async fn merge_group(
             crate::metrics::ObjectStoreReason::Compaction,
         )
         .await;
-    // Drain the feeder after the write completes; ignore its unit result.
-    let _ = feeder.await;
     write_result?;
     Ok(merged_meta)
 }
@@ -349,6 +285,7 @@ mod tests {
     use crate::Hlc;
     use crate::hlc::HlcParts;
     use crate::ids::{LogIndex, NodeId};
+    use crate::test_stream::ChannelTestExt as _;
 
     fn meta(start_ms: u64, end_ms: u64, id: u64) -> SnapshotMetadata {
         SnapshotMetadata {
@@ -556,7 +493,7 @@ mod tests {
         for (idx, rec) in records {
             let _ = tx.send(Ok((source, idx, rec)));
         }
-        let (ch, closer) = crate::channel::Channels::from(rx, "test integrate");
+        let (ch, closer) = crossbeam_combinators::Channel::from(rx, "test integrate");
         // Close before the last sender drops, or the consumer forms its
         // verdict as "disconnected, not yet closed" — an abort.
         closer.close();
@@ -664,10 +601,10 @@ mod tests {
         use futures::TryStreamExt as _;
         let pre_entries: Vec<(LogIndex, Data)> = learner_pre
             .range(
-                LogIndex(0),
+                None,
                 LogIndex(u64::try_from(all_entries.len()).expect("fits")),
             )
-            .into_stream()
+            .into_test_stream()
             .try_collect()
             .await
             .expect("range pre");
@@ -741,10 +678,10 @@ mod tests {
             .expect("load post");
         let post_entries: Vec<(LogIndex, Data)> = learner_post
             .range(
-                LogIndex(0),
+                None,
                 LogIndex(u64::try_from(all_entries.len()).expect("fits")),
             )
-            .into_stream()
+            .into_test_stream()
             .try_collect()
             .await
             .expect("range post");

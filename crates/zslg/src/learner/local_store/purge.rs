@@ -41,9 +41,9 @@ async fn run(
     cancel: CancellationToken,
 ) -> Result<(), Error> {
     // The watermark's *state*, not the event stream: this loop only ever asked
-    // "did the watermark move", which a watch answers without a payload and
+    // "did the watermark move", which a level answers without a payload and
     // without a lag to skip past.
-    let mut watermark = stable_log.watch_watermark();
+    let mut watermark = stable_log.watermark();
     let mut last: Option<Hlc> = None;
     let mut last_purge = Instant::now();
 

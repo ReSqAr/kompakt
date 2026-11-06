@@ -14,6 +14,7 @@
     clippy::result_large_err,
     reason = "test code"
 )]
+use crate::test_stream::ChannelTestExt as _;
 use std::time::Duration;
 
 use std::path::PathBuf;
@@ -26,7 +27,6 @@ use crate::Error;
 use crate::ReplicaNode;
 use crate::hlc::Hlc;
 use crate::ids::DataId;
-use crate::ids::LogIndex;
 use crate::ids::NodeId;
 use crate::ids::PeerAddr;
 use crate::leader::CompactionTier;
@@ -99,7 +99,7 @@ async fn write_then_read_via_unstable_tail() {
     let reader = node.reader();
     let entry = tokio::time::timeout(TEST_TIMEOUT, async {
         loop {
-            let mut stream = reader.unstable_tail().into_stream();
+            let mut stream = reader.unstable_tail().into_test_stream();
             let mut found = None;
             while let Some(item) = stream.next().await {
                 if let Ok(d) = item {
@@ -181,7 +181,7 @@ async fn write_multiple_entries_observable_via_reader() {
                 payloads.len()
             );
         }
-        let mut stream = reader.unstable_tail().into_stream();
+        let mut stream = reader.unstable_tail().into_test_stream();
         observed.clear();
         for _ in 0..payloads.len() {
             match tokio::time::timeout(Duration::from_millis(500), stream.next()).await {
@@ -231,13 +231,14 @@ async fn snapshot_creation_tick_promotes_into_stable_log() {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(25);
     let promoted = loop {
         let mut stream = reader
-            .subscribe_stable_log(LogIndex::ZERO)
+            .subscribe_stable_log(None)
+            .into_channel()
             .filter_map(|item| match item {
                 Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
                 Ok(StableLogEvent::Watermark(_)) => None,
                 Err(e) => Some(Err(e)),
             })
-            .into_stream();
+            .into_test_stream();
         if matches!(
             tokio::time::timeout(Duration::from_millis(500), stream.next()).await,
             Ok(Some(Ok(_)))

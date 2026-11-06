@@ -17,6 +17,7 @@
     clippy::result_large_err,
     reason = "test code"
 )]
+use crate::test_stream::ChannelTestExt as _;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -57,7 +58,7 @@ async fn three_node_tcp_write_round_trip() {
     let reader = cluster.node(leader_id).reader();
     let found = tokio::time::timeout(Duration::from_secs(20), async {
         loop {
-            let mut stream = reader.unstable_tail().into_stream();
+            let mut stream = reader.unstable_tail().into_test_stream();
             while let Some(item) = stream.next().await {
                 if let Ok(d) = item
                     && d.blob == payload

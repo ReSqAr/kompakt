@@ -14,6 +14,7 @@
     clippy::result_large_err,
     reason = "test code"
 )]
+use crate::test_stream::ChannelTestExt as _;
 use std::collections::{BTreeMap, BTreeSet};
 
 use bytes::Bytes;
@@ -37,7 +38,7 @@ async fn integrate_batch(
     for (idx, rec) in records {
         let _ = tx.send(Ok((source, idx, rec)));
     }
-    let (ch, closer) = crate::channel::Channels::from(rx, "test integrate");
+    let (ch, closer) = crossbeam_combinators::Channel::from(rx, "test integrate");
     // Close before the last sender drops, or the consumer forms its
     // verdict as "disconnected, not yet closed" — an abort.
     closer.close();
@@ -143,7 +144,7 @@ fn run_sequence(ops: &[Op]) {
         use futures::TryStreamExt as _;
         let all_data_ids: BTreeSet<DataId> = store
             .stream_above_hlc(None)
-            .into_stream()
+            .into_test_stream()
             .try_collect::<Vec<_>>()
             .await
             .expect("stream")

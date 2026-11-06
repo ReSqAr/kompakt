@@ -14,6 +14,7 @@
     clippy::result_large_err,
     reason = "test code"
 )]
+use crate::test_stream::ChannelTestExt as _;
 /// Leadership churn against an in-flight snapshot (EXPERT_REVIEW Appendix
 /// B.4): a real 3-node raft cluster, a snapshot pipeline stalled between
 /// its base-generation capture and its final fenced manifest commit, and a
@@ -39,7 +40,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::channel::Channels;
 use crate::object_store::CompressionLevel;
 use object_store::ObjectStore;
 use object_store::memory::InMemory;
@@ -47,7 +47,7 @@ use tokio::sync::Notify;
 use tokio::sync::watch;
 
 use crate::api::ReplicatedRaftState;
-use crate::api::{LocalStoreMut, LocalStoreView, Replica, Router, StableLogSnapshot, WindowItem};
+use crate::api::{LocalStoreMut, LocalStoreView, Replica, Router, StableLogSnapshot};
 use crate::error::Error;
 use crate::hlc::HlcGate;
 use crate::hlc::{Hlc, HlcParts};
@@ -76,7 +76,7 @@ async fn integrate_batch(
     for (idx, rec) in records {
         let _ = tx.send(Ok((source, idx, rec)));
     }
-    let (ch, closer) = crate::channel::Channels::from(rx, "test integrate");
+    let (ch, closer) = crossbeam_combinators::Channel::from(rx, "test integrate");
     // Close before the last sender drops, or the consumer forms its
     // verdict as "disconnected, not yet closed" — an abort.
     closer.close();
@@ -92,50 +92,49 @@ struct StallingLocalStore {
     inner: Arc<LocalStore>,
     entered: Arc<Notify>,
     /// Sync, not `Notify`: the stall happens on the *consumer's blocking thread*
-    /// (see `stream_window_ordered` below), where awaiting is impossible.
+    /// (see `stream_window` below), where awaiting is impossible.
     release: crossbeam_channel::Receiver<()>,
 }
 
 #[async_trait::async_trait]
 impl LocalStoreView for StallingLocalStore {
-    fn stream_above_hlc(&self, threshold: Option<Hlc>) -> Channels<Result<Data, Error>> {
+    fn stream_above_hlc(&self, threshold: Option<Hlc>) -> crate::api::LocalStoreStream {
         self.inner.stream_above_hlc(threshold)
     }
 
     /// Stall on the *first pull*, not on the call.
     ///
-    /// `stream_window_ordered` is synchronous, so it cannot await here — and
+    /// `stream_window` is synchronous, so it cannot await here — and
     /// `block_on` inside the runtime panics (and violates CLAUDE.md §4). The
-    /// returned `Channels` is drained on a blocking thread
+    /// returned `Channel` is drained on a blocking thread
     /// (`snapshot/create.rs` pulls it inside `spawn_blocking`), so gating the
     /// first pull is both legal and the stall point we actually want: after
     /// `create_snapshot_entry` captured its base generation, before the window
     /// is read.
-    fn stream_window_ordered(
-        &self,
-        above: Option<Hlc>,
-        upto: Hlc,
-        max_entries: Option<std::num::NonZeroUsize>,
-    ) -> Channels<Result<WindowItem, Error>> {
+    fn stream_window(&self, above: Option<Hlc>, upto: Hlc) -> crate::api::LocalStoreStream {
         self.entered.notify_one();
         let release = self.release.clone();
-        // `filter_map` takes `Fn`, so the once-flag needs interior mutability.
-        let gate = std::sync::Once::new();
+        let mut released = false;
         self.inner
-            .stream_window_ordered(above, upto, max_entries)
+            .stream_window(above, upto)
+            .into_channel()
             .filter_map(move |item| {
-                gate.call_once(|| {
+                if !released {
+                    released = true;
                     let _ = release.recv();
-                });
+                }
                 Some(item)
             })
+            .ordered(None, "stalling window")
     }
 
     fn subscribe_integrated(&self) -> watch::Receiver<()> {
         self.inner.subscribe_integrated()
     }
 
-    fn subscribe_unstable(&self) -> crate::channel::Channels<crate::meta::Data> {
+    fn subscribe_unstable(
+        &self,
+    ) -> crossbeam_combinators::Channel<crate::meta::Data, crossbeam_combinators::Infinite> {
         self.inner.subscribe_unstable()
     }
 
@@ -327,7 +326,7 @@ const CHURN_CAP: Duration = Duration::from_secs(120);
 /// Wait until the stalling store reports the pipeline reached the window read —
 /// or until the build ends without ever getting there.
 ///
-/// `entered` fires from inside `StallingLocalStore::stream_window_ordered`, and
+/// `entered` fires from inside `StallingLocalStore::stream_window`, and
 /// `build_snapshot` only reaches that call after its quorum wait *and* its
 /// post-quorum leadership re-check. Three earlier exits return without touching
 /// the store at all: `Error::QuorumUnreachable` on the 5 s quorum timeout,
@@ -486,8 +485,8 @@ async fn covered_entries(c: &Churn, via: NodeId) -> usize {
         .await
         .expect("load manifest");
     let entries: Vec<(LogIndex, Data)> = verify
-        .range(LogIndex(0), LogIndex(1_000))
-        .into_iter()
+        .range(None, LogIndex(1_000))
+        .items()
         .filter_map(|r| r.ok())
         .collect();
     entries.len()
