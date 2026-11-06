@@ -49,7 +49,7 @@
 //! transform and bound a stream at pull time.
 //!
 //! The write half lives next door: [`crate::Feed`] for one producer and
-//! [`crate::broadcast`]/[`crate::keyed`]/[`crate::Wakes`] for many. The seam
+//! [`crate::broadcast`]/[`crate::keyed`] for many, and [`crate::Level`] for a watched value. The seam
 //! ([`crate::Seam`], [`crate::Segment`]) composes a live tail with a bounded
 //! history.
 

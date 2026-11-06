@@ -17,7 +17,9 @@ channel/     one file per functionality: mod.rs (Channel and its docs), verdict
              ready_batch), cancellation; each source type sits next to the
              Channel method that builds it; tests/ by topic
 kind.rs      Finite / Infinite, Kind, MergeKind              (new)
-ordered.rs   Key, Successor, policies, OrderedChannel, covers / also / stitch
+ordered/     key (Key, Successor), policy (Contiguous, StrictlyIncreasing,
+             NonDecreasing), check (the enforcing source), ordered_channel
+             (OrderedChannel, ordered, also), covers, stitch; tests/ by topic
 seam.rs      Seam, Segment::open → cut / chain / merge       (new)
 resume.rs    Opening, Resumable, resync                      (new)
 fanout.rs    broadcast/keyed, Registry, Fanout, Wakes
