@@ -10,10 +10,12 @@ verification (§3) ride along: publish numbering, and a draining shutdown.
 ## 1. Code review
 
 ```text
-channel/     Channel<T, K> and ReadyBatch (mod.rs); verdict.rs (End, AbortReason,
-             Closer); source.rs (the private Source tree) with one file per
-             source: leaf, merge, chain, guarded, resume, transform, deferred;
-             cancellation.rs; tests/ by topic
+channel/     one file per functionality: mod.rs (Channel and its docs), verdict
+             (End, AbortReason, Closer), source (the private Source tree),
+             leaf, constructors, merge, chain, guarded (until), resume,
+             deferred, filter_map, take_while, dedup_by_key, read (recv,
+             ready_batch), cancellation; each source type sits next to the
+             Channel method that builds it; tests/ by topic
 kind.rs      Finite / Infinite, Kind, MergeKind              (new)
 ordered.rs   Key, Successor, policies, OrderedChannel, covers / also / stitch
 seam.rs      Seam, Segment::open → cut / chain / merge       (new)

@@ -120,3 +120,26 @@ impl<T: Send + 'static, C: Send + 'static> Source<T> for Resume<T, C> {
         }
     }
 }
+
+impl<T: Send + 'static> Channel<T, Infinite> {
+    /// The resume loop (see [`Resume`]); the public faces are
+    /// [`crate::Resumable`] and [`crate::resync`].
+    pub(crate) fn resume<C: Send + 'static>(
+        what: &'static str,
+        cursor: C,
+        track: fn(&T, &mut C),
+        make: impl FnMut(&C, Opening) -> Option<Channel<T, Infinite>> + Send + 'static,
+    ) -> Channel<T, Infinite> {
+        let mut source = Resume {
+            what,
+            cursor,
+            track,
+            make: Box::new(make),
+            current: None,
+            last_end: None,
+        };
+        // Eagerly, so `leaf_count()` is accurate before the first `register`.
+        source.open(Opening::First);
+        Channel::wrap(Box::new(source))
+    }
+}

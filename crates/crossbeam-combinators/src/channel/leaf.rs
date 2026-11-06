@@ -2,7 +2,8 @@
 
 use crossbeam_channel::{Receiver, Select, TryRecvError};
 
-use super::{AbortReason, End, Poll, Source};
+use super::{AbortReason, Channel, Closer, End, Poll, Source};
+use crate::kind::{Finite, Infinite};
 
 /// The lifecycle of a single wrapped `Receiver`. `Alive` holds the receiver and
 /// the consumer's half of the explicit close (or `None` for an
@@ -180,5 +181,68 @@ impl<T> LeafState<T> {
                 reason: AbortReason::ProducerGone { what },
             }),
         }
+    }
+}
+
+impl<T: Send + 'static> Channel<T, Finite> {
+    /// Wrap a **finite** receiver, handing back the producer's [`Closer`].
+    ///
+    /// `what` names the producer in an [`End::Aborted`] verdict, so keep it
+    /// specific enough to identify the site from a log line.
+    ///
+    /// The `Closer` is in the return type on purpose: a construction site cannot
+    /// forget that closing is its job. A stream the application expects to run
+    /// forever wants [`from_infinite`](Self::from_infinite) instead — do not
+    /// reach for `from(..)` and an immediate `close()`, which claims a clean
+    /// finish the stream cannot vouch for.
+    ///
+    /// Prefer [`Feed::channel`](crate::Feed::channel) for a new producer: it
+    /// pairs the sender and the closer. This low-level form is for adapters
+    /// that must keep them separate — an async producer, or a fan-out that
+    /// shares only the sender.
+    #[must_use]
+    pub fn from(rx: Receiver<T>, what: &'static str) -> (Self, Closer) {
+        let (close_tx, close_rx) = crossbeam_channel::bounded(1);
+        (
+            Self::wrap(Box::new(LeafState::Alive {
+                rx,
+                close_rx: Some(close_rx),
+                what,
+            })),
+            Closer(close_tx),
+        )
+    }
+
+    /// A receiver whose producer has already declared completion.
+    ///
+    /// Useful when the items are already queued and the producer is gone; the
+    /// stream reports [`End::Complete`] after draining. For a producer that is
+    /// still running, use [`Channel::from`] and keep its [`Closer`].
+    #[must_use]
+    pub fn closed(rx: Receiver<T>) -> Self {
+        let (ch, closer) = Self::from(rx, "closed");
+        closer.close();
+        ch
+    }
+}
+
+impl<T: Send + 'static> Channel<T, Infinite> {
+    /// A stream the application expects to **never end**: socket-backed, or an
+    /// internal fan replaced wholesale on reconnect.
+    ///
+    /// There is deliberately no [`Closer`] — nothing may declare completion,
+    /// because completion is not something that happens to this stream. Any
+    /// termination is an error: [`recv`](Self::recv) reports [`End::Aborted`],
+    /// which is the consumer's cue to back off and resume from its last
+    /// position. Whether the peer closed politely, crashed, or the socket reset
+    /// is visible in the channel lifecycle and irrelevant to the caller — the
+    /// response is the same either way.
+    #[must_use]
+    pub fn from_infinite(rx: Receiver<T>, what: &'static str) -> Self {
+        Self::wrap(Box::new(LeafState::Alive {
+            rx,
+            close_rx: None,
+            what,
+        }))
     }
 }

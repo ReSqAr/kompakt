@@ -1,7 +1,12 @@
 #![allow(clippy::unwrap_used, clippy::panic, reason = "test code")]
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use crossbeam_channel::{Receiver, Select};
+
+use super::guarded::Guarded;
+use super::leaf::LeafState;
 use super::*;
 
 /// Most tests care about item flow, not the verdict: wrap a receiver in a

@@ -4,7 +4,8 @@ use std::collections::VecDeque;
 
 use crossbeam_channel::Select;
 
-use super::{End, Poll, Source};
+use super::{Channel, End, Poll, Source};
+use crate::kind::{Finite, Kind};
 
 /// Sequential first-then-second. An aborted phase **condemns the chain
 /// immediately** — remaining phases are discarded and the chain reports
@@ -114,5 +115,35 @@ impl<T: Send + 'static> Source<T> for ChainState<T> {
                 None => End::Complete,
             },
         }
+    }
+}
+
+impl<T: Send + 'static> Channel<T, Finite> {
+    /// Fixed phases in order. Only the front phase is registered; when it
+    /// closes cleanly the next one is pulled. An [`End::Aborted`] or
+    /// [`End::Aborted { reason: AbortReason::Cancelled }`] phase ends the chain there and drops the remaining
+    /// phases, exactly like [`chain`](Self::chain).
+    ///
+    /// An empty phase list is an empty [`End::Complete`] stream. A single phase
+    /// is returned as-is.
+    #[must_use]
+    pub fn chain_all<I>(phases: I) -> Channel<T, Finite>
+    where
+        I: IntoIterator<Item = Channel<T, Finite>>,
+    {
+        let mut phases: VecDeque<Box<dyn Source<T>>> =
+            phases.into_iter().map(|ch| ch.source).collect();
+        if phases.len() == 1 {
+            let source = phases.pop_front().expect("checked one phase");
+            return Channel::wrap(source);
+        }
+        Channel::wrap(Box::new(ChainState::Active { phases }))
+    }
+
+    #[must_use]
+    pub fn chain<K: Kind>(self, next: Channel<T, K>) -> Channel<T, K> {
+        Channel::wrap(Box::new(ChainState::Active {
+            phases: VecDeque::from([self.source, next.source]),
+        }))
     }
 }

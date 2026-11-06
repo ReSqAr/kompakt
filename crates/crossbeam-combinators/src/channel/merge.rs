@@ -2,7 +2,8 @@
 
 use crossbeam_channel::Select;
 
-use super::{End, Poll, Source};
+use super::{Channel, End, Poll, Source};
+use crate::kind::{Kind, MergeKind};
 
 /// Which branch a `MergeState::Both` should drain from next. Alternation keeps
 /// `drain_first` fair: `ready_batch` takes only its head through the fair
@@ -270,5 +271,19 @@ impl<T: Send + 'static> Source<T> for MergeState<T> {
             // Both still alive: no verdict to report. Closed is the identity.
             MergeState::Both { .. } => End::Complete,
         }
+    }
+}
+
+impl<T: Send + 'static, K: Kind> Channel<T, K> {
+    #[must_use]
+    pub fn merge<K2: Kind>(self, other: Channel<T, K2>) -> Channel<T, <K as MergeKind<K2>>::Out>
+    where
+        K: MergeKind<K2>,
+    {
+        Channel::wrap(Box::new(MergeState::Both {
+            left: self.source,
+            right: other.source,
+            next: Side::Left,
+        }))
     }
 }

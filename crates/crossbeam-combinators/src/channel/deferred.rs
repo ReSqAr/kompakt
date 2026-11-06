@@ -2,7 +2,8 @@
 
 use crossbeam_channel::{Receiver, Select, TryRecvError};
 
-use super::{AbortReason, End, Poll, Source};
+use super::{AbortReason, Channel, End, Poll, Source};
+use crate::kind::Kind;
 
 /// A phase whose producer starts on first use: [`Channel::defer_async`].
 ///
@@ -124,5 +125,41 @@ impl<T> Drop for Deferred<T> {
         {
             task.abort();
         }
+    }
+}
+
+impl<T: Send + 'static, K: Kind> Channel<T, K> {
+    /// A phase whose channel comes from an async opener, started on first use.
+    ///
+    /// Nothing runs at construction: the first time the stream is read (or
+    /// registered by an enclosing merge/chain), `open` is spawned on `handle`,
+    /// and the stream then delegates to the channel it resolves to, verdict
+    /// included. In a `chain_all` only the front phase is read, so deferred
+    /// phases open one at a time. Dropping the stream before it resolves
+    /// aborts the task; a task that ends without resolving reads as
+    /// `Aborted(ProducerGone { what: "defer_async" })`.
+    #[cfg(feature = "tokio")]
+    #[must_use]
+    pub fn defer_async<F, Fut>(handle: &tokio::runtime::Handle, open: F) -> Self
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Channel<T, K>> + Send + 'static,
+    {
+        let (tx, handoff) = crossbeam_channel::bounded(1);
+        let handle = handle.clone();
+        let start: Box<dyn FnOnce() -> tokio::task::AbortHandle + Send> = Box::new(move || {
+            handle
+                .spawn(async move {
+                    let _ = tx.send(open().await.source);
+                })
+                .abort_handle()
+        });
+        Self::wrap(Box::new(Deferred {
+            state: DeferredState::Waiting {
+                handoff,
+                start: Some(start),
+                task: None,
+            },
+        }))
     }
 }

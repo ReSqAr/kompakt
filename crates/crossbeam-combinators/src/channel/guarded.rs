@@ -5,7 +5,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crossbeam_channel::Select;
 
-use super::{AbortReason, End, LeafState, Poll, Source};
+use super::leaf::LeafState;
+use super::{AbortReason, Cancellation, Channel, End, Poll, Source};
+use crate::kind::Kind;
 
 /// An inner source raced against a [`Cancellation`]: whichever ends first ends
 /// the stream ([`Channel::until`]).
@@ -108,5 +110,33 @@ impl<T: Send + 'static> Source<T> for Guarded<T> {
             };
         }
         self.inner.end_reason()
+    }
+}
+
+impl<T: Send + 'static, K: Kind> Channel<T, K> {
+    /// End this stream as soon as `cancel` fires, even while `recv` is
+    /// blocked waiting for an item: the stream then reports
+    /// [`End::Aborted { reason: AbortReason::Cancelled }`]. Items already buffered when it fires may still be
+    /// delivered first, or not: the stream stops at the first wake-up that
+    /// sees the cancel.
+    ///
+    /// A race, not a [`merge`](Self::merge): merged with a cancellation, a
+    /// finite stream that closes would leave the merge waiting on the
+    /// survivor — the cancellation — and never end. Here either side ending
+    /// ends the stream, and a clean [`End::Complete`] keeps its verdict.
+    #[must_use]
+    pub fn until(self, cancel: &Cancellation) -> Channel<T, K> {
+        let Some(rx) = &cancel.rx else {
+            return self;
+        };
+        Channel::wrap(Box::new(Guarded {
+            inner: self.source,
+            alive: LeafState::Alive {
+                rx: rx.clone(),
+                close_rx: None,
+                what: "cancellation",
+            },
+            fired: Arc::clone(&cancel.fired),
+        }))
     }
 }
