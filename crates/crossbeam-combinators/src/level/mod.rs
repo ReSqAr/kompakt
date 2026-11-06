@@ -18,8 +18,11 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 
 use crate::channel::Channel;
-use crate::fanout::Wakes;
 use crate::kind::Infinite;
+
+mod wakes;
+
+use wakes::Wakes;
 
 /// The writing half of a [`Level`].
 pub struct LevelSetter<T> {

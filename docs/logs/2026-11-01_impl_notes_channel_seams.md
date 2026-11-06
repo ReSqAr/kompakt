@@ -233,3 +233,10 @@ post-implementation doc. Not a design doc; the design is
 - **Stress timeout, not a failure:** one of six full-lib runs under six CPU
   hogs hit the 400 s limit with `cluster_upholds_invariants_under_generated_faults`
   unfinished (about 106 s unloaded). No assertion failed in any of the six.
+- **A third racy test surfaced by the split:** `shed_removes_a_full_subscriber`
+  failed once in a parallel no-default-features run (0 of 60 alone). It
+  assumed the distribution thread had processed element 2 before the test
+  thread read element 1; if not, the subscriber's queue had room and 2 was
+  delivered. It now publishes 100 elements first: with a data queue of 4 the
+  last publish cannot return before the thread has shed the subscriber, so the
+  read cannot race it. 0 failures in 40 crate-lib runs under four CPU hogs.

@@ -22,9 +22,10 @@ ordered/     key (Key, Successor), policy (Contiguous, StrictlyIncreasing,
              (OrderedChannel, ordered, also), covers, stitch; tests/ by topic
 seam.rs      Seam, Segment::open → cut / chain / merge       (new)
 resume.rs    Opening, Resumable, resync                      (new)
-fanout.rs    broadcast/keyed, Registry, Fanout, Wakes
+fanout/      mod.rs (broadcast, keyed), config, error, producer (Fanout, publish
+             count, stop handle), registry, thread (the distribution loop)
 feed.rs      Feed<T, K>, produce_blocking / produce_async
-level.rs     Level / LevelSetter                              (new)
+level/       Level / LevelSetter (mod.rs), wakes (the subscriber list)  (new)
 ```
 
 `blend.rs` (`Tail`, `Ranged`, `blend_chain`) is gone. `Source` is still
