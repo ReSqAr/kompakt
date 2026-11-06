@@ -48,7 +48,6 @@ use crate::hlc::Hlc;
 use crate::ids::{DataId, LogIndex, NodeId};
 use crate::meta::Data;
 use crate::metrics::{self, LocalWriteKind, LogType, OpState};
-use crate::ordered::local_store_stream;
 
 const STREAM_CHANNEL_CAPACITY: usize = 32;
 
@@ -255,7 +254,7 @@ impl crate::api::LocalStoreView for LocalStore {
             Channel::produce_blocking(STREAM_CHANNEL_CAPACITY, "stream_above_hlc", move |feed| {
                 stream_scan(&storage, (start, Bound::Unbounded), feed)
             });
-        local_store_stream(ch, "local store above HLC")
+        ch.ordered(None, "local store above HLC")
     }
 
     fn stream_window(&self, above: Option<Hlc>, upto: Hlc) -> crate::api::LocalStoreStream {
@@ -265,7 +264,7 @@ impl crate::api::LocalStoreView for LocalStore {
         let ch = Channel::produce_blocking(STREAM_CHANNEL_CAPACITY, "stream_window", move |feed| {
             stream_scan(&storage, (start, end), feed)
         });
-        local_store_stream(ch, "local store window")
+        ch.ordered(None, "local store window")
     }
 
     fn subscribe_integrated(&self) -> watch::Receiver<()> {

@@ -287,10 +287,8 @@ impl LocalStoreView for FailingWindowStore {
     fn stream_window(&self, _above: Option<Hlc>, _upto: Hlc) -> crate::api::LocalStoreStream {
         let n = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         let _ = self.done.send(n);
-        crate::ordered::local_store_stream(
-            Channel::once(Err(Error::Storage("pacing test: window read".into()))),
-            "pacing test window",
-        )
+        Channel::once(Err(Error::Storage("pacing test: window read".into())))
+            .ordered(None, "pacing test window")
     }
 
     fn subscribe_integrated(&self) -> watch::Receiver<()> {

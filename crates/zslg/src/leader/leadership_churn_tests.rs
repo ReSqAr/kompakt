@@ -115,19 +115,17 @@ impl LocalStoreView for StallingLocalStore {
         self.entered.notify_one();
         let release = self.release.clone();
         let mut released = false;
-        crate::ordered::local_store_stream(
-            self.inner
-                .stream_window(above, upto)
-                .into_channel()
-                .filter_map(move |item| {
-                    if !released {
-                        released = true;
-                        let _ = release.recv();
-                    }
-                    Some(item)
-                }),
-            "stalling window",
-        )
+        self.inner
+            .stream_window(above, upto)
+            .into_channel()
+            .filter_map(move |item| {
+                if !released {
+                    released = true;
+                    let _ = release.recv();
+                }
+                Some(item)
+            })
+            .ordered(None, "stalling window")
     }
 
     fn subscribe_integrated(&self) -> watch::Receiver<()> {

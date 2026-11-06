@@ -4,9 +4,7 @@
 //! differs by source. These impls keep the key concept at the boundary without
 //! putting it on the item.
 
-use crossbeam_combinators::{Channel, Finite, Infinite, Key, OrderedChannel, Successor};
-
-use crate::api::{LocalStoreStream, ReplicaStream};
+use crossbeam_combinators::{Key, Successor};
 
 use crate::error::Error;
 use crate::hlc::Hlc;
@@ -65,20 +63,4 @@ impl Key<Result<Data, Error>> for Hlc {
     fn key(item: &Result<Data, Error>) -> Option<Self> {
         item.as_ref().ok().map(|data| data.data_id.hlc())
     }
-}
-
-/// Wrap a replica stream with the strict policy, after the subscriber's cursor.
-pub(crate) fn replica_stream(
-    ch: Channel<Result<(LogIndex, Data), Error>, Infinite>,
-    after: Option<LogIndex>,
-) -> ReplicaStream {
-    OrderedChannel::named(ch, after, "replica subscription")
-}
-
-/// Wrap a local-store scan with its `StrictlyIncreasing` contract.
-pub(crate) fn local_store_stream(
-    ch: Channel<Result<Data, Error>, Finite>,
-    what: &'static str,
-) -> LocalStoreStream {
-    OrderedChannel::named(ch, None, what)
 }

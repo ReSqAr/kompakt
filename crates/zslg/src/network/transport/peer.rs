@@ -141,7 +141,7 @@ impl Replica for TcpPeerClient {
         match &self.target {
             Target::Registered(node_id) => self.rpc_client.subscribe_from(*node_id, from),
             Target::Direct(_) => {
-                crate::ordered::replica_stream(Channel::aborted("direct-dialed peer"), from)
+                Channel::aborted("direct-dialed peer").ordered(from, "replica subscription")
             }
         }
     }

@@ -671,7 +671,9 @@ impl ReplicaLogStore {
             log: Arc::clone(self),
             from,
         };
-        crate::ordered::replica_stream(Segment::open(&seam).chain(), from)
+        Segment::open(&seam)
+            .chain()
+            .ordered(from, "replica subscription")
     }
 
     /// An empty historic phase: complete by construction — the window *was*

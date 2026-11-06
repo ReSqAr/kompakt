@@ -102,7 +102,7 @@ async fn snapshot_refuses_to_commit_an_aborted_window() {
             tx.send(Ok(make_data(1, 100, b"a"))).unwrap();
             drop(tx);
             drop(closer); // never closed: the scan died
-            crate::ordered::local_store_stream(ch, "truncated window")
+            ch.ordered(None, "truncated window")
         }
         fn subscribe_integrated(&self) -> watch::Receiver<()> {
             self.inner.subscribe_integrated()

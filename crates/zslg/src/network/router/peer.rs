@@ -98,7 +98,7 @@ impl Replica for ErrorTransport {
 
     fn subscribe_from(&self, from: Option<LogIndex>) -> crate::api::ReplicaStream {
         // Node is shutting down: an empty subscription that ends aborted.
-        crate::ordered::replica_stream(Channel::aborted("router shutting down"), from)
+        Channel::aborted("router shutting down").ordered(from, "replica subscription")
     }
 
     async fn fetch_status(&self) -> Result<ReplicaStatus, crate::Error> {

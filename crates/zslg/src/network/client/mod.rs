@@ -405,16 +405,14 @@ impl StreamOpener {
     }
 
     fn subscribe_from(&self, node_id: NodeId, from: Option<LogIndex>) -> crate::api::ReplicaStream {
-        crate::ordered::replica_stream(
-            open_subscribe(
-                self.rpc_weak.clone(),
-                Target::Registered(node_id),
-                from,
-                self.subscribe_channel_cap,
-                self.cancel.clone(),
-            ),
+        open_subscribe(
+            self.rpc_weak.clone(),
+            Target::Registered(node_id),
             from,
+            self.subscribe_channel_cap,
+            self.cancel.clone(),
         )
+        .ordered(from, "replica subscription")
     }
 }
 
