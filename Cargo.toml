@@ -72,8 +72,10 @@ zslg-consensus-types = { path = "crates/zslg-consensus-types" }
 zslg-lifecycle-types = { path = "crates/zslg-lifecycle-types" }
 zslg-log = { path = "crates/zslg-log" }
 zslg-log-types = { path = "crates/zslg-log-types" }
+zslg-net = { path = "crates/zslg-net" }
 zslg-net-types = { path = "crates/zslg-net-types" }
 zslg-node-types = { path = "crates/zslg-node-types" }
+zslg-raft = { path = "crates/zslg-raft" }
 zslg-raft-types = { path = "crates/zslg-raft-types" }
 zslg-snapshot = { path = "crates/zslg-snapshot" }
 zslg-snapshot-types = { path = "crates/zslg-snapshot-types" }

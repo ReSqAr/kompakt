@@ -2,8 +2,8 @@
 //! [`PeerRouter`](crate::network::PeerRouter)'s job, layered on top.
 
 use std::sync::Arc;
+use zslg_net::{ReplicaClient, Router};
 
-use crate::api::{ReplicaClient, Router};
 use crate::network::client::RpcClient;
 use crate::network::transport::TcpPeerClient;
 use zslg_net_types::PeerAddr;

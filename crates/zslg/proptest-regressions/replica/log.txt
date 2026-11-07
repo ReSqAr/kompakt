@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc bf84428a683277d1434c370cfaadd7bbbe5cde869dd80c0e8172886f5a8a97ff # shrinks to blobs = [[]]
+cc 87b9bc4a8808828cfa875c7aafd617086224a7aaa04c2d0d5cee6d894e28dac2 # shrinks to records = [([], 74103)]

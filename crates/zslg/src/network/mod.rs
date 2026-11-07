@@ -9,7 +9,7 @@
 //!   client     outbound: unary pool, subscribe streams, the write pool
 //!   server     inbound: accept, dispatch, and the two streaming handlers
 //!   router     NodeId -> client, with the in-process short-circuit for self
-//!   transport  the per-peer client that presents `api::ReplicaClient`
+//!   transport  the per-peer client that presents `zslg_net::ReplicaClient`
 //!   peers      the configured member set, and the join admission gate
 //! ```
 //!
@@ -33,11 +33,12 @@ mod messages;
 mod tcp;
 
 use std::sync::Arc;
+use zslg_net::{ReplicaClient, Router};
 
 use tokio_util::sync::CancellationToken;
 
 use crate::Error;
-use crate::api::{ReplicaClient, Router};
+
 use crate::network::client::RpcClient;
 pub(crate) use crate::network::client::RpcClientConfig;
 use crate::network::server::DispatchHandler;

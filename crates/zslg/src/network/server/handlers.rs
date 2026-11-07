@@ -10,6 +10,7 @@
 use std::sync::Arc;
 use zslg_consensus::AddMemberOutcome;
 use zslg_lifecycle_types::LifecycleError;
+use zslg_net::ReplicaClient;
 use zslg_net_types::NetError;
 
 use async_trait::async_trait;
@@ -18,7 +19,7 @@ use futures::StreamExt as _;
 use tokio_util::sync::CancellationToken;
 
 use crate::Error;
-use crate::api::ReplicaClient;
+
 use crate::network::framing::{AsyncFrameSink, AsyncFrameStream};
 use crate::network::messages::{
     RpcFrame, RpcRaftFrame, RpcRaftRequest, RpcReplicaFrame, RpcReplicaRequest, RpcRequest,

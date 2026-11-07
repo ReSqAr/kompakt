@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 use zslg_log_types::LogError;
+use zslg_net::Router;
 /// Fault-injection doubles at the `Replica` trait seam, shared by the
 /// integration tests. Two modes, matching what the tests need:
 /// `fail_next(n)` (the next n calls error like a dropped RPC) and
@@ -15,7 +16,6 @@ use futures::stream::BoxStream;
 use parking_lot::Mutex as SyncMutex;
 use tokio::sync::watch;
 
-use crate::api::Router;
 use crate::error::Error;
 use crate::hlc::{HlcClock, HlcGate};
 use crate::replica::ReplicaLogStore;
@@ -382,7 +382,7 @@ pub(crate) struct MapPeerRouter {
 impl Router for MapPeerRouter {
     fn register_peer(&self, _node_id: NodeId, _peer_addr: PeerAddr) {}
 
-    fn remote(&self, node_id: NodeId) -> Arc<dyn crate::api::ReplicaClient> {
+    fn remote(&self, node_id: NodeId) -> Arc<dyn zslg_net::ReplicaClient> {
         super::replica_only(
             self.replicas
                 .get(&node_id)
@@ -391,7 +391,7 @@ impl Router for MapPeerRouter {
         )
     }
 
-    fn remote_direct(&self, _peer_addr: PeerAddr) -> Arc<dyn crate::api::ReplicaClient> {
+    fn remote_direct(&self, _peer_addr: PeerAddr) -> Arc<dyn zslg_net::ReplicaClient> {
         unimplemented!("MapPeerRouter: direct dial not used")
     }
 }
@@ -677,10 +677,10 @@ mod tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::time::Duration;
+    use zslg_net::Router as _;
 
     use bytes::Bytes;
 
-    use crate::api::Router;
     use crate::tests::nid;
     use zslg_log::Replica;
     use zslg_log_types::DataId;

@@ -2,7 +2,7 @@
 //!
 //! [`PeerRouter`] is the single entry point for per-node clients.
 //! Callers obtain a per-node [`ReplicaClient`] via
-//! [`remote`](crate::api::Router::remote) — the local/self call stays in-process,
+//! [`remote`](zslg_net::Router::remote) — the local/self call stays in-process,
 //! remote calls go through the inner [`RemoteRouter`](crate::network::RemoteRouter)
 //! (TCP) — and use the returned handle normally.
 //!
@@ -16,7 +16,8 @@
 //! | 4 | Routing (this module) | `PeerRouter` |
 
 use crate::Error;
-use crate::api::{LivenessProbe, RaftTransport, ReplicaClient, Router};
+use zslg_net::{LivenessProbe, ReplicaClient, Router};
+
 use crossbeam_combinators::Channel;
 use futures::stream::BoxStream;
 use openraft::error::{InstallSnapshotError, RaftError};
@@ -32,6 +33,7 @@ use zslg_log::{Replica, StampedWrite, WriteOutcome};
 use zslg_log_types::LogIndex;
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
+use zslg_raft::RaftTransport;
 use zslg_raft_types::TypeConfig;
 
 /// A [`Router`] with an in-process fast-path for `self`: `remote(self_id)` returns
@@ -128,23 +130,22 @@ impl Replica for ErrorTransport {
 
 // The remaining `ReplicaClient` facets only matter when the local node is mid
 // shutdown (the self `Arc` already dropped); every call errors with `Shutdown`.
-#[async_trait::async_trait]
-impl RaftTransport for ErrorTransport {
-    async fn append_entries(
+impl ErrorTransport {
+    pub(crate) async fn append_entries_in(
         &self,
         _rpc: AppendEntriesRequest<TypeConfig>,
     ) -> Result<Result<AppendEntriesResponse<NodeId>, RaftError<NodeId>>, Error> {
         Err(Error::Lifecycle(LifecycleError::Shutdown))
     }
 
-    async fn vote(
+    pub(crate) async fn vote_in(
         &self,
         _rpc: VoteRequest<NodeId>,
     ) -> Result<Result<VoteResponse<NodeId>, RaftError<NodeId>>, Error> {
         Err(Error::Lifecycle(LifecycleError::Shutdown))
     }
 
-    async fn install_snapshot(
+    pub(crate) async fn install_snapshot_in(
         &self,
         _rpc: InstallSnapshotRequest<TypeConfig>,
     ) -> Result<
@@ -152,6 +153,49 @@ impl RaftTransport for ErrorTransport {
         Error,
     > {
         Err(Error::Lifecycle(LifecycleError::Shutdown))
+    }
+}
+
+#[async_trait::async_trait]
+impl RaftTransport for ErrorTransport {
+    async fn append_entries(
+        &self,
+        rpc: openraft::raft::AppendEntriesRequest<zslg_raft_types::TypeConfig>,
+    ) -> Result<
+        Result<
+            openraft::raft::AppendEntriesResponse<zslg_node_types::NodeId>,
+            openraft::error::RaftError<zslg_node_types::NodeId>,
+        >,
+        zslg_raft::Error,
+    > {
+        self.append_entries_in(rpc).await.map_err(Into::into)
+    }
+    async fn vote(
+        &self,
+        rpc: openraft::raft::VoteRequest<zslg_node_types::NodeId>,
+    ) -> Result<
+        Result<
+            openraft::raft::VoteResponse<zslg_node_types::NodeId>,
+            openraft::error::RaftError<zslg_node_types::NodeId>,
+        >,
+        zslg_raft::Error,
+    > {
+        self.vote_in(rpc).await.map_err(Into::into)
+    }
+    async fn install_snapshot(
+        &self,
+        rpc: openraft::raft::InstallSnapshotRequest<zslg_raft_types::TypeConfig>,
+    ) -> Result<
+        Result<
+            openraft::raft::InstallSnapshotResponse<zslg_node_types::NodeId>,
+            openraft::error::RaftError<
+                zslg_node_types::NodeId,
+                openraft::error::InstallSnapshotError,
+            >,
+        >,
+        zslg_raft::Error,
+    > {
+        self.install_snapshot_in(rpc).await.map_err(Into::into)
     }
 }
 
@@ -178,9 +222,15 @@ impl RaftMembership for ErrorTransport {
     }
 }
 
+impl ErrorTransport {
+    pub(crate) async fn probe_in(&self) -> Result<(), Error> {
+        Err(Error::Lifecycle(LifecycleError::Shutdown))
+    }
+}
+
 #[async_trait::async_trait]
 impl LivenessProbe for ErrorTransport {
-    async fn probe(&self) -> Result<(), Error> {
-        Err(Error::Lifecycle(LifecycleError::Shutdown))
+    async fn probe(&self) -> Result<(), zslg_net::Error> {
+        self.probe_in().await.map_err(Into::into)
     }
 }

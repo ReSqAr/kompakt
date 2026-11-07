@@ -15,13 +15,14 @@ use std::sync::Arc;
 use std::time::Duration;
 use zslg_consensus::RaftStateView;
 use zslg_lifecycle_types::ConfigError;
+use zslg_net::PeersWatcher;
 use zslg_net_types::NetError;
 
 use tokio::sync::watch;
 use tracing::debug;
 
 use crate::Error;
-use crate::api::PeersWatcher;
+
 use zslg_consensus_types::RaftState;
 use zslg_node_types::NodeId;
 

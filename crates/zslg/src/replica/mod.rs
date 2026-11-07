@@ -33,6 +33,7 @@ use purge::run_purge_worker;
 use zslg_consensus::RaftStateView;
 use zslg_consensus_types::ConsensusError;
 use zslg_lifecycle_types::{ConfigError, LifecycleError};
+use zslg_net::PeersWatcher;
 use zslg_time_types::ClockError;
 
 use futures::StreamExt as _;
@@ -44,7 +45,6 @@ use tokio::sync::watch;
 
 use tracing::{info, warn};
 
-use crate::api::PeersWatcher;
 use crate::error::Error;
 use crate::hlc::{CutoffApplier, HlcClock, HlcGate, HlcGuard};
 use crate::metrics::{self, ReplicaWriteState};

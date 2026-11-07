@@ -36,13 +36,13 @@ use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 use zslg_consensus::RaftStateTracker;
 use zslg_consensus_types::ConsensusError;
+use zslg_net::Router;
 
 use crossbeam_channel::{Receiver, Sender};
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry as MapEntry;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
-use crate::api::Router;
 use crate::error::Error;
 use crate::metrics::{self, FanoutResponseState, WriteRpcOutcome};
 use crossbeam_combinators::Channel;
@@ -499,13 +499,14 @@ mod tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use zslg_net::ReplicaClient;
     use zslg_net_types::NetError;
 
     use async_trait::async_trait;
     use futures::stream::BoxStream;
 
     use super::*;
-    use crate::api::ReplicaClient;
+
     use crate::tests::{make_data, nid, replica_only};
     use zslg_consensus_types::RaftGeneration;
     use zslg_consensus_types::{RaftManifestState, RaftState, ReplicaMembership, ReplicaStatus};

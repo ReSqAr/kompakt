@@ -26,6 +26,7 @@
 
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_net::{PeersWatcher, Router};
 
 use async_trait::async_trait;
 use tokio::time::Instant;
@@ -33,8 +34,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use super::bootstrap::{JoinAttempt, attempt_join_once};
-use crate::api::PeersWatcher;
-use crate::api::Router;
+
 use crate::error::Error;
 use crate::raft::RaftNode;
 use zslg_consensus_types::EvictionStatus;

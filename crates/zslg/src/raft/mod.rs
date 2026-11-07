@@ -16,10 +16,10 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use zslg_consensus::MembershipGate;
 use zslg_lifecycle_types::ConfigError;
+use zslg_net::Router;
 
 use openraft::storage::Adaptor;
 
-use crate::api::Router;
 use crate::error::{Error, ToRaft};
 use crate::raft::raft_storage::RocksRaftStorage;
 use crate::raft::rpc::NetworkFactory;

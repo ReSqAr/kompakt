@@ -41,6 +41,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 use zslg_log_types::LogError;
+use zslg_net::Router;
 
 use object_store::ObjectStore;
 use object_store::memory::InMemory;
@@ -48,7 +49,6 @@ use tokio::sync::Notify;
 use tokio::sync::watch;
 use zslg_snapshot_types::CompressionLevel;
 
-use crate::api::Router;
 use crate::error::Error;
 use crate::hlc::HlcGate;
 use crate::leader::{SnapshotInputs, build_snapshot};

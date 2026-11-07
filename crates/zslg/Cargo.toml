@@ -48,8 +48,10 @@ zslg-consensus-types = { workspace = true }
 zslg-lifecycle-types = { workspace = true }
 zslg-log = { workspace = true }
 zslg-log-types = { workspace = true }
+zslg-net = { workspace = true }
 zslg-net-types = { workspace = true }
 zslg-node-types = { workspace = true }
+zslg-raft = { workspace = true }
 zslg-raft-types = { workspace = true }
 zslg-snapshot = { workspace = true }
 zslg-snapshot-types = { workspace = true }

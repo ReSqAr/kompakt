@@ -201,6 +201,11 @@ fn every_dependency_is_allowed_by_the_role_table() {
             if k.role == Role::Facade && to == Role::Fake && d.optional {
                 continue;
             }
+            // The one ports -> ports edge (`ReplicaClient` bundles four groups);
+            // `only_zslg_net_bundles_ports` pins who may have it.
+            if k.name == "zslg-net" && to == Role::Ports {
+                continue;
+            }
             if !allowed.contains(&to) {
                 violations.push(format!(
                     "{} ({:?}) -> {} ({:?}){}",

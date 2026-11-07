@@ -14,13 +14,13 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use zslg_consensus::RaftStateTracker;
+use zslg_net::Router;
 
 use futures::StreamExt;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
-use crate::api::Router;
 use crate::error::Error;
 use crate::raft::{RaftTracker, RaftTrackerConfig};
 use shutdown::Shutdown;

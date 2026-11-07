@@ -18,11 +18,11 @@
 
 use std::sync::Arc;
 
-use crate::api::ReplicaClient;
+use crate::ReplicaClient;
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 
-pub(crate) trait Router: Send + Sync + 'static {
+pub trait Router: Send + Sync + 'static {
     /// Register a peer learned from Raft membership into the routing table so it
     /// can later be addressed by `NodeId`. Idempotent.
     fn register_peer(&self, node_id: NodeId, peer_addr: PeerAddr);

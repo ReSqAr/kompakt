@@ -1,5 +1,5 @@
 //! Where the `api` traits become wire calls: one struct implementing the facets
-//! of [`ReplicaClient`](crate::api::ReplicaClient) by mapping each method onto an
+//! of [`ReplicaClient`](zslg_net::ReplicaClient) by mapping each method onto an
 //! `Rpc*Request` and its answer back out.
 //!
 //! Purely a translation layer, deliberately. Retries, pooling and timeouts belong
@@ -13,9 +13,10 @@
 
 use std::sync::Arc;
 use zslg_consensus::{AddMemberOutcome, RaftMembership};
+use zslg_net::LivenessProbe;
 use zslg_net_types::NetError;
+use zslg_raft::RaftTransport;
 
-use crate::api::{LivenessProbe, RaftTransport};
 use crate::error::Error;
 use crate::network::client::{RpcClient, Target};
 use crate::network::messages::{
@@ -39,7 +40,7 @@ use zslg_raft_types::TypeConfig;
 /// Per-peer typed transport over [`RpcClient`]. The peer is addressed either by
 /// a registered `NodeId` ([`TcpPeerClient::new`]) or directly by
 /// `(addr, server_name)` ([`TcpPeerClient::direct`]); both expose the full
-/// [`ReplicaClient`](crate::api::ReplicaClient) surface. Built only inside
+/// [`ReplicaClient`](zslg_net::ReplicaClient) surface. Built only inside
 /// [`RemoteRouter`](crate::network::RemoteRouter).
 pub(in crate::network) struct TcpPeerClient {
     rpc_client: Arc<RpcClient>,
@@ -121,10 +122,16 @@ impl RaftMembership for TcpPeerClient {
     }
 }
 
+impl TcpPeerClient {
+    pub(crate) async fn probe_in(&self) -> Result<(), Error> {
+        self.rpc_client.echo(self.target_node_id()).await
+    }
+}
+
 #[async_trait]
 impl LivenessProbe for TcpPeerClient {
-    async fn probe(&self) -> Result<(), Error> {
-        self.rpc_client.echo(self.target_node_id()).await
+    async fn probe(&self) -> Result<(), zslg_net::Error> {
+        self.probe_in().await.map_err(Into::into)
     }
 }
 
@@ -227,9 +234,8 @@ impl Replica for TcpPeerClient {
     }
 }
 
-#[async_trait]
-impl RaftTransport for TcpPeerClient {
-    async fn append_entries(
+impl TcpPeerClient {
+    pub(crate) async fn append_entries_in(
         &self,
         rpc: AppendEntriesRequest<TypeConfig>,
     ) -> Result<Result<AppendEntriesResponse<NodeId>, RaftError<NodeId>>, Error> {
@@ -246,7 +252,7 @@ impl RaftTransport for TcpPeerClient {
         }
     }
 
-    async fn vote(
+    pub(crate) async fn vote_in(
         &self,
         rpc: VoteRequest<NodeId>,
     ) -> Result<Result<VoteResponse<NodeId>, RaftError<NodeId>>, Error> {
@@ -263,7 +269,7 @@ impl RaftTransport for TcpPeerClient {
         }
     }
 
-    async fn install_snapshot(
+    pub(crate) async fn install_snapshot_in(
         &self,
         rpc: InstallSnapshotRequest<TypeConfig>,
     ) -> Result<
@@ -284,5 +290,48 @@ impl RaftTransport for TcpPeerClient {
                 self.target,
             )))),
         }
+    }
+}
+
+#[async_trait]
+impl RaftTransport for TcpPeerClient {
+    async fn append_entries(
+        &self,
+        rpc: openraft::raft::AppendEntriesRequest<zslg_raft_types::TypeConfig>,
+    ) -> Result<
+        Result<
+            openraft::raft::AppendEntriesResponse<zslg_node_types::NodeId>,
+            openraft::error::RaftError<zslg_node_types::NodeId>,
+        >,
+        zslg_raft::Error,
+    > {
+        self.append_entries_in(rpc).await.map_err(Into::into)
+    }
+    async fn vote(
+        &self,
+        rpc: openraft::raft::VoteRequest<zslg_node_types::NodeId>,
+    ) -> Result<
+        Result<
+            openraft::raft::VoteResponse<zslg_node_types::NodeId>,
+            openraft::error::RaftError<zslg_node_types::NodeId>,
+        >,
+        zslg_raft::Error,
+    > {
+        self.vote_in(rpc).await.map_err(Into::into)
+    }
+    async fn install_snapshot(
+        &self,
+        rpc: openraft::raft::InstallSnapshotRequest<zslg_raft_types::TypeConfig>,
+    ) -> Result<
+        Result<
+            openraft::raft::InstallSnapshotResponse<zslg_node_types::NodeId>,
+            openraft::error::RaftError<
+                zslg_node_types::NodeId,
+                openraft::error::InstallSnapshotError,
+            >,
+        >,
+        zslg_raft::Error,
+    > {
+        self.install_snapshot_in(rpc).await.map_err(Into::into)
     }
 }

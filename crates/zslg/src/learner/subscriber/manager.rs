@@ -3,12 +3,13 @@ use std::sync::Arc;
 use std::time::Duration;
 use zslg_consensus::RaftStateView;
 use zslg_consensus_types::ConsensusError;
+use zslg_net::Router;
 
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use super::peer::ReplicationSubscriber;
-use crate::api::Router;
+
 use crate::error::Error;
 use crate::hlc::HlcClock;
 use crate::learner::LocalStore;

@@ -12,6 +12,7 @@ use std::time::Duration;
 use zslg_consensus::{MembershipGate, RaftLeadership, StateReplicator};
 use zslg_consensus_types::ConsensusError;
 use zslg_net_types::NetError;
+use zslg_raft::RaftConsensus;
 
 use futures::FutureExt as _;
 
@@ -22,7 +23,6 @@ use openraft::raft::{
 };
 use tracing::info;
 
-use crate::api::RaftConsensus;
 use crate::error::{Error, ToRaft};
 use crate::metrics;
 use zslg_consensus_types::RaftGeneration;
@@ -87,30 +87,12 @@ impl RaftNode {
     }
 }
 
-#[async_trait::async_trait]
-impl RaftConsensus for RaftNode {
-    async fn append_entries(
+impl RaftNode {
+    pub(crate) async fn add_member_in(
         &self,
-        rpc: AppendEntriesRequest<zslg_raft_types::TypeConfig>,
-    ) -> Result<AppendEntriesResponse<NodeId>, RaftError<NodeId>> {
-        self.inner.append_entries(rpc).await
-    }
-
-    async fn vote(
-        &self,
-        rpc: VoteRequest<NodeId>,
-    ) -> Result<VoteResponse<NodeId>, RaftError<NodeId>> {
-        self.inner.vote(rpc).await
-    }
-
-    async fn install_snapshot(
-        &self,
-        rpc: InstallSnapshotRequest<zslg_raft_types::TypeConfig>,
-    ) -> Result<InstallSnapshotResponse<NodeId>, RaftError<NodeId, InstallSnapshotError>> {
-        self.inner.install_snapshot(rpc).await
-    }
-
-    async fn add_member(&self, new_node_id: NodeId, peer_addr: PeerAddr) -> Result<(), Error> {
+        new_node_id: NodeId,
+        peer_addr: PeerAddr,
+    ) -> Result<(), Error> {
         self.gate.admit(new_node_id, &peer_addr)?;
 
         let start = tokio::time::Instant::now();
@@ -210,6 +192,40 @@ impl RaftConsensus for RaftNode {
                 }
             }
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl RaftConsensus for RaftNode {
+    async fn append_entries(
+        &self,
+        rpc: AppendEntriesRequest<zslg_raft_types::TypeConfig>,
+    ) -> Result<AppendEntriesResponse<NodeId>, RaftError<NodeId>> {
+        self.inner.append_entries(rpc).await
+    }
+
+    async fn vote(
+        &self,
+        rpc: VoteRequest<NodeId>,
+    ) -> Result<VoteResponse<NodeId>, RaftError<NodeId>> {
+        self.inner.vote(rpc).await
+    }
+
+    async fn install_snapshot(
+        &self,
+        rpc: InstallSnapshotRequest<zslg_raft_types::TypeConfig>,
+    ) -> Result<InstallSnapshotResponse<NodeId>, RaftError<NodeId, InstallSnapshotError>> {
+        self.inner.install_snapshot(rpc).await
+    }
+
+    async fn add_member(
+        &self,
+        new_node_id: zslg_node_types::NodeId,
+        peer_addr: zslg_net_types::PeerAddr,
+    ) -> Result<(), zslg_raft::Error> {
+        self.add_member_in(new_node_id, peer_addr)
+            .await
+            .map_err(Into::into)
     }
 }
 

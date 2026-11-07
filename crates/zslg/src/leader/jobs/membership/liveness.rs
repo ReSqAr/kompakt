@@ -5,6 +5,7 @@ use zslg_consensus::{RaftLeadership, RaftStateView};
 use zslg_consensus_types::CandidateInfo;
 use zslg_consensus_types::ConsensusError;
 use zslg_lifecycle_types::ConfigError;
+use zslg_net::Router;
 use zslg_net_types::NetError;
 
 use parking_lot::Mutex as SyncMutex;
@@ -12,7 +13,6 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::api::Router;
 use crate::error::Error;
 use crate::leader::jobs::membership::change::LivenessQuery;
 use zslg_node_types::NodeId;
@@ -200,7 +200,7 @@ impl LivenessWorker {
                     let result = tokio::time::timeout(probe_timeout, client.probe())
                         .await
                         .unwrap_or_else(|_| {
-                            Err(Error::Net(NetError::Rpc(format!(
+                            Err(zslg_net::Error::Net(NetError::Rpc(format!(
                                 "liveness probe to {peer:?} timed out after {probe_timeout:?}"
                             ))))
                         });
@@ -224,7 +224,7 @@ impl LivenessWorker {
                         self.live.send_if_modified(|live| live.insert(peer));
                         debug!(?peer, ?rtt, "liveness probe ok");
                     }
-                    Err(Error::Consensus(ConsensusError::UnexpectedNodeId(ids))) => {
+                    Err(zslg_net::Error::Consensus(ConsensusError::UnexpectedNodeId(ids))) => {
                         let zslg_consensus_types::UnexpectedNodeId { expected, actual } = *ids;
                         debug!(
                             ?peer,
@@ -236,7 +236,7 @@ impl LivenessWorker {
                         self.rtts.lock().remove(&peer);
                         crate::metrics::node_live(peer, false);
                     }
-                    Err(Error::Consensus(ConsensusError::UnknownPeer { .. })) => {
+                    Err(zslg_net::Error::Consensus(ConsensusError::UnknownPeer { .. })) => {
                         debug!(
                             ?peer,
                             "liveness probe: peer evicted from registry; removing from live set"
@@ -308,7 +308,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::api::LivenessProbe;
+
     use async_trait::async_trait;
     use shutdown::Shutdown;
     use zslg_consensus_types::RaftStateHandle;
@@ -356,20 +356,32 @@ mod tests {
         calls: Arc<AtomicU32>,
     }
 
-    #[async_trait]
-    impl LivenessProbe for OkProbe {
-        async fn probe(&self) -> Result<(), Error> {
+    impl OkProbe {
+        pub(crate) async fn probe_in(&self) -> Result<(), Error> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
     }
 
+    #[async_trait]
+    impl zslg_net::LivenessProbe for OkProbe {
+        async fn probe(&self) -> Result<(), zslg_net::Error> {
+            self.probe_in().await.map_err(Into::into)
+        }
+    }
+
     struct FailProbe;
 
-    #[async_trait]
-    impl LivenessProbe for FailProbe {
-        async fn probe(&self) -> Result<(), Error> {
+    impl FailProbe {
+        pub(crate) async fn probe_in(&self) -> Result<(), Error> {
             Err(crate::error::Error::Net(NetError::Rpc("simulated".into())))
+        }
+    }
+
+    #[async_trait]
+    impl zslg_net::LivenessProbe for FailProbe {
+        async fn probe(&self) -> Result<(), zslg_net::Error> {
+            self.probe_in().await.map_err(Into::into)
         }
     }
 
@@ -652,9 +664,8 @@ mod tests {
             in_flight: Arc<AtomicU32>,
             peak: Arc<AtomicU32>,
         }
-        #[async_trait]
-        impl LivenessProbe for SlowProbe {
-            async fn probe(&self) -> Result<(), Error> {
+        impl SlowProbe {
+            pub(crate) async fn probe_in(&self) -> Result<(), Error> {
                 let now = self
                     .in_flight
                     .fetch_add(1, Ordering::SeqCst)
@@ -663,6 +674,13 @@ mod tests {
                 tokio::time::sleep(Duration::from_millis(50)).await;
                 self.in_flight.fetch_sub(1, Ordering::SeqCst);
                 Ok(())
+            }
+        }
+
+        #[async_trait]
+        impl zslg_net::LivenessProbe for SlowProbe {
+            async fn probe(&self) -> Result<(), zslg_net::Error> {
+                self.probe_in().await.map_err(Into::into)
             }
         }
 
@@ -712,10 +730,16 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn wedged_probe_times_out_and_marks_peer_unhealthy() {
         struct WedgedProbe;
-        #[async_trait]
-        impl LivenessProbe for WedgedProbe {
-            async fn probe(&self) -> Result<(), Error> {
+        impl WedgedProbe {
+            pub(crate) async fn probe_in(&self) -> Result<(), Error> {
                 std::future::pending().await
+            }
+        }
+
+        #[async_trait]
+        impl zslg_net::LivenessProbe for WedgedProbe {
+            async fn probe(&self) -> Result<(), zslg_net::Error> {
+                self.probe_in().await.map_err(Into::into)
             }
         }
 

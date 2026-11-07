@@ -29,9 +29,9 @@ use tracing::{debug, warn};
 use zslg_consensus::RaftStateView;
 use zslg_consensus_types::ConsensusError;
 use zslg_log_types::LogError;
+use zslg_net::Router;
 use zslg_snapshot::SnapshotStore;
 
-use crate::api::Router;
 use crate::error::ToStorage;
 use crate::error::{Error, Home};
 use crate::learner::ReplicaPoller;
@@ -331,7 +331,7 @@ pub(in crate::leader) async fn build_snapshot(
 /// only needs *some* replicas to answer, so a peer that never does must not cap
 /// how long the others get.
 async fn await_cutoff_drained(
-    transport: &Arc<dyn crate::api::ReplicaClient>,
+    transport: &Arc<dyn zslg_net::ReplicaClient>,
     peer: zslg_node_types::NodeId,
     cutoff: Hlc,
     poll: Duration,

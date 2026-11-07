@@ -16,10 +16,11 @@
 
 use std::sync::Arc;
 use zslg_consensus::RaftStateView;
+use zslg_net::LivenessProbe;
+use zslg_raft::RaftConsensus;
 
 use tokio::sync::watch;
 
-use crate::api::{LivenessProbe, RaftConsensus};
 use crossbeam_combinators::Channel;
 use futures::stream::BoxStream;
 use openraft::error::{InstallSnapshotError, RaftError};
@@ -109,7 +110,7 @@ impl RaftConsensus for LocalReplicaClient {
         &self,
         new_node_id: NodeId,
         peer_addr: PeerAddr,
-    ) -> Result<(), crate::Error> {
+    ) -> Result<(), zslg_raft::Error> {
         self.raft.add_member(new_node_id, peer_addr).await
     }
 }
@@ -126,7 +127,7 @@ impl RaftMembership for LocalReplicaClient {
             Ok(()) => Ok(AddMemberOutcome::Accepted { state }),
             // Denied is the one answer no retry can improve: everything else
             // becomes Rejected, which the joiner retries elsewhere.
-            Err(crate::Error::Consensus(ConsensusError::MembershipDenied { .. })) => Err(
+            Err(zslg_raft::Error::Consensus(ConsensusError::MembershipDenied { .. })) => Err(
                 zslg_consensus::Error::Consensus(ConsensusError::MembershipDenied { node_id }),
             ),
             Err(_) => Ok(AddMemberOutcome::Rejected { state }),
@@ -144,12 +145,18 @@ impl RaftStateView for LocalReplicaClient {
     }
 }
 
-#[async_trait::async_trait]
-impl LivenessProbe for LocalReplicaClient {
-    async fn probe(&self) -> Result<(), crate::Error> {
+impl LocalReplicaClient {
+    pub(crate) async fn probe_in(&self) -> Result<(), crate::Error> {
         // A node is trivially alive to itself.
         Ok(())
     }
 }
 
-// The composite surfaces come from the blanket impls in `crate::api` (§ header).
+#[async_trait::async_trait]
+impl LivenessProbe for LocalReplicaClient {
+    async fn probe(&self) -> Result<(), zslg_net::Error> {
+        self.probe_in().await.map_err(Into::into)
+    }
+}
+
+// The composite surfaces come from the blanket impls in `zslg_net` (§ header).

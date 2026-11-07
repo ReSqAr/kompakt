@@ -32,12 +32,12 @@ use std::time::Duration;
 use zslg_consensus::{QuorumCheck, RaftStateView};
 use zslg_lifecycle_types::LifecycleError;
 use zslg_log_types::LogError;
+use zslg_net::Router;
 
 use async_trait::async_trait;
 use parking_lot::Mutex as SyncMutex;
 use tokio::sync::oneshot;
 
-use crate::api::Router;
 use crate::error::Error;
 use crate::metrics::OpState;
 use crate::quorum::{FanOutResponse, fan_out_quorum};

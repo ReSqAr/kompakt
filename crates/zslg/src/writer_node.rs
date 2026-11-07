@@ -20,7 +20,7 @@ use std::num::NonZeroUsize;
 
 use crate::ByteSize;
 use crate::Error;
-use crate::api;
+
 use crate::hlc::{HlcClock, run_clock_gauges};
 use crate::network::setup_router;
 use crate::raft::{RaftTracker, RaftTrackerConfig, spawn_raft_tracker_streamer};
@@ -34,7 +34,7 @@ pub struct WriterNode {
     node_id: NodeId,
     hlc_clock: Arc<HlcClock>,
     raft_tracker: Arc<RaftTracker>,
-    router: Arc<dyn api::Router>,
+    router: Arc<dyn zslg_net::Router>,
     writer: Arc<WriterService>,
     shutdown: Shutdown<Error>,
 }
@@ -243,7 +243,7 @@ impl WriterNodeConfig {
 
     /// Produce the persistent peers watcher from the flat peer list.
     #[must_use]
-    pub(crate) fn peers_watcher(&self) -> Arc<dyn crate::api::PeersWatcher> {
+    pub(crate) fn peers_watcher(&self) -> Arc<dyn zslg_net::PeersWatcher> {
         crate::network::static_peers(self.peers.clone())
     }
 

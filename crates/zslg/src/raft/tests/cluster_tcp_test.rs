@@ -22,11 +22,11 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 use zslg_consensus_types::ReplicaMembership;
+use zslg_net::Router;
 
 use openraft::Config;
 use openraft::storage::Adaptor;
 
-use crate::api::Router;
 use crate::hlc::HlcClock;
 use crate::network::{LocalReplicaClient, RemoteRouter, RpcServerConfig, SocketOpts};
 use crate::raft::rpc::NetworkFactory;
@@ -75,7 +75,7 @@ async fn build_node(node_id: NodeId, raft_config: Arc<Config>) -> ClusterNode {
     // (`ReadyReplica`, whose data methods are `unimplemented!()`) is sufficient
     // padding for the production `bind_server` cut point.
     let mut shutdown = Shutdown::new();
-    let self_client: Arc<dyn crate::api::ReplicaClient> = Arc::new(LocalReplicaClient::new(
+    let self_client: Arc<dyn zslg_net::ReplicaClient> = Arc::new(LocalReplicaClient::new(
         Arc::new(ReadyReplica {
             raft_state: raft_state.clone(),
         }),

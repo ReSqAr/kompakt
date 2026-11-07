@@ -4469,8 +4469,10 @@ dependencies = [
  "zslg-lifecycle-types",
  "zslg-log",
  "zslg-log-types",
+ "zslg-net",
  "zslg-net-types",
  "zslg-node-types",
+ "zslg-raft",
  "zslg-raft-types",
  "zslg-snapshot",
  "zslg-snapshot-types",
@@ -4556,6 +4558,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "zslg-net"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "error-union",
+ "tokio",
+ "zslg-consensus",
+ "zslg-consensus-types",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-log-types",
+ "zslg-net-types",
+ "zslg-node-types",
+ "zslg-raft",
+ "zslg-snapshot-types",
+ "zslg-time-types",
+]
+
+[[package]]
 name = "zslg-net-types"
 version = "0.1.0"
 dependencies = [
@@ -4571,6 +4592,23 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "uuid",
+]
+
+[[package]]
+name = "zslg-raft"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "error-union",
+ "openraft",
+ "zslg-consensus-types",
+ "zslg-lifecycle-types",
+ "zslg-log-types",
+ "zslg-net-types",
+ "zslg-node-types",
+ "zslg-raft-types",
+ "zslg-snapshot-types",
+ "zslg-time-types",
 ]
 
 [[package]]

@@ -29,12 +29,12 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 use zslg_consensus::RaftStateView;
 use zslg_lifecycle_types::{ConfigError, LifecycleError};
+use zslg_net::PeersWatcher;
 use zslg_snapshot::SnapshotStore;
 
 use std::num::NonZeroUsize;
 
 use crate::ByteSize;
-use crate::api::PeersWatcher;
 
 use crate::error::Error;
 use crate::hlc::{HlcClock, HlcGate, run_clock_gauges};
@@ -53,7 +53,7 @@ use crate::raft::{NoOpRaftViewer, RaftNode, run_raft_startup, setup_raft};
 use crate::replica::ReplicaLogConfig;
 use crate::replica::{ReplicaService, spawn_replica};
 use crate::writer::WriterService;
-use crate::{api, database, network};
+use crate::{database, network};
 #[cfg(test)]
 use rocksdb_kit::ColumnFamily;
 use rocksdb_kit::{CfSpec, Storage, StorageConfig};
@@ -656,7 +656,7 @@ pub struct ReplicaNode {
     /// Cheap to clone (one `Arc<AtomicBool>`) — held here rather than
     /// reconstructed per call.
     eviction: EvictionStatus,
-    _self_client: Arc<dyn api::ReplicaClient>,
+    _self_client: Arc<dyn zslg_net::ReplicaClient>,
     /// Held for shutdown only: its background retire compactions must be joined
     /// before the node's `Storage` handle drops.
     stable_log: Arc<crate::learner::StableLog>,
@@ -702,7 +702,7 @@ pub struct InitialisingReplicaNode {
     storage: Arc<Storage>,
     router: Arc<PeerRouter>,
     has_local_state: bool,
-    _self_client: Arc<dyn api::ReplicaClient>,
+    _self_client: Arc<dyn zslg_net::ReplicaClient>,
     shutdown: Shutdown<Error>,
 }
 
@@ -1027,7 +1027,7 @@ impl ReplicaNode {
         // Self/loopback client: created first so it can be shared with bind_server
         // and PeerRouter. The manager holds a `Weak` to it, so it must be
         // kept alive for the node's lifetime (stored in `ReplicaNode`).
-        let self_client: Arc<dyn api::ReplicaClient> = Arc::new(LocalReplicaClient::new(
+        let self_client: Arc<dyn zslg_net::ReplicaClient> = Arc::new(LocalReplicaClient::new(
             replica.clone(),
             raft.clone(),
             raft_state_view.clone(),

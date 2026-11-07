@@ -33,10 +33,12 @@ pub(crate) use cutoff_observer::CutoffObserver;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use zslg_consensus::{AddMemberOutcome, RaftMembership};
+use zslg_net::{LivenessProbe, ReplicaClient, Router};
 use zslg_net_types::NetError;
+use zslg_raft::RaftTransport;
 
 use crate::Error;
-use crate::api::{LivenessProbe, RaftTransport, ReplicaClient, Router};
+
 use crate::learner::LocalStore;
 use crate::raft::build_raft_for_test;
 use crossbeam_combinators::{Channel, Finite, Infinite};
@@ -507,23 +509,22 @@ impl Replica for ReplicaOnly {
     }
 }
 
-#[async_trait::async_trait]
-impl RaftTransport for ReplicaOnly {
-    async fn append_entries(
+impl ReplicaOnly {
+    pub(crate) async fn append_entries_in(
         &self,
         _rpc: AppendEntriesRequest<TypeConfig>,
     ) -> Result<Result<AppendEntriesResponse<NodeId>, RaftError<NodeId>>, Error> {
         unimplemented!("ReplicaOnly: raft transport not used")
     }
 
-    async fn vote(
+    pub(crate) async fn vote_in(
         &self,
         _rpc: VoteRequest<NodeId>,
     ) -> Result<Result<VoteResponse<NodeId>, RaftError<NodeId>>, Error> {
         unimplemented!("ReplicaOnly: raft transport not used")
     }
 
-    async fn install_snapshot(
+    pub(crate) async fn install_snapshot_in(
         &self,
         _rpc: InstallSnapshotRequest<TypeConfig>,
     ) -> Result<
@@ -531,6 +532,49 @@ impl RaftTransport for ReplicaOnly {
         Error,
     > {
         unimplemented!("ReplicaOnly: raft transport not used")
+    }
+}
+
+#[async_trait::async_trait]
+impl RaftTransport for ReplicaOnly {
+    async fn append_entries(
+        &self,
+        rpc: openraft::raft::AppendEntriesRequest<zslg_raft_types::TypeConfig>,
+    ) -> Result<
+        Result<
+            openraft::raft::AppendEntriesResponse<zslg_node_types::NodeId>,
+            openraft::error::RaftError<zslg_node_types::NodeId>,
+        >,
+        zslg_raft::Error,
+    > {
+        self.append_entries_in(rpc).await.map_err(Into::into)
+    }
+    async fn vote(
+        &self,
+        rpc: openraft::raft::VoteRequest<zslg_node_types::NodeId>,
+    ) -> Result<
+        Result<
+            openraft::raft::VoteResponse<zslg_node_types::NodeId>,
+            openraft::error::RaftError<zslg_node_types::NodeId>,
+        >,
+        zslg_raft::Error,
+    > {
+        self.vote_in(rpc).await.map_err(Into::into)
+    }
+    async fn install_snapshot(
+        &self,
+        rpc: openraft::raft::InstallSnapshotRequest<zslg_raft_types::TypeConfig>,
+    ) -> Result<
+        Result<
+            openraft::raft::InstallSnapshotResponse<zslg_node_types::NodeId>,
+            openraft::error::RaftError<
+                zslg_node_types::NodeId,
+                openraft::error::InstallSnapshotError,
+            >,
+        >,
+        zslg_raft::Error,
+    > {
+        self.install_snapshot_in(rpc).await.map_err(Into::into)
     }
 }
 
@@ -557,10 +601,16 @@ impl RaftMembership for ReplicaOnly {
     }
 }
 
+impl ReplicaOnly {
+    pub(crate) async fn probe_in(&self) -> Result<(), Error> {
+        unimplemented!("ReplicaOnly: liveness not used")
+    }
+}
+
 #[async_trait::async_trait]
 impl LivenessProbe for ReplicaOnly {
-    async fn probe(&self) -> Result<(), Error> {
-        unimplemented!("ReplicaOnly: liveness not used")
+    async fn probe(&self) -> Result<(), zslg_net::Error> {
+        self.probe_in().await.map_err(Into::into)
     }
 }
 
@@ -612,10 +662,16 @@ impl Router for ProbeRouter {
 /// `unimplemented!()` (the liveness worker calls nothing else).
 struct ProbeOnly(Arc<dyn LivenessProbe>);
 
+impl ProbeOnly {
+    pub(crate) async fn probe_in(&self) -> Result<(), Error> {
+        self.0.probe().await.map_err(Error::from)
+    }
+}
+
 #[async_trait::async_trait]
 impl LivenessProbe for ProbeOnly {
-    async fn probe(&self) -> Result<(), Error> {
-        self.0.probe().await
+    async fn probe(&self) -> Result<(), zslg_net::Error> {
+        self.probe_in().await.map_err(Into::into)
     }
 }
 
@@ -655,23 +711,22 @@ impl Replica for ProbeOnly {
     }
 }
 
-#[async_trait::async_trait]
-impl RaftTransport for ProbeOnly {
-    async fn append_entries(
+impl ProbeOnly {
+    pub(crate) async fn append_entries_in(
         &self,
         _rpc: AppendEntriesRequest<TypeConfig>,
     ) -> Result<Result<AppendEntriesResponse<NodeId>, RaftError<NodeId>>, Error> {
         unimplemented!("ProbeOnly: raft transport not used")
     }
 
-    async fn vote(
+    pub(crate) async fn vote_in(
         &self,
         _rpc: VoteRequest<NodeId>,
     ) -> Result<Result<VoteResponse<NodeId>, RaftError<NodeId>>, Error> {
         unimplemented!("ProbeOnly: raft transport not used")
     }
 
-    async fn install_snapshot(
+    pub(crate) async fn install_snapshot_in(
         &self,
         _rpc: InstallSnapshotRequest<TypeConfig>,
     ) -> Result<
@@ -679,6 +734,49 @@ impl RaftTransport for ProbeOnly {
         Error,
     > {
         unimplemented!("ProbeOnly: raft transport not used")
+    }
+}
+
+#[async_trait::async_trait]
+impl RaftTransport for ProbeOnly {
+    async fn append_entries(
+        &self,
+        rpc: openraft::raft::AppendEntriesRequest<zslg_raft_types::TypeConfig>,
+    ) -> Result<
+        Result<
+            openraft::raft::AppendEntriesResponse<zslg_node_types::NodeId>,
+            openraft::error::RaftError<zslg_node_types::NodeId>,
+        >,
+        zslg_raft::Error,
+    > {
+        self.append_entries_in(rpc).await.map_err(Into::into)
+    }
+    async fn vote(
+        &self,
+        rpc: openraft::raft::VoteRequest<zslg_node_types::NodeId>,
+    ) -> Result<
+        Result<
+            openraft::raft::VoteResponse<zslg_node_types::NodeId>,
+            openraft::error::RaftError<zslg_node_types::NodeId>,
+        >,
+        zslg_raft::Error,
+    > {
+        self.vote_in(rpc).await.map_err(Into::into)
+    }
+    async fn install_snapshot(
+        &self,
+        rpc: openraft::raft::InstallSnapshotRequest<zslg_raft_types::TypeConfig>,
+    ) -> Result<
+        Result<
+            openraft::raft::InstallSnapshotResponse<zslg_node_types::NodeId>,
+            openraft::error::RaftError<
+                zslg_node_types::NodeId,
+                openraft::error::InstallSnapshotError,
+            >,
+        >,
+        zslg_raft::Error,
+    > {
+        self.install_snapshot_in(rpc).await.map_err(Into::into)
     }
 }
 

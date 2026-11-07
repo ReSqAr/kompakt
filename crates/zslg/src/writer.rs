@@ -28,11 +28,11 @@ use zslg_consensus::RaftStateTracker;
 use zslg_consensus_types::ConsensusError;
 use zslg_lifecycle_types::ConfigError;
 use zslg_log_types::LogError;
+use zslg_net::Router;
 
 use bytes::Bytes;
 use tracing::warn;
 
-use crate::api::Router;
 use crate::error::Error;
 use crate::metrics::{self, OpState};
 use crate::quorum::Coordinator;

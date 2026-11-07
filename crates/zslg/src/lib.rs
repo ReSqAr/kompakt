@@ -39,7 +39,6 @@ use console_subscriber as _;
 #[cfg(feature = "jemalloc")]
 use tikv_jemallocator as _;
 
-pub(crate) mod api;
 mod database;
 pub(crate) mod error;
 pub(crate) mod follower_node;

@@ -1,6 +1,6 @@
 //! Dynamic source of expected Raft member addresses.
 //!
-//! The [`PeersWatcher`] trait is defined in [`crate::api`]. This module
+//! The [`PeersWatcher`] trait is defined in [`zslg_net`]. This module
 //! provides the concrete [`StaticPeers`] implementation and the
 //! [`static_peers`] convenience constructor.
 
@@ -8,10 +8,10 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use zslg_consensus::MembershipGate;
 use zslg_consensus_types::ConsensusError;
+use zslg_net::PeersWatcher;
 
 use tokio::sync::watch;
 
-use crate::api::PeersWatcher;
 use zslg_net_types::{PeerAddr, ServerName};
 use zslg_node_types::NodeId;
 

@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use zslg_consensus::RaftLeadership;
 use zslg_log_types::LogError;
+use zslg_net::Router;
 use zslg_snapshot::{CleanupReport, SnapshotStore, SnapshotWrite};
 
 use bytes::Bytes;
@@ -586,7 +587,6 @@ async fn fenced_write_rejected_on_stale_generation() {
 async fn invariant_stale_snapshot_commit_is_fenced() {
     use std::sync::atomic::AtomicBool;
 
-    use crate::api::Router;
     use crate::error::Error;
     use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
     use zslg_consensus_types::RaftGeneration;
@@ -610,11 +610,11 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
     impl Router for OnePeerRouter {
         fn register_peer(&self, _node_id: NodeId, _peer_addr: PeerAddr) {}
 
-        fn remote(&self, _node_id: NodeId) -> Arc<dyn crate::api::ReplicaClient> {
+        fn remote(&self, _node_id: NodeId) -> Arc<dyn zslg_net::ReplicaClient> {
             crate::tests::replica_only(self.replica.clone())
         }
 
-        fn remote_direct(&self, _peer_addr: PeerAddr) -> Arc<dyn crate::api::ReplicaClient> {
+        fn remote_direct(&self, _peer_addr: PeerAddr) -> Arc<dyn zslg_net::ReplicaClient> {
             unimplemented!("OnePeerRouter: direct dial not used")
         }
     }
@@ -799,7 +799,6 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
 /// §10.2 — slow-replica fault mode).
 #[tokio::test]
 async fn snapshot_quorum_tolerates_one_wedged_replica() {
-    use crate::api::Router;
     use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
     use zslg_log::Replica;
     use zslg_time_types::HlcParts;
@@ -898,7 +897,6 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use crate::api::Router;
     use crate::error::Error;
     use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
     use crate::tests::ReadyReplica;
@@ -916,11 +914,11 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
     impl Router for OnePeerRouter {
         fn register_peer(&self, _node_id: NodeId, _peer_addr: PeerAddr) {}
 
-        fn remote(&self, _node_id: NodeId) -> Arc<dyn crate::api::ReplicaClient> {
+        fn remote(&self, _node_id: NodeId) -> Arc<dyn zslg_net::ReplicaClient> {
             crate::tests::replica_only(self.replica.clone())
         }
 
-        fn remote_direct(&self, _peer_addr: PeerAddr) -> Arc<dyn crate::api::ReplicaClient> {
+        fn remote_direct(&self, _peer_addr: PeerAddr) -> Arc<dyn zslg_net::ReplicaClient> {
             unimplemented!("OnePeerRouter: direct dial not used")
         }
     }

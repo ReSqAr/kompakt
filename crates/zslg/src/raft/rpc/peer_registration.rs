@@ -4,10 +4,10 @@
 //! can reach no one, so it must be surfaced even when no event fires.
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_net::Router;
 
 use tokio_util::sync::CancellationToken;
 
-use crate::api::Router;
 use crate::error::Error;
 use zslg_node_types::NodeId;
 use zslg_raft_types::NodeInfo;

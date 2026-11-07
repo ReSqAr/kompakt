@@ -10,7 +10,7 @@ use tokio::sync::watch;
 
 use zslg_net_types::PeerAddr;
 
-pub(crate) trait PeersWatcher: Send + Sync + std::fmt::Debug + 'static {
+pub trait PeersWatcher: Send + Sync + std::fmt::Debug + 'static {
     /// Notified on every change; the receiver starts primed with the current
     /// list, so a subscriber never has to also call `current`.
     #[allow(

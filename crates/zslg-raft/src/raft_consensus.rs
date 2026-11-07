@@ -24,7 +24,7 @@ use zslg_node_types::NodeId;
 use zslg_raft_types::TypeConfig;
 
 #[async_trait::async_trait]
-pub(crate) trait RaftConsensus: Send + Sync + 'static {
+pub trait RaftConsensus: Send + Sync + 'static {
     async fn append_entries(
         &self,
         rpc: AppendEntriesRequest<TypeConfig>,

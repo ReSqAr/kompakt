@@ -28,11 +28,11 @@
 //! a fast relaunch hits "dir already open".
 
 use std::sync::Arc;
+use zslg_net::ReplicaClient;
 
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
-use crate::api::ReplicaClient;
 use crate::error::{Error, Home};
 use crate::network::framing::{
     AsyncFrameSink, AsyncFrameStream, TcpFrameSink, TcpFrameStream, adopt_blocking,

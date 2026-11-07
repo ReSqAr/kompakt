@@ -3,6 +3,8 @@
 //! peer's route lazily, which is how followers learn new members — and
 //! [`Network`] adapts each RPC's transport errors into openraft's `RPCError`.
 use std::sync::Arc;
+use zslg_net::Router;
+use zslg_raft::RaftTransport;
 
 use openraft::RaftNetwork;
 use openraft::RaftNetworkFactory;
@@ -19,7 +21,6 @@ use openraft::raft::InstallSnapshotResponse;
 use openraft::raft::VoteRequest;
 use openraft::raft::VoteResponse;
 
-use crate::api::{RaftTransport, Router};
 use zslg_node_types::NodeId;
 use zslg_raft_types::{NodeInfo, TypeConfig};
 

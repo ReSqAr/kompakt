@@ -7,7 +7,7 @@
 //!                 + LivenessProbe    echo
 //! ```
 //!
-//! Existing purely so [`Router::remote`](crate::api::Router::remote) can return
+//! Existing purely so [`Router::remote`](crate::Router::remote) can return
 //! one `Arc<dyn _>`: a caller cannot name four traits in a single trait object.
 //! Consumers should still take the narrowest facet they use — this alias is for
 //! the router's return type, not a default.
@@ -16,13 +16,11 @@
 //! local composite each implement the four facets and become a `ReplicaClient`
 //! with nothing further written.
 
-use crate::api::{LivenessProbe, RaftTransport};
+use crate::LivenessProbe;
 use zslg_consensus::RaftMembership;
 use zslg_log::Replica;
+use zslg_raft::RaftTransport;
 
-pub(crate) trait ReplicaClient:
-    Replica + RaftTransport + RaftMembership + LivenessProbe
-{
-}
+pub trait ReplicaClient: Replica + RaftTransport + RaftMembership + LivenessProbe {}
 
 impl<T: Replica + RaftTransport + RaftMembership + LivenessProbe + ?Sized> ReplicaClient for T {}

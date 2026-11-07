@@ -27,9 +27,10 @@ use zslg_consensus::AddMemberOutcome;
 /// (`raft::startup::rejoin`; group removal is the group's decision, ending the
 /// process is the orchestrator's).
 use zslg_consensus_types::ConsensusError;
+use zslg_net::Router;
 
 use crate::ReplicaNode;
-use crate::api::Router;
+
 use crate::hlc::HlcClock;
 use crate::network::RemoteRouter;
 use crate::replica_node::ReplicaNodeConfig;

@@ -21,6 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use zslg_consensus::{RaftLeadership, StateReplicator};
 use zslg_log_types::Data;
+use zslg_net::{LivenessProbe, Router};
 use zslg_snapshot::SnapshotStore;
 use zslg_snapshot_types::CompressionLevel;
 
@@ -29,7 +30,6 @@ use object_store::memory::InMemory;
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
-use crate::api::{LivenessProbe, Router};
 use crate::hlc::CutoffApplier;
 use crate::hlc::HlcClock;
 use crate::hlc::HlcGate;
@@ -86,10 +86,16 @@ async fn integrate_batch(
 
 struct NoOpProbe;
 
+impl NoOpProbe {
+    pub(crate) async fn probe_in(&self) -> Result<(), crate::Error> {
+        Ok(())
+    }
+}
+
 #[async_trait::async_trait]
 impl LivenessProbe for NoOpProbe {
-    async fn probe(&self) -> Result<(), crate::Error> {
-        Ok(())
+    async fn probe(&self) -> Result<(), zslg_net::Error> {
+        self.probe_in().await.map_err(Into::into)
     }
 }
 
@@ -178,7 +184,7 @@ fn spawn_loop(
 ) -> (
     LeaderTasks,
     Shutdown<crate::Error>,
-    Arc<dyn crate::api::ReplicaClient>,
+    Arc<dyn zslg_net::ReplicaClient>,
 ) {
     let (drained_cutoff_tx, drained_cutoff_rx) =
         tokio::sync::watch::channel::<Option<zslg_time_types::Hlc>>(None);
@@ -204,7 +210,7 @@ fn spawn_loop(
         crate::network::static_peers(Vec::new()),
     ));
     let mut server_shutdown = Shutdown::new();
-    let self_client: Arc<dyn crate::api::ReplicaClient> = Arc::new(LocalReplicaClient::new(
+    let self_client: Arc<dyn zslg_net::ReplicaClient> = Arc::new(LocalReplicaClient::new(
         replica.clone(),
         Arc::new(RaftNode::new(
             sys.raft.clone(),

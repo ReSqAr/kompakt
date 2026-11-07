@@ -20,13 +20,13 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 use zslg_consensus::RaftStateView;
+use zslg_net::Router;
 use zslg_net_types::NetError;
 
 use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::api::Router;
 use crate::error::Error;
 use crate::leader::jobs::Pace;
 use crate::leader::jobs::is_local_leader;

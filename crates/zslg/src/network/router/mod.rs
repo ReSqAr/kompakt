@@ -1,4 +1,4 @@
-//! Per-node client routing: hand out a [`ReplicaClient`](crate::api::ReplicaClient)
+//! Per-node client routing: hand out a [`ReplicaClient`](zslg_net::ReplicaClient)
 //! for any node.
 //!
 //! - [`remote`] — [`RemoteRouter`]: every node dialed remotely over TCP (owns the
