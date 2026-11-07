@@ -18,10 +18,10 @@ async-trait = { workspace = true }
 bytesize = { workspace = true }
 bytes = { workspace = true }
 console-subscriber = { workspace = true, optional = true }
-crc32fast = { workspace = true }
 crossbeam-channel = { workspace = true }
 crossbeam-combinators = { workspace = true, features = ["tokio"] }
 dashmap = { workspace = true }
+framing = { workspace = true }
 futures = { workspace = true }
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true, optional = true }

@@ -5,11 +5,17 @@
 //! is caught, not just a flipped blob byte.
 //!
 //! Used by the two surfaces RocksDB's own block checksums do not reach: RPC
-//! envelopes (`network::framing`) and object-store snapshot records
-//! (`object_store::framing`). Everything inside the node's DB is covered by
-//! RocksDB itself.
+//! envelopes and object-store snapshot records. Everything inside the node's DB
+//! is covered by RocksDB itself.
 
-use crate::error::Error;
+/// A frame that cannot be trusted. Verify **before** decoding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum FrameError {
+    #[error("crc32 checksum mismatch")]
+    ChecksumMismatch,
+    #[error("crc32 frame shorter than checksum")]
+    TooShort,
+}
 
 /// CRC32 (IEEE) of `bytes`, as the 4 big-endian bytes written on the wire.
 /// Guaranteed detection of 1–2 bit errors and bursts <= 32 bits — corruption
@@ -25,7 +31,7 @@ fn crc32(bytes: &[u8]) -> [u8; 4] {
 ///
 /// `reserve_exact(4)` first: `postcard::to_allocvec` hands back a tightly-sized
 /// `Vec`, so a bare `extend_from_slice` would grow-and-copy the whole buffer.
-pub(crate) fn append_crc32(buf: &mut Vec<u8>) {
+pub fn append_crc32(buf: &mut Vec<u8>) {
     append_crc32_from(buf, 0);
 }
 
@@ -35,7 +41,7 @@ pub(crate) fn append_crc32(buf: &mut Vec<u8>) {
 /// this frame's own header) and must not be covered — the RPC sink, see
 /// `network::framing`. A `start` past the end checksums nothing, which
 /// [`verify_frame_crc32`] then rejects as a short frame.
-pub(crate) fn append_crc32_from(buf: &mut Vec<u8>, start: usize) {
+pub fn append_crc32_from(buf: &mut Vec<u8>, start: usize) {
     let sum = crc32(buf.get(start..).unwrap_or_default());
     buf.reserve_exact(4);
     buf.extend_from_slice(&sum);
@@ -43,25 +49,20 @@ pub(crate) fn append_crc32_from(buf: &mut Vec<u8>, start: usize) {
 
 /// Check the 4 wire bytes `checksum` against the CRC32 of `body`. `Err` on
 /// mismatch. Internal primitive behind [`verify_frame_crc32`].
-fn verify_crc32(body: &[u8], checksum: &[u8; 4]) -> Result<(), Error> {
+fn verify_crc32(body: &[u8], checksum: &[u8; 4]) -> Result<(), FrameError> {
     if *checksum != crc32(body) {
-        return Err(Error::Codec("crc32 checksum mismatch".into()));
+        return Err(FrameError::ChecksumMismatch);
     }
     Ok(())
 }
 
 /// Split a contiguous `[record | crc32(4)]` frame, verifying the trailing
 /// checksum against the record bytes. Returns the record slice on success;
-/// `Error::Codec` on a short buffer or a mismatch. Verify **before** decoding.
-pub(crate) fn verify_frame_crc32(frame: &[u8]) -> Result<&[u8], Error> {
-    let body_len = frame
-        .len()
-        .checked_sub(4)
-        .ok_or_else(|| Error::Codec("crc32 frame shorter than checksum".into()))?;
+/// `FrameError` on a short buffer or a mismatch. Verify **before** decoding.
+pub fn verify_frame_crc32(frame: &[u8]) -> Result<&[u8], FrameError> {
+    let body_len = frame.len().checked_sub(4).ok_or(FrameError::TooShort)?;
     let (body, sum) = frame.split_at(body_len);
-    let sum: &[u8; 4] = sum
-        .try_into()
-        .map_err(|_| Error::Codec("crc32 checksum slice".into()))?;
+    let sum: &[u8; 4] = sum.try_into().map_err(|_| FrameError::TooShort)?;
     verify_crc32(body, sum)?;
     Ok(body)
 }
@@ -76,7 +77,6 @@ pub(crate) fn verify_frame_crc32(frame: &[u8]) -> Result<&[u8], Error> {
 )]
 mod tests {
     use super::*;
-    use crate::error::Error;
 
     // ── CRC32 frame integrity ───────────────────────────────────────────
 
@@ -97,7 +97,10 @@ mod tests {
         let mut buf = b"record identity + blob".to_vec();
         append_crc32(&mut buf);
         buf[0] ^= 0x01; // flip a bit in the record (e.g. a data_id byte)
-        assert!(matches!(verify_frame_crc32(&buf), Err(Error::Codec(_))));
+        assert!(matches!(
+            verify_frame_crc32(&buf),
+            Err(FrameError::ChecksumMismatch)
+        ));
     }
 
     #[test]
@@ -106,7 +109,10 @@ mod tests {
         append_crc32(&mut buf);
         let last = buf.len() - 1;
         buf[last] ^= 0x01; // flip a bit in the trailing CRC
-        assert!(matches!(verify_frame_crc32(&buf), Err(Error::Codec(_))));
+        assert!(matches!(
+            verify_frame_crc32(&buf),
+            Err(FrameError::ChecksumMismatch)
+        ));
     }
 
     #[test]
@@ -114,7 +120,7 @@ mod tests {
         // Fewer than 4 bytes cannot carry a checksum.
         assert!(matches!(
             verify_frame_crc32(&[0u8; 3]),
-            Err(Error::Codec(_))
+            Err(FrameError::TooShort)
         ));
     }
 
@@ -136,7 +142,7 @@ mod tests {
         assert!(verify_crc32(body, &sum).is_ok());
         assert!(matches!(
             verify_crc32(b"different record", &sum),
-            Err(Error::Codec(_))
+            Err(FrameError::ChecksumMismatch)
         ));
     }
 }

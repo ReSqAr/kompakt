@@ -43,7 +43,6 @@ pub(crate) mod api;
 mod database;
 pub(crate) mod error;
 pub(crate) mod follower_node;
-pub(crate) mod framing;
 pub(crate) mod hlc;
 pub(crate) mod ids;
 #[cfg(test)]

@@ -30,9 +30,9 @@ use tokio::io::{AsyncRead, AsyncReadExt as _};
 
 use crate::api::Clock;
 use crate::error::{Error, ToCodec};
-use crate::framing::verify_frame_crc32;
 use crate::ids::NodeId;
 use crate::network::messages::RpcEnvelope;
+use framing::verify_frame_crc32;
 
 use super::{LEN_PREFIX, MAX_FRAME_LEN, READ_CHUNK, shrink_drained};
 

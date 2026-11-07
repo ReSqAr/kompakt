@@ -406,6 +406,12 @@ impl Error {
     }
 }
 
+impl From<framing::FrameError> for Error {
+    fn from(e: framing::FrameError) -> Self {
+        Error::Codec(e.to_string())
+    }
+}
+
 impl From<bytesize::OutOfRange> for Error {
     fn from(e: bytesize::OutOfRange) -> Self {
         Error::InvalidConfiguration(e.to_string())

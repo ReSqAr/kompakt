@@ -59,6 +59,7 @@ btrb = { path = "crates/btrb" }
 bytesize = { path = "crates/bytesize" }
 crossbeam-combinators = { path = "crates/crossbeam-combinators" }
 error-union = { path = "crates/error-union" }
+framing = { path = "crates/framing" }
 nvzn = { path = "crates/nvzn" }
 objectstorage-cache = { path = "crates/objectstorage-cache" }
 warn-throttle = { path = "crates/warn-throttle" }

@@ -92,10 +92,10 @@ mod tests {
     use super::*;
     use crate::api::Clock;
     use crate::error::Error;
-    use crate::framing::verify_frame_crc32;
     use crate::hlc::Hlc;
     use crate::ids::NodeId;
     use crate::network::messages::RpcEnvelope;
+    use framing::verify_frame_crc32;
 
     #[test]
     fn shrink_drained_when_empty_and_over_capacity() {

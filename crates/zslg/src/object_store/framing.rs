@@ -30,8 +30,8 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::error::{Error, ToCodec};
-use crate::framing::{append_crc32, verify_frame_crc32};
 use crate::object_store::CompressionLevel;
+use framing::{append_crc32, verify_frame_crc32};
 
 const MAGIC: [u8; 4] = *b"SNZC";
 
