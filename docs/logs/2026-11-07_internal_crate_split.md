@@ -4,7 +4,7 @@ Working document for the IAIC interview. Current model only.
 
 ## Where we are
 
-Q1-Q11 settled (D1-D11). Asked Q12 (nvzn scope). Still to cover: migration order / PR shape, then design doc. Then the implementation layer cut (database, object-store, quorum, clock impl, net, raft, learner, leader, replica, facade). No design doc yet.
+Q1-Q12 settled (D1-D12). Asked Q13 (PR shape / migration order). After Q13: probably 1-3 more checks (layer-enforcement mechanism, naming, raft `startup` coupling follow-up), then the design doc. Then the implementation layer cut (database, object-store, quorum, clock impl, net, raft, learner, leader, replica, facade). No design doc yet.
 
 ## Model of the problem
 

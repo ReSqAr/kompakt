@@ -175,7 +175,23 @@ live (wait for projections)             1.7k, uses dispatcher, projection, event
 reader                                  0.7k, uses dispatcher, live, projection
 ```
 
+### D12. nvzn gets the same treatment, in this design
+
+Same rules (D1-D11): ports/types below, implementations as siblings, fakes as
+their own crates, `nvzn` the facade. Working cut: `nvzn-types` (ids, events,
+view, projection), `nvzn-store` (Store port + shared write machinery),
+`nvzn-store-rocksdb`, `nvzn-store-fake` (the in-memory store), `nvzn-resultset`,
+`nvzn-dispatcher`, `nvzn-live`, `nvzn-reader`, `nvzn` (facade, `testing`).
+Two consequences of earlier rules, found while answering "should the in-memory
+impl be separate" (yes):
+
+- `store/overlay.rs` (`CommitBatch`, `WriteTransactionImpl`) is not memory
+  code: both the RocksDB and in-memory stores build on it. It belongs with the
+  Store port crate, not with either implementation.
+- `nvzn::testing::TestLog` is an in-memory implementation of zslg's
+  `Reader`/`Writer`: a fake of the `log` group (D10). It moves to
+  `zslg-log-fake`; `nvzn::testing` keeps the store helpers and re-exports it.
+
 ## Open
 
-- Q12: scope — does nvzn get the same treatment in this design, a second phase,
-  or is it left alone?
+- Q13: how does the change land — one PR, a PR per layer, or a PR per crate?
