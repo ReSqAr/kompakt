@@ -25,3 +25,6 @@ tokio = ["dep:tokio", "dep:tokio-util"]
 
 [lints]
 workspace = true
+
+[package.metadata.layer]
+role = "library"
