@@ -17,8 +17,7 @@
 
 use crate::Error;
 use crate::api::{
-    AddMemberOutcome, LivenessProbe, RaftMembership, RaftTransport, Replica, ReplicaClient, Router,
-    StampedWrite, WriteOutcome,
+    AddMemberOutcome, LivenessProbe, RaftMembership, RaftTransport, ReplicaClient, Router,
 };
 use crossbeam_combinators::Channel;
 use futures::stream::BoxStream;
@@ -30,6 +29,7 @@ use openraft::raft::{
 use std::sync::{Arc, Weak};
 use zslg_consensus_types::ReplicaStatus;
 use zslg_lifecycle_types::LifecycleError;
+use zslg_log::{Replica, StampedWrite, WriteOutcome};
 use zslg_log_types::LogIndex;
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
@@ -86,32 +86,44 @@ impl Replica for ErrorTransport {
     fn write(
         &self,
         input: Channel<StampedWrite, crossbeam_combinators::Finite>,
-    ) -> Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> {
-        // Node is shutting down: fail every write (a pull-time map, no thread),
-        // then end the outcome stream as the shutdown it is — never cleanly.
-        input
-            .map(|stamped| {
-                Ok(WriteOutcome::Failed {
-                    data_id: stamped.data.data_id,
-                    error: Error::Lifecycle(LifecycleError::Shutdown),
+    ) -> Channel<Result<WriteOutcome, zslg_log::Error>, crossbeam_combinators::Infinite> {
+        let run = || -> Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> {
+            // Node is shutting down: fail every write (a pull-time map, no thread),
+            // then end the outcome stream as the shutdown it is — never cleanly.
+            input
+                .map(|stamped| {
+                    Ok(WriteOutcome::Failed {
+                        data_id: stamped.data.data_id,
+                        error: Error::Lifecycle(LifecycleError::Shutdown).into(),
+                    })
                 })
-            })
-            .chain(Channel::aborted("router shutting down"))
+                .chain(Channel::aborted("router shutting down"))
+        };
+        let result: Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> = run();
+        result.err_into()
     }
 
-    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::api::ReplicaStream {
+    fn subscribe_from(&self, from: Option<LogIndex>) -> zslg_log::ReplicaStream {
         // Node is shutting down: an empty subscription that ends aborted.
         Channel::aborted("router shutting down").ordered(from, "replica subscription")
     }
 
-    async fn fetch_status(&self) -> Result<ReplicaStatus, crate::Error> {
-        Err(Error::Lifecycle(LifecycleError::Shutdown))
+    async fn fetch_status(&self) -> Result<ReplicaStatus, zslg_log::Error> {
+        let result: Result<ReplicaStatus, crate::Error> =
+            async { Err(Error::Lifecycle(LifecycleError::Shutdown)) }.await;
+        result.map_err(Into::into)
     }
 
     async fn subscribe_status(
         &self,
-    ) -> Result<BoxStream<'static, Result<ReplicaStatus, crate::Error>>, crate::Error> {
-        Err(Error::Lifecycle(LifecycleError::Shutdown))
+    ) -> Result<BoxStream<'static, Result<ReplicaStatus, zslg_log::Error>>, zslg_log::Error> {
+        let result: Result<BoxStream<'static, Result<ReplicaStatus, crate::Error>>, crate::Error> =
+            async { Err(Error::Lifecycle(LifecycleError::Shutdown)) }.await;
+        result
+            .map(|s| {
+                futures::StreamExt::boxed(futures::StreamExt::map(s, |r| r.map_err(Into::into)))
+            })
+            .map_err(Into::into)
     }
 }
 

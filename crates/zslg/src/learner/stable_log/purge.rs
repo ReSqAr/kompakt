@@ -14,9 +14,10 @@ use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
-use crate::api::{RaftStateView, StableLogSnapshot};
+use crate::api::RaftStateView;
 use crate::error::Error;
 use crate::metrics;
+use zslg_log::StableLogSnapshot;
 use zslg_time_types::{Hlc, hlc_subtract};
 
 /// Don't hand over a new purge threshold more than once per interval even if

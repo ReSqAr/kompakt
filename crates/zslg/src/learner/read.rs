@@ -47,11 +47,7 @@
 //! `WatermarkGate`, keeps it off the stable side: nothing at or below the
 //! current watermark.
 
-use crate::Error;
-use crate::api::{
-    ArchiveBounds, ArchiveUpperBound, LocalStoreView, Reader, StableArchiveReader,
-    StableLogSnapshot,
-};
+use crate::error::{Error, Home};
 use crate::learner::QuorumReadDebouncer;
 use crate::metrics::{self, ReadEntrySource, ReadSource};
 use crossbeam_combinators::{
@@ -61,6 +57,10 @@ use crossbeam_combinators::{
 use std::sync::Arc;
 use zslg_consensus_types::EvictionStatus;
 use zslg_lifecycle_types::LifecycleError;
+use zslg_log::{
+    ArchiveBounds, ArchiveUpperBound, LocalStoreView, Reader, StableArchiveReader,
+    StableLogSnapshot,
+};
 use zslg_log_types::LogIndex;
 use zslg_log_types::{Data, StableLogEvent, UnstableEvent};
 use zslg_node_types::NodeId;
@@ -132,11 +132,15 @@ impl GatedReader {
 
 #[async_trait::async_trait]
 impl Reader for GatedReader {
-    async fn sync(&self) -> Result<(), Error> {
-        if !self.ready() {
-            return Err(self.not_ready());
+    async fn sync(&self) -> Result<(), zslg_log::Error> {
+        let result: Result<(), Error> = async {
+            if !self.ready() {
+                return Err(self.not_ready());
+            }
+            self.inner.sync().await.home()
         }
-        self.inner.sync().await
+        .await;
+        result.map_err(Into::into)
     }
 
     fn stable_watermark(&self) -> Option<Hlc> {
@@ -152,25 +156,35 @@ impl Reader for GatedReader {
 
     fn subscribe_stable_log(&self, after: Option<LogIndex>) -> crate::StableStream {
         if !self.ready() {
-            return Channel::once(Err(self.not_ready()))
+            return (Channel::once(Err(self.not_ready()))
                 .chain(Channel::aborted("gated reader"))
-                .ordered(after, "stable log stream");
+                .ordered(after, "stable log stream"))
+            .err_into();
         }
         self.inner.subscribe_stable_log(after)
     }
 
-    fn unstable_tail(&self) -> Channel<Result<Data, Error>, Finite> {
-        if !self.ready() {
-            return Channel::once(Err(self.not_ready()));
-        }
-        self.inner.unstable_tail()
+    fn unstable_tail(&self) -> Channel<Result<Data, zslg_log::Error>, Finite> {
+        let run = || -> Channel<Result<Data, Error>, Finite> {
+            if !self.ready() {
+                return Channel::once(Err(self.not_ready()));
+            }
+            self.inner.unstable_tail().home()
+        };
+        let result: Channel<Result<Data, Error>, Finite> = run();
+        result.err_into()
     }
 
-    fn subscribe_unstable_tail(&self) -> Channel<Result<UnstableEvent, Error>, Infinite> {
-        if !self.ready() {
-            return Channel::once(Err(self.not_ready())).chain(Channel::aborted("gated reader"));
-        }
-        self.inner.subscribe_unstable_tail()
+    fn subscribe_unstable_tail(&self) -> Channel<Result<UnstableEvent, zslg_log::Error>, Infinite> {
+        let run = || -> Channel<Result<UnstableEvent, Error>, Infinite> {
+            if !self.ready() {
+                return Channel::once(Err(self.not_ready()))
+                    .chain(Channel::aborted("gated reader"));
+            }
+            self.inner.subscribe_unstable_tail().home()
+        };
+        let result: Channel<Result<UnstableEvent, Error>, Infinite> = run();
+        result.err_into()
     }
 }
 
@@ -238,7 +252,7 @@ fn historical_replay(
     after: Option<LogIndex>,
     until: LogIndex,
 ) -> Channel<Result<(LogIndex, Data), Error>, Finite> {
-    stable_log
+    (stable_log
         .range(after, until)
         .map(|item| {
             if item.is_ok() {
@@ -263,7 +277,8 @@ fn historical_replay(
         })
         .covers(..until, "historical replay")
         .also::<NonDecreasing<Hlc>>(None, "historical replay HLC")
-        .into_channel()
+        .into_channel())
+    .home()
 }
 
 // ── Resyncing tail ─────────────────────────────────────────────────────────
@@ -373,7 +388,7 @@ fn resyncing_tail(
     let weak_stable_log = Arc::downgrade(&stable_log);
     drop((archive, stable_log));
 
-    Resumable::new::<_, Contiguous<LogIndex>, _, _>(
+    (Resumable::new::<_, Contiguous<LogIndex>, _, _>(
         "stable log stream",
         after,
         move |after, opening| {
@@ -426,7 +441,8 @@ fn resyncing_tail(
             );
             Some(seam)
         },
-    )
+    ))
+    .err_into()
 }
 
 // ── Resyncing unstable tail ────────────────────────────────────────────────
@@ -536,7 +552,7 @@ impl Seam for UnstableSeam {
                     UnstableStep::Entry(data)
                 })
             });
-        opening.chain(scan)
+        opening.chain(scan.home())
     }
 }
 
@@ -611,10 +627,14 @@ fn resyncing_unstable_tail(
 
 #[async_trait::async_trait]
 impl Reader for ReaderImpl {
-    async fn sync(&self) -> Result<(), Error> {
-        let result = self.debouncer.sync_quorum().await;
-        metrics::quorum_read(metrics::OpState::from_ok(result.is_ok()));
-        result
+    async fn sync(&self) -> Result<(), zslg_log::Error> {
+        let result: Result<(), Error> = async {
+            let result = self.debouncer.sync_quorum().await;
+            metrics::quorum_read(metrics::OpState::from_ok(result.is_ok()));
+            result
+        }
+        .await;
+        result.map_err(Into::into)
     }
 
     fn stable_watermark(&self) -> Option<Hlc> {
@@ -630,31 +650,40 @@ impl Reader for ReaderImpl {
         resyncing_tail(self.archive.clone(), self.stable_log.clone(), after).until(&self.shutdown)
     }
 
-    fn unstable_tail(&self) -> Channel<Result<Data, Error>, Finite> {
-        metrics::read_request(ReadSource::Unstable);
-        let local_store = self.local_store.clone();
-        let stable_log = self.stable_log.clone();
-        // The stable watermark = end_hlc. Everything at or below it has been
-        // settled into the stable prefix (served by stable_tail) or has been
-        // superseded and must not appear here — so non-quorum writes below the
-        // watermark disappear from the unstable view by the next snapshot.
-        let watermark = stable_log.end_hlc();
-        local_store
-            .stream_above_hlc(watermark)
-            .into_channel()
-            .map(|item| {
-                if item.is_ok() {
-                    metrics::read_entry(ReadEntrySource::LocalStore);
-                }
-                item
-            })
-            .until(&self.shutdown)
+    fn unstable_tail(&self) -> Channel<Result<Data, zslg_log::Error>, Finite> {
+        let run = || -> Channel<Result<Data, Error>, Finite> {
+            metrics::read_request(ReadSource::Unstable);
+            let local_store = self.local_store.clone();
+            let stable_log = self.stable_log.clone();
+            // The stable watermark = end_hlc. Everything at or below it has been
+            // settled into the stable prefix (served by stable_tail) or has been
+            // superseded and must not appear here — so non-quorum writes below the
+            // watermark disappear from the unstable view by the next snapshot.
+            let watermark = stable_log.end_hlc();
+            (local_store
+                .stream_above_hlc(watermark)
+                .into_channel()
+                .map(|item| {
+                    if item.is_ok() {
+                        metrics::read_entry(ReadEntrySource::LocalStore);
+                    }
+                    item
+                })
+                .until(&self.shutdown))
+            .home()
+        };
+        let result: Channel<Result<Data, Error>, Finite> = run();
+        result.err_into()
     }
 
-    fn subscribe_unstable_tail(&self) -> Channel<Result<UnstableEvent, Error>, Infinite> {
-        metrics::read_request(ReadSource::UnstableSubscription);
-        resyncing_unstable_tail(self.local_store.clone(), self.stable_log.clone())
-            .until(&self.shutdown)
+    fn subscribe_unstable_tail(&self) -> Channel<Result<UnstableEvent, zslg_log::Error>, Infinite> {
+        let run = || -> Channel<Result<UnstableEvent, Error>, Infinite> {
+            metrics::read_request(ReadSource::UnstableSubscription);
+            resyncing_unstable_tail(self.local_store.clone(), self.stable_log.clone())
+                .until(&self.shutdown)
+        };
+        let result: Channel<Result<UnstableEvent, Error>, Infinite> = run();
+        result.err_into()
     }
 }
 
@@ -668,6 +697,7 @@ impl Reader for ReaderImpl {
     reason = "test code"
 )]
 mod tests {
+    use crate::error::Home as _;
     use crate::test_stream::ChannelTestExt as _;
     use std::sync::Arc;
     use std::time::Duration;
@@ -676,8 +706,8 @@ mod tests {
 
     use crate::Reader;
     use crate::api::QuorumCheck;
-    use crate::api::{LocalStoreMut, StableLogSnapshot};
     use crossbeam_combinators::{Cancellation, Channel, Finite, Infinite};
+    use zslg_log::{LocalStoreMut, StableLogSnapshot};
     use zslg_log_types::StableLogEvent;
 
     use crate::learner::{LocalStore, QuorumReadDebouncer, StableLog};
@@ -750,7 +780,7 @@ mod tests {
             deadtime,
             Duration::from_secs(5),
         ));
-        let archive: Arc<dyn crate::api::StableArchiveReader> =
+        let archive: Arc<dyn zslg_log::StableArchiveReader> =
             Arc::new(ObjectStoreArchiveReader::new(snapshot_store, raft_state));
         ReaderImpl::new(
             local_store,
@@ -880,7 +910,7 @@ mod tests {
         // verdict as "disconnected, not yet closed" — an abort.
         closer.close();
         drop(tx);
-        store.integrate_loop(ch).await
+        store.integrate_loop(ch).await.home()
     }
 
     /// `hlc_now` reads the node's clock, the one its writes are minted from: it
@@ -898,7 +928,7 @@ mod tests {
             Duration::ZERO,
             Duration::from_secs(5),
         ));
-        let archive: Arc<dyn crate::api::StableArchiveReader> =
+        let archive: Arc<dyn zslg_log::StableArchiveReader> =
             Arc::new(ObjectStoreArchiveReader::new(
                 Arc::new(ScriptedSnapshotStore::default()),
                 Arc::new(RaftStateHandle::default()),
@@ -931,11 +961,11 @@ mod tests {
             .expect("from_db");
 
         stable_log
-            .append(rx_of([Ok((LogIndex(0), make_data(1, 100, b"a")))]))
+            .append(rx_of([Ok((LogIndex(0), make_data(1, 100, b"a")))]).err_into())
             .await
             .expect("append");
         stable_log
-            .append(rx_of([Ok((LogIndex(1), make_data(2, 200, b"b")))]))
+            .append(rx_of([Ok((LogIndex(1), make_data(2, 200, b"b")))]).err_into())
             .await
             .expect("append");
 
@@ -963,7 +993,7 @@ mod tests {
         assert_eq!(d1.data_id.hlc(), Hlc(200));
 
         stable_log
-            .append(rx_of([Ok((LogIndex(2), make_data(3, 300, b"c")))]))
+            .append(rx_of([Ok((LogIndex(2), make_data(3, 300, b"c")))]).err_into())
             .await
             .expect("append");
         let live = tokio::time::timeout(Duration::from_secs(1), stream.next())
@@ -987,10 +1017,13 @@ mod tests {
 
         for (idx, hlc) in [(0u64, 100u64), (1, 200), (2, 300)] {
             stable_log
-                .append(rx_of([Ok((
-                    LogIndex(idx),
-                    make_data(u8::try_from(idx + 1).expect("fits"), hlc, b""),
-                ))]))
+                .append(
+                    (rx_of([Ok((
+                        LogIndex(idx),
+                        make_data(u8::try_from(idx + 1).expect("fits"), hlc, b""),
+                    ))]))
+                    .err_into(),
+                )
                 .await
                 .expect("append");
         }
@@ -1035,10 +1068,13 @@ mod tests {
         // Append indices 0..=4 with HLCs 100..=104.
         for (idx, hlc) in [(0u64, 100u64), (1, 101), (2, 102), (3, 103), (4, 104)] {
             stable_log
-                .append(rx_of([Ok((
-                    LogIndex(idx),
-                    make_data(u8::try_from(idx + 1).expect("fits"), hlc, b""),
-                ))]))
+                .append(
+                    (rx_of([Ok((
+                        LogIndex(idx),
+                        make_data(u8::try_from(idx + 1).expect("fits"), hlc, b""),
+                    ))]))
+                    .err_into(),
+                )
                 .await
                 .expect("append");
         }
@@ -1203,12 +1239,16 @@ mod tests {
         }
         async fn append(
             &self,
-            _entries: Channel<Result<zslg_log_types::SnapshotEntry, crate::Error>, Finite>,
-        ) -> Result<usize, crate::Error> {
-            unimplemented!("scripted stable log is read-only")
+            _entries: Channel<Result<zslg_log_types::SnapshotEntry, zslg_log::Error>, Finite>,
+        ) -> Result<usize, zslg_log::Error> {
+            let result: Result<usize, crate::Error> =
+                async { unimplemented!("scripted stable log is read-only") }.await;
+            result.map_err(Into::into)
         }
-        async fn record_end_hlc(&self, _end_hlc: Hlc) -> Result<(), crate::Error> {
-            unimplemented!("scripted stable log is read-only")
+        async fn record_end_hlc(&self, _end_hlc: Hlc) -> Result<(), zslg_log::Error> {
+            let result: Result<(), crate::Error> =
+                async { unimplemented!("scripted stable log is read-only") }.await;
+            result.map_err(Into::into)
         }
         fn subscribe_events(&self) -> Channel<zslg_log_types::StableLogEvent, Infinite> {
             self.events_registry.subscribe_infinite()
@@ -1220,22 +1260,28 @@ mod tests {
             &self,
             after: Option<LogIndex>,
             until: LogIndex,
-        ) -> Channel<Result<(LogIndex, Data), crate::Error>, Finite> {
-            self.ranges
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let items: Vec<Result<(LogIndex, Data), crate::Error>> = self
-                .entries
-                .lock()
-                .expect("lock")
-                .iter()
-                .filter(|(i, _)| after.is_none_or(|a| *i > a) && *i < until)
-                .cloned()
-                .map(Ok)
-                .collect();
-            Channel::from_vec(items)
+        ) -> Channel<Result<(LogIndex, Data), zslg_log::Error>, Finite> {
+            let run = || -> Channel<Result<(LogIndex, Data), crate::Error>, Finite> {
+                self.ranges
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let items: Vec<Result<(LogIndex, Data), crate::Error>> = self
+                    .entries
+                    .lock()
+                    .expect("lock")
+                    .iter()
+                    .filter(|(i, _)| after.is_none_or(|a| *i > a) && *i < until)
+                    .cloned()
+                    .map(Ok)
+                    .collect();
+                Channel::from_vec(items)
+            };
+            let result: Channel<Result<(LogIndex, Data), crate::Error>, Finite> = run();
+            result.err_into()
         }
-        fn set_purge_threshold(&self, _hlc_threshold: Hlc) -> Result<(), crate::Error> {
-            Ok(())
+        fn set_purge_threshold(&self, _hlc_threshold: Hlc) -> Result<(), zslg_log::Error> {
+            let run = || -> Result<(), crate::Error> { Ok(()) };
+            let result: Result<(), crate::Error> = run();
+            result.map_err(Into::into)
         }
     }
 
@@ -1450,7 +1496,7 @@ mod tests {
             Duration::from_millis(5),
             Duration::from_secs(5),
         ));
-        let archive: Arc<dyn crate::api::StableArchiveReader> =
+        let archive: Arc<dyn zslg_log::StableArchiveReader> =
             Arc::new(ObjectStoreArchiveReader::new(snapshot_store, raft_state));
         let dir = tempfile::tempdir().expect("tempdir");
         let local_store = LocalStore::simple_at(dir.path().join("local.stable"))
@@ -1636,10 +1682,7 @@ mod tests {
             .expect("from_db");
 
         stable_log
-            .append(rx_of([Ok((
-                LogIndex(0),
-                make_data(0, 150, b"stable-seed"),
-            ))]))
+            .append((rx_of([Ok((LogIndex(0), make_data(0, 150, b"stable-seed")))])).err_into())
             .await
             .expect("watermark via append");
 
@@ -1691,8 +1734,6 @@ mod tests {
 
     // ── subscribe_unstable_tail ─────────────────────────────────────────────
 
-    type UnstableStream = Channel<Result<zslg_log_types::UnstableEvent, crate::Error>, Infinite>;
-
     /// A reader over a local store and the stable log it reads its watermark
     /// from, on one `Storage` (the production shape), with the stable
     /// watermark at `watermark` and unstable queues `capacity` deep.
@@ -1726,7 +1767,9 @@ mod tests {
     }
 
     /// The next event, without blocking the runtime the store's workers run on.
-    async fn next_unstable(stream: &mut UnstableStream) -> zslg_log_types::UnstableEvent {
+    async fn next_unstable(
+        stream: &mut Channel<Result<zslg_log_types::UnstableEvent, zslg_log::Error>, Infinite>,
+    ) -> zslg_log_types::UnstableEvent {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         loop {
             if let Some(item) = stream.try_recv() {
@@ -1741,7 +1784,9 @@ mod tests {
     }
 
     /// Nothing further arrives within a short grace.
-    async fn assert_quiet(stream: &mut UnstableStream) {
+    async fn assert_quiet(
+        stream: &mut Channel<Result<zslg_log_types::UnstableEvent, zslg_log::Error>, Infinite>,
+    ) {
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(stream.try_recv().is_none(), "expected no further event");
     }
@@ -1877,7 +1922,7 @@ mod tests {
         let mut stream = gated.subscribe_unstable_tail();
         assert!(matches!(
             stream.recv(),
-            Ok(Err(crate::Error::Lifecycle(LifecycleError::NotReady(_))))
+            Ok(Err(zslg_log::Error::Lifecycle(LifecycleError::NotReady(_))))
         ));
     }
 
@@ -1931,7 +1976,7 @@ mod tests {
     /// Pull what is ready, asserting no `Appended` is at or below the
     /// watermark current at emission and that `Watermark`s never regress.
     fn drain_ready(
-        stream: &mut UnstableStream,
+        stream: &mut Channel<Result<zslg_log_types::UnstableEvent, zslg_log::Error>, Infinite>,
         stable: &StableLog,
         delivered: &mut std::collections::BTreeSet<zslg_log_types::DataId>,
         last_watermark: &mut Option<Hlc>,
@@ -2051,11 +2096,11 @@ mod tests {
             .expect("from_db");
 
         stable_log
-            .append(rx_of([Ok((LogIndex(0), make_data(1, 100, b"a")))]))
+            .append(rx_of([Ok((LogIndex(0), make_data(1, 100, b"a")))]).err_into())
             .await
             .expect("append");
         stable_log
-            .append(rx_of([Ok((LogIndex(1), make_data(2, 200, b"b")))]))
+            .append(rx_of([Ok((LogIndex(1), make_data(2, 200, b"b")))]).err_into())
             .await
             .expect("append");
 
@@ -2088,7 +2133,7 @@ mod tests {
             .await
             .expect("from_db");
         stable_log
-            .append(rx_of([Ok((LogIndex(0), make_data(1, 100, b"a")))]))
+            .append(rx_of([Ok((LogIndex(0), make_data(1, 100, b"a")))]).err_into())
             .await
             .expect("append");
 

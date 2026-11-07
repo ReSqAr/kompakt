@@ -481,7 +481,7 @@ impl FollowerNode {
     /// Callers should clone this [`Arc`] before calling [`run`](Self::run) if
     /// reads should continue after the node is consumed.
     #[must_use]
-    pub fn reader(&self) -> Arc<dyn api::Reader> {
+    pub fn reader(&self) -> Arc<dyn zslg_log::Reader> {
         self.learner.reader()
     }
 
@@ -490,7 +490,7 @@ impl FollowerNode {
     /// Callers should clone this [`Arc`] before calling [`run`](Self::run) if
     /// writes should continue after the node is consumed.
     #[must_use]
-    pub fn writer(&self) -> Arc<dyn api::Writer> {
+    pub fn writer(&self) -> Arc<dyn zslg_log::Writer> {
         self.writer.clone()
     }
 

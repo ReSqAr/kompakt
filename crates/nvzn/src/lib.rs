@@ -137,3 +137,9 @@ pub enum Error {
     #[error("an index with ID {0} is already registered")]
     IndexAlreadyRegistered(u32),
 }
+
+impl From<zslg::LogApiError> for Error {
+    fn from(error: zslg::LogApiError) -> Self {
+        Self::Zslg(error.into())
+    }
+}

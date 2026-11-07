@@ -34,7 +34,7 @@
 //! [`CutoffObserver`], which is inherently temporal: it records a history and
 //! checks it after the fact.
 //!
-//! **A failed write proves nothing.** `api::Writer::write` documents that "an
+//! **A failed write proves nothing.** `zslg_log::Writer::write` documents that "an
 //! error means quorum was not observed, not that nothing was written" — the
 //! write may well be durable on a quorum with the ACK lost on the way back. So
 //! a `DataId` is recorded only when `write` returns `Ok`, and the absence of a

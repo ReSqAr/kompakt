@@ -119,7 +119,7 @@ use parking_lot::Mutex as SyncMutex;
 use rocksdb_kit::Batch;
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::Error;
+use crate::error::{Error, Home};
 use crate::error::{ToCodec, ToStorage};
 use crate::metrics::{self, LogType, OpState};
 use crossbeam_combinators::{
@@ -636,7 +636,7 @@ impl BatchAppender {
 }
 
 #[async_trait::async_trait]
-impl crate::api::StableLogSnapshot for StableLog {
+impl zslg_log::StableLogSnapshot for StableLog {
     fn end_index(&self) -> Option<LogIndex> {
         *self.end_index.lock()
     }
@@ -647,77 +647,86 @@ impl crate::api::StableLogSnapshot for StableLog {
 
     async fn append(
         &self,
-        entries: Channel<Result<SnapshotEntry, Error>, Finite>,
-    ) -> Result<usize, Error> {
-        // The entire drain → encode → commit → fsync → frontier-advance →
-        // broadcast loop runs on ONE blocking thread (CLAUDE.md §8; mirrors
-        // `replica/log.rs::flush_loop_blocking`). The caller (`integrate_manifest`)
-        // decodes the snapshot on its own `spawn_blocking` worker and feeds the
-        // decoded entries straight into `entries` — one bounded channel directly
-        // between the two blocking threads, no reactor hop on the data path.
-        let probe = metrics::stable_log_append_probe();
+        entries: Channel<Result<SnapshotEntry, zslg_log::Error>, Finite>,
+    ) -> Result<usize, zslg_log::Error> {
+        let entries: Channel<Result<SnapshotEntry, Error>, Finite> = entries.home();
+        let result: Result<usize, Error> = async {
+            // The entire drain → encode → commit → fsync → frontier-advance →
+            // broadcast loop runs on ONE blocking thread (CLAUDE.md §8; mirrors
+            // `replica/log.rs::flush_loop_blocking`). The caller (`integrate_manifest`)
+            // decodes the snapshot on its own `spawn_blocking` worker and feeds the
+            // decoded entries straight into `entries` — one bounded channel directly
+            // between the two blocking threads, no reactor hop on the data path.
+            let probe = metrics::stable_log_append_probe();
 
-        // Serialize the frontier/watermark read-modify-write against
-        // `record_end_hlc`; held across the blocking task.
-        let _g = self.write_lock.lock().await;
-        // The loader (§9.7): an overlapping re-append is deduplicated, the
-        // stored prefix skipped, and the rest must continue the log exactly.
-        let end = *self.end_index.lock();
-        let entries = entries
-            .dedup_by_key::<LogIndex>()
-            .filter_above::<LogIndex>(end)
-            .ordered::<crossbeam_combinators::Contiguous<LogIndex>>(end, "stable log loader");
-        let appender = BatchAppender {
-            rx: entries,
-            storage: Arc::clone(&self.storage),
-            end_index: Arc::clone(&self.end_index),
-            end_hlc: Arc::clone(&self.end_hlc),
-            frontier_hlc: Arc::clone(&self.frontier_hlc),
-            events: Arc::clone(&self.events),
-            watermark: Arc::clone(&self.watermark),
-        };
+            // Serialize the frontier/watermark read-modify-write against
+            // `record_end_hlc`; held across the blocking task.
+            let _g = self.write_lock.lock().await;
+            // The loader (§9.7): an overlapping re-append is deduplicated, the
+            // stored prefix skipped, and the rest must continue the log exactly.
+            let end = *self.end_index.lock();
+            let entries = entries
+                .dedup_by_key::<LogIndex>()
+                .filter_above::<LogIndex>(end)
+                .ordered::<crossbeam_combinators::Contiguous<LogIndex>>(end, "stable log loader");
+            let appender = BatchAppender {
+                rx: entries,
+                storage: Arc::clone(&self.storage),
+                end_index: Arc::clone(&self.end_index),
+                end_hlc: Arc::clone(&self.end_hlc),
+                frontier_hlc: Arc::clone(&self.frontier_hlc),
+                events: Arc::clone(&self.events),
+                watermark: Arc::clone(&self.watermark),
+            };
 
-        let total = tokio::task::spawn_blocking(move || appender.run())
-            .await
-            .to_storage("append spawn_blocking panicked")??;
+            let total = tokio::task::spawn_blocking(move || appender.run())
+                .await
+                .to_storage("append spawn_blocking panicked")??;
 
-        probe.finish(OpState::Success);
-        Ok(total)
+            probe.finish(OpState::Success);
+            Ok(total)
+        }
+        .await;
+        result.map_err(Into::into)
     }
 
-    async fn record_end_hlc(&self, end_hlc: Hlc) -> Result<(), Error> {
-        // Purely in-memory: the watermark is derived from the log tail at
-        // recovery, so an empty-window advance needs no durability — the
-        // manifest that carries it is re-delivered after a restart. Serialized
-        // against `append` (which holds `write_lock` across its whole blocking
-        // body), so the read-check-store below cannot interleave with the
-        // append path's watermark store.
-        let _g = self.write_lock.lock().await;
-        let advanced = {
-            let mut guard = self.end_hlc.lock();
-            let prev = *guard;
-            if prev.is_some_and(|p| end_hlc < p) {
-                return Err(Error::Log(LogError::Storage(format!(
-                    "end_hlc would regress from {prev:?} to {end_hlc:?}"
-                ))));
-            }
-            // `advanced` distinguishes a genuine forward move (stamp the age
-            // gauge) from a redundant re-record of the same watermark.
-            let advanced = prev.is_none_or(|p| end_hlc > p);
-            *guard = Some(end_hlc);
-            advanced
-        };
+    async fn record_end_hlc(&self, end_hlc: Hlc) -> Result<(), zslg_log::Error> {
+        let result: Result<(), Error> = async {
+            // Purely in-memory: the watermark is derived from the log tail at
+            // recovery, so an empty-window advance needs no durability — the
+            // manifest that carries it is re-delivered after a restart. Serialized
+            // against `append` (which holds `write_lock` across its whole blocking
+            // body), so the read-check-store below cannot interleave with the
+            // append path's watermark store.
+            let _g = self.write_lock.lock().await;
+            let advanced = {
+                let mut guard = self.end_hlc.lock();
+                let prev = *guard;
+                if prev.is_some_and(|p| end_hlc < p) {
+                    return Err(Error::Log(LogError::Storage(format!(
+                        "end_hlc would regress from {prev:?} to {end_hlc:?}"
+                    ))));
+                }
+                // `advanced` distinguishes a genuine forward move (stamp the age
+                // gauge) from a redundant re-record of the same watermark.
+                let advanced = prev.is_none_or(|p| end_hlc > p);
+                *guard = Some(end_hlc);
+                advanced
+            };
 
-        // Only a genuine advance is broadcast: a redundant re-record (same value)
-        // must not emit a `Watermark` event — the event would misstate the
-        // current end_hlc and the gauge would re-stamp without progress.
-        if advanced {
-            metrics::stable_log_end_hlc_physical_ms(end_hlc);
-            metrics::stable_log_end_advanced();
-            let _ = self.events.publish(StableLogEvent::Watermark(end_hlc));
-            self.watermark.set(Some(end_hlc));
+            // Only a genuine advance is broadcast: a redundant re-record (same value)
+            // must not emit a `Watermark` event — the event would misstate the
+            // current end_hlc and the gauge would re-stamp without progress.
+            if advanced {
+                metrics::stable_log_end_hlc_physical_ms(end_hlc);
+                metrics::stable_log_end_advanced();
+                let _ = self.events.publish(StableLogEvent::Watermark(end_hlc));
+                self.watermark.set(Some(end_hlc));
+            }
+            Ok(())
         }
-        Ok(())
+        .await;
+        result.map_err(Into::into)
     }
 
     fn subscribe_events(&self) -> Channel<StableLogEvent, Infinite> {
@@ -732,69 +741,77 @@ impl crate::api::StableLogSnapshot for StableLog {
         &self,
         after: Option<LogIndex>,
         until: LogIndex,
-    ) -> Channel<Result<(LogIndex, Data), Error>, Finite> {
-        // `(after, until)`, scanned as the inclusive `[from, until)` storage
-        // takes, off a blocking scan through a bounded channel.
-        let from = LogIndex::next_after(after);
-        let storage = Arc::clone(&self.storage);
-        Channel::produce_blocking(32, "StableLogSnapshot::range", move |feed| {
-            let mut decode_err: Option<Error> = None;
-            let scan = for_each_entry(
-                &storage,
-                from,
-                until,
-                // PINNING RULE: `payload` borrows the iterator's block and pins
-                // it in the block cache. It is decoded into an owned `Data`
-                // here — the copy the sink contract requires — and the borrow
-                // never crosses an `.await` or a batch commit.
-                &mut |idx, payload| match postcard::from_bytes::<Data>(payload)
-                    .to_codec("decode stable entry")
-                {
-                    Ok(d) => feed.send(Ok((idx, d))).is_ok(),
-                    Err(e) => {
-                        decode_err = Some(e.into());
-                        false
-                    }
-                },
-            );
-            if let Err(e) = scan {
-                let _ = feed.send(Err(e));
-            } else if let Some(e) = decode_err {
-                let _ = feed.send(Err(e));
-            }
-            feed.close()
-        })
+    ) -> Channel<Result<(LogIndex, Data), zslg_log::Error>, Finite> {
+        let run = || -> Channel<Result<(LogIndex, Data), Error>, Finite> {
+            // `(after, until)`, scanned as the inclusive `[from, until)` storage
+            // takes, off a blocking scan through a bounded channel.
+            let from = LogIndex::next_after(after);
+            let storage = Arc::clone(&self.storage);
+            Channel::produce_blocking(32, "StableLogSnapshot::range", move |feed| {
+                let mut decode_err: Option<Error> = None;
+                let scan = for_each_entry(
+                    &storage,
+                    from,
+                    until,
+                    // PINNING RULE: `payload` borrows the iterator's block and pins
+                    // it in the block cache. It is decoded into an owned `Data`
+                    // here — the copy the sink contract requires — and the borrow
+                    // never crosses an `.await` or a batch commit.
+                    &mut |idx, payload| match postcard::from_bytes::<Data>(payload)
+                        .to_codec("decode stable entry")
+                    {
+                        Ok(d) => feed.send(Ok((idx, d))).is_ok(),
+                        Err(e) => {
+                            decode_err = Some(e.into());
+                            false
+                        }
+                    },
+                );
+                if let Err(e) = scan {
+                    let _ = feed.send(Err(e));
+                } else if let Some(e) = decode_err {
+                    let _ = feed.send(Err(e));
+                }
+                feed.close()
+            })
+        };
+        let result: Channel<Result<(LogIndex, Data), Error>, Finite> = run();
+        result.err_into()
     }
 
-    fn set_purge_threshold(&self, hlc_threshold: Hlc) -> Result<(), Error> {
-        // Mirror `ReplicaLogStore::set_purge_threshold`: cap the threshold at
-        // `frontier_hlc − 1`, the largest value that leaves the frontier entry
-        // (secondary == frontier_hlc) uncovered. An empty log or a frontier at
-        // HLC 0 has no such threshold — nothing to purge.
-        let Some(frontier_hlc) = *self.frontier_hlc.lock() else {
-            return Ok(());
+    fn set_purge_threshold(&self, hlc_threshold: Hlc) -> Result<(), zslg_log::Error> {
+        let run = || -> Result<(), Error> {
+            // Mirror `ReplicaLogStore::set_purge_threshold`: cap the threshold at
+            // `frontier_hlc − 1`, the largest value that leaves the frontier entry
+            // (secondary == frontier_hlc) uncovered. An empty log or a frontier at
+            // HLC 0 has no such threshold — nothing to purge.
+            let Some(frontier_hlc) = *self.frontier_hlc.lock() else {
+                return Ok(());
+            };
+            let Some(cap) = frontier_hlc.raw().checked_sub(1).map(Hlc) else {
+                return Ok(());
+            };
+            let effective = hlc_threshold.min(cap);
+            // Index order == HLC order here, so `hlc <= effective` is a key-order
+            // prefix and a durable range delete says exactly that. `effective` is
+            // capped at `frontier_hlc - 1` above, so the frontier entry has
+            // `hlc > effective` and stops the walk: the recovery anchor is never
+            // covered (CLAUDE.md §8).
+            let Some(boundary) = purge_boundary(&self.storage, effective)? else {
+                return Ok(());
+            };
+            let cf = self.storage.cf(STABLE_LOG_CF)?;
+            let mut batch = Batch::new();
+            batch.delete_range(
+                &cf,
+                &encode_primary(LogIndex::ZERO)[..],
+                &encode_primary(boundary)[..],
+            );
+            self.storage.write(batch)?;
+            self.storage.fence().map_err(Into::into)
         };
-        let Some(cap) = frontier_hlc.raw().checked_sub(1).map(Hlc) else {
-            return Ok(());
-        };
-        let effective = hlc_threshold.min(cap);
-        // Index order == HLC order here, so `hlc <= effective` is a key-order
-        // prefix and a durable range delete says exactly that. `effective` is
-        // capped at `frontier_hlc - 1` above, so the frontier entry has
-        // `hlc > effective` and stops the walk: the recovery anchor is never
-        // covered (CLAUDE.md §8).
-        let Some(boundary) = purge_boundary(&self.storage, effective)? else {
-            return Ok(());
-        };
-        let cf = self.storage.cf(STABLE_LOG_CF)?;
-        let mut batch = Batch::new();
-        batch.delete_range(
-            &cf,
-            &encode_primary(LogIndex::ZERO)[..],
-            &encode_primary(boundary)[..],
-        );
-        self.storage.write(batch)?;
-        self.storage.fence().map_err(Into::into)
+        let result: Result<(), Error> = run();
+        result.map_err(Into::into)
     }
 }
 
@@ -808,9 +825,9 @@ impl crate::api::StableLogSnapshot for StableLog {
 )]
 mod tests {
     use super::*;
-    use crate::api::StableLogSnapshot;
     use crate::test_stream::ChannelTestExt as _;
     use crate::tests::make_data;
+    use zslg_log::StableLogSnapshot;
 
     /// Build a closed `Channel` pre-loaded with `items` — test convenience
     /// for the channel-based [`StableLogSnapshot::append`] signature (mirrors how
@@ -847,17 +864,20 @@ mod tests {
         let log = open_at(dir.path().join("stable")).await;
 
         let err = log
-            .append(rx_of([
-                Ok((LogIndex(0), make_data(1, 100, b"a"))),
-                Ok((LogIndex(1), make_data(2, 200, b"b"))),
-                Err(Error::Log(LogError::StableLogGap(
-                    "archive stream: expected index 5".into(),
-                ))),
-            ]))
+            .append(
+                (rx_of([
+                    Ok((LogIndex(0), make_data(1, 100, b"a"))),
+                    Ok((LogIndex(1), make_data(2, 200, b"b"))),
+                    Err(Error::Log(LogError::StableLogGap(
+                        "archive stream: expected index 5".into(),
+                    ))),
+                ]))
+                .err_into(),
+            )
             .await
             .expect_err("the terminal error must still surface");
         assert!(
-            matches!(err, Error::Log(LogError::StableLogGap(_))),
+            matches!(err, zslg_log::Error::Log(LogError::StableLogGap(_))),
             "expected the original error, got: {err:?}"
         );
         assert_eq!(
@@ -875,7 +895,7 @@ mod tests {
 
         let mut rx = log.subscribe_events();
         let d = make_data(1, 100, b"a");
-        log.append(rx_of([Ok((LogIndex(0), d.clone()))]))
+        log.append(rx_of([Ok((LogIndex(0), d.clone()))]).err_into())
             .await
             .expect("ok");
         assert_eq!(log.end_index(), Some(LogIndex(0)));
@@ -901,10 +921,13 @@ mod tests {
         let log = open_at(dir.path().join("stable")).await;
 
         for (idx, hlc) in [(0u64, 100u64), (1, 150), (2, 200), (3, 275), (4, 300)] {
-            log.append(rx_of([Ok((
-                LogIndex(idx),
-                make_data(u8::try_from(idx + 1).expect("fits"), hlc, b""),
-            ))]))
+            log.append(
+                (rx_of([Ok((
+                    LogIndex(idx),
+                    make_data(u8::try_from(idx + 1).expect("fits"), hlc, b""),
+                ))]))
+                .err_into(),
+            )
             .await
             .expect("append");
         }
@@ -937,10 +960,13 @@ mod tests {
         {
             let log = open_at(path.clone()).await;
             for (idx, hlc) in [(0u64, 100u64), (1, 200), (2, 300)] {
-                log.append(rx_of([Ok((
-                    LogIndex(idx),
-                    make_data(u8::try_from(idx + 1).expect("fits"), hlc, b""),
-                ))]))
+                log.append(
+                    (rx_of([Ok((
+                        LogIndex(idx),
+                        make_data(u8::try_from(idx + 1).expect("fits"), hlc, b""),
+                    ))]))
+                    .err_into(),
+                )
                 .await
                 .expect("append");
             }
@@ -977,10 +1003,13 @@ mod tests {
         {
             let log = open_at(path.clone()).await;
             for (idx, hlc) in [(0u64, 100u64), (1, 200), (2, 300)] {
-                log.append(rx_of([Ok((
-                    LogIndex(idx),
-                    make_data(u8::try_from(idx + 1).expect("fits"), hlc, b""),
-                ))]))
+                log.append(
+                    (rx_of([Ok((
+                        LogIndex(idx),
+                        make_data(u8::try_from(idx + 1).expect("fits"), hlc, b""),
+                    ))]))
+                    .err_into(),
+                )
                 .await
                 .expect("append");
             }
@@ -1013,10 +1042,13 @@ mod tests {
         {
             let log = open_at(path.clone()).await;
             for (idx, hlc) in [(0u64, 100u64), (1, 101), (2, 102)] {
-                log.append(rx_of([Ok((
-                    LogIndex(idx),
-                    make_data(u8::try_from(idx + 1).expect("fits"), hlc, b""),
-                ))]))
+                log.append(
+                    (rx_of([Ok((
+                        LogIndex(idx),
+                        make_data(u8::try_from(idx + 1).expect("fits"), hlc, b""),
+                    ))]))
+                    .err_into(),
+                )
                 .await
                 .expect("append");
             }
@@ -1082,7 +1114,7 @@ mod tests {
             .read_snapshot(id, zslg_snapshot_types::ObjectStoreReason::ArchiveRead)
             .await
             .expect("read_snapshot");
-        let n = log.append(entries_rx).await.expect("append");
+        let n = log.append(entries_rx.err_into()).await.expect("append");
         assert_eq!(n, 5);
         assert_eq!(log.end_index(), Some(LogIndex(4)));
         assert_eq!(
@@ -1109,7 +1141,7 @@ mod tests {
         assert!(log.end_hlc().is_none());
 
         let mut rx = log.subscribe_events();
-        log.append(rx_of([Ok((LogIndex(0), make_data(0, 123, b"a")))]))
+        log.append(rx_of([Ok((LogIndex(0), make_data(0, 123, b"a")))]).err_into())
             .await
             .expect("ok");
         assert_eq!(log.end_hlc(), Some(Hlc(122)));
@@ -1146,18 +1178,18 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = open_at(dir.path().join("stable")).await;
 
-        log.append(rx_of([Ok((LogIndex(0), make_data(0, 200, b"a")))]))
+        log.append(rx_of([Ok((LogIndex(0), make_data(0, 200, b"a")))]).err_into())
             .await
             .expect("ok");
         assert_eq!(log.end_hlc(), Some(Hlc(199)));
 
         // HLC 100 after 200 violates the sorted-stream contract.
         let err = log
-            .append(rx_of([Ok((LogIndex(1), make_data(1, 100, b"b")))]))
+            .append(rx_of([Ok((LogIndex(1), make_data(1, 100, b"b")))]).err_into())
             .await
             .expect_err("unsorted stream must be refused");
         assert!(
-            matches!(err, Error::Log(LogError::StableLogGap(ref m)) if m.contains("HLC-sorted")),
+            matches!(err, zslg_log::Error::Log(LogError::StableLogGap(ref m)) if m.contains("HLC-sorted")),
             "expected a StableLogGap naming the HLC ordering violation, got: {err:?}"
         );
         assert_eq!(log.end_hlc(), Some(Hlc(199)), "watermark unchanged");
@@ -1172,7 +1204,7 @@ mod tests {
         let stable = dir.path().join("stable");
         let log = open_at(stable.clone()).await;
 
-        log.append(rx_of([Ok((LogIndex(0), make_data(0, 200, b"a")))]))
+        log.append(rx_of([Ok((LogIndex(0), make_data(0, 200, b"a")))]).err_into())
             .await
             .expect("ok");
         assert_eq!(log.end_hlc(), Some(Hlc(199)));
@@ -1197,20 +1229,23 @@ mod tests {
     async fn invariant_append_rejects_gap_in_global_indices() {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = open_at(dir.path().join("stable")).await;
-        log.append(rx_of([
-            Ok((LogIndex(0), make_data(1, 100, b"a"))),
-            Ok((LogIndex(1), make_data(2, 200, b"b"))),
-        ]))
+        log.append(
+            (rx_of([
+                Ok((LogIndex(0), make_data(1, 100, b"a"))),
+                Ok((LogIndex(1), make_data(2, 200, b"b"))),
+            ]))
+            .err_into(),
+        )
         .await
         .expect("contiguous prefix ok");
 
         // Index 3 with no index 2 — must be refused, nothing committed.
         let err = log
-            .append(rx_of([Ok((LogIndex(3), make_data(4, 400, b"d")))]))
+            .append(rx_of([Ok((LogIndex(3), make_data(4, 400, b"d")))]).err_into())
             .await
             .expect_err("gap must be rejected");
         assert!(
-            matches!(err, Error::Log(LogError::StreamTruncated { ref what }) if what.contains("stable log loader")),
+            matches!(err, zslg_log::Error::Log(LogError::StreamTruncated { ref what }) if what.contains("stable log loader")),
             "typed gap error expected, got: {err}"
         );
 
@@ -1231,22 +1266,28 @@ mod tests {
     async fn append_tolerates_overlapping_reappend() {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = open_at(dir.path().join("stable")).await;
-        log.append(rx_of([
-            Ok((LogIndex(0), make_data(1, 100, b"a"))),
-            Ok((LogIndex(1), make_data(2, 200, b"b"))),
-            Ok((LogIndex(2), make_data(3, 300, b"c"))),
-        ]))
+        log.append(
+            (rx_of([
+                Ok((LogIndex(0), make_data(1, 100, b"a"))),
+                Ok((LogIndex(1), make_data(2, 200, b"b"))),
+                Ok((LogIndex(2), make_data(3, 300, b"c"))),
+            ]))
+            .err_into(),
+        )
         .await
         .expect("prefix");
 
         // Overlapping resume: 1..=2 already present (skipped), 3..=4 appended.
         let n = log
-            .append(rx_of([
-                Ok((LogIndex(1), make_data(2, 200, b"b"))),
-                Ok((LogIndex(2), make_data(3, 300, b"c"))),
-                Ok((LogIndex(3), make_data(4, 400, b"d"))),
-                Ok((LogIndex(4), make_data(5, 500, b"e"))),
-            ]))
+            .append(
+                (rx_of([
+                    Ok((LogIndex(1), make_data(2, 200, b"b"))),
+                    Ok((LogIndex(2), make_data(3, 300, b"c"))),
+                    Ok((LogIndex(3), make_data(4, 400, b"d"))),
+                    Ok((LogIndex(4), make_data(5, 500, b"e"))),
+                ]))
+                .err_into(),
+            )
             .await
             .expect("overlapping re-append is legitimate");
         assert_eq!(n, 2, "only the genuinely-new entries count as appended");
@@ -1303,10 +1344,13 @@ mod tests {
         let stable_dir = dir.path().join("stable");
         {
             let log = open_at(stable_dir.clone()).await;
-            log.append(rx_of([
-                Ok((LogIndex(0), make_data(1, 100, b"a"))),
-                Ok((LogIndex(1), make_data(2, 200, b"b"))),
-            ]))
+            log.append(
+                (rx_of([
+                    Ok((LogIndex(0), make_data(1, 100, b"a"))),
+                    Ok((LogIndex(1), make_data(2, 200, b"b"))),
+                ]))
+                .err_into(),
+            )
             .await
             .expect("prefix");
         }
@@ -1347,10 +1391,13 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let log = open_at(dir.path().join("stable")).await;
         for i in 0..5u8 {
-            log.append(rx_of([Ok((
-                LogIndex(u64::from(i)),
-                make_data(i, 100 + u64::from(i), &[i]),
-            ))]))
+            log.append(
+                (rx_of([Ok((
+                    LogIndex(u64::from(i)),
+                    make_data(i, 100 + u64::from(i), &[i]),
+                ))]))
+                .err_into(),
+            )
             .await
             .expect("ok");
         }
@@ -1450,7 +1497,7 @@ mod tests {
                 Ok((LogIndex(i), make_data(seed, hlc_of(i), b"")))
             })
             .collect();
-        log.append(rx_of(entries)).await.expect("append");
+        log.append(rx_of(entries).err_into()).await.expect("append");
 
         // The fan-out delivers on its own thread, so `append` returning does not
         // mean the events have arrived: wait for every entry (with a deadline)

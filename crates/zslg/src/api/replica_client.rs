@@ -16,7 +16,8 @@
 //! local composite each implement the four facets and become a `ReplicaClient`
 //! with nothing further written.
 
-use crate::api::{LivenessProbe, RaftMembership, RaftTransport, Replica};
+use crate::api::{LivenessProbe, RaftMembership, RaftTransport};
+use zslg_log::Replica;
 
 pub(crate) trait ReplicaClient:
     Replica + RaftTransport + RaftMembership + LivenessProbe

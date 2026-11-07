@@ -41,7 +41,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, trace};
 use zslg::{Hlc, LogIndex, StableLogEvent};
 
-type LogItem = Result<StableLogEvent, zslg::Error>;
+type LogItem = Result<StableLogEvent, zslg::LogApiError>;
 
 /// What the fold runs on, split off the dispatcher by `finalise`.
 pub(super) struct FoldInputs {

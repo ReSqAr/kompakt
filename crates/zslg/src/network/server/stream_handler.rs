@@ -32,13 +32,14 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
-use crate::api::{ReplicaClient, StampedWrite};
-use crate::error::Error;
+use crate::api::ReplicaClient;
+use crate::error::{Error, Home};
 use crate::network::framing::{
     AsyncFrameSink, AsyncFrameStream, TcpFrameSink, TcpFrameStream, adopt_blocking,
 };
 use crate::network::messages::{RpcReplicaRequest, RpcRequest, WriteOutcome, WriteStreamResponse};
 use crossbeam_combinators::{AbortReason, Channel};
+use zslg_log::StampedWrite;
 use zslg_log_types::LogIndex;
 
 /// In-flight window between the socket reader and the replica's write pipeline.
@@ -68,19 +69,20 @@ pub(in crate::network) async fn run_write(
     };
 
     let (data_tx, data_rx) = crossbeam_channel::bounded::<StampedWrite>(WRITE_STREAM_CAPACITY);
-    let (drift_tx, drift_rx) = crossbeam_channel::bounded::<Result<crate::api::WriteOutcome, Error>>(
-        WRITE_STREAM_CAPACITY,
-    );
+    let (drift_tx, drift_rx) =
+        crossbeam_channel::bounded::<Result<zslg_log::WriteOutcome, Error>>(WRITE_STREAM_CAPACITY);
     // Connection-scoped: these end only when the connection dies, which for the
     // peer is an error it retries — never a declared completion.
     let data_ch = Channel::from_infinite(data_rx, "write stream ingress");
     let drift_ch = Channel::from_infinite(drift_rx, "write stream drift");
-    let outcomes = client.write(data_ch.into_finite()).merge(drift_ch);
+    let outcomes = client
+        .write(data_ch.into_finite())
+        .merge(drift_ch.err_into());
     // `outcomes` owns everything now (§ header: a parked loop must not pin it).
     drop(client);
 
     let reader = tokio::task::spawn_blocking(move || reader_loop(blk_recv, &data_tx, &drift_tx));
-    let writer = tokio::task::spawn_blocking(move || writer_loop(blk_sink, outcomes));
+    let writer = tokio::task::spawn_blocking(move || writer_loop(blk_sink, outcomes.home()));
 
     // Join both off the reactor; on cancel, force both socket ops to return so the
     // blocking loops exit.
@@ -106,16 +108,16 @@ pub(in crate::network) async fn run_write(
 fn reader_loop(
     mut recv: TcpFrameStream,
     data_tx: &crossbeam_channel::Sender<StampedWrite>,
-    drift_tx: &crossbeam_channel::Sender<Result<crate::api::WriteOutcome, Error>>,
+    drift_tx: &crossbeam_channel::Sender<Result<zslg_log::WriteOutcome, Error>>,
 ) {
     loop {
         match recv.next_frame_raw_blocking::<RpcRequest>() {
             Some(Ok((RpcRequest::Replica(RpcReplicaRequest::Write { data }), drift))) => {
                 let fed = match drift {
                     Some(drift_err) => drift_tx
-                        .send(Ok(crate::api::WriteOutcome::Failed {
+                        .send(Ok(zslg_log::WriteOutcome::Failed {
                             data_id: data.data_id,
-                            error: drift_err,
+                            error: drift_err.into(),
                         }))
                         .is_ok(),
                     None => data_tx.send(StampedWrite::now(*data)).is_ok(),
@@ -137,7 +139,7 @@ fn reader_loop(
 /// breaks.
 fn writer_loop(
     mut sink: TcpFrameSink,
-    mut outcomes: Channel<Result<crate::api::WriteOutcome, Error>, crossbeam_combinators::Infinite>,
+    mut outcomes: Channel<Result<zslg_log::WriteOutcome, Error>, crossbeam_combinators::Infinite>,
 ) {
     loop {
         let batch = match outcomes.ready_batch(MAX_BATCH) {
@@ -164,28 +166,33 @@ fn writer_loop(
     }
 }
 
-/// Map a replica [`WriteOutcome`](crate::api::WriteOutcome) onto its wire
+/// Map a replica [`WriteOutcome`](zslg_log::WriteOutcome) onto its wire
 /// `WriteStreamResponse` (1:1).
-fn outcome_to_response(outcome: crate::api::WriteOutcome) -> WriteStreamResponse {
+fn outcome_to_response(outcome: zslg_log::WriteOutcome) -> WriteStreamResponse {
     match outcome {
-        crate::api::WriteOutcome::Accepted {
+        zslg_log::WriteOutcome::Accepted {
             data_id,
             raft_state,
         } => WriteStreamResponse {
             data_id,
             outcome: WriteOutcome::Accepted { raft_state },
         },
-        crate::api::WriteOutcome::Rejected {
+        zslg_log::WriteOutcome::Rejected {
             data_id,
             error,
             raft_state,
         } => WriteStreamResponse {
             data_id,
-            outcome: WriteOutcome::Rejected { error, raft_state },
+            outcome: WriteOutcome::Rejected {
+                error: error.into(),
+                raft_state,
+            },
         },
-        crate::api::WriteOutcome::Failed { data_id, error } => WriteStreamResponse {
+        zslg_log::WriteOutcome::Failed { data_id, error } => WriteStreamResponse {
             data_id,
-            outcome: WriteOutcome::Failed { error },
+            outcome: WriteOutcome::Failed {
+                error: error.into(),
+            },
         },
     }
 }
@@ -232,7 +239,7 @@ pub(in crate::network) async fn run_subscribe(
 /// panic strategy, which a library does not control — under `unwind` it killed
 /// only this thread anyway (`run_subscribe` swallows the `JoinError`), so it
 /// bought nothing over closing the connection.
-fn subscribe_writer_loop(mut sink: TcpFrameSink, mut items: crate::api::ReplicaStream) {
+fn subscribe_writer_loop(mut sink: TcpFrameSink, mut items: zslg_log::ReplicaStream) {
     loop {
         let batch = match items.ready_batch(MAX_BATCH) {
             Ok(batch) => batch,

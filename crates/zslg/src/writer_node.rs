@@ -105,7 +105,7 @@ impl WriterNode {
     }
 
     #[must_use]
-    pub fn writer(&self) -> Arc<dyn api::Writer> {
+    pub fn writer(&self) -> Arc<dyn zslg_log::Writer> {
         self.writer.clone()
     }
 

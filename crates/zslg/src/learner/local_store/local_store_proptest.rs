@@ -14,6 +14,7 @@
     clippy::result_large_err,
     reason = "test code"
 )]
+use crate::error::Home as _;
 use crate::test_stream::ChannelTestExt as _;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -22,7 +23,7 @@ use proptest::prelude::*;
 
 use super::open_test_local_store;
 use super::store::LocalStore;
-use crate::api::{LocalStoreMut, LocalStoreView};
+use zslg_log::{LocalStoreMut, LocalStoreView};
 use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};
 use zslg_node_types::NodeId;
@@ -44,7 +45,7 @@ async fn integrate_batch(
     // verdict as "disconnected, not yet closed" — an abort.
     closer.close();
     drop(tx);
-    store.integrate_loop(ch).await
+    store.integrate_loop(ch).await.home()
 }
 
 #[derive(Debug, Clone)]

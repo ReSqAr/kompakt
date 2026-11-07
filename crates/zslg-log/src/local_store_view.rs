@@ -17,7 +17,7 @@
 
 use tokio::sync::watch;
 
-use crate::error::Error;
+use crate::Error;
 use crossbeam_combinators::{Channel, Finite, OrderedChannel, StrictlyIncreasing};
 use zslg_log_types::Data;
 use zslg_log_types::DataId;
@@ -27,11 +27,10 @@ use zslg_time_types::Hlc;
 
 /// A local-store scan (above an HLC, or a bounded window): strictly increasing
 /// `DataId`s.
-pub(crate) type LocalStoreStream =
-    OrderedChannel<Result<Data, Error>, StrictlyIncreasing<DataId>, Finite>;
+pub type LocalStoreStream = OrderedChannel<Result<Data, Error>, StrictlyIncreasing<DataId>, Finite>;
 
 #[async_trait::async_trait]
-pub(crate) trait LocalStoreView: Send + Sync + 'static {
+pub trait LocalStoreView: Send + Sync + 'static {
     #[must_use]
     fn stream_above_hlc(&self, threshold: Option<Hlc>) -> LocalStoreStream;
 

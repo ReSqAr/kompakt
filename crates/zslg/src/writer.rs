@@ -84,36 +84,40 @@ impl WriterService {
 }
 
 #[async_trait::async_trait]
-impl crate::api::Writer for WriterService {
-    async fn write(&self, blob: Bytes) -> Result<zslg_log_types::DataId, Error> {
-        let creation_hlc = self.clock.now();
-        let data_id =
-            zslg_log_types::DataId::from_parts(creation_hlc, self.node_id, rand::random());
+impl zslg_log::Writer for WriterService {
+    async fn write(&self, blob: Bytes) -> Result<zslg_log_types::DataId, zslg_log::Error> {
+        let result: Result<zslg_log_types::DataId, Error> = async {
+            let creation_hlc = self.clock.now();
+            let data_id =
+                zslg_log_types::DataId::from_parts(creation_hlc, self.node_id, rand::random());
 
-        let _in_flight = metrics::writes_in_flight_guard();
-        let probe = metrics::write_duration_probe();
+            let _in_flight = metrics::writes_in_flight_guard();
+            let probe = metrics::write_duration_probe();
 
-        let rx = self.coord.submit(Data { data_id, blob });
-        let out = match tokio::time::timeout(self.write_timeout, rx).await {
-            Ok(Ok(Ok(()))) => Ok(data_id),
-            Ok(Ok(Err(e))) => Err(e),
-            // A dropped sender is either backpressure at submit or a departed
-            // coordinator; neither is distinguishable here, and both mean the
-            // write never reached a quorum.
-            Ok(Err(_)) => Err(Error::Consensus(ConsensusError::QuorumUnreachable)),
-            Err(_) => {
-                warn!(
-                    node_id = ?self.node_id,
-                    limit_s = self.write_timeout.as_secs(),
-                    "write exceeded its hard deadline (quorum stalled)"
-                );
-                Err(Error::Log(LogError::WriteTimeout {
-                    elapsed: self.write_timeout,
-                }))
-            }
-        };
-        probe.finish(OpState::from_ok(out.is_ok()));
-        out
+            let rx = self.coord.submit(Data { data_id, blob });
+            let out = match tokio::time::timeout(self.write_timeout, rx).await {
+                Ok(Ok(Ok(()))) => Ok(data_id),
+                Ok(Ok(Err(e))) => Err(e),
+                // A dropped sender is either backpressure at submit or a departed
+                // coordinator; neither is distinguishable here, and both mean the
+                // write never reached a quorum.
+                Ok(Err(_)) => Err(Error::Consensus(ConsensusError::QuorumUnreachable)),
+                Err(_) => {
+                    warn!(
+                        node_id = ?self.node_id,
+                        limit_s = self.write_timeout.as_secs(),
+                        "write exceeded its hard deadline (quorum stalled)"
+                    );
+                    Err(Error::Log(LogError::WriteTimeout {
+                        elapsed: self.write_timeout,
+                    }))
+                }
+            };
+            probe.finish(OpState::from_ok(out.is_ok()));
+            out
+        }
+        .await;
+        result.map_err(Into::into)
     }
 }
 

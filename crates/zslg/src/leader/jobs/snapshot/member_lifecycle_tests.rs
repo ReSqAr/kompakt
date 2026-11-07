@@ -14,6 +14,7 @@
     clippy::result_large_err,
     reason = "test code"
 )]
+use crate::error::Home as _;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
@@ -26,7 +27,6 @@ use object_store::memory::InMemory;
 use parking_lot::Mutex as SyncMutex;
 use tempfile::TempDir;
 
-use crate::api::LocalStoreMut;
 use crate::error::Error;
 use crate::hlc::HlcGate;
 use crate::leader::jobs::membership::change::{
@@ -47,6 +47,7 @@ use crate::tests::wait_for_leader;
 use zslg_consensus_types::RaftStateHandle;
 use zslg_consensus_types::ReplicatedRaftState;
 use zslg_consensus_types::SpareSelectionStrategy;
+use zslg_log::LocalStoreMut;
 use zslg_log_types::LogIndex;
 use zslg_node_types::NodeId;
 use zslg_snapshot_types::CompressionLevel;
@@ -69,7 +70,7 @@ async fn integrate_batch(
     // verdict as "disconnected, not yet closed" — an abort.
     closer.close();
     drop(tx);
-    store.integrate_loop(ch).await
+    store.integrate_loop(ch).await.home()
 }
 use crate::tests::wait_until;
 

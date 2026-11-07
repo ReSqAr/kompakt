@@ -91,8 +91,8 @@ struct Shared {
     next_seed: u64,
 }
 
-type StableSender = crossbeam_channel::Sender<Result<StableLogEvent, zslg::Error>>;
-type UnstableSender = crossbeam_channel::Sender<Result<UnstableEvent, zslg::Error>>;
+type StableSender = crossbeam_channel::Sender<Result<StableLogEvent, zslg::LogApiError>>;
+type UnstableSender = crossbeam_channel::Sender<Result<UnstableEvent, zslg::LogApiError>>;
 
 /// An append-only log in this process, handing out [`zslg::Reader`] and
 /// [`zslg::Writer`] views of itself.
@@ -263,7 +263,7 @@ struct TestReader {
 
 #[async_trait::async_trait]
 impl zslg::Reader for TestReader {
-    async fn sync(&self) -> Result<(), zslg::Error> {
+    async fn sync(&self) -> Result<(), zslg::LogApiError> {
         Ok(())
     }
 
@@ -301,7 +301,7 @@ impl zslg::Reader for TestReader {
         zslg::StableStream::new(Channel::from_infinite(rx, "test-log"), after)
     }
 
-    fn unstable_tail(&self) -> Channel<Result<Data, zslg::Error>, Finite> {
+    fn unstable_tail(&self) -> Channel<Result<Data, zslg::LogApiError>, Finite> {
         let items = self
             .shared
             .lock()
@@ -316,7 +316,9 @@ impl zslg::Reader for TestReader {
 
     /// One cycle of zslg's: the watermark, the staged entries above it, then
     /// live. No resync — a hang-up ends it `Aborted`.
-    fn subscribe_unstable_tail(&self) -> Channel<Result<UnstableEvent, zslg::Error>, Infinite> {
+    fn subscribe_unstable_tail(
+        &self,
+    ) -> Channel<Result<UnstableEvent, zslg::LogApiError>, Infinite> {
         let (tx, rx) = crossbeam_channel::unbounded();
 
         let shared = self.shared.lock().expect("test mutex");
@@ -351,7 +353,7 @@ struct TestWriter {
 
 #[async_trait::async_trait]
 impl zslg::Writer for TestWriter {
-    async fn write(&self, blob: Bytes) -> Result<DataId, zslg::Error> {
+    async fn write(&self, blob: Bytes) -> Result<DataId, zslg::LogApiError> {
         let (index, seed) = next_ids(&self.shared);
         let did = data_id(seed, seed);
         let hlc = Hlc::from_bytes(seed.to_be_bytes());

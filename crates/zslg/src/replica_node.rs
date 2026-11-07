@@ -1114,7 +1114,7 @@ impl ReplicaNode {
     }
 
     #[must_use]
-    pub fn writer(&self) -> Arc<dyn api::Writer> {
+    pub fn writer(&self) -> Arc<dyn zslg_log::Writer> {
         self.writer.clone()
     }
 
@@ -1125,7 +1125,7 @@ impl ReplicaNode {
     /// nothing locally, so this node's own membership does not bear on it (see
     /// `writer.rs`).
     #[must_use]
-    pub fn reader(&self) -> Arc<dyn api::Reader> {
+    pub fn reader(&self) -> Arc<dyn zslg_log::Reader> {
         Arc::new(crate::learner::GatedReader::new(
             self.learner.reader(),
             self.eviction.clone(),
@@ -1200,7 +1200,7 @@ impl ReplicaNode {
 
     #[must_use]
     #[cfg(test)]
-    pub(crate) fn replica(&self) -> Arc<dyn api::Replica> {
+    pub(crate) fn replica(&self) -> Arc<dyn zslg_log::Replica> {
         self.replica.clone()
     }
 

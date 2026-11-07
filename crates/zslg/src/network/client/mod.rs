@@ -45,7 +45,6 @@ use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
 use crate::ByteSize;
-use crate::api::{StampedWrite, WriteOutcome};
 use crate::error::Error;
 use crate::metrics::OpState;
 use crate::network::framing::{AsyncFrameSink, AsyncFrameStream};
@@ -55,6 +54,7 @@ use crate::network::messages::{
 };
 use crate::network::tcp::{self, SocketOpts};
 use crossbeam_combinators::Channel;
+use zslg_log::{StampedWrite, WriteOutcome};
 use zslg_log_types::LogIndex;
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
@@ -412,15 +412,16 @@ impl StreamOpener {
         Ok((sink, stream))
     }
 
-    fn subscribe_from(&self, node_id: NodeId, from: Option<LogIndex>) -> crate::api::ReplicaStream {
-        open_subscribe(
+    fn subscribe_from(&self, node_id: NodeId, from: Option<LogIndex>) -> zslg_log::ReplicaStream {
+        (open_subscribe(
             self.rpc_weak.clone(),
             Target::Registered(node_id),
             from,
             self.subscribe_channel_cap,
             self.cancel.clone(),
         )
-        .ordered(from, "replica subscription")
+        .ordered(from, "replica subscription"))
+        .err_into()
     }
 }
 
@@ -597,7 +598,7 @@ impl RpcClient {
         &self,
         node_id: NodeId,
         from: Option<LogIndex>,
-    ) -> crate::api::ReplicaStream {
+    ) -> zslg_log::ReplicaStream {
         self.streams.subscribe_from(node_id, from)
     }
 }

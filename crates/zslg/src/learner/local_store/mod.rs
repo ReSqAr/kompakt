@@ -38,11 +38,11 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::Error;
-use crate::api::StableLogSnapshot;
+use crate::error::Error;
 use crate::learner::local_store::purge::spawn_local_store_purge_worker;
 use rocksdb_kit::Storage;
 use shutdown::Shutdown;
+use zslg_log::StableLogSnapshot;
 
 pub(in crate::learner::local_store) use recent_ids::Dedup;
 pub(crate) use store::{LOCAL_STORE_CURSORS_CF, LOCAL_STORE_DATA_CF, LocalStore};

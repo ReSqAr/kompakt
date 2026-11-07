@@ -26,7 +26,7 @@ use tokio::sync::watch;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-use crate::api::{LocalStoreView, RaftLeadership, SnapshotStore, StableLogSnapshot};
+use crate::api::{RaftLeadership, SnapshotStore};
 use crate::error::Error;
 use crate::leader::integrator::Integrator;
 use crate::leader::jobs::LeaderHandles;
@@ -38,6 +38,7 @@ use crate::leader::jobs::snapshot::{SNAPSHOT_LOOP_FLOOR, SnapshotJob};
 use crossbeam_combinators::Channel;
 use zslg_consensus_types::RaftStateHandle;
 use zslg_consensus_types::{RaftManifestState, RaftState, ReplicaMembership};
+use zslg_log::{LocalStoreView, StableLogSnapshot};
 use zslg_log_types::Data;
 use zslg_log_types::LogIndex;
 use zslg_net_types::ServerName;
@@ -285,17 +286,18 @@ struct FailingWindowStore {
 
 #[async_trait::async_trait]
 impl LocalStoreView for FailingWindowStore {
-    fn stream_above_hlc(&self, _threshold: Option<Hlc>) -> crate::api::LocalStoreStream {
+    fn stream_above_hlc(&self, _threshold: Option<Hlc>) -> zslg_log::LocalStoreStream {
         unimplemented!("pacing tests do not stream above an hlc")
     }
 
-    fn stream_window(&self, _above: Option<Hlc>, _upto: Hlc) -> crate::api::LocalStoreStream {
+    fn stream_window(&self, _above: Option<Hlc>, _upto: Hlc) -> zslg_log::LocalStoreStream {
         let n = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         let _ = self.done.send(n);
-        Channel::once(Err(Error::Log(LogError::Storage(
+        (Channel::once(Err(Error::Log(LogError::Storage(
             "pacing test: window read".into(),
         ))))
-        .ordered(None, "pacing test window")
+        .ordered(None, "pacing test window"))
+        .err_into()
     }
 
     fn subscribe_integrated(&self) -> watch::Receiver<()> {
@@ -308,8 +310,12 @@ impl LocalStoreView for FailingWindowStore {
         crossbeam_combinators::Channel::from_infinite(crossbeam_channel::never(), "stub unstable")
     }
 
-    async fn subscription_cursor(&self, _upstream: NodeId) -> Result<Option<LogIndex>, Error> {
-        Ok(None)
+    async fn subscription_cursor(
+        &self,
+        _upstream: NodeId,
+    ) -> Result<Option<LogIndex>, zslg_log::Error> {
+        let result: Result<Option<LogIndex>, Error> = async { Ok(None) }.await;
+        result.map_err(Into::into)
     }
 }
 
@@ -326,14 +332,18 @@ impl StableLogSnapshot for EmptyStableLog {
     async fn append(
         &self,
         _entries: Channel<
-            Result<zslg_log_types::SnapshotEntry, Error>,
+            Result<zslg_log_types::SnapshotEntry, zslg_log::Error>,
             crossbeam_combinators::Finite,
         >,
-    ) -> Result<usize, Error> {
-        unimplemented!("pacing tests never append")
+    ) -> Result<usize, zslg_log::Error> {
+        let result: Result<usize, Error> =
+            async { unimplemented!("pacing tests never append") }.await;
+        result.map_err(Into::into)
     }
-    async fn record_end_hlc(&self, _end_hlc: Hlc) -> Result<(), Error> {
-        unimplemented!("pacing tests never record an end hlc")
+    async fn record_end_hlc(&self, _end_hlc: Hlc) -> Result<(), zslg_log::Error> {
+        let result: Result<(), Error> =
+            async { unimplemented!("pacing tests never record an end hlc") }.await;
+        result.map_err(Into::into)
     }
     fn subscribe_events(
         &self,
@@ -347,11 +357,17 @@ impl StableLogSnapshot for EmptyStableLog {
         &self,
         _after: Option<LogIndex>,
         _until: LogIndex,
-    ) -> Channel<Result<(LogIndex, Data), Error>, crossbeam_combinators::Finite> {
-        unimplemented!("pacing tests never range the stable log")
+    ) -> Channel<Result<(LogIndex, Data), zslg_log::Error>, crossbeam_combinators::Finite> {
+        let run = || -> Channel<Result<(LogIndex, Data), Error>, crossbeam_combinators::Finite> {
+            unimplemented!("pacing tests never range the stable log")
+        };
+        let result: Channel<Result<(LogIndex, Data), Error>, crossbeam_combinators::Finite> = run();
+        result.err_into()
     }
-    fn set_purge_threshold(&self, _hlc_threshold: Hlc) -> Result<(), Error> {
-        unimplemented!("pacing tests never purge")
+    fn set_purge_threshold(&self, _hlc_threshold: Hlc) -> Result<(), zslg_log::Error> {
+        let run = || -> Result<(), Error> { unimplemented!("pacing tests never purge") };
+        let result: Result<(), Error> = run();
+        result.map_err(Into::into)
     }
 }
 
@@ -429,7 +445,7 @@ fn spawn_always_failing_snapshot_job() -> SnapshotHarness {
 
     // A replica that is always drained and caught up, so the quorum wait costs
     // nothing and the build reaches the window read every time.
-    let ready: Arc<dyn crate::api::Replica> = Arc::new(crate::tests::ReadyReplica {
+    let ready: Arc<dyn zslg_log::Replica> = Arc::new(crate::tests::ReadyReplica {
         raft_state: (*raft_state).clone(),
     });
     let router =

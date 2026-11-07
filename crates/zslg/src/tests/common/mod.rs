@@ -36,8 +36,7 @@ use zslg_net_types::NetError;
 
 use crate::Error;
 use crate::api::{
-    AddMemberOutcome, LivenessProbe, RaftMembership, RaftTransport, Replica, ReplicaClient, Router,
-    StampedWrite, WriteOutcome,
+    AddMemberOutcome, LivenessProbe, RaftMembership, RaftTransport, ReplicaClient, Router,
 };
 use crate::learner::LocalStore;
 use crate::raft::build_raft_for_test;
@@ -55,6 +54,7 @@ use openraft::raft::{
 };
 use zslg_consensus_types::RaftStateHandle;
 use zslg_consensus_types::{RaftState, ReplicaStatus};
+use zslg_log::{Replica, StampedWrite, WriteOutcome};
 use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};
 use zslg_net_types::PeerAddr;
@@ -364,7 +364,7 @@ pub(crate) async fn replica_write<R: Replica + ?Sized>(
     match first {
         Ok(Ok(WriteOutcome::Accepted { raft_state, .. })) => Ok(raft_state),
         Ok(Ok(WriteOutcome::Rejected { error, .. } | WriteOutcome::Failed { error, .. }))
-        | Ok(Err(error)) => Err(error),
+        | Ok(Err(error)) => Err(error.into()),
         Err(_) => Err(Error::Net(NetError::Rpc(
             "replica dropped write outcome".into(),
         ))),
@@ -489,21 +489,21 @@ impl Replica for ReplicaOnly {
     fn write(
         &self,
         input: Channel<StampedWrite, Finite>,
-    ) -> Channel<Result<WriteOutcome, Error>, Infinite> {
+    ) -> Channel<Result<WriteOutcome, zslg_log::Error>, Infinite> {
         self.0.write(input)
     }
 
-    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::api::ReplicaStream {
+    fn subscribe_from(&self, from: Option<LogIndex>) -> zslg_log::ReplicaStream {
         self.0.subscribe_from(from)
     }
 
-    async fn fetch_status(&self) -> Result<ReplicaStatus, Error> {
+    async fn fetch_status(&self) -> Result<ReplicaStatus, zslg_log::Error> {
         self.0.fetch_status().await
     }
 
     async fn subscribe_status(
         &self,
-    ) -> Result<BoxStream<'static, Result<ReplicaStatus, Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<ReplicaStatus, zslg_log::Error>>, zslg_log::Error> {
         self.0.subscribe_status().await
     }
 }
@@ -613,22 +613,34 @@ impl Replica for ProbeOnly {
     fn write(
         &self,
         _: Channel<StampedWrite, Finite>,
-    ) -> Channel<Result<WriteOutcome, Error>, Infinite> {
+    ) -> Channel<Result<WriteOutcome, zslg_log::Error>, Infinite> {
+        let run = || -> Channel<Result<WriteOutcome, Error>, Infinite> {
+            unimplemented!("ProbeOnly: replica not used")
+        };
+        let result: Channel<Result<WriteOutcome, Error>, Infinite> = run();
+        result.err_into()
+    }
+
+    fn subscribe_from(&self, _from: Option<LogIndex>) -> zslg_log::ReplicaStream {
         unimplemented!("ProbeOnly: replica not used")
     }
 
-    fn subscribe_from(&self, _from: Option<LogIndex>) -> crate::api::ReplicaStream {
-        unimplemented!("ProbeOnly: replica not used")
-    }
-
-    async fn fetch_status(&self) -> Result<ReplicaStatus, Error> {
-        unimplemented!("ProbeOnly: replica not used")
+    async fn fetch_status(&self) -> Result<ReplicaStatus, zslg_log::Error> {
+        let result: Result<ReplicaStatus, Error> =
+            async { unimplemented!("ProbeOnly: replica not used") }.await;
+        result.map_err(Into::into)
     }
 
     async fn subscribe_status(
         &self,
-    ) -> Result<BoxStream<'static, Result<ReplicaStatus, Error>>, Error> {
-        unimplemented!("ProbeOnly: replica not used")
+    ) -> Result<BoxStream<'static, Result<ReplicaStatus, zslg_log::Error>>, zslg_log::Error> {
+        let result: Result<BoxStream<'static, Result<ReplicaStatus, Error>>, Error> =
+            async { unimplemented!("ProbeOnly: replica not used") }.await;
+        result
+            .map(|s| {
+                futures::StreamExt::boxed(futures::StreamExt::map(s, |r| r.map_err(Into::into)))
+            })
+            .map_err(Into::into)
     }
 }
 

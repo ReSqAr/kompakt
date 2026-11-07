@@ -43,7 +43,8 @@ use rocksdb_kit::Batch as RocksBatch;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
-use crate::error::{Error, ToStorage};
+use crate::error::Error;
+use crate::error::ToStorage;
 use crate::hlc::HlcGuard;
 use crate::metrics::{self, FlushTrigger, LogType, OpState};
 use crossbeam_combinators::{
@@ -686,14 +687,15 @@ impl ReplicaLogStore {
     pub(in crate::replica) fn subscribe_from(
         self: &Arc<Self>,
         from: Option<LogIndex>,
-    ) -> crate::api::ReplicaStream {
+    ) -> zslg_log::ReplicaStream {
         let seam = ReplicaSeam {
             log: Arc::clone(self),
             from,
         };
-        Segment::open(&seam)
+        (Segment::open(&seam)
             .chain()
-            .ordered(from, "replica subscription")
+            .ordered(from, "replica subscription"))
+        .err_into()
     }
 
     /// An empty historic phase: complete by construction — the window *was*
@@ -1072,6 +1074,7 @@ fn flush_one_batch_blocking(
     reason = "test code"
 )]
 mod tests {
+    use crate::error::Home as _;
     use crate::test_stream::ChannelTestExt as _;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
@@ -1080,7 +1083,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::api::{LocalStoreMut, LocalStoreView};
+    use zslg_log::{LocalStoreMut, LocalStoreView};
 
     use crate::hlc::HlcGate;
     use crate::learner::LocalStore;
@@ -1107,7 +1110,7 @@ mod tests {
         // verdict as "disconnected, not yet closed" — an abort.
         closer.close();
         drop(tx);
-        store.integrate_loop(ch).await
+        store.integrate_loop(ch).await.home()
     }
 
     /// Create a guard for a test HLC. A fresh `HlcGate` has no cutoff, so

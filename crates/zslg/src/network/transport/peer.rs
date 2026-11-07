@@ -14,10 +14,7 @@
 use std::sync::Arc;
 use zslg_net_types::NetError;
 
-use crate::api::{
-    AddMemberOutcome, LivenessProbe, RaftMembership, RaftTransport, Replica, StampedWrite,
-    WriteOutcome,
-};
+use crate::api::{AddMemberOutcome, LivenessProbe, RaftMembership, RaftTransport};
 use crate::error::Error;
 use crate::network::client::{RpcClient, Target};
 use crate::network::messages::{
@@ -33,6 +30,7 @@ use openraft::raft::{
     VoteRequest, VoteResponse,
 };
 use zslg_consensus_types::ReplicaStatus;
+use zslg_log::{Replica, StampedWrite, WriteOutcome};
 use zslg_log_types::LogIndex;
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
@@ -126,21 +124,25 @@ impl Replica for TcpPeerClient {
     fn write(
         &self,
         input: Channel<StampedWrite, crossbeam_combinators::Finite>,
-    ) -> Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> {
-        match &self.target {
-            Target::Registered(node_id) => self.rpc_client.write(*node_id, input),
-            Target::Direct(addr) => {
-                // A direct-dialed peer (join-time transport, before its NodeId is
-                // known) never accepts writes: yield one terminal error.
-                Channel::once(Err(Error::Net(NetError::Rpc(format!(
-                    "direct-dialed peer {addr:?} does not accept writes (join-time transport)"
-                )))))
-                .chain(Channel::aborted("direct-dialed peer"))
+    ) -> Channel<Result<WriteOutcome, zslg_log::Error>, crossbeam_combinators::Infinite> {
+        let run = || -> Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> {
+            match &self.target {
+                Target::Registered(node_id) => self.rpc_client.write(*node_id, input),
+                Target::Direct(addr) => {
+                    // A direct-dialed peer (join-time transport, before its NodeId is
+                    // known) never accepts writes: yield one terminal error.
+                    Channel::once(Err(Error::Net(NetError::Rpc(format!(
+                        "direct-dialed peer {addr:?} does not accept writes (join-time transport)"
+                    )))))
+                    .chain(Channel::aborted("direct-dialed peer"))
+                }
             }
-        }
+        };
+        let result: Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> = run();
+        result.err_into()
     }
 
-    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::api::ReplicaStream {
+    fn subscribe_from(&self, from: Option<LogIndex>) -> zslg_log::ReplicaStream {
         match &self.target {
             Target::Registered(node_id) => self.rpc_client.subscribe_from(*node_id, from),
             Target::Direct(_) => {
@@ -149,54 +151,66 @@ impl Replica for TcpPeerClient {
         }
     }
 
-    async fn fetch_status(&self) -> Result<ReplicaStatus, Error> {
-        let frame = self
-            .rpc_client
-            .call_replica(&self.target, RpcReplicaRequest::FetchStatus)
-            .await?;
-        match frame {
-            RpcReplicaFrame::FetchStatus { status } => Ok(status),
-            other => Err(Error::Net(NetError::Rpc(format!(
-                "unexpected frame on FetchStatus from {:?}: {other:?}",
-                self.target,
-            )))),
+    async fn fetch_status(&self) -> Result<ReplicaStatus, zslg_log::Error> {
+        let result: Result<ReplicaStatus, Error> = async {
+            let frame = self
+                .rpc_client
+                .call_replica(&self.target, RpcReplicaRequest::FetchStatus)
+                .await?;
+            match frame {
+                RpcReplicaFrame::FetchStatus { status } => Ok(status),
+                other => Err(Error::Net(NetError::Rpc(format!(
+                    "unexpected frame on FetchStatus from {:?}: {other:?}",
+                    self.target,
+                )))),
+            }
         }
+        .await;
+        result.map_err(Into::into)
     }
 
     async fn subscribe_status(
         &self,
-    ) -> Result<BoxStream<'static, Result<ReplicaStatus, Error>>, Error> {
-        let rpc_client = self.rpc_client.clone();
+    ) -> Result<BoxStream<'static, Result<ReplicaStatus, zslg_log::Error>>, zslg_log::Error> {
+        let result: Result<BoxStream<'static, Result<ReplicaStatus, Error>>, Error> = async {
+            let rpc_client = self.rpc_client.clone();
 
-        let frame_stream = rpc_client
-            .open(
-                &self.target,
-                RpcRequest::Replica(RpcReplicaRequest::SubscribeStatus),
-            )
-            .await?;
+            let frame_stream = rpc_client
+                .open(
+                    &self.target,
+                    RpcRequest::Replica(RpcReplicaRequest::SubscribeStatus),
+                )
+                .await?;
 
-        let stream =
-            futures::stream::unfold((frame_stream, false), move |(mut fs, done)| async move {
-                if done {
-                    return None;
-                }
-                match fs.next_frame::<RpcFrame>().await {
-                    None => None,
-                    Some(Ok(RpcFrame::Replica(RpcReplicaFrame::StatusItem { status }))) => {
-                        Some((Ok(status), (fs, false)))
+            let stream =
+                futures::stream::unfold((frame_stream, false), move |(mut fs, done)| async move {
+                    if done {
+                        return None;
                     }
-                    Some(Ok(RpcFrame::Error(e))) => Some((Err(e), (fs, true))),
-                    Some(Ok(other)) => Some((
-                        Err(Error::Net(NetError::Rpc(format!(
-                            "unexpected frame in subscribe_status: {other:?}"
-                        )))),
-                        (fs, true),
-                    )),
-                    Some(Err(e)) => Some((Err(e), (fs, true))),
-                }
-            });
+                    match fs.next_frame::<RpcFrame>().await {
+                        None => None,
+                        Some(Ok(RpcFrame::Replica(RpcReplicaFrame::StatusItem { status }))) => {
+                            Some((Ok(status), (fs, false)))
+                        }
+                        Some(Ok(RpcFrame::Error(e))) => Some((Err(e), (fs, true))),
+                        Some(Ok(other)) => Some((
+                            Err(Error::Net(NetError::Rpc(format!(
+                                "unexpected frame in subscribe_status: {other:?}"
+                            )))),
+                            (fs, true),
+                        )),
+                        Some(Err(e)) => Some((Err(e), (fs, true))),
+                    }
+                });
 
-        Ok(stream.boxed())
+            Ok(stream.boxed())
+        }
+        .await;
+        result
+            .map(|s| {
+                futures::StreamExt::boxed(futures::StreamExt::map(s, |r| r.map_err(Into::into)))
+            })
+            .map_err(Into::into)
     }
 }
 

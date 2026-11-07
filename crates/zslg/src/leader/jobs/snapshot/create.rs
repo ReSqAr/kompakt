@@ -29,13 +29,14 @@ use tracing::{debug, warn};
 use zslg_consensus_types::ConsensusError;
 use zslg_log_types::LogError;
 
-use crate::api::{LocalStoreView, RaftStateView, Router, SnapshotStore, StableLogSnapshot};
-use crate::error::Error;
+use crate::api::{RaftStateView, Router, SnapshotStore};
 use crate::error::ToStorage;
+use crate::error::{Error, Home};
 use crate::learner::ReplicaPoller;
 use crate::metrics::{self, SnapshotState, SnapshotStep};
 use crate::quorum::{FanOutResponse, fan_out_quorum};
 use crossbeam_combinators::{Channel, Finite};
+use zslg_log::{LocalStoreView, StableLogSnapshot};
 use zslg_log_types::LogIndex;
 use zslg_log_types::SnapshotEntry;
 use zslg_snapshot_types::CompressionLevel;
@@ -148,7 +149,7 @@ pub(in crate::leader) async fn create_snapshot_entry(
         let mut window = window;
         let first = match window.recv() {
             Ok(Ok(d)) => d,
-            Ok(Err(e)) => return Err(e),
+            Ok(Err(e)) => return Err(e.into()),
             Err(crossbeam_combinators::End::Complete) => return Ok(None),
             Err(crossbeam_combinators::End::Aborted { reason }) => {
                 return Err(Error::Log(LogError::StreamTruncated {
@@ -173,7 +174,7 @@ pub(in crate::leader) async fn create_snapshot_entry(
                 SnapshotEntry { global_index, data }
             })
         });
-        Ok(Some((entries, start_hlc)))
+        Ok(Some((entries.home(), start_hlc)))
     })
     .await
     .to_storage("snapshot stream scan panicked")??;
@@ -406,7 +407,7 @@ mod tests {
     use proptest::prelude::*;
     use uuid::Uuid;
 
-    use crate::api::{LocalStoreMut, StableLogSnapshot};
+    use zslg_log::{LocalStoreMut, StableLogSnapshot};
 
     use crate::learner::LocalStore;
     use crate::learner::StableLog;
@@ -434,7 +435,7 @@ mod tests {
         // verdict as "disconnected, not yet closed" — an abort.
         closer.close();
         drop(tx);
-        store.integrate_loop(ch).await
+        store.integrate_loop(ch).await.home()
     }
 
     #[derive(Debug, Clone)]

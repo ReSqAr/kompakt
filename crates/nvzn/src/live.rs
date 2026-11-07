@@ -484,8 +484,8 @@ enum FoldItem {
     Live(Data),
     Scan(Data),
     ReplayDone,
-    TailFailed(zslg::Error),
-    ScanFailed(zslg::Error),
+    TailFailed(zslg::LogApiError),
+    ScanFailed(zslg::LogApiError),
 }
 
 /// A live entry sits at its HLC; scan items and markers have no position here.
@@ -1441,8 +1441,8 @@ mod tests {
     /// A reader whose stable and unstable subscriptions stay quiet: the scan
     /// cannot finish, so a snapshot waits on `scanned`.
     struct StalledReader {
-        stable: Mutex<Option<crossbeam_channel::Sender<Result<StableLogEvent, zslg::Error>>>>,
-        tail: Mutex<Option<crossbeam_channel::Sender<Result<UnstableEvent, zslg::Error>>>>,
+        stable: Mutex<Option<crossbeam_channel::Sender<Result<StableLogEvent, zslg::LogApiError>>>>,
+        tail: Mutex<Option<crossbeam_channel::Sender<Result<UnstableEvent, zslg::LogApiError>>>>,
         watermark: Hlc,
     }
 
@@ -1458,7 +1458,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl zslg::Reader for StalledReader {
-        async fn sync(&self) -> Result<(), zslg::Error> {
+        async fn sync(&self) -> Result<(), zslg::LogApiError> {
             Ok(())
         }
 
@@ -1478,13 +1478,14 @@ mod tests {
 
         fn unstable_tail(
             &self,
-        ) -> Channel<Result<Data, zslg::Error>, crossbeam_combinators::Finite> {
+        ) -> Channel<Result<Data, zslg::LogApiError>, crossbeam_combinators::Finite> {
             Channel::from_vec(Vec::new())
         }
 
         fn subscribe_unstable_tail(
             &self,
-        ) -> Channel<Result<UnstableEvent, zslg::Error>, crossbeam_combinators::Infinite> {
+        ) -> Channel<Result<UnstableEvent, zslg::LogApiError>, crossbeam_combinators::Infinite>
+        {
             let (tx, rx) = crossbeam_channel::bounded(1);
             *self.tail.lock().expect("test mutex") = Some(tx);
             Channel::from_infinite(rx, "stalled tail")

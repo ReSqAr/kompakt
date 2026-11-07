@@ -7,11 +7,12 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use super::peer::ReplicationSubscriber;
-use crate::api::{LocalStoreMut, RaftStateView, Router};
+use crate::api::{RaftStateView, Router};
 use crate::error::Error;
 use crate::hlc::HlcClock;
 use crate::learner::LocalStore;
 use warn_throttle::ThrottledWarn;
+use zslg_log::LocalStoreMut;
 use zslg_node_types::NodeId;
 
 const REPLICATION_INITIAL_BACKOFF: Duration = Duration::from_millis(250);

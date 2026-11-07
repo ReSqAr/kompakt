@@ -470,7 +470,7 @@ impl LearnerNode {
     /// Callers should clone this [`Arc`] before calling [`run`](Self::run) if
     /// reads should continue after the node is consumed.
     #[must_use]
-    pub fn reader(&self) -> Arc<dyn api::Reader> {
+    pub fn reader(&self) -> Arc<dyn zslg_log::Reader> {
         self.learner.reader()
     }
 

@@ -14,6 +14,7 @@
     clippy::result_large_err,
     reason = "test code"
 )]
+use crate::error::Home as _;
 use crate::test_stream::ChannelTestExt as _;
 /// Leadership churn against an in-flight snapshot (EXPERT_REVIEW Appendix
 /// B.4): a real 3-node raft cluster, a snapshot pipeline stalled between
@@ -47,7 +48,7 @@ use tokio::sync::Notify;
 use tokio::sync::watch;
 use zslg_snapshot_types::CompressionLevel;
 
-use crate::api::{LocalStoreMut, LocalStoreView, Replica, Router, StableLogSnapshot};
+use crate::api::Router;
 use crate::error::Error;
 use crate::hlc::HlcGate;
 use crate::leader::{SnapshotInputs, build_snapshot};
@@ -62,6 +63,7 @@ use crate::tests::{FixedClock, MapPeerRouter, ReadyReplica};
 use crate::tests::{Partition, TestNode};
 use zslg_consensus_types::ReplicaMembership;
 use zslg_consensus_types::ReplicatedRaftState;
+use zslg_log::{LocalStoreMut, LocalStoreView, Replica, StableLogSnapshot};
 use zslg_log_types::Data;
 use zslg_log_types::LogIndex;
 use zslg_node_types::NodeId;
@@ -84,7 +86,7 @@ async fn integrate_batch(
     // verdict as "disconnected, not yet closed" — an abort.
     closer.close();
     drop(tx);
-    store.integrate_loop(ch).await
+    store.integrate_loop(ch).await.home()
 }
 
 /// `LocalStoreView` wrapper that pauses the snapshot pipeline inside the
@@ -101,7 +103,7 @@ struct StallingLocalStore {
 
 #[async_trait::async_trait]
 impl LocalStoreView for StallingLocalStore {
-    fn stream_above_hlc(&self, threshold: Option<Hlc>) -> crate::api::LocalStoreStream {
+    fn stream_above_hlc(&self, threshold: Option<Hlc>) -> zslg_log::LocalStoreStream {
         self.inner.stream_above_hlc(threshold)
     }
 
@@ -114,7 +116,7 @@ impl LocalStoreView for StallingLocalStore {
     /// first pull is both legal and the stall point we actually want: after
     /// `create_snapshot_entry` captured its base generation, before the window
     /// is read.
-    fn stream_window(&self, above: Option<Hlc>, upto: Hlc) -> crate::api::LocalStoreStream {
+    fn stream_window(&self, above: Option<Hlc>, upto: Hlc) -> zslg_log::LocalStoreStream {
         self.entered.notify_one();
         let release = self.release.clone();
         let mut released = false;
@@ -141,8 +143,13 @@ impl LocalStoreView for StallingLocalStore {
         self.inner.subscribe_unstable()
     }
 
-    async fn subscription_cursor(&self, upstream: NodeId) -> Result<Option<LogIndex>, Error> {
-        self.inner.subscription_cursor(upstream).await
+    async fn subscription_cursor(
+        &self,
+        upstream: NodeId,
+    ) -> Result<Option<LogIndex>, zslg_log::Error> {
+        let result: Result<Option<LogIndex>, Error> =
+            (async { self.inner.subscription_cursor(upstream).await }.await).home();
+        result.map_err(Into::into)
     }
 }
 

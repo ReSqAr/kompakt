@@ -286,7 +286,7 @@ async fn evicted_node_survives_a_denied_rejoin() {
         .await
         .expect_err("a denied node must refuse client reads");
     assert!(
-        matches!(err, crate::Error::Lifecycle(LifecycleError::NotReady(_))),
+        matches!(err, zslg_log::Error::Lifecycle(LifecycleError::NotReady(_))),
         "expected NotReady, got {err:?}"
     );
 

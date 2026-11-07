@@ -41,11 +41,12 @@ use dashmap::DashMap;
 use dashmap::mapref::entry::Entry as MapEntry;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
-use crate::api::{RaftStateTracker, Router, StampedWrite, WriteOutcome};
+use crate::api::{RaftStateTracker, Router};
 use crate::error::Error;
 use crate::metrics::{self, FanoutResponseState, WriteRpcOutcome};
 use crossbeam_combinators::Channel;
 use zslg_consensus_types::{all_targets, is_quorum};
+use zslg_log::{StampedWrite, WriteOutcome};
 use zslg_log_types::Data;
 use zslg_log_types::DataId;
 use zslg_node_types::NodeId;
@@ -503,10 +504,11 @@ mod tests {
     use futures::stream::BoxStream;
 
     use super::*;
-    use crate::api::{RaftStateTracker, Replica, ReplicaClient};
+    use crate::api::{RaftStateTracker, ReplicaClient};
     use crate::tests::{make_data, nid, replica_only};
     use zslg_consensus_types::RaftGeneration;
     use zslg_consensus_types::{RaftManifestState, RaftState, ReplicaMembership, ReplicaStatus};
+    use zslg_log::Replica;
     use zslg_log_types::LogIndex;
 
     fn state(generation: u64, replicas: &[NodeId]) -> RaftState {
@@ -537,48 +539,60 @@ mod tests {
         fn write(
             &self,
             input: Channel<StampedWrite, Finite>,
-        ) -> Channel<Result<WriteOutcome, Error>, Infinite> {
-            let (tx, rx) = crossbeam_channel::unbounded();
-            let resp = self.resp.clone();
-            // This double measures nothing, so it drops the stamp immediately.
-            let mut input = input.filter_map(|s| Some(s.data));
-            std::thread::spawn(move || {
-                while let Ok(data) = input.recv() {
-                    let data_id = data.data_id;
-                    let outcome = match &resp {
-                        Resp::Ack(s) => WriteOutcome::Accepted {
-                            data_id,
-                            raft_state: s.clone(),
-                        },
-                        Resp::Reject(s) => WriteOutcome::Rejected {
-                            data_id,
-                            error: Error::Net(NetError::Rpc("rejected".into())),
-                            raft_state: s.clone(),
-                        },
-                        Resp::Down => WriteOutcome::Failed {
-                            data_id,
-                            error: Error::Net(NetError::Rpc("down".into())),
-                        },
-                        Resp::Silent => continue,
-                    };
-                    if tx.send(Ok(outcome)).is_err() {
-                        return;
+        ) -> Channel<Result<WriteOutcome, zslg_log::Error>, Infinite> {
+            let run = || -> Channel<Result<WriteOutcome, Error>, Infinite> {
+                let (tx, rx) = crossbeam_channel::unbounded();
+                let resp = self.resp.clone();
+                // This double measures nothing, so it drops the stamp immediately.
+                let mut input = input.filter_map(|s| Some(s.data));
+                std::thread::spawn(move || {
+                    while let Ok(data) = input.recv() {
+                        let data_id = data.data_id;
+                        let outcome = match &resp {
+                            Resp::Ack(s) => WriteOutcome::Accepted {
+                                data_id,
+                                raft_state: s.clone(),
+                            },
+                            Resp::Reject(s) => WriteOutcome::Rejected {
+                                data_id,
+                                error: Error::Net(NetError::Rpc("rejected".into())).into(),
+                                raft_state: s.clone(),
+                            },
+                            Resp::Down => WriteOutcome::Failed {
+                                data_id,
+                                error: Error::Net(NetError::Rpc("down".into())).into(),
+                            },
+                            Resp::Silent => continue,
+                        };
+                        if tx.send(Ok(outcome)).is_err() {
+                            return;
+                        }
                     }
-                }
-            });
-            Channel::from_infinite(rx, "test replica")
+                });
+                Channel::from_infinite(rx, "test replica")
+            };
+            let result: Channel<Result<WriteOutcome, Error>, Infinite> = run();
+            result.err_into()
         }
 
-        async fn fetch_status(&self) -> Result<ReplicaStatus, Error> {
-            unimplemented!()
+        async fn fetch_status(&self) -> Result<ReplicaStatus, zslg_log::Error> {
+            let result: Result<ReplicaStatus, Error> = async { unimplemented!() }.await;
+            result.map_err(Into::into)
         }
-        fn subscribe_from(&self, _: Option<LogIndex>) -> crate::api::ReplicaStream {
+        fn subscribe_from(&self, _: Option<LogIndex>) -> zslg_log::ReplicaStream {
             Channel::aborted("test replica").ordered(None, "replica subscription")
         }
         async fn subscribe_status(
             &self,
-        ) -> Result<BoxStream<'static, Result<ReplicaStatus, Error>>, Error> {
-            unimplemented!()
+        ) -> Result<BoxStream<'static, Result<ReplicaStatus, zslg_log::Error>>, zslg_log::Error>
+        {
+            let result: Result<BoxStream<'static, Result<ReplicaStatus, Error>>, Error> =
+                async { unimplemented!() }.await;
+            result
+                .map(|s| {
+                    futures::StreamExt::boxed(futures::StreamExt::map(s, |r| r.map_err(Into::into)))
+                })
+                .map_err(Into::into)
         }
     }
 

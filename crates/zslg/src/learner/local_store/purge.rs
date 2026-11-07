@@ -12,9 +12,9 @@ use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
-use crate::api::{LocalStoreMut, StableLogSnapshot};
 use crate::error::Error;
 use shutdown::Shutdown;
+use zslg_log::{LocalStoreMut, StableLogSnapshot};
 use zslg_time_types::{Hlc, hlc_subtract};
 
 /// Floor on the gap between two threshold advances, however fast `end_hlc`

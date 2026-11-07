@@ -1111,6 +1111,7 @@ fn spawn_write(
                 // actual replica-side cause (e.g. quorum_unreachable / hlc_cutoff),
                 // not a flattened `rpc`. Prometheus sums labels, so the unlabeled
                 // total is still recoverable.
+                let e = zslg::Error::from(e);
                 let kind = e.kind();
                 warn!(error = %e, kind, "loadgen: write error");
                 metrics::counter!("loadgen_errors_total", "kind" => kind).increment(1);

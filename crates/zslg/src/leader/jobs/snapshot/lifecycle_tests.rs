@@ -14,6 +14,7 @@
     clippy::result_large_err,
     reason = "test code"
 )]
+use crate::error::Home as _;
 use crate::test_stream::ChannelTestExt as _;
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,7 +23,6 @@ use zslg_log_types::LogError;
 use bytes::Bytes;
 use uuid::Uuid;
 
-use crate::api::{LocalStoreMut, StableLogSnapshot};
 use crate::leader::jobs::snapshot::create::{
     SnapshotEntryInputs, SnapshotResult, create_snapshot_entry,
 };
@@ -34,6 +34,7 @@ use crate::raft::RaftNode;
 use zslg_consensus_types::RaftStateHandle;
 use zslg_consensus_types::ReplicaMembership;
 use zslg_consensus_types::ReplicatedRaftState;
+use zslg_log::{LocalStoreMut, StableLogSnapshot};
 use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};
 use zslg_net_types::PeerAddr;
@@ -62,7 +63,7 @@ async fn integrate_batch(
     // verdict as "disconnected, not yet closed" — an abort.
     closer.close();
     drop(tx);
-    store.integrate_loop(ch).await
+    store.integrate_loop(ch).await.home()
 }
 
 use crate::tests::{boot_snapshot_harness as boot, commit_snapshot_result};
@@ -84,9 +85,9 @@ async fn append_entries(local_store: &LocalStore, entries: &[Data]) {
 /// bound and be lost for good.
 #[tokio::test]
 async fn snapshot_refuses_to_commit_an_aborted_window() {
-    use crate::api::LocalStoreView;
     use crate::error::Error;
     use crossbeam_combinators::Channel;
+    use zslg_log::LocalStoreView;
 
     use tokio::sync::watch;
 
@@ -98,10 +99,10 @@ async fn snapshot_refuses_to_commit_an_aborted_window() {
 
     #[async_trait::async_trait]
     impl LocalStoreView for TruncatingLocalStore {
-        fn stream_above_hlc(&self, threshold: Option<Hlc>) -> crate::api::LocalStoreStream {
+        fn stream_above_hlc(&self, threshold: Option<Hlc>) -> zslg_log::LocalStoreStream {
             self.inner.stream_above_hlc(threshold)
         }
-        fn stream_window(&self, _above: Option<Hlc>, _upto: Hlc) -> crate::api::LocalStoreStream {
+        fn stream_window(&self, _above: Option<Hlc>, _upto: Hlc) -> zslg_log::LocalStoreStream {
             let (tx, rx) = crossbeam_channel::bounded(4);
             let (ch, closer) = Channel::from(rx, "truncated window");
             tx.send(Ok(make_data(1, 100, b"a"))).unwrap();
@@ -118,8 +119,13 @@ async fn snapshot_refuses_to_commit_an_aborted_window() {
         {
             self.inner.subscribe_unstable()
         }
-        async fn subscription_cursor(&self, upstream: NodeId) -> Result<Option<LogIndex>, Error> {
-            self.inner.subscription_cursor(upstream).await
+        async fn subscription_cursor(
+            &self,
+            upstream: NodeId,
+        ) -> Result<Option<LogIndex>, zslg_log::Error> {
+            let result: Result<Option<LogIndex>, Error> =
+                (async { self.inner.subscription_cursor(upstream).await }.await).home();
+            result.map_err(Into::into)
         }
     }
 
@@ -578,11 +584,12 @@ async fn fenced_write_rejected_on_stale_generation() {
 async fn invariant_stale_snapshot_commit_is_fenced() {
     use std::sync::atomic::AtomicBool;
 
-    use crate::api::Replica;
-    use crate::api::{LocalStoreView, Router};
+    use crate::api::Router;
     use crate::error::Error;
     use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
     use zslg_consensus_types::RaftGeneration;
+    use zslg_log::LocalStoreView;
+    use zslg_log::Replica;
     use zslg_log_types::LogIndex;
     use zslg_node_types::NodeId;
     use zslg_snapshot_types::SnapshotId;
@@ -624,11 +631,11 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
 
     #[async_trait::async_trait]
     impl LocalStoreView for InjectingLocalStore {
-        fn stream_above_hlc(&self, threshold: Option<Hlc>) -> crate::api::LocalStoreStream {
+        fn stream_above_hlc(&self, threshold: Option<Hlc>) -> zslg_log::LocalStoreStream {
             self.inner.stream_above_hlc(threshold)
         }
 
-        fn stream_window(&self, above: Option<Hlc>, upto: Hlc) -> crate::api::LocalStoreStream {
+        fn stream_window(&self, above: Option<Hlc>, upto: Hlc) -> zslg_log::LocalStoreStream {
             self.inner.stream_window(above, upto)
         }
 
@@ -643,8 +650,13 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
             self.inner.subscribe_unstable()
         }
 
-        async fn subscription_cursor(&self, upstream: NodeId) -> Result<Option<LogIndex>, Error> {
-            self.inner.subscription_cursor(upstream).await
+        async fn subscription_cursor(
+            &self,
+            upstream: NodeId,
+        ) -> Result<Option<LogIndex>, zslg_log::Error> {
+            let result: Result<Option<LogIndex>, Error> =
+                (async { self.inner.subscription_cursor(upstream).await }.await).home();
+            result.map_err(Into::into)
         }
     }
 
@@ -785,9 +797,9 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
 /// §10.2 — slow-replica fault mode).
 #[tokio::test]
 async fn snapshot_quorum_tolerates_one_wedged_replica() {
-    use crate::api::Replica;
     use crate::api::Router;
     use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
+    use zslg_log::Replica;
     use zslg_time_types::HlcParts;
 
     use crate::tests::{FaultyReplica, FixedClock, MapPeerRouter, ReadyReplica};
@@ -884,13 +896,13 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use crate::api::Replica;
     use crate::api::Router;
     use crate::api::{RaftLeadership, SnapshotStore};
     use crate::error::Error;
     use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
     use crate::tests::ReadyReplica;
     use crossbeam_combinators::Channel;
+    use zslg_log::Replica;
     use zslg_log_types::SnapshotEntry;
     use zslg_net_types::ServerName;
     use zslg_snapshot_types::SnapshotId;

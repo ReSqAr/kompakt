@@ -1,3 +1,4 @@
+use crate::error::Home as _;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -14,7 +15,7 @@ use futures::stream::BoxStream;
 use parking_lot::Mutex as SyncMutex;
 use tokio::sync::watch;
 
-use crate::api::{Replica, Router, StampedWrite, WriteOutcome};
+use crate::api::Router;
 use crate::error::Error;
 use crate::hlc::{HlcClock, HlcGate};
 use crate::replica::ReplicaLogStore;
@@ -22,6 +23,7 @@ use crate::replica::ReplicaService;
 use crossbeam_combinators::{Channel, Finite, Infinite};
 use zslg_consensus_types::RaftStateHandle;
 use zslg_consensus_types::{RaftState, ReplicaMembership, ReplicaStatus};
+use zslg_log::{Replica, StampedWrite, WriteOutcome};
 use zslg_log_types::{DataId, LogIndex};
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
@@ -107,85 +109,95 @@ impl Replica for FaultyReplica {
     fn write(
         &self,
         input: Channel<StampedWrite, Finite>,
-    ) -> Channel<Result<WriteOutcome, Error>, Infinite> {
-        let (out_tx, out_rx) = crossbeam_channel::unbounded::<Result<WriteOutcome, Error>>();
+    ) -> Channel<Result<WriteOutcome, zslg_log::Error>, Infinite> {
+        let run = || -> Channel<Result<WriteOutcome, Error>, Infinite> {
+            let (out_tx, out_rx) = crossbeam_channel::unbounded::<Result<WriteOutcome, Error>>();
 
-        let faults = self.faults.clone();
-        let inner = self.inner.clone();
-        // Fault injection is about outcomes, not timing: drop the stamp here
-        // and re-stamp when handing on to the inner replica.
-        let mut input = input.filter_map(|s| Some(s.data));
-        std::thread::spawn(move || {
-            // Opened on the first write that actually reaches the inner replica —
-            // some stubs (`ReadyReplica`) serve no writes at all, so a stream
-            // opened eagerly would panic on a run where every write is faulted.
-            let mut inner_tx: Option<crossbeam_channel::Sender<StampedWrite>> = None;
-            let mut open_inner = || {
-                inner_tx
-                    .get_or_insert_with(|| {
-                        let (tx, rx) = crossbeam_channel::unbounded::<StampedWrite>();
-                        let mut outcomes = inner.write(Channel::closed(rx));
-                        let fwd_tx = out_tx.clone();
-                        std::thread::spawn(move || {
-                            while let Ok(outcome) = outcomes.recv() {
-                                if fwd_tx.send(outcome).is_err() {
-                                    return;
+            let faults = self.faults.clone();
+            let inner = self.inner.clone();
+            // Fault injection is about outcomes, not timing: drop the stamp here
+            // and re-stamp when handing on to the inner replica.
+            let mut input = input.filter_map(|s| Some(s.data));
+            std::thread::spawn(move || {
+                // Opened on the first write that actually reaches the inner replica —
+                // some stubs (`ReadyReplica`) serve no writes at all, so a stream
+                // opened eagerly would panic on a run where every write is faulted.
+                let mut inner_tx: Option<crossbeam_channel::Sender<StampedWrite>> = None;
+                let mut open_inner = || {
+                    inner_tx
+                        .get_or_insert_with(|| {
+                            let (tx, rx) = crossbeam_channel::unbounded::<StampedWrite>();
+                            let mut outcomes = inner.write(Channel::closed(rx));
+                            let fwd_tx = out_tx.clone();
+                            std::thread::spawn(move || {
+                                while let Ok(outcome) = outcomes.recv() {
+                                    if fwd_tx.send(outcome.home()).is_err() {
+                                        return;
+                                    }
                                 }
-                            }
-                        });
-                        tx
-                    })
-                    .clone()
-            };
-            while let Ok(data) = input.recv() {
-                let data_id = data.data_id;
-                // `wedged` is a watch channel (async); this thread is not on a
-                // reactor, so block on the change notification directly.
-                let mut wedged = faults.wedged.subscribe();
-                let waited = futures::executor::block_on(wedged.wait_for(|w| !*w));
-                if waited.is_err() {
-                    let _ = out_tx.send(Ok(WriteOutcome::Failed {
-                        data_id,
-                        error: Error::Net(NetError::Rpc(
-                            "fault handle dropped while wedged".into(),
-                        )),
-                    }));
-                    continue;
-                }
-                let injected = faults
-                    .fail_next
-                    .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
-                    .is_ok();
-                let sent = if injected {
-                    out_tx
-                        .send(Ok(WriteOutcome::Failed {
-                            data_id,
-                            error: Error::Net(NetError::Rpc("injected fault".into())),
-                        }))
-                        .is_ok()
-                } else {
-                    open_inner().send(StampedWrite::now(data)).is_ok()
+                            });
+                            tx
+                        })
+                        .clone()
                 };
-                if !sent {
-                    return;
+                while let Ok(data) = input.recv() {
+                    let data_id = data.data_id;
+                    // `wedged` is a watch channel (async); this thread is not on a
+                    // reactor, so block on the change notification directly.
+                    let mut wedged = faults.wedged.subscribe();
+                    let waited = futures::executor::block_on(wedged.wait_for(|w| !*w));
+                    if waited.is_err() {
+                        let _ = out_tx.send(Ok(WriteOutcome::Failed {
+                            data_id,
+                            error: (Error::Net(NetError::Rpc(
+                                "fault handle dropped while wedged".into(),
+                            )))
+                            .into(),
+                        }));
+                        continue;
+                    }
+                    let injected = faults
+                        .fail_next
+                        .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                        .is_ok();
+                    let sent = if injected {
+                        out_tx
+                            .send(Ok(WriteOutcome::Failed {
+                                data_id,
+                                error: (Error::Net(NetError::Rpc("injected fault".into()))).into(),
+                            }))
+                            .is_ok()
+                    } else {
+                        open_inner().send(StampedWrite::now(data)).is_ok()
+                    };
+                    if !sent {
+                        return;
+                    }
                 }
-            }
-        });
+            });
 
-        Channel::from_infinite(out_rx, "faulty replica")
+            Channel::from_infinite(out_rx, "faulty replica")
+        };
+        let result: Channel<Result<WriteOutcome, Error>, Infinite> = run();
+        result.err_into()
     }
 
-    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::api::ReplicaStream {
+    fn subscribe_from(&self, from: Option<LogIndex>) -> zslg_log::ReplicaStream {
         self.inner.subscribe_from(from)
     }
-    async fn fetch_status(&self) -> Result<ReplicaStatus, crate::Error> {
-        self.gate().await?;
-        self.inner.fetch_status().await
+    async fn fetch_status(&self) -> Result<ReplicaStatus, zslg_log::Error> {
+        let result: Result<ReplicaStatus, crate::Error> = (async {
+            self.gate().await?;
+            self.inner.fetch_status().await
+        }
+        .await)
+            .home();
+        result.map_err(Into::into)
     }
     async fn subscribe_status(
         &self,
-    ) -> Result<BoxStream<'static, Result<ReplicaStatus, crate::Error>>, crate::Error> {
-        self.gate().await?;
+    ) -> Result<BoxStream<'static, Result<ReplicaStatus, zslg_log::Error>>, zslg_log::Error> {
+        self.gate().await.map_err(zslg_log::Error::from)?;
         self.inner.subscribe_status().await
     }
 }
@@ -201,26 +213,40 @@ impl Replica for ReadyReplica {
     fn write(
         &self,
         _: Channel<StampedWrite, Finite>,
-    ) -> Channel<Result<WriteOutcome, Error>, Infinite> {
-        unimplemented!("ReadyReplica does not serve writes")
+    ) -> Channel<Result<WriteOutcome, zslg_log::Error>, Infinite> {
+        let run = || -> Channel<Result<WriteOutcome, Error>, Infinite> {
+            unimplemented!("ReadyReplica does not serve writes")
+        };
+        let result: Channel<Result<WriteOutcome, Error>, Infinite> = run();
+        result.err_into()
     }
-    fn subscribe_from(&self, _: Option<LogIndex>) -> crate::api::ReplicaStream {
+    fn subscribe_from(&self, _: Option<LogIndex>) -> zslg_log::ReplicaStream {
         unimplemented!("ReadyReplica does not serve subscriptions")
     }
-    async fn fetch_status(&self) -> Result<ReplicaStatus, crate::Error> {
-        Ok(ReplicaStatus {
-            node_id: zslg_node_types::NodeId::default(),
-            frontier: None,
-            raft_state: (*self.raft_state.snapshot()).clone(),
-            effective_cutoff: Some(Hlc(u64::MAX)),
-            max_hlc: None,
-            peer_names: Vec::new(),
-        })
+    async fn fetch_status(&self) -> Result<ReplicaStatus, zslg_log::Error> {
+        let result: Result<ReplicaStatus, crate::Error> = async {
+            Ok(ReplicaStatus {
+                node_id: zslg_node_types::NodeId::default(),
+                frontier: None,
+                raft_state: (*self.raft_state.snapshot()).clone(),
+                effective_cutoff: Some(Hlc(u64::MAX)),
+                max_hlc: None,
+                peer_names: Vec::new(),
+            })
+        }
+        .await;
+        result.map_err(Into::into)
     }
     async fn subscribe_status(
         &self,
-    ) -> Result<BoxStream<'static, Result<ReplicaStatus, crate::Error>>, crate::Error> {
-        unimplemented!("ReadyReplica does not serve status subscriptions")
+    ) -> Result<BoxStream<'static, Result<ReplicaStatus, zslg_log::Error>>, zslg_log::Error> {
+        let result: Result<BoxStream<'static, Result<ReplicaStatus, crate::Error>>, crate::Error> =
+            async { unimplemented!("ReadyReplica does not serve status subscriptions") }.await;
+        result
+            .map(|s| {
+                futures::StreamExt::boxed(futures::StreamExt::map(s, |r| r.map_err(Into::into)))
+            })
+            .map_err(Into::into)
     }
 }
 
@@ -477,86 +503,92 @@ impl Replica for DuplicateReplica {
     fn write(
         &self,
         input: Channel<StampedWrite, Finite>,
-    ) -> Channel<Result<WriteOutcome, Error>, Infinite> {
-        let (out_tx, out_rx) = crossbeam_channel::unbounded::<Result<WriteOutcome, Error>>();
-        let (inner_tx, inner_rx) = crossbeam_channel::unbounded::<StampedWrite>();
-        let mut outcomes = self.inner.write(Channel::closed(inner_rx));
+    ) -> Channel<Result<WriteOutcome, zslg_log::Error>, Infinite> {
+        let run = || -> Channel<Result<WriteOutcome, Error>, Infinite> {
+            let (out_tx, out_rx) = crossbeam_channel::unbounded::<Result<WriteOutcome, Error>>();
+            let (inner_tx, inner_rx) = crossbeam_channel::unbounded::<StampedWrite>();
+            let mut outcomes = self.inner.write(Channel::closed(inner_rx));
 
-        // How many outcomes are still expected per data_id, and the best one seen
-        // so far. Only shared between this thread and the feeder below.
-        let expected: DupExpectations = Arc::new(SyncMutex::new(BTreeMap::new()));
+            // How many outcomes are still expected per data_id, and the best one seen
+            // so far. Only shared between this thread and the feeder below.
+            let expected: DupExpectations = Arc::new(SyncMutex::new(BTreeMap::new()));
 
-        let dup = self.dup.clone();
-        let expected_feed = expected.clone();
-        let mut input = input;
-        std::thread::spawn(move || {
-            while let Ok(stamped) = input.recv() {
-                let n = dup.should_duplicate().unwrap_or(1);
-                if n > 1 {
-                    expected_feed.lock().insert(stamped.data.data_id, (n, None));
+            let dup = self.dup.clone();
+            let expected_feed = expected.clone();
+            let mut input = input;
+            std::thread::spawn(move || {
+                while let Ok(stamped) = input.recv() {
+                    let n = dup.should_duplicate().unwrap_or(1);
+                    if n > 1 {
+                        expected_feed.lock().insert(stamped.data.data_id, (n, None));
+                    }
+                    for _ in 0..n {
+                        // Each copy is stamped afresh: a duplicate is a distinct
+                        // arrival, so sharing one enqueue time would misreport the
+                        // residency of every copy after the first.
+                        if inner_tx
+                            .send(StampedWrite::now(stamped.data.clone()))
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
                 }
-                for _ in 0..n {
-                    // Each copy is stamped afresh: a duplicate is a distinct
-                    // arrival, so sharing one enqueue time would misreport the
-                    // residency of every copy after the first.
-                    if inner_tx
-                        .send(StampedWrite::now(stamped.data.clone()))
-                        .is_err()
+            });
+
+            std::thread::spawn(move || {
+                while let Ok(outcome) = outcomes.recv() {
+                    let Ok(outcome) = outcome else {
+                        let _ = out_tx.send(outcome.home());
+                        return; // terminal
+                    };
+                    let mut guard = expected.lock();
+                    let Some((remaining, best)) = guard.get_mut(&outcome.data_id()) else {
+                        // Not duplicated — pass straight through.
+                        drop(guard);
+                        if out_tx.send(Ok(outcome)).is_err() {
+                            return;
+                        }
+                        continue;
+                    };
+                    *remaining = remaining.saturating_sub(1);
+                    let accepted = matches!(outcome, WriteOutcome::Accepted { .. });
+                    if accepted || best.is_none() {
+                        *best = Some(outcome);
+                    }
+                    if *remaining > 0 {
+                        continue;
+                    }
+                    let data_id = best.as_ref().map(WriteOutcome::data_id);
+                    let chosen = data_id.and_then(|id| guard.remove(&id).and_then(|(_, b)| b));
+                    drop(guard);
+                    if let Some(chosen) = chosen
+                        && out_tx.send(Ok(chosen)).is_err()
                     {
                         return;
                     }
                 }
-            }
-        });
+            });
 
-        std::thread::spawn(move || {
-            while let Ok(outcome) = outcomes.recv() {
-                let Ok(outcome) = outcome else {
-                    let _ = out_tx.send(outcome);
-                    return; // terminal
-                };
-                let mut guard = expected.lock();
-                let Some((remaining, best)) = guard.get_mut(&outcome.data_id()) else {
-                    // Not duplicated — pass straight through.
-                    drop(guard);
-                    if out_tx.send(Ok(outcome)).is_err() {
-                        return;
-                    }
-                    continue;
-                };
-                *remaining = remaining.saturating_sub(1);
-                let accepted = matches!(outcome, WriteOutcome::Accepted { .. });
-                if accepted || best.is_none() {
-                    *best = Some(outcome);
-                }
-                if *remaining > 0 {
-                    continue;
-                }
-                let data_id = best.as_ref().map(WriteOutcome::data_id);
-                let chosen = data_id.and_then(|id| guard.remove(&id).and_then(|(_, b)| b));
-                drop(guard);
-                if let Some(chosen) = chosen
-                    && out_tx.send(Ok(chosen)).is_err()
-                {
-                    return;
-                }
-            }
-        });
-
-        Channel::from_infinite(out_rx, "faulty replica")
+            Channel::from_infinite(out_rx, "faulty replica")
+        };
+        let result: Channel<Result<WriteOutcome, Error>, Infinite> = run();
+        result.err_into()
     }
 
-    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::api::ReplicaStream {
+    fn subscribe_from(&self, from: Option<LogIndex>) -> zslg_log::ReplicaStream {
         self.inner.subscribe_from(from)
     }
 
-    async fn fetch_status(&self) -> Result<ReplicaStatus, Error> {
-        self.inner.fetch_status().await
+    async fn fetch_status(&self) -> Result<ReplicaStatus, zslg_log::Error> {
+        let result: Result<ReplicaStatus, Error> =
+            (async { self.inner.fetch_status().await }.await).home();
+        result.map_err(Into::into)
     }
 
     async fn subscribe_status(
         &self,
-    ) -> Result<BoxStream<'static, Result<ReplicaStatus, Error>>, Error> {
+    ) -> Result<BoxStream<'static, Result<ReplicaStatus, zslg_log::Error>>, zslg_log::Error> {
         self.inner.subscribe_status().await
     }
 }
@@ -648,9 +680,9 @@ mod tests {
 
     use bytes::Bytes;
 
-    use crate::api::Replica;
     use crate::api::Router;
     use crate::tests::nid;
+    use zslg_log::Replica;
     use zslg_log_types::DataId;
     use zslg_node_types::NodeId;
     use zslg_time_types::Hlc;
@@ -675,7 +707,7 @@ mod tests {
         let ids = nids();
         let [n1, n2, _n3] = ids;
 
-        let mut replicas: BTreeMap<NodeId, Arc<dyn crate::api::Replica>> = BTreeMap::new();
+        let mut replicas: BTreeMap<NodeId, Arc<dyn zslg_log::Replica>> = BTreeMap::new();
         for &id in &ids {
             replicas.insert(
                 id,
@@ -717,7 +749,7 @@ mod tests {
         let ids = nids();
         let [n1, _n2, _n3] = ids;
 
-        let mut replicas: BTreeMap<NodeId, Arc<dyn crate::api::Replica>> = BTreeMap::new();
+        let mut replicas: BTreeMap<NodeId, Arc<dyn zslg_log::Replica>> = BTreeMap::new();
         for &id in &ids {
             replicas.insert(
                 id,
@@ -759,7 +791,7 @@ mod tests {
             .expect("harness");
 
         let (dup_replica, dup_handle) =
-            DuplicateReplica::new(harness.replica.clone() as Arc<dyn crate::api::Replica>);
+            DuplicateReplica::new(harness.replica.clone() as Arc<dyn zslg_log::Replica>);
 
         // Next write is sent twice, concurrently.
         dup_handle.duplicate_next(1, 2);

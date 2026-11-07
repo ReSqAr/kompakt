@@ -127,11 +127,12 @@ use std::time::Duration;
 
 use tracing::info;
 
-use crate::api::{LocalStoreMut, RaftStateView, Router, SnapshotStore};
+use crate::api::{RaftStateView, Router, SnapshotStore};
 use crate::hlc::HlcClock;
-use crate::{Error, Reader, api};
+use crate::{Error, Reader};
 use shutdown::Shutdown;
 use stable_log::SnapshotLoader;
+use zslg_log::LocalStoreMut;
 
 #[derive(Clone)]
 pub(crate) struct LearnerService {
@@ -180,7 +181,7 @@ impl LearnerService {
 )]
 pub(crate) async fn spawn_learner(
     clock: Arc<HlcClock>,
-    stable_log: Arc<dyn api::StableLogSnapshot>,
+    stable_log: Arc<dyn zslg_log::StableLogSnapshot>,
     storage: Arc<rocksdb_kit::Storage>,
     snapshot_store: Arc<dyn SnapshotStore>,
     raft_state: Arc<dyn RaftStateView>,
@@ -211,7 +212,7 @@ pub(crate) async fn spawn_learner(
     // The shared object-store access path for the stable prefix — used by both
     // the reader (purged-index fallback) and the snapshot loader. Threaded as a
     // trait object so neither sees the object-store/manifest detail.
-    let archive_reader: Arc<dyn api::StableArchiveReader> = Arc::new(
+    let archive_reader: Arc<dyn zslg_log::StableArchiveReader> = Arc::new(
         stable_archive::ObjectStoreArchiveReader::new(snapshot_store.clone(), raft_state.clone()),
     );
 

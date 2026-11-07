@@ -324,7 +324,7 @@ impl FailingSyncReader {
 
 #[async_trait::async_trait]
 impl zslg::Reader for FailingSyncReader {
-    async fn sync(&self) -> Result<(), zslg::Error> {
+    async fn sync(&self) -> Result<(), zslg::LogApiError> {
         let failing = {
             let mut left = self.failures.lock().expect("test mutex");
             let failing = *left > 0;
@@ -332,7 +332,7 @@ impl zslg::Reader for FailingSyncReader {
             failing
         };
         if failing {
-            return Err(zslg::Error::Log(zslg::LogError::QuorumReadTimeout {
+            return Err(zslg::LogApiError::Log(zslg::LogError::QuorumReadTimeout {
                 timeout: std::time::Duration::from_millis(1),
             }));
         }
@@ -351,13 +351,16 @@ impl zslg::Reader for FailingSyncReader {
         self.inner.subscribe_stable_log(after)
     }
 
-    fn unstable_tail(&self) -> Channel<Result<Data, zslg::Error>, crossbeam_combinators::Finite> {
+    fn unstable_tail(
+        &self,
+    ) -> Channel<Result<Data, zslg::LogApiError>, crossbeam_combinators::Finite> {
         self.inner.unstable_tail()
     }
 
     fn subscribe_unstable_tail(
         &self,
-    ) -> Channel<Result<zslg::UnstableEvent, zslg::Error>, crossbeam_combinators::Infinite> {
+    ) -> Channel<Result<zslg::UnstableEvent, zslg::LogApiError>, crossbeam_combinators::Infinite>
+    {
         self.inner.subscribe_unstable_tail()
     }
 }
@@ -401,7 +404,7 @@ impl Store for UnfenceableStore {
     }
 }
 
-pub type StableFeed = crossbeam_channel::Sender<Result<StableLogEvent, zslg::Error>>;
+pub type StableFeed = crossbeam_channel::Sender<Result<StableLogEvent, zslg::LogApiError>>;
 
 #[must_use]
 pub fn hlc(ms: u64) -> Hlc {
@@ -415,7 +418,7 @@ pub fn hlc(ms: u64) -> Hlc {
 pub struct ScriptedReader {
     watermark: Mutex<Option<Hlc>>,
     unstable: Mutex<Vec<Data>>,
-    stable: Mutex<Option<crossbeam_channel::Receiver<Result<StableLogEvent, zslg::Error>>>>,
+    stable: Mutex<Option<crossbeam_channel::Receiver<Result<StableLogEvent, zslg::LogApiError>>>>,
 }
 
 impl ScriptedReader {
@@ -439,7 +442,7 @@ impl ScriptedReader {
 
 #[async_trait::async_trait]
 impl zslg::Reader for ScriptedReader {
-    async fn sync(&self) -> Result<(), zslg::Error> {
+    async fn sync(&self) -> Result<(), zslg::LogApiError> {
         Ok(())
     }
 
@@ -462,7 +465,9 @@ impl zslg::Reader for ScriptedReader {
         zslg::StableStream::new(Channel::from_infinite(rx, "scripted"), after)
     }
 
-    fn unstable_tail(&self) -> Channel<Result<Data, zslg::Error>, crossbeam_combinators::Finite> {
+    fn unstable_tail(
+        &self,
+    ) -> Channel<Result<Data, zslg::LogApiError>, crossbeam_combinators::Finite> {
         let items = self
             .unstable
             .lock()
@@ -478,7 +483,8 @@ impl zslg::Reader for ScriptedReader {
     /// reader has no live leg, so the stream then ends `Aborted`.
     fn subscribe_unstable_tail(
         &self,
-    ) -> Channel<Result<zslg::UnstableEvent, zslg::Error>, crossbeam_combinators::Infinite> {
+    ) -> Channel<Result<zslg::UnstableEvent, zslg::LogApiError>, crossbeam_combinators::Infinite>
+    {
         let watermark = self.stable_watermark();
         let entries = self.unstable.lock().expect("test mutex").clone();
         let (tx, rx) = crossbeam_channel::unbounded();

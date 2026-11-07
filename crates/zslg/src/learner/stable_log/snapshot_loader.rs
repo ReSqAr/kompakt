@@ -14,11 +14,10 @@ use zslg_log_types::LogError;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::api::{
-    ArchiveBounds, ArchiveUpperBound, RaftStateView, StableArchiveReader, StableLogSnapshot,
-};
+use crate::api::RaftStateView;
 use crate::error::Error;
 use zslg_consensus_types::RaftManifestState;
+use zslg_log::{ArchiveBounds, ArchiveUpperBound, StableArchiveReader, StableLogSnapshot};
 use zslg_log_types::LogIndex;
 
 pub(in crate::learner) async fn integrate_manifest(

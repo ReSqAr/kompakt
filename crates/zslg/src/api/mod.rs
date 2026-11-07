@@ -27,8 +27,6 @@
 //! same client surface as a remote peer with no hand-written forwarding.
 
 mod liveness_probe;
-mod local_store_mut;
-mod local_store_view;
 mod membership_gate;
 mod peers;
 mod quorum_check;
@@ -37,24 +35,15 @@ mod raft_leadership;
 mod raft_membership;
 mod raft_peer;
 mod raft_state;
-mod reader;
-mod replica;
 mod replica_client;
 mod router;
 mod snapshot_store;
 mod spare_selection;
-mod stable_archive;
-mod stable_log;
 mod state_replicator;
-mod writer;
 
 pub(crate) use peers::PeersWatcher;
-pub use reader::{Reader, StableStream};
-pub use writer::Writer;
 
 pub(crate) use liveness_probe::LivenessProbe;
-pub(crate) use local_store_mut::LocalStoreMut;
-pub(crate) use local_store_view::{LocalStoreStream, LocalStoreView};
 pub(crate) use membership_gate::MembershipGate;
 pub(crate) use quorum_check::QuorumCheck;
 pub(crate) use raft_consensus::RaftConsensus;
@@ -63,13 +52,8 @@ pub(crate) use raft_membership::{AddMemberOutcome, RaftMembership};
 pub(crate) use raft_peer::RaftTransport;
 pub(crate) use raft_state::RaftStateTracker;
 pub use raft_state::RaftStateView;
-pub(crate) use replica::{Replica, ReplicaStream, StampedWrite, WriteOutcome};
 pub(crate) use replica_client::ReplicaClient;
 pub(crate) use router::Router;
 pub(crate) use snapshot_store::{CleanupReport, EntryMeta, SnapshotStore, SnapshotWrite};
 pub(crate) use spare_selection::{CandidateInfo, SpareSelector};
-pub(crate) use stable_archive::{
-    ArchiveBounds, ArchiveStream, ArchiveUpperBound, StableArchiveReader,
-};
-pub(crate) use stable_log::StableLogSnapshot;
 pub(crate) use state_replicator::StateReplicator;

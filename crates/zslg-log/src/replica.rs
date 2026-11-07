@@ -32,7 +32,7 @@ use zslg_log_types::{DataId, LogIndex};
 
 /// The replica append stream: strictly increasing indices, forward purge gaps
 /// allowed.
-pub(crate) type ReplicaStream =
+pub type ReplicaStream =
     OrderedChannel<Result<(LogIndex, Data), Error>, StrictlyIncreasing<LogIndex>, Infinite>;
 
 /// A write with the wall-clock time it entered a queue, for *direct*
@@ -40,7 +40,7 @@ pub(crate) type ReplicaStream =
 /// through the write path so a hop's residency is measured from a timestamp on
 /// the queued object, never inferred from other metrics.
 #[derive(Debug, Clone)]
-pub(crate) struct StampedWrite {
+pub struct StampedWrite {
     pub data: Data,
     pub enqueued: std::time::Instant,
 }
@@ -50,7 +50,7 @@ impl StampedWrite {
     /// handing a write straight over rather than relaying one it received —
     /// the writer's own submissions, and every test double.
     #[must_use]
-    pub(crate) fn now(data: Data) -> Self {
+    pub fn now(data: Data) -> Self {
         Self {
             data,
             enqueued: std::time::Instant::now(),
@@ -61,7 +61,7 @@ impl StampedWrite {
 /// Outcome of one write. Mirrors the wire `WriteStreamResponse` 1:1, so the
 /// server maps between them without a decision of its own.
 #[derive(Debug)]
-pub(crate) enum WriteOutcome {
+pub enum WriteOutcome {
     /// Durably committed. Carries the post-commit `RaftState`.
     Accepted {
         data_id: DataId,
@@ -80,7 +80,8 @@ pub(crate) enum WriteOutcome {
 
 impl WriteOutcome {
     /// The write this outcome answers.
-    pub(crate) fn data_id(&self) -> DataId {
+    #[must_use]
+    pub fn data_id(&self) -> DataId {
         match self {
             WriteOutcome::Accepted { data_id, .. }
             | WriteOutcome::Rejected { data_id, .. }
@@ -90,7 +91,7 @@ impl WriteOutcome {
 }
 
 #[async_trait::async_trait]
-pub(crate) trait Replica: Send + Sync + 'static {
+pub trait Replica: Send + Sync + 'static {
     /// Open a long-lived write connection: `input` yields writes, the returned
     /// channel their outcomes. Returns immediately; both halves are driven off
     /// the reactor, so the hot path never touches it.
@@ -117,7 +118,7 @@ pub(crate) trait Replica: Send + Sync + 'static {
     ) -> Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite>;
 
     /// Resumable subscription to the replica's append stream.
-    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::api::ReplicaStream;
+    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::ReplicaStream;
 
     /// Log frontier, Raft state, and the fully-drained effective HLC cutoff, in
     /// one call. All cheap in-memory reads, fetched together to keep the trait

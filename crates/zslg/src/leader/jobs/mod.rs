@@ -33,10 +33,9 @@ use std::time::Duration;
 
 use tokio::time::Instant;
 
-use crate::api::{
-    LocalStoreView, RaftLeadership, RaftStateView, Router, SnapshotStore, StableLogSnapshot,
-};
+use crate::api::{RaftLeadership, RaftStateView, Router, SnapshotStore};
 use crate::leader::IntentSubmitter;
+use zslg_log::{LocalStoreView, StableLogSnapshot};
 use zslg_node_types::NodeId;
 use zslg_time::Clock;
 

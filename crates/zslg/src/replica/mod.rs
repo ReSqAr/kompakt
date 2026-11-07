@@ -43,7 +43,7 @@ use tokio::sync::watch;
 
 use tracing::{info, warn};
 
-use crate::api::{PeersWatcher, RaftStateView, Replica, StampedWrite, WriteOutcome};
+use crate::api::{PeersWatcher, RaftStateView};
 use crate::error::Error;
 use crate::hlc::{CutoffApplier, HlcClock, HlcGate, HlcGuard};
 use crate::metrics::{self, ReplicaWriteState};
@@ -52,6 +52,7 @@ use crossbeam_combinators::Channel;
 use shutdown::Shutdown;
 use warn_throttle::WarnThrottle;
 use zslg_consensus_types::ReplicaStatus;
+use zslg_log::{Replica, StampedWrite, WriteOutcome};
 use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};
 use zslg_node_types::NodeId;
@@ -132,62 +133,88 @@ impl Replica for ReplicaService {
     fn write(
         &self,
         input: Channel<StampedWrite, crossbeam_combinators::Finite>,
-    ) -> Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> {
-        // No thread: the gate is a `filter_map` stage that runs when the *consumer*
-        // pulls the returned channel. A rejection short-circuits onto the output; an
-        // accepted write is submitted (durably, inline) and the stage yields
-        // `None`, its outcome arriving later on the merged commit channel. The
-        // `Weak<ReplicaLogStore>` inside the submitter means a parked consumer never
-        // pins the node's RocksDB.
-        let submitter = WriteSubmitter {
-            replica_log: Arc::downgrade(&self.replica_log),
-            hlc_gate: self.hlc_gate.clone(),
-            node_id: self.node_id,
-            clock: self.clock.clone(),
-            raft_state: self.raft_state.clone(),
-            reject_warn: self.reject_warn.clone(),
-            write_out_capacity: self.write_out_capacity,
+    ) -> Channel<Result<WriteOutcome, zslg_log::Error>, crossbeam_combinators::Infinite> {
+        let run = || -> Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> {
+            // No thread: the gate is a `filter_map` stage that runs when the *consumer*
+            // pulls the returned channel. A rejection short-circuits onto the output; an
+            // accepted write is submitted (durably, inline) and the stage yields
+            // `None`, its outcome arriving later on the merged commit channel. The
+            // `Weak<ReplicaLogStore>` inside the submitter means a parked consumer never
+            // pins the node's RocksDB.
+            let submitter = WriteSubmitter {
+                replica_log: Arc::downgrade(&self.replica_log),
+                hlc_gate: self.hlc_gate.clone(),
+                node_id: self.node_id,
+                clock: self.clock.clone(),
+                raft_state: self.raft_state.clone(),
+                reject_warn: self.reject_warn.clone(),
+                write_out_capacity: self.write_out_capacity,
+            };
+            // The stamp is read here and nowhere else: this is the server→raft
+            // dispatch wait, measured at the moment the write leaves the queue.
+            // Same pull-time stage as the gate, so it costs no thread either.
+            submitter.write(input.filter_map(|s| {
+                metrics::server_dispatch_wait(s.enqueued.elapsed());
+                Some(s.data)
+            }))
         };
-        // The stamp is read here and nowhere else: this is the server→raft
-        // dispatch wait, measured at the moment the write leaves the queue.
-        // Same pull-time stage as the gate, so it costs no thread either.
-        submitter.write(input.filter_map(|s| {
-            metrics::server_dispatch_wait(s.enqueued.elapsed());
-            Some(s.data)
-        }))
+        let result: Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> = run();
+        result.err_into()
     }
 
-    fn subscribe_from(&self, from: Option<LogIndex>) -> crate::api::ReplicaStream {
+    fn subscribe_from(&self, from: Option<LogIndex>) -> zslg_log::ReplicaStream {
         self.replica_log.subscribe_from(from)
     }
 
-    async fn fetch_status(&self) -> Result<ReplicaStatus, Error> {
-        Ok(status_snapshot(
-            self.node_id,
-            &self.replica_log,
-            self.raft_state.as_ref(),
-            &self.effective_cutoff_rx,
-            self.peers.as_ref(),
-        ))
+    async fn fetch_status(&self) -> Result<ReplicaStatus, zslg_log::Error> {
+        let result: Result<ReplicaStatus, Error> = async {
+            Ok(status_snapshot(
+                self.node_id,
+                &self.replica_log,
+                self.raft_state.as_ref(),
+                &self.effective_cutoff_rx,
+                self.peers.as_ref(),
+            ))
+        }
+        .await;
+        result.map_err(Into::into)
     }
 
     async fn subscribe_status(
         &self,
-    ) -> Result<BoxStream<'static, Result<ReplicaStatus, Error>>, Error> {
-        let replica_log = self.replica_log.clone();
-        let node_id = self.node_id;
-        let raft_state = self.raft_state.clone();
-        let cutoff_rx = self.effective_cutoff_rx.clone();
-        let peers = self.peers.clone();
+    ) -> Result<BoxStream<'static, Result<ReplicaStatus, zslg_log::Error>>, zslg_log::Error> {
+        let result: Result<BoxStream<'static, Result<ReplicaStatus, Error>>, Error> = async {
+            let replica_log = self.replica_log.clone();
+            let node_id = self.node_id;
+            let raft_state = self.raft_state.clone();
+            let cutoff_rx = self.effective_cutoff_rx.clone();
+            let peers = self.peers.clone();
 
-        let stream = futures::stream::unfold(
-            (raft_state.subscribe(), cutoff_rx, false),
-            move |(mut rx, mut cutoff_rx, baseline_sent)| {
-                let replica_log = replica_log.clone();
-                let raft_state = raft_state.clone();
-                let peers = peers.clone();
-                async move {
-                    if !baseline_sent {
+            let stream = futures::stream::unfold(
+                (raft_state.subscribe(), cutoff_rx, false),
+                move |(mut rx, mut cutoff_rx, baseline_sent)| {
+                    let replica_log = replica_log.clone();
+                    let raft_state = raft_state.clone();
+                    let peers = peers.clone();
+                    async move {
+                        if !baseline_sent {
+                            let status = status_snapshot(
+                                node_id,
+                                &replica_log,
+                                raft_state.as_ref(),
+                                &cutoff_rx,
+                                peers.as_ref(),
+                            );
+                            return Some((Ok(status), (rx, cutoff_rx, true)));
+                        }
+
+                        let alive = tokio::select! {
+                            raft = rx.changed() => raft.is_ok(),
+                            changed = cutoff_rx.changed() => changed.is_ok(),
+                        };
+                        if !alive {
+                            return None;
+                        }
                         let status = status_snapshot(
                             node_id,
                             &replica_log,
@@ -195,29 +222,19 @@ impl Replica for ReplicaService {
                             &cutoff_rx,
                             peers.as_ref(),
                         );
-                        return Some((Ok(status), (rx, cutoff_rx, true)));
+                        Some((Ok(status), (rx, cutoff_rx, true)))
                     }
+                },
+            );
 
-                    let alive = tokio::select! {
-                        raft = rx.changed() => raft.is_ok(),
-                        changed = cutoff_rx.changed() => changed.is_ok(),
-                    };
-                    if !alive {
-                        return None;
-                    }
-                    let status = status_snapshot(
-                        node_id,
-                        &replica_log,
-                        raft_state.as_ref(),
-                        &cutoff_rx,
-                        peers.as_ref(),
-                    );
-                    Some((Ok(status), (rx, cutoff_rx, true)))
-                }
-            },
-        );
-
-        Ok(stream.boxed())
+            Ok(stream.boxed())
+        }
+        .await;
+        result
+            .map(|s| {
+                futures::StreamExt::boxed(futures::StreamExt::map(s, |r| r.map_err(Into::into)))
+            })
+            .map_err(Into::into)
     }
 }
 
@@ -261,7 +278,7 @@ impl WriteSubmitter {
             metrics::replica_write_request(ReplicaWriteState::FailStorage);
             return Gated::Answer(Box::new(WriteOutcome::Failed {
                 data_id,
-                error: Error::Lifecycle(LifecycleError::Shutdown),
+                error: Error::Lifecycle(LifecycleError::Shutdown).into(),
             }));
         }
         let state = self.raft_state.snapshot();
@@ -283,9 +300,10 @@ impl WriteSubmitter {
             }
             return Gated::Answer(Box::new(WriteOutcome::Rejected {
                 data_id,
-                error: Error::Consensus(ConsensusError::NotAReplica {
+                error: (Error::Consensus(ConsensusError::NotAReplica {
                     node_id: self.node_id,
-                }),
+                }))
+                .into(),
                 raft_state: (*state).clone(),
             }));
         }
@@ -318,7 +336,7 @@ impl WriteSubmitter {
                 }
                 return Gated::Answer(Box::new(WriteOutcome::Rejected {
                     data_id,
-                    error: Error::Clock(ClockError::HlcCutoff(e)),
+                    error: Error::Clock(ClockError::HlcCutoff(e)).into(),
                     raft_state: (*state).clone(),
                 }));
             }
@@ -368,7 +386,10 @@ impl WriteSubmitter {
                          (flush loop may be stalled)"
                     );
                 }
-                Some(Ok(WriteOutcome::Failed { data_id, error: e }))
+                Some(Ok(WriteOutcome::Failed {
+                    data_id,
+                    error: e.into(),
+                }))
             }
         });
 
@@ -386,7 +407,7 @@ impl WriteSubmitter {
                         metrics::replica_write_request(ReplicaWriteState::FailStorage);
                         Some(Ok(WriteOutcome::Failed {
                             data_id: data.data_id,
-                            error: Error::Lifecycle(LifecycleError::Shutdown),
+                            error: Error::Lifecycle(LifecycleError::Shutdown).into(),
                         }))
                     }
                 },
@@ -573,21 +594,21 @@ impl ReplicaLogConfig {
         slots.saturating_mul(QUEUE_REFERENCE_PAYLOAD_BYTES)
     }
 
-    pub(crate) fn validate(&self) -> Result<(), crate::error::Error> {
+    pub(crate) fn validate(&self) -> Result<(), crate::Error> {
         if self.subscribe_channel_capacity < self.max_flush_batch {
-            return Err(crate::error::Error::Config(
-                ConfigError::InvalidConfiguration(format!(
+            return Err(crate::Error::Config(ConfigError::InvalidConfiguration(
+                format!(
                     "replica_log_subscribe_channel_capacity ({}) must be >= \
                  replica_log_max_flush_batch ({}): one flush batch would shed \
                  every subscriber on the node",
                     self.subscribe_channel_capacity, self.max_flush_batch,
-                )),
-            ));
+                ),
+            )));
         }
         if self.fetch_sweep_interval.is_zero() {
-            return Err(crate::error::Error::Config(
-                ConfigError::InvalidConfiguration("fetch_sweep_interval must be > 0".to_owned()),
-            ));
+            return Err(crate::Error::Config(ConfigError::InvalidConfiguration(
+                "fetch_sweep_interval must be > 0".to_owned(),
+            )));
         }
         Ok(())
     }
@@ -777,7 +798,7 @@ mod tests {
             collected.iter().all(|o| matches!(
                 o,
                 Ok(WriteOutcome::Rejected {
-                    error: Error::Consensus(ConsensusError::NotAReplica { .. }),
+                    error: zslg_log::Error::Consensus(ConsensusError::NotAReplica { .. }),
                     ..
                 })
             )),

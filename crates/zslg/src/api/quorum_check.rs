@@ -1,5 +1,5 @@
 //! Catch up with a quorum of replicas — the one operation behind
-//! [`Reader::sync_quorum`](crate::api::Reader::sync).
+//! [`Reader::sync_quorum`](zslg_log::Reader::sync).
 //!
 //! Its own trait rather than a `Reader` method because the debouncer that paces
 //! it (`learner::quorum::QuorumReadDebouncer`) is a `QuorumCheck` too: one

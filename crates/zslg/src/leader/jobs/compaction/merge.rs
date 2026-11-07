@@ -256,6 +256,7 @@ async fn merge_group(
 )]
 mod tests {
     use super::*;
+    use crate::error::Home as _;
     use crate::test_stream::ChannelTestExt as _;
     use zslg_log_types::LogIndex;
     use zslg_node_types::NodeId;
@@ -438,7 +439,8 @@ mod tests {
 
     use uuid::Uuid;
 
-    use crate::api::{LocalStoreMut, SnapshotStore, StableLogSnapshot};
+    use crate::api::SnapshotStore;
+    use zslg_log::{LocalStoreMut, StableLogSnapshot};
 
     use crate::leader::jobs::snapshot::create::{
         SnapshotEntryInputs, SnapshotResult, create_snapshot_entry,
@@ -473,7 +475,7 @@ mod tests {
         // verdict as "disconnected, not yet closed" — an abort.
         closer.close();
         drop(tx);
-        store.integrate_loop(ch).await
+        store.integrate_loop(ch).await.home()
     }
 
     fn make_data(seed: u32, hlc_ms: u64, blob: &[u8]) -> Data {

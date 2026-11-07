@@ -11,11 +11,11 @@
 
 use std::sync::Arc;
 
-use crate::api::ArchiveStream;
-use crate::api::{
-    ArchiveBounds, ArchiveUpperBound, RaftStateView, SnapshotStore, StableArchiveReader,
-};
-use crossbeam_combinators::{Channel, Contiguous, NonDecreasing};
+use crate::api::{RaftStateView, SnapshotStore};
+use crate::error::Error;
+use crossbeam_combinators::{Channel, Contiguous, Finite, NonDecreasing, OrderedChannel};
+use zslg_log::ArchiveStream;
+use zslg_log::{ArchiveBounds, ArchiveUpperBound, StableArchiveReader};
 use zslg_log_types::LogIndex;
 use zslg_log_types::SnapshotEntry;
 use zslg_snapshot_types::SnapshotMetadata;
@@ -91,29 +91,37 @@ impl StableArchiveReader for ObjectStoreArchiveReader {
     ///     ─ Contiguous from after ─ covers(..until) ─ also NonDecreasing<Hlc>
     /// ```
     fn stream(&self, bounds: ArchiveBounds) -> ArchiveStream {
-        let covering =
-            covering_snapshots(&self.raft_state.snapshot().manifest_state.manifest, bounds);
-        let phases = covering.into_iter().map(|meta| {
-            let store = Arc::clone(&self.snapshot_store);
-            Channel::defer_async(&self.runtime, move || async move {
-                store
-                    .read_snapshot(
-                        meta.snapshot_id,
-                        zslg_snapshot_types::ObjectStoreReason::ArchiveRead,
-                    )
-                    .await
-                    .unwrap_or_else(|e| Channel::once(Err(e)))
-            })
-        });
-        let ch = Channel::chain_all(phases)
-            .take_while(not_above(bounds.until))
-            .filter_above::<LogIndex>(bounds.after)
-            .ordered::<Contiguous<LogIndex>>(bounds.after, "archive tiling");
-        let ch = match bounds.until {
-            ArchiveUpperBound::IndexExclusive(until) => ch.covers(..until, "archive window"),
-            ArchiveUpperBound::Unbounded => ch,
-        };
-        ch.also::<NonDecreasing<Hlc>>(None, "archive HLC")
+        let run =
+            || -> OrderedChannel<Result<SnapshotEntry, Error>, Contiguous<LogIndex>, Finite> {
+                let covering =
+                    covering_snapshots(&self.raft_state.snapshot().manifest_state.manifest, bounds);
+                let phases = covering.into_iter().map(|meta| {
+                    let store = Arc::clone(&self.snapshot_store);
+                    Channel::defer_async(&self.runtime, move || async move {
+                        store
+                            .read_snapshot(
+                                meta.snapshot_id,
+                                zslg_snapshot_types::ObjectStoreReason::ArchiveRead,
+                            )
+                            .await
+                            .unwrap_or_else(|e| Channel::once(Err(e)))
+                    })
+                });
+                let ch = Channel::chain_all(phases)
+                    .take_while(not_above(bounds.until))
+                    .filter_above::<LogIndex>(bounds.after)
+                    .ordered::<Contiguous<LogIndex>>(bounds.after, "archive tiling");
+                let ch = match bounds.until {
+                    ArchiveUpperBound::IndexExclusive(until) => {
+                        ch.covers(..until, "archive window")
+                    }
+                    ArchiveUpperBound::Unbounded => ch,
+                };
+                ch.also::<NonDecreasing<Hlc>>(None, "archive HLC")
+            };
+        let result: OrderedChannel<Result<SnapshotEntry, Error>, Contiguous<LogIndex>, Finite> =
+            run();
+        result.err_into()
     }
 }
 

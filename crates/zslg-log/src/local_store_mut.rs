@@ -16,7 +16,7 @@
 //! everything it forwarded has committed, or the cursor re-read that measures
 //! an attempt's progress would under-report it.
 
-use crate::api::LocalStoreView;
+use crate::LocalStoreView;
 use crossbeam_combinators::Channel;
 use zslg_log_types::Data;
 use zslg_log_types::LogIndex;
@@ -24,7 +24,7 @@ use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 
 #[async_trait::async_trait]
-pub(crate) trait LocalStoreMut: LocalStoreView {
+pub trait LocalStoreMut: LocalStoreView {
     /// Feed `records` into the store until it ends, then return once
     /// everything forwarded has committed. An `Err` item ends the call early
     /// and is returned as-is.

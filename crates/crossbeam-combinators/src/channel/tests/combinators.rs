@@ -296,3 +296,24 @@ fn from_vec_empty_disconnects_immediately() {
     let mut ch: Channel<u32, Finite> = Channel::from_vec(vec![]);
     assert_eq!(ch.recv(), Err(End::Complete));
 }
+
+#[derive(Debug, PartialEq)]
+struct Narrow(u8);
+#[derive(Debug, PartialEq)]
+struct Wide(String);
+
+impl From<Narrow> for Wide {
+    fn from(n: Narrow) -> Self {
+        Wide(format!("narrow {}", n.0))
+    }
+}
+
+#[test]
+fn err_into_converts_errors_and_leaves_values() {
+    let items: Vec<Result<u32, Narrow>> = vec![Ok(1), Err(Narrow(7)), Ok(3)];
+    let mut ch = Channel::from_vec(items).err_into::<Wide>();
+    assert_eq!(ch.recv(), Ok(Ok(1)));
+    assert_eq!(ch.recv(), Ok(Err(Wide("narrow 7".into()))));
+    assert_eq!(ch.recv(), Ok(Ok(3)));
+    assert_eq!(ch.recv(), Err(End::Complete));
+}

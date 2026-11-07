@@ -64,7 +64,7 @@ mod tests;
 pub(crate) mod writer;
 pub(crate) mod writer_node;
 
-pub use crate::api::{RaftStateView, Reader, StableStream, Writer};
+pub use crate::api::RaftStateView;
 pub use crate::error::Error;
 pub use crate::follower_node::{FollowerNode, FollowerNodeConfig};
 pub use crate::hlc::HlcClock;
@@ -81,6 +81,7 @@ pub use zslg_consensus_types::{
     ReplicaMembership, SpareSelectionStrategy,
 };
 pub use zslg_lifecycle_types::{ConfigError, LifecycleError};
+pub use zslg_log::{Error as LogApiError, Reader, StableStream, Writer};
 pub use zslg_log_types::{Data, DataId, LogError, LogIndex, StableLogEvent, UnstableEvent};
 pub use zslg_net_types::{HostPort, NetError, PeerAddr, ServerName};
 pub use zslg_node_types::NodeId;

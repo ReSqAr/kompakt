@@ -37,11 +37,12 @@ use parking_lot::Mutex as SyncMutex;
 use tokio::sync::oneshot;
 
 use crate::api::QuorumCheck;
-use crate::api::{LocalStoreView, RaftStateView, Replica, Router, StableLogSnapshot};
+use crate::api::{RaftStateView, Router};
 use crate::error::Error;
 use crate::metrics::OpState;
 use crate::quorum::{FanOutResponse, fan_out_quorum};
 use zslg_consensus_types::{RaftManifestState, RaftState};
+use zslg_log::{LocalStoreView, Replica, StableLogSnapshot};
 use zslg_node_types::NodeId;
 
 // ── Multi-replica quorum check ──────────────────────────────────────────────
@@ -504,10 +505,10 @@ mod tests {
 
     #[async_trait]
     impl LocalStoreView for StubLocalStore {
-        fn stream_above_hlc(&self, _threshold: Option<Hlc>) -> crate::api::LocalStoreStream {
+        fn stream_above_hlc(&self, _threshold: Option<Hlc>) -> zslg_log::LocalStoreStream {
             unimplemented!()
         }
-        fn stream_window(&self, _above: Option<Hlc>, _upto: Hlc) -> crate::api::LocalStoreStream {
+        fn stream_window(&self, _above: Option<Hlc>, _upto: Hlc) -> zslg_log::LocalStoreStream {
             unimplemented!()
         }
         fn subscribe_integrated(&self) -> tokio::sync::watch::Receiver<()> {
@@ -524,14 +525,21 @@ mod tests {
                 "stub unstable",
             )
         }
-        async fn subscription_cursor(&self, upstream: NodeId) -> Result<Option<LogIndex>, Error> {
-            Ok(self
-                .inner
-                .lock()
-                .expect("lock")
-                .cursors
-                .get(&upstream)
-                .copied())
+        async fn subscription_cursor(
+            &self,
+            upstream: NodeId,
+        ) -> Result<Option<LogIndex>, zslg_log::Error> {
+            let result: Result<Option<LogIndex>, Error> = async {
+                Ok(self
+                    .inner
+                    .lock()
+                    .expect("lock")
+                    .cursors
+                    .get(&upstream)
+                    .copied())
+            }
+            .await;
+            result.map_err(Into::into)
         }
     }
 

@@ -17,9 +17,9 @@
 //! reconnect from a peer that is merely flaky. Neither half is enough alone.
 
 use crate::Error;
-use crate::api::{LocalStoreMut, Replica};
 use crate::hlc::HlcClock;
 use std::sync::Arc;
+use zslg_log::{LocalStoreMut, Replica};
 use zslg_log_types::Data;
 use zslg_log_types::LogError;
 use zslg_log_types::LogIndex;
@@ -103,7 +103,7 @@ impl ReplicationSubscriber {
             Err(e) => {
                 return InnerOutcome {
                     resume_from: None,
-                    result: Err(e),
+                    result: Err(e.into()),
                 };
             }
         };
@@ -129,7 +129,7 @@ impl ReplicationSubscriber {
             .upstream
             .subscribe_from(resume_from)
             .into_channel()
-            .filter_map(move |item: Result<(LogIndex, Data), Error>| {
+            .filter_map(move |item: Result<(LogIndex, Data), zslg_log::Error>| {
                 let (idx, data) = match item {
                     Ok(v) => v,
                     // In-band: `integrate_loop` stops on it and returns it.
@@ -155,10 +155,10 @@ impl ReplicationSubscriber {
                 "upstream declared the stream complete, but a \
                  subscription cannot complete",
             )),
-            Err(Error::Log(LogError::SubscriptionStreamEnded { reason })) => {
+            Err(zslg_log::Error::Log(LogError::SubscriptionStreamEnded { reason })) => {
                 Err(Error::subscription_ended(peer_id, reason))
             }
-            Err(other) => Err(other),
+            Err(other) => Err(other.into()),
         }
     }
 }
@@ -184,11 +184,11 @@ mod tests {
     use futures::stream::BoxStream;
 
     use super::*;
-    use crate::api::{LocalStoreView, Replica, StampedWrite, WriteOutcome};
     use crate::hlc::HlcClock;
     use crate::tests::{fresh_local, make_meta, upstream as upstream_id};
     use crossbeam_combinators::{Channel, Finite, Infinite};
     use zslg_consensus_types::ReplicaStatus;
+    use zslg_log::{LocalStoreView, Replica, StampedWrite, WriteOutcome};
     use zslg_log_types::Data;
     use zslg_log_types::LogIndex;
 
@@ -231,13 +231,16 @@ mod tests {
         fn write(
             &self,
             _: Channel<StampedWrite, Finite>,
-        ) -> Channel<Result<WriteOutcome, Error>, Infinite> {
-            unimplemented!()
+        ) -> Channel<Result<WriteOutcome, zslg_log::Error>, Infinite> {
+            let run = || -> Channel<Result<WriteOutcome, Error>, Infinite> { unimplemented!() };
+            let result: Channel<Result<WriteOutcome, Error>, Infinite> = run();
+            result.err_into()
         }
-        async fn fetch_status(&self) -> Result<ReplicaStatus, Error> {
-            unimplemented!()
+        async fn fetch_status(&self) -> Result<ReplicaStatus, zslg_log::Error> {
+            let result: Result<ReplicaStatus, Error> = async { unimplemented!() }.await;
+            result.map_err(Into::into)
         }
-        fn subscribe_from(&self, _from: Option<LogIndex>) -> crate::api::ReplicaStream {
+        fn subscribe_from(&self, _from: Option<LogIndex>) -> zslg_log::ReplicaStream {
             let items = self.items.lock().expect("lock").take().unwrap_or_default();
             Channel::from_vec(
                 items
@@ -250,8 +253,15 @@ mod tests {
         }
         async fn subscribe_status(
             &self,
-        ) -> Result<BoxStream<'static, Result<ReplicaStatus, Error>>, Error> {
-            unimplemented!()
+        ) -> Result<BoxStream<'static, Result<ReplicaStatus, zslg_log::Error>>, zslg_log::Error>
+        {
+            let result: Result<BoxStream<'static, Result<ReplicaStatus, Error>>, Error> =
+                async { unimplemented!() }.await;
+            result
+                .map(|s| {
+                    futures::StreamExt::boxed(futures::StreamExt::map(s, |r| r.map_err(Into::into)))
+                })
+                .map_err(Into::into)
         }
     }
 
@@ -264,22 +274,33 @@ mod tests {
         fn write(
             &self,
             _: Channel<StampedWrite, Finite>,
-        ) -> Channel<Result<WriteOutcome, Error>, Infinite> {
-            unimplemented!()
+        ) -> Channel<Result<WriteOutcome, zslg_log::Error>, Infinite> {
+            let run = || -> Channel<Result<WriteOutcome, Error>, Infinite> { unimplemented!() };
+            let result: Channel<Result<WriteOutcome, Error>, Infinite> = run();
+            result.err_into()
         }
-        async fn fetch_status(&self) -> Result<ReplicaStatus, Error> {
-            unimplemented!()
+        async fn fetch_status(&self) -> Result<ReplicaStatus, zslg_log::Error> {
+            let result: Result<ReplicaStatus, Error> = async { unimplemented!() }.await;
+            result.map_err(Into::into)
         }
-        fn subscribe_from(&self, _from: Option<LogIndex>) -> crate::api::ReplicaStream {
+        fn subscribe_from(&self, _from: Option<LogIndex>) -> zslg_log::ReplicaStream {
             let (tx, rx) = crossbeam_channel::bounded::<Result<(LogIndex, Data), Error>>(1);
             drop(tx); // the peer went away
-            Channel::from_infinite(rx, "client subscribe stream")
-                .ordered(None, "replica subscription")
+            (Channel::from_infinite(rx, "client subscribe stream")
+                .ordered(None, "replica subscription"))
+            .err_into()
         }
         async fn subscribe_status(
             &self,
-        ) -> Result<BoxStream<'static, Result<ReplicaStatus, Error>>, Error> {
-            unimplemented!()
+        ) -> Result<BoxStream<'static, Result<ReplicaStatus, zslg_log::Error>>, zslg_log::Error>
+        {
+            let result: Result<BoxStream<'static, Result<ReplicaStatus, Error>>, Error> =
+                async { unimplemented!() }.await;
+            result
+                .map(|s| {
+                    futures::StreamExt::boxed(futures::StreamExt::map(s, |r| r.map_err(Into::into)))
+                })
+                .map_err(Into::into)
         }
     }
 

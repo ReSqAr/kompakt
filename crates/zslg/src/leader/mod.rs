@@ -32,12 +32,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::api::PeersWatcher;
-use crate::api::{
-    LocalStoreView, RaftLeadership, RaftStateView, Router, SnapshotStore, StableLogSnapshot,
-    StateReplicator,
-};
+use crate::api::{RaftLeadership, RaftStateView, Router, SnapshotStore, StateReplicator};
 use crate::raft::MembershipConfig;
 use shutdown::Shutdown;
+use zslg_log::{LocalStoreView, StableLogSnapshot};
 use zslg_time::Clock;
 
 /// The leader-loop config bundle. Produced by

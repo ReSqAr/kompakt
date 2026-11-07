@@ -1,5 +1,5 @@
 //! Per-connection write stream — the remote half of
-//! [`Replica::write`](crate::api::Replica::write).
+//! [`Replica::write`](zslg_log::Replica::write).
 //!
 //! **One call, one TCP connection, no reopen.** The stream drives writes off
 //! `input` and yields their outcomes; when the connection breaks it simply
@@ -13,7 +13,6 @@
 use std::sync::Weak;
 use zslg_lifecycle_types::LifecycleError;
 
-use crate::api::{StampedWrite, WriteOutcome};
 use crate::error::Error;
 use crate::metrics;
 use crate::network::client::{RpcClient, Target};
@@ -21,10 +20,11 @@ use crate::network::framing::{TcpFrameSink, TcpFrameStream, adopt_blocking};
 use crate::network::messages::WriteOutcome as WireWriteOutcome;
 use crate::network::messages::{RpcReplicaRequest, RpcRequest, WriteStreamResponse};
 use crossbeam_combinators::{Channel, Feed, Finite, Infinite};
+use zslg_log::{StampedWrite, WriteOutcome};
 use zslg_log_types::Data;
 
 /// Open a write stream to `target` over **one** connection. Drives writes off
-/// `input`, yielding their outcomes. See [`Replica::write`](crate::api::Replica::write).
+/// `input`, yielding their outcomes. See [`Replica::write`](zslg_log::Replica::write).
 ///
 /// Only the connect is async; once dialed, the socket is adopted as a blocking std
 /// stream and driven **fully synchronously** by two `spawn_blocking` loops — the
@@ -144,7 +144,7 @@ fn resolve_response(
     let write_outcome = if let Some(drift_err) = drift {
         WriteOutcome::Failed {
             data_id,
-            error: drift_err,
+            error: drift_err.into(),
         }
     } else {
         match outcome {
@@ -154,10 +154,13 @@ fn resolve_response(
             },
             WireWriteOutcome::Rejected { error, raft_state } => WriteOutcome::Rejected {
                 data_id,
-                error,
+                error: error.into(),
                 raft_state,
             },
-            WireWriteOutcome::Failed { error } => WriteOutcome::Failed { data_id, error },
+            WireWriteOutcome::Failed { error } => WriteOutcome::Failed {
+                data_id,
+                error: error.into(),
+            },
         }
     };
     // `try_send`: cap ≥ the in-flight window, so a Full would mean the consumer has
@@ -210,7 +213,7 @@ mod tests {
         assert!(matches!(
             rx.try_recv(),
             Some(Ok(WriteOutcome::Failed {
-                error: Error::Clock(ClockError::HlcDriftTooLarge { .. }),
+                error: zslg_log::Error::Clock(ClockError::HlcDriftTooLarge { .. }),
                 ..
             }))
         ));
@@ -233,7 +236,7 @@ mod tests {
         assert!(matches!(
             rx.try_recv(),
             Some(Ok(WriteOutcome::Failed {
-                error: Error::Net(NetError::Rpc(_)),
+                error: zslg_log::Error::Net(NetError::Rpc(_)),
                 ..
             }))
         ));

@@ -31,7 +31,7 @@ use zslg_log_types::{Data, SnapshotEntry, StableLogEvent};
 use zslg_time_types::Hlc;
 
 #[async_trait::async_trait]
-pub(crate) trait StableLogSnapshot: Send + Sync + 'static {
+pub trait StableLogSnapshot: Send + Sync + 'static {
     /// Recomputed from the log itself on open, so it cannot drift: there is no
     /// separately-persisted "loaded index" marker to fall out of step with the
     /// data.

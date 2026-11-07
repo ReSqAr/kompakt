@@ -15,6 +15,7 @@
     clippy::type_complexity,
     reason = "test code"
 )]
+use crate::error::Home as _;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -26,10 +27,7 @@ use object_store::memory::InMemory;
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
-use crate::api::{
-    LivenessProbe, LocalStoreMut, RaftLeadership, Router, SnapshotStore, StableLogSnapshot,
-    StateReplicator,
-};
+use crate::api::{LivenessProbe, RaftLeadership, Router, SnapshotStore, StateReplicator};
 use crate::hlc::CutoffApplier;
 use crate::hlc::HlcClock;
 use crate::hlc::HlcGate;
@@ -49,6 +47,7 @@ use shutdown::Shutdown;
 use zslg_consensus_types::ReplicaMembership;
 use zslg_consensus_types::ReplicatedRaftState;
 use zslg_consensus_types::SpareSelectionStrategy;
+use zslg_log::{LocalStoreMut, StableLogSnapshot};
 use zslg_log_types::LogIndex;
 use zslg_log_types::SnapshotEntry;
 use zslg_net_types::PeerAddr;
@@ -80,7 +79,7 @@ async fn integrate_batch(
     // verdict as "disconnected, not yet closed" — an abort.
     closer.close();
     drop(tx);
-    store.integrate_loop(ch).await
+    store.integrate_loop(ch).await.home()
 }
 
 struct NoOpProbe;
@@ -724,7 +723,7 @@ async fn a_wedged_snapshot_build_does_not_block_the_other_jobs() {
         raft_state: nodes.get(&n1).expect("n1").raft_state.clone(),
     });
     let (map_router, faults) = crate::tests::MapPeerRouter::wrap_all_faulty(
-        [(n1, ready as Arc<dyn crate::api::Replica>)]
+        [(n1, ready as Arc<dyn zslg_log::Replica>)]
             .into_iter()
             .collect(),
     );

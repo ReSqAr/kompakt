@@ -4466,6 +4466,7 @@ dependencies = [
  "warn-throttle",
  "zslg-consensus-types",
  "zslg-lifecycle-types",
+ "zslg-log",
  "zslg-log-types",
  "zslg-net-types",
  "zslg-node-types",
@@ -4500,6 +4501,25 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "zslg-log"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "crossbeam-combinators",
+ "error-union",
+ "futures",
+ "tokio",
+ "zslg-consensus-types",
+ "zslg-lifecycle-types",
+ "zslg-log-types",
+ "zslg-net-types",
+ "zslg-node-types",
+ "zslg-snapshot-types",
+ "zslg-time-types",
 ]
 
 [[package]]
