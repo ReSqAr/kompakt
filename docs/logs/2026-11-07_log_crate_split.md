@@ -299,3 +299,29 @@ sign-off):
   implementations.
 
 Crate count rises from ~55 to ~70.
+
+### D16. Errors: thiserror leaves + a flat `error_union!` per crate (replaces P2)
+
+User's proposal, accepted: no global error crate below the ports. Each crate
+with fallible functions on its boundary declares one error type that merges
+the leaf (group) errors it can carry. With the types/ports split (P1), a ports
+crate may name any group's leaf, so no upward edge arises.
+
+- Leaves: `thiserror` enums per group in the types crates, plus
+  `LifecycleError`/`ConfigError` in `zslg-lifecycle` (D6's `zslg-cancelled`,
+  renamed because it now holds the lifecycle leaf).
+- Unions: `error_union!` (own `macro_rules!`, library `zslg-error-union`).
+  Flat rule: a union holds leaves, never another union, so depth is always
+  `Crate::Leaf::Variant`. `from Other { .. }` generates union→union `From`;
+  the compiler rejects a missing target leaf (E0599) and an incomplete list
+  (E0004). Verified with a three-crate prototype. Convention: a leaf's variant
+  name is its group name in every union.
+- `zslg::Error` = the union of all leaves, in the facade; consumer-visible
+  shape as before (`Error::Consensus(ConsensusError::NotLeader)`).
+
+Libraries evaluated and rejected (both tested in a scratch workspace):
+`error_set` 0.9.2 — aggregates only sets declared in the same invocation; a
+set from another crate fails with "Not a declared error set". `terrors` 0.3.3 —
+works across crates, but type-level `OneOf<(..)>` sets replace `match` with
+`narrow::<T>()` at ~140 match sites and inside ten channel signatures.
+`thiserror`/`snafu`/`derive_more`/`error-stack` have no subset conversion.

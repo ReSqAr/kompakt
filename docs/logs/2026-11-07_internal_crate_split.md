@@ -40,8 +40,7 @@ candidate  foundation = several domain crates, each types+traits (time, log, con
 
 ## After pass 2
 
-- Most consequential for sign-off: P2 (D4 change: ports return the composed
-  error). Expected answer: accept, since the alternative is a catch-all.
+- P2 superseded by D16 (user's per-crate unions + own macro).
 - Most likely pushback: the number of assemblies (8), and whether every group
   needs a types/ports split (time's port crate is one trait).
 - Implementation rule from the user: stop and ask when the plan does not fit.

@@ -29,14 +29,13 @@ convention the module graph already violates — is enforced by Cargo.
                                               │
   procedures        quorum-read · net-wire     (shared logic over the foundation)
                                               │
-  ports             zslg-time · -log · -snapshot · -consensus · -net   (traits)
-                                              │
-  error             zslg-error                 (composes the group errors)
+  ports             zslg-time · -log · -snapshot · -consensus · -net   (traits;
+                                               every crate has its own error union)
                                               │
   types             zslg-<group>-types: time · log · snapshot · consensus · raft · net
                                               │
-  libraries         bytesize · warn-throttle · cancelled · shutdown · framing ·
-                    metrics-kit
+  libraries         bytesize · warn-throttle · lifecycle · shutdown · framing ·
+                    metrics-kit · database · error-union
   fakes             zslg-<group>-fake, next to each ports crate
 ```
 
@@ -89,12 +88,11 @@ normal dependencies; dev-dependencies follow §7.3.
 
 | role | names | contents | may depend on |
 |---|---|---|---|
-| library | `zslg-bytesize`, `-warn-throttle`, `-cancelled`, `-shutdown`, `-framing`, `-metrics-kit`, `-database` | code that knows no zslg domain | other libraries |
-| types | `zslg-<group>-types` | data, invariants over it, shared cells, group error, label enums | libraries, lower types |
-| error | `zslg-error` | the composed `Error` | types |
-| ports | `zslg-<group>` | traits; re-exports its group's types | types, error, lower ports |
-| procedure | `zslg-quorum-read`, `zslg-net-wire` | shared logic over the foundation, implements no port | ports, types, error, libraries |
-| fake | `zslg-<group>-fake` | in-memory port implementations | ports, types, error, libraries |
+| library | `zslg-bytesize`, `-warn-throttle`, `-lifecycle`, `-shutdown`, `-framing`, `-metrics-kit`, `-database`, `-error-union` | code that knows no zslg domain | other libraries |
+| types | `zslg-<group>-types` | data, invariants over it, shared cells, the group's leaf error, label enums | libraries, lower types |
+| ports | `zslg-<group>` | traits, the crate's error union; re-exports its group's types | types, lower ports, libraries |
+| procedure | `zslg-quorum-read`, `zslg-net-wire` | shared logic over the foundation, implements no port | ports, types, libraries |
+| fake | `zslg-<group>-fake` | in-memory port implementations | ports, types, libraries |
 | implementation | `zslg-<what>` | implements one or a few ports | everything below, nothing beside |
 | assembly | `zslg-<role>-node`, `zslg-learner`, `zslg-leader`, `zslg-raft-setup`, `zslg-observability` | wiring of implementations | implementations, lower assemblies, everything below |
 | facade | `zslg` | `pub use` only, integration tests, examples | assemblies, ports |
@@ -103,7 +101,7 @@ normal dependencies; dev-dependencies follow §7.3.
 
 Three rules keep the import patterns boring:
 
-1. **One path per item per layer.** Outside the types and error layers, a type
+1. **One path per item per layer.** Outside the types layer, a type
    is imported through its group's ports crate (`use zslg_log::{Reader, Data,
    LogIndex}`), never from `zslg-log-types` directly. This is the import
    pattern of D3; the types crates exist for the dependency graph, not for
@@ -148,10 +146,11 @@ raises `NotReady`, `ObjectStore`, `Lagged`; `replica/mod.rs` raises `HlcCutoff`,
 `NotAReplica`, `Shutdown`; `snapshot_store.rs` raises `Storage` and
 `StreamTruncated`. If a port could return only its own group's error (first
 draft of D4), the only moves would be a catch-all `Other(Box<dyn Error>)` or an
-upward edge. So the composed `Error` moves from the facade down to `zslg-error`,
-between the types and the ports. Group errors stay where D4 put them, as
-structured enums in their types crates; ports return `zslg_error::Error`; the
-facade re-exports it as `zslg::Error`. **This changes D4** (§10.4).
+upward edge. The types/ports split of §3.1 opens a third move: a crate's error
+is a *union* of the leaf errors it can carry, from any group (D16, §4.4). The
+union stays flat — it holds leaves, never another crate's union — so the depth
+is always `Crate::Leaf::Variant`, and converting one union into a wider one is
+generated and checked by the compiler.
 
 ### 3.3 openraft would leak into everyone
 
@@ -233,15 +232,37 @@ RaftStateHandle, EvictionStatus         -> zslg-consensus-types
 Fields that were `pub(crate)` (`NodeId(pub(crate) Uuid)`) get the smallest
 accessor implementation crates need; nothing new reaches the facade.
 
-### 4.4 Errors
+### 4.4 Errors: leaves and flat unions (D4, D16)
 
-Group errors (D4) live in the types crates: `ClockError`, `LogError`,
-`SnapshotError`, `ConsensusError`, `NetError`. `zslg-error` composes them with
-`#[from]`, plus the cross-cutting and startup variants (`Cancelled`,
-`Shutdown` from `zslg-cancelled`, `InvalidConfiguration`, `NotReady`,
-`StartupCancelled`, `HardCrashDataLoss`). Ports return `zslg_error::Error`; a
-function wholly inside one group may return its group error.
+**Leaves** are `thiserror` enums, one per group, in the types crates:
+`ClockError`, `LogError`, `SnapshotError`, `ConsensusError`, `NetError`; plus
+`LifecycleError` (`Cancelled`, `Shutdown`, `NotReady`, `StartupCancelled`,
+`HardCrashDataLoss`) and `ConfigError` (`InvalidConfiguration`) in the
+`zslg-lifecycle` library.
 
+**Unions** are declared with `error_union!` from the `zslg-error-union`
+library (~60 lines of `macro_rules!`). Every crate with fallible functions on
+its boundary — ports crates, implementations, procedures, assemblies — has one:
+
+```rust
+error_union! {
+    pub ReadError { Log(LogError), Snapshot(SnapshotError), Lifecycle(LifecycleError) }
+    from ArchiveError { Log, Snapshot }   // From<ArchiveError> for ReadError
+}
+```
+
+The macro generates the enum, `From<Leaf>`, `Display`, `Error::source` and the
+listed union→union `From`s. The compiler enforces the subset rule both ways:
+a target without one of the source's leaves fails (E0599), and a `from` list
+that omits one of the source's leaves fails (E0004, non-exhaustive match).
+Prototyped across three crates before writing this. The convention that makes
+it work: a leaf has the same variant name in every union — its group name.
+
+Channel seams (§3.1: ten port signatures carry `Result<_, E>` in channel items)
+convert with one `map_err(Into::into)` per source; the generated `From`s make
+that the only adaptation.
+
+`zslg::Error` (public, D11) is the union of all leaves, declared in the facade.
 The visible change for consumers is the nesting: `Error::NotLeader { .. }`
 becomes `Error::Consensus(ConsensusError::NotLeader { .. })`. nlnr does not
 match on `zslg::Error`; nvzn's uses are `Result<_, zslg::Error>`.
@@ -425,7 +446,7 @@ cargo test --workspace
 describe_metrics() golden       (names, kinds, units, help — identical)
 ```
 
-At milestones (after §9 step 6, step 12, the end): btrb and nvzn examples build;
+At milestones (after §11 step 5, step 12, the end): btrb and nvzn examples build;
 nlnr builds against the facade; loadgen before/after; a clean build and an
 incremental build of one leaf crate are timed for the post document.
 
@@ -433,8 +454,9 @@ incremental build of one leaf crate are timed for the post document.
 
 A test in the facade reads `cargo metadata`, assigns each workspace crate its
 role from the name (§2.1), and fails on any normal or dev dependency the role
-table does not allow, and on any crate outside types/error/ports that depends
-on a `-types` crate directly (§2.2 rule 1). It is added in the first commit so
+table does not allow, and on any crate outside types/ports that depends
+on a `-types` crate directly (§2.2 rule 1), and on an `error_union!` that
+names another union as a leaf. It is added in the first commit so
 every later commit is checked.
 
 ---
@@ -482,6 +504,9 @@ types on ports; a central metrics crate; a `zslg-support` crate; nvzn
 importing group crates; nested directories; a PR per layer or per crate;
 implementations depending on each other. From this pass: types and ports in one
 crate per group (§3.1); ports returning only their group's error (§3.2);
+a composed `zslg-error` crate below the ports (superseded by D16);
+`error_set` (cannot aggregate sets across crates — verified) and `terrors`
+(works across crates, but type-level sets replace `match` at ~140 sites);
 the facade as the only composition root (§3.5); dev-dependencies between
 implementations (§7.3).
 
@@ -510,8 +535,9 @@ fakes, sideways edges.
 Changed in this pass:
 1. §3.1/§4.1–4.2: each group is a types crate and a ports crate (+6 crates,
    incl. `zslg-raft-types`). Ports re-export their types (§2.2 rule 1).
-2. §3.2/§4.4: **D4 changes** — ports return the composed `Error`, which now
-   lives in `zslg-error` below the ports; group errors stay structured inside it.
+2. §3.2/§4.4: errors are `thiserror` leaves per group plus a flat
+   `error_union!` per crate (D16); no global error crate. D6's `zslg-cancelled`
+   becomes `zslg-lifecycle`, since it now holds the lifecycle leaf.
 3. §2.1/§3.4: new role *procedure* (`zslg-quorum-read`, `zslg-net-wire`,
    `nvzn-store-overlay`).
 4. §3.5/§6: new role *assembly* (8 crates); the facade only re-exports.
@@ -531,26 +557,25 @@ first.
 
 ```text
  1  layering test (roles from names; passes trivially on today's two crates)
- 2  libraries: bytesize, warn-throttle, cancelled, shutdown, framing, metrics-kit,
-    database
+ 2  libraries: bytesize, warn-throttle, lifecycle, shutdown, framing, metrics-kit,
+    database, error-union
  3  types: time, log, snapshot, consensus, raft, net  (+ the four moves of §4.3)
- 4  zslg-error
- 5  ports: time, log, snapshot, consensus (+ ClusterBootstrap), net
- 6  fakes: time, log (+ TestLog), snapshot, consensus, net
+ 4  ports: time, log, snapshot, consensus (+ ClusterBootstrap), net
+ 5  fakes: time, log (+ TestLog), snapshot, consensus, net
  ── checkpoint: foundation enforced; one big implementation crate left; all green
- 7  procedures: quorum-read, net-wire
- 8  object-store, hlc-clock, hlc-gate
- 9  net-client, net-server, net-router
-10  raft-storage, raft-rpc, raft-state, raft-tracker, raft, raft-startup
-11  local-store, stable-log, stable-archive, subscriber, reader
-12  replica-log, replica-service, writer
-13  leader-integrator, leader-membership, leader-snapshot, leader-compaction
+ 6  procedures: quorum-read, net-wire
+ 7  object-store, hlc-clock, hlc-gate
+ 8  net-client, net-server, net-router
+ 9  raft-storage, raft-rpc, raft-state, raft-tracker, raft, raft-startup
+10  local-store, stable-log, stable-archive, subscriber, reader
+11  replica-log, replica-service, writer
+12  leader-integrator, leader-membership, leader-snapshot, leader-compaction
  ── checkpoint: no implementation code left in zslg
-14  assemblies: raft-setup, learner, leader, observability, the four nodes
-15  facade reduced to pub use + integration tests + examples
-16  nvzn: types, metrics, store, store-overlay, store-rocksdb, store-fake,
+13  assemblies: raft-setup, learner, leader, observability, the four nodes
+14  facade reduced to pub use + integration tests + examples
+15  nvzn: types, metrics, store, store-overlay, store-rocksdb, store-fake,
     resultset, dispatcher, live, reader, facade
 ```
 
-After step 16 a post document records the review, surprises and build-time
+After step 15 a post document records the review, surprises and build-time
 numbers.
