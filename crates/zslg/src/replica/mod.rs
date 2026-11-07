@@ -43,7 +43,7 @@ use tokio::sync::watch;
 
 use tracing::{info, warn};
 
-use crate::api::{Clock as _, PeersWatcher, RaftStateView, Replica, StampedWrite, WriteOutcome};
+use crate::api::{PeersWatcher, RaftStateView, Replica, StampedWrite, WriteOutcome};
 use crate::error::Error;
 use crate::hlc::{CutoffApplier, HlcClock, HlcGate, HlcGuard};
 use crate::metrics::{self, ReplicaWriteState};
@@ -55,6 +55,7 @@ use zslg_consensus_types::ReplicaStatus;
 use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};
 use zslg_node_types::NodeId;
+use zslg_time::Clock as _;
 use zslg_time_types::Hlc;
 
 /// Minimum spacing between replica-write-rejection `warn!`s. Rejections recur at

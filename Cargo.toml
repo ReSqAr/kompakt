@@ -74,6 +74,7 @@ zslg-net-types = { path = "crates/zslg-net-types" }
 zslg-node-types = { path = "crates/zslg-node-types" }
 zslg-raft-types = { path = "crates/zslg-raft-types" }
 zslg-snapshot-types = { path = "crates/zslg-snapshot-types" }
+zslg-time = { path = "crates/zslg-time" }
 zslg-time-types = { path = "crates/zslg-time-types" }
 
 [workspace.lints.clippy]

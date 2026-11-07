@@ -37,7 +37,7 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 use crate::Error;
-use crate::api::{Clock, ReplicaClient, Router};
+use crate::api::{ReplicaClient, Router};
 use crate::network::client::RpcClient;
 pub(crate) use crate::network::client::RpcClientConfig;
 use crate::network::server::DispatchHandler;
@@ -50,6 +50,7 @@ pub(crate) use peers::permissive_gate;
 pub(crate) use peers::static_peers;
 pub(crate) use router::{LocalReplicaClient, PeerRouter, RemoteRouter};
 use shutdown::Shutdown;
+use zslg_time::Clock;
 
 /// Build an outbound [`Router`] from the client tuning config. The `RpcClient`
 /// is captured inside and never handed back, so it stays confined to `network`.

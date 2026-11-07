@@ -16,9 +16,8 @@
 use std::time::Duration;
 use zslg_time_types::ClockError;
 
-use crate::api::Clock;
-use crate::error::Error;
 use crate::tests::{SharedClockController, SkewedClock};
+use zslg_time::Clock;
 use zslg_time_types::{Hlc, HlcParts};
 
 #[tokio::test]
@@ -38,7 +37,10 @@ async fn peer_clock_diverged_beyond_drift_limit_fails_integrate() {
         .integrate(diverged_peer)
         .expect_err("wildly diverged peer must be rejected by integrate");
     assert!(
-        matches!(err, Error::Clock(ClockError::HlcDriftTooLarge { .. })),
+        matches!(
+            err,
+            zslg_time::Error::Clock(ClockError::HlcDriftTooLarge { .. })
+        ),
         "expected HlcDriftTooLarge, got {err:?}",
     );
 }

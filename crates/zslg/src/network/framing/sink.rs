@@ -19,11 +19,11 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::io::{AsyncWrite, AsyncWriteExt as _};
 
-use crate::api::Clock;
 use crate::error::{Error, ToCodec, ToRpc};
 use crate::network::messages::RpcEnvelope;
 use framing::append_crc32_from;
 use zslg_node_types::NodeId;
+use zslg_time::Clock;
 
 use super::{BACKPRESSURE_BOUNDARY, LEN_PREFIX, MAX_FRAME_LEN, shrink_drained};
 

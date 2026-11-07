@@ -31,12 +31,13 @@ use zslg_log_types::LogError;
 use bytes::Bytes;
 use tracing::warn;
 
-use crate::api::{Clock, RaftStateTracker, Router};
+use crate::api::{RaftStateTracker, Router};
 use crate::error::Error;
 use crate::metrics::{self, OpState};
 use crate::quorum::Coordinator;
 use zslg_log_types::Data;
 use zslg_node_types::NodeId;
+use zslg_time::Clock;
 
 pub(crate) struct WriterConfig {
     pub(crate) node_id: NodeId,

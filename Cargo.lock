@@ -4471,6 +4471,7 @@ dependencies = [
  "zslg-node-types",
  "zslg-raft-types",
  "zslg-snapshot-types",
+ "zslg-time",
  "zslg-time-types",
  "zstd",
 ]
@@ -4554,6 +4555,19 @@ dependencies = [
  "thiserror 2.0.21",
  "zslg-lifecycle-types",
  "zslg-log-types",
+ "zslg-time-types",
+]
+
+[[package]]
+name = "zslg-time"
+version = "0.1.0"
+dependencies = [
+ "error-union",
+ "zslg-consensus-types",
+ "zslg-lifecycle-types",
+ "zslg-log-types",
+ "zslg-net-types",
+ "zslg-snapshot-types",
  "zslg-time-types",
 ]
 

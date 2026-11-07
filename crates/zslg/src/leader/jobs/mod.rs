@@ -34,10 +34,11 @@ use std::time::Duration;
 use tokio::time::Instant;
 
 use crate::api::{
-    Clock, LocalStoreView, RaftLeadership, RaftStateView, Router, SnapshotStore, StableLogSnapshot,
+    LocalStoreView, RaftLeadership, RaftStateView, Router, SnapshotStore, StableLogSnapshot,
 };
 use crate::leader::IntentSubmitter;
 use zslg_node_types::NodeId;
+use zslg_time::Clock;
 
 pub(in crate::leader) mod cleanup;
 pub(in crate::leader) mod compaction;

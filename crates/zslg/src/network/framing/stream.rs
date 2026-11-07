@@ -30,11 +30,11 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::io::{AsyncRead, AsyncReadExt as _};
 
-use crate::api::Clock;
 use crate::error::{Error, ToCodec};
 use crate::network::messages::RpcEnvelope;
 use framing::verify_frame_crc32;
 use zslg_node_types::NodeId;
+use zslg_time::Clock;
 
 use super::{LEN_PREFIX, MAX_FRAME_LEN, READ_CHUNK, shrink_drained};
 
@@ -200,7 +200,7 @@ impl<R> FrameStream<R> {
         }
         // Absorb the peer HLC. On success the clock advances; on drift the error
         // is surfaced (clock not advanced) but the frame is still handed back.
-        let drift = self.clock.integrate(env.hlc).err();
+        let drift = self.clock.integrate(env.hlc).err().map(Error::from);
         Ok((env.inner, drift))
     }
 }

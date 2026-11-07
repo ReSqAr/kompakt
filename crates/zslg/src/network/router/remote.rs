@@ -32,7 +32,7 @@ impl RemoteRouter {
     #[cfg(test)]
     #[must_use]
     pub(crate) fn for_test(
-        clock: Arc<dyn crate::api::Clock>,
+        clock: Arc<dyn zslg_time::Clock>,
         unary_timeout: std::time::Duration,
     ) -> Self {
         let sopts = crate::network::tcp::SocketOpts::for_test();
@@ -61,7 +61,7 @@ impl RemoteRouter {
     #[must_use]
     pub(crate) fn for_test_from_client(
         config: crate::network::RpcClientConfig,
-        clock: Arc<dyn crate::api::Clock>,
+        clock: Arc<dyn zslg_time::Clock>,
     ) -> Self {
         Self::new(RpcClient::new(
             clock,

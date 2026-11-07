@@ -40,7 +40,28 @@ error_union! {
         Net(NetError),
         Consensus(ConsensusError),
     }
+    from zslg_time::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
 }
+
+macro_rules! port_error_bridge {
+    ($($port:path),+ $(,)?) => {$(
+        impl From<Error> for $port {
+            fn from(e: Error) -> Self {
+                match e {
+                    Error::Lifecycle(x) => Self::Lifecycle(x),
+                    Error::Config(x) => Self::Config(x),
+                    Error::Clock(x) => Self::Clock(x),
+                    Error::Log(x) => Self::Log(x),
+                    Error::Snapshot(x) => Self::Snapshot(x),
+                    Error::Net(x) => Self::Net(x),
+                    Error::Consensus(x) => Self::Consensus(x),
+                }
+            }
+        }
+    )+};
+}
+
+port_error_bridge!(zslg_time::Error);
 
 // ── Boxed variant payloads ────────────────────────────────────────────────────
 //

@@ -160,13 +160,13 @@ impl HlcClock {
     }
 }
 
-impl crate::api::Clock for HlcClock {
+impl zslg_time::Clock for HlcClock {
     fn now(&self) -> Hlc {
         self.now()
     }
 
-    fn integrate(&self, peer: Hlc) -> Result<Hlc, Error> {
-        self.integrate(peer)
+    fn integrate(&self, peer: Hlc) -> Result<Hlc, zslg_time::Error> {
+        self.integrate(peer).map_err(Into::into)
     }
 }
 
@@ -462,7 +462,7 @@ mod tests {
     fn clock_trait_now_delegates() {
         let (clock, now_ms) = fixed_clock(1000);
         now_ms.store(777, Ordering::SeqCst);
-        let hlc = <HlcClock as crate::api::Clock>::now(&clock);
+        let hlc = <HlcClock as zslg_time::Clock>::now(&clock);
         assert_eq!(hlc.parts().physical_ms, 777);
     }
 
@@ -474,7 +474,7 @@ mod tests {
             physical_ms: 2_000,
             logical: 0,
         });
-        let merged = <HlcClock as crate::api::Clock>::integrate(&clock, peer).expect("ok");
+        let merged = <HlcClock as zslg_time::Clock>::integrate(&clock, peer).expect("ok");
         assert!(merged > peer);
     }
 

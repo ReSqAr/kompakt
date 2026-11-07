@@ -33,11 +33,12 @@ use std::time::Duration;
 
 use crate::api::PeersWatcher;
 use crate::api::{
-    Clock, LocalStoreView, RaftLeadership, RaftStateView, Router, SnapshotStore, StableLogSnapshot,
+    LocalStoreView, RaftLeadership, RaftStateView, Router, SnapshotStore, StableLogSnapshot,
     StateReplicator,
 };
 use crate::raft::MembershipConfig;
 use shutdown::Shutdown;
+use zslg_time::Clock;
 
 /// The leader-loop config bundle. Produced by
 /// [`ReplicaNodeConfig::leader_loop_config`](crate::replica_node::ReplicaNodeConfig::leader_loop_config).

@@ -45,7 +45,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
 use crate::ByteSize;
-use crate::api::{Clock, StampedWrite, WriteOutcome};
+use crate::api::{StampedWrite, WriteOutcome};
 use crate::error::Error;
 use crate::metrics::OpState;
 use crate::network::framing::{AsyncFrameSink, AsyncFrameStream};
@@ -58,6 +58,7 @@ use crossbeam_combinators::Channel;
 use zslg_log_types::LogIndex;
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
+use zslg_time::Clock;
 
 mod write_stream;
 pub(super) use write_stream::open_write;

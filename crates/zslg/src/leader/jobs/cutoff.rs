@@ -23,12 +23,13 @@ use tokio::time::{Instant, MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::api::{Clock, RaftStateView};
+use crate::api::RaftStateView;
 use crate::error::Error;
 use crate::leader::integrator::{IntentOutcome, IntentSubmitter, RaftIntent};
 use crate::leader::jobs::is_local_leader;
 use crate::metrics::{self, LeaderJob, SnapshotState, SnapshotStep};
 use zslg_node_types::NodeId;
+use zslg_time::Clock;
 use zslg_time_types::Hlc;
 
 /// Spawn `leader:cutoff` on the shutdown tree.

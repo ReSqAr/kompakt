@@ -14,7 +14,7 @@ use futures::stream::BoxStream;
 use parking_lot::Mutex as SyncMutex;
 use tokio::sync::watch;
 
-use crate::api::{Clock, Replica, Router, StampedWrite, WriteOutcome};
+use crate::api::{Replica, Router, StampedWrite, WriteOutcome};
 use crate::error::Error;
 use crate::hlc::{HlcClock, HlcGate};
 use crate::replica::ReplicaLogStore;
@@ -25,6 +25,7 @@ use zslg_consensus_types::{RaftState, ReplicaMembership, ReplicaStatus};
 use zslg_log_types::{DataId, LogIndex};
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
+use zslg_time::Clock;
 use zslg_time_types::Hlc;
 
 /// Control handle for a [`FaultyReplica`]. Clone freely; clones share state.
@@ -342,7 +343,7 @@ impl Clock for FixedClock {
     fn now(&self) -> Hlc {
         self.now
     }
-    fn integrate(&self, peer: Hlc) -> Result<Hlc, crate::Error> {
+    fn integrate(&self, peer: Hlc) -> Result<Hlc, zslg_time::Error> {
         Ok(peer)
     }
 }

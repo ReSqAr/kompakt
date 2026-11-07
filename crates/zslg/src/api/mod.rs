@@ -26,7 +26,6 @@
 //! local `RaftConsensus` — which is what lets the self/loopback path present the
 //! same client surface as a remote peer with no hand-written forwarding.
 
-mod clock;
 mod liveness_probe;
 mod local_store_mut;
 mod local_store_view;
@@ -53,7 +52,6 @@ pub(crate) use peers::PeersWatcher;
 pub use reader::{Reader, StableStream};
 pub use writer::Writer;
 
-pub(crate) use clock::Clock;
 pub(crate) use liveness_probe::LivenessProbe;
 pub(crate) use local_store_mut::LocalStoreMut;
 pub(crate) use local_store_view::{LocalStoreStream, LocalStoreView};

@@ -37,13 +37,13 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, trace, warn};
 
-use crate::api::Clock;
 use crate::error::{Error, ToRpc};
 use crate::metrics::{self};
 use crate::network::framing::{AsyncFrameSink, AsyncFrameStream};
 use crate::network::messages::{RpcFrame, RpcRequest};
 use crate::network::tcp::{self, SocketOpts};
 use zslg_node_types::NodeId;
+use zslg_time::Clock;
 
 mod handlers;
 mod stream_handler;

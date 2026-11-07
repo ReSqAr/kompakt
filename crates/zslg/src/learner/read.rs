@@ -49,7 +49,7 @@
 
 use crate::Error;
 use crate::api::{
-    ArchiveBounds, ArchiveUpperBound, Clock, LocalStoreView, Reader, StableArchiveReader,
+    ArchiveBounds, ArchiveUpperBound, LocalStoreView, Reader, StableArchiveReader,
     StableLogSnapshot,
 };
 use crate::learner::QuorumReadDebouncer;
@@ -64,6 +64,7 @@ use zslg_lifecycle_types::LifecycleError;
 use zslg_log_types::LogIndex;
 use zslg_log_types::{Data, StableLogEvent, UnstableEvent};
 use zslg_node_types::NodeId;
+use zslg_time::Clock;
 use zslg_time_types::Hlc;
 
 /// Whether this node may serve client reads and writes.
@@ -685,7 +686,7 @@ mod tests {
     use zslg_time_types::Hlc;
 
     /// A node clock for the reader under test.
-    fn test_clock() -> Arc<dyn crate::api::Clock> {
+    fn test_clock() -> Arc<dyn zslg_time::Clock> {
         Arc::new(crate::hlc::HlcClock::new(Duration::from_secs(60)))
     }
     use async_trait::async_trait;

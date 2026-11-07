@@ -92,11 +92,11 @@ mod tests {
     use serde::de::DeserializeOwned;
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _, duplex};
 
-    use crate::api::Clock;
     use crate::error::Error;
     use crate::network::messages::RpcEnvelope;
     use framing::verify_frame_crc32;
     use zslg_node_types::NodeId;
+    use zslg_time::Clock;
     use zslg_time_types::Hlc;
 
     #[test]
@@ -127,7 +127,7 @@ mod tests {
         fn now(&self) -> Hlc {
             Hlc(7)
         }
-        fn integrate(&self, peer: Hlc) -> Result<Hlc, Error> {
+        fn integrate(&self, peer: Hlc) -> Result<Hlc, zslg_time::Error> {
             Ok(peer)
         }
     }
