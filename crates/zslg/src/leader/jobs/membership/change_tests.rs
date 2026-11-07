@@ -291,7 +291,7 @@ async fn three_to_five_full_transition_via_state_handle() {
             let cur = leader_sys.raft_state.snapshot();
             leader_sys
                 .raft
-                .client_write(zslg_raft_types::FencedStateWrite {
+                .client_write(zslg_raft::FencedStateWrite {
                     expected_generation: cur.generation,
                     state: ReplicatedRaftState {
                         replica: cur.replica.clone(),
@@ -408,7 +408,7 @@ async fn invariant_joint_exit_waits_for_the_old_set_to_be_drained() {
             let cur = leader_sys.raft_state.snapshot();
             leader_sys
                 .raft
-                .client_write(zslg_raft_types::FencedStateWrite {
+                .client_write(zslg_raft::FencedStateWrite {
                     expected_generation: cur.generation,
                     state: ReplicatedRaftState {
                         replica: cur.replica.clone(),
@@ -448,7 +448,7 @@ async fn invariant_joint_exit_waits_for_the_old_set_to_be_drained() {
         let cur = leader_sys.raft_state.snapshot();
         leader_sys
             .raft
-            .client_write(zslg_raft_types::FencedStateWrite {
+            .client_write(zslg_raft::FencedStateWrite {
                 expected_generation: cur.generation,
                 state: ReplicatedRaftState {
                     replica: cur.replica.clone(),
@@ -698,7 +698,7 @@ async fn resume_from_joint_after_leader_killed_mid_step() {
             let cur = new_sys.raft_state.snapshot();
             new_sys
                 .raft
-                .client_write(zslg_raft_types::FencedStateWrite {
+                .client_write(zslg_raft::FencedStateWrite {
                     expected_generation: cur.generation,
                     state: ReplicatedRaftState {
                         replica: cur.replica.clone(),

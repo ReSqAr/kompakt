@@ -33,29 +33,28 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
+use zslg_consensus::ConsensusError;
 use zslg_consensus::{AddMemberOutcome, RaftStateView};
-use zslg_consensus_types::ConsensusError;
 use zslg_lifecycle_types::LifecycleError;
 use zslg_net::{PeersWatcher, Router};
 use zslg_snapshot::SnapshotStore;
 
-use super::rejoin::{
-    REJOIN_LEADERLESS_GRACE, REJOIN_RECONCILE_INTERVAL, RejoinMonitor, RejoinMonitorInputs,
-    RejoinProbe, RpcRejoinProbe,
+use crate::rejoin::{
+    NodeView, REJOIN_LEADERLESS_GRACE, REJOIN_RECONCILE_INTERVAL, RejoinMonitor,
+    RejoinMonitorInputs, RejoinProbe, RpcRejoinProbe,
 };
 
-use crate::error::Error;
-use crate::raft::{RaftNode, membership_map};
+use crate::Error;
 use shutdown::Shutdown;
-use zslg_consensus::ToRaft;
-use zslg_consensus_types::EvictionStatus;
-use zslg_consensus_types::RaftGeneration;
-use zslg_consensus_types::ReplicatedRaftState;
-use zslg_consensus_types::{RaftState, ReplicaMembership};
-use zslg_net_types::PeerAddr;
-use zslg_node_types::NodeId;
+use zslg_consensus::EvictionStatus;
+use zslg_consensus::NodeId;
+use zslg_consensus::RaftGeneration;
+use zslg_consensus::ReplicatedRaftState;
+use zslg_consensus::{RaftState, ReplicaMembership};
+use zslg_net::PeerAddr;
 use zslg_quorum_read::{FanOutResponse, fan_out_quorum};
-use zslg_raft_types::FencedStateWrite;
+use zslg_raft::FencedStateWrite;
+use zslg_raft::{ClusterBootstrap, membership_map};
 
 const JOIN_INITIAL_BACKOFF: Duration = Duration::from_millis(50);
 const JOIN_MAX_BACKOFF: Duration = Duration::from_secs(10);
@@ -136,15 +135,15 @@ async fn resolve_bootstrap_fence(snapshot_store: &Arc<dyn SnapshotStore>) -> Res
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::raft) struct BootstrapInputs {
-    pub(in crate::raft) has_local_state: bool,
-    pub(in crate::raft) fence_present: bool,
-    pub(in crate::raft) is_bootstrap_node: bool,
-    pub(in crate::raft) in_membership: bool,
+pub(crate) struct BootstrapInputs {
+    pub has_local_state: bool,
+    pub fence_present: bool,
+    pub is_bootstrap_node: bool,
+    pub in_membership: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::raft) enum BootstrapDecision {
+pub(crate) enum BootstrapDecision {
     Rejoin,
     JoinExisting,
     Bootstrap,
@@ -152,7 +151,7 @@ pub(in crate::raft) enum BootstrapDecision {
 }
 
 #[must_use]
-pub(in crate::raft) fn bootstrap_decision(
+pub(crate) fn bootstrap_decision(
     BootstrapInputs {
         has_local_state,
         fence_present,
@@ -178,17 +177,17 @@ pub(in crate::raft) fn bootstrap_decision(
 /// Config-only fields for `run_raft_startup`. Active handles are passed as
 /// separate parameters — this struct carries only tunables and identity.
 /// Produced by [`ReplicaNodeConfig::raft_startup_config`].
-pub(crate) struct RaftStartupConfig {
-    pub(crate) node_id: NodeId,
-    pub(crate) peers_watcher: Arc<dyn PeersWatcher>,
-    pub(crate) is_bootstrap_node: bool,
-    pub(crate) has_local_state: bool,
-    pub(crate) self_peer_addr: PeerAddr,
-    pub(crate) startup_phase_timeout: Duration,
+pub struct RaftStartupConfig {
+    pub node_id: NodeId,
+    pub peers_watcher: Arc<dyn PeersWatcher>,
+    pub is_bootstrap_node: bool,
+    pub has_local_state: bool,
+    pub self_peer_addr: PeerAddr,
+    pub startup_phase_timeout: Duration,
 }
 
-pub(crate) async fn run_raft_startup(
-    raft: Arc<RaftNode>,
+pub async fn run_raft_startup<E>(
+    raft: Arc<dyn ClusterBootstrap>,
     raft_state: Arc<dyn RaftStateView>,
     snapshot_store: Arc<dyn SnapshotStore>,
     router: Arc<dyn Router>,
@@ -200,8 +199,11 @@ pub(crate) async fn run_raft_startup(
         self_peer_addr,
         startup_phase_timeout,
     }: RaftStartupConfig,
-    shutdown: &mut Shutdown<Error>,
-) -> Result<EvictionStatus, Error> {
+    shutdown: &mut Shutdown<E>,
+) -> Result<EvictionStatus, Error>
+where
+    E: From<Error> + From<shutdown::Stopped> + std::fmt::Display + Send + 'static,
+{
     let fence_present = run_phase(
         "fence_check",
         startup_phase_timeout,
@@ -214,7 +216,7 @@ pub(crate) async fn run_raft_startup(
             startup_phase_timeout,
             async {
                 let metrics = {
-                    let mut rx = raft.inner().metrics();
+                    let mut rx = raft.metrics();
                     let started = Instant::now();
                     let mut warn_tick = startup_warn_ticker();
                     loop {
@@ -266,13 +268,16 @@ pub(crate) async fn run_raft_startup(
     ));
     let monitor = RejoinMonitor::new(RejoinMonitorInputs {
         self_node_id: node_id,
-        view: raft.clone(),
+        view: Arc::new(NodeView(raft.clone())),
         probe,
         reconcile_interval: REJOIN_RECONCILE_INTERVAL,
         leaderless_grace: REJOIN_LEADERLESS_GRACE,
         eviction: eviction.clone(),
     });
-    shutdown.spawn("raft:bootstrap_monitor", monitor.run(shutdown.token()));
+    let cancel = shutdown.token();
+    shutdown.spawn("raft:bootstrap_monitor", async move {
+        monitor.run(cancel).await.map_err(E::from)
+    });
     info!("rejoin monitor spawned");
 
     let decision = bootstrap_decision(BootstrapInputs {
@@ -380,7 +385,7 @@ pub(crate) async fn run_raft_startup(
 /// *applied* it), but bounded by apply-lag, never arbitrarily stale. If a quorum
 /// is unreachable, this blocks (backoff) rather than reporting ready.
 async fn wait_for_raft_recent(
-    raft: Arc<RaftNode>,
+    raft: Arc<dyn ClusterBootstrap>,
     router: Arc<dyn Router>,
     raft_state: Arc<dyn RaftStateView>,
     node_id: NodeId,
@@ -414,9 +419,7 @@ async fn wait_for_raft_recent(
             startup_phase_timeout,
             async {
                 let started = Instant::now();
-                let waiter = raft.inner().wait(None);
-                let wait_fut =
-                    waiter.applied_index_at_least(Some(index), "raft startup: catch up to quorum");
+                let wait_fut = raft.wait_applied_at_least(index, "raft startup: catch up to quorum");
                 tokio::pin!(wait_fut);
                 let mut warn_tick = startup_warn_ticker();
                 loop {
@@ -535,7 +538,7 @@ async fn wait_for_replica_set(
 
 async fn bootstrap_single_node_cluster(
     node_id: NodeId,
-    raft: Arc<RaftNode>,
+    raft: Arc<dyn ClusterBootstrap>,
     snapshot_store: Arc<dyn SnapshotStore>,
     self_peer_addr: PeerAddr,
 ) -> Result<(), Error> {
@@ -553,37 +556,26 @@ async fn bootstrap_single_node_cluster(
     // the spawned task, so the sequence always runs to completion.
     tokio::spawn(async move {
         snapshot_store.write_bootstrap_fence().boxed().await?;
-        raft.inner()
-            .initialize(membership_map([(node_id, self_peer_addr)]))
+        raft.initialize(membership_map([(node_id, self_peer_addr)]))
             .boxed()
-            .await
-            .to_raft("Raft::initialize")?;
+            .await?;
 
-        raft.inner()
-            .wait(None)
-            .current_leader(node_id, "bootstrap: wait for self-election")
+        raft.wait_leader(node_id, "bootstrap: wait for self-election")
             .boxed()
-            .await
-            .map_err(|e| {
-                Error::Consensus(ConsensusError::Raft(format!(
-                    "bootstrap: wait for self-election: {e}"
-                )))
-            })?;
+            .await?;
 
         let initial: BTreeSet<NodeId> = [node_id].into_iter().collect();
-        raft.inner()
-            .client_write(FencedStateWrite {
-                expected_generation: zslg_consensus_types::RaftGeneration::ZERO,
-                state: ReplicatedRaftState {
-                    replica: ReplicaMembership::single(initial),
-                    manifest: Vec::new(),
-                    manifest_watermark: None,
-                    hlc_cutoff: None,
-                },
-            })
-            .boxed()
-            .await
-            .to_raft("client_write SetReplicaSet")?;
+        raft.write_fenced(FencedStateWrite {
+            expected_generation: zslg_consensus::RaftGeneration::ZERO,
+            state: ReplicatedRaftState {
+                replica: ReplicaMembership::single(initial),
+                manifest: Vec::new(),
+                manifest_watermark: None,
+                hlc_cutoff: None,
+            },
+        })
+        .boxed()
+        .await?;
         Ok::<(), Error>(())
     })
     .await
@@ -652,13 +644,13 @@ async fn join_existing(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::raft) enum JoinAttempt {
+pub(crate) enum JoinAttempt {
     Accepted,
     Denied,
     Retry,
 }
 
-pub(in crate::raft) async fn attempt_join_once(
+pub(crate) async fn attempt_join_once(
     net: &dyn Router,
     peers: &[PeerAddr],
     node_id: NodeId,

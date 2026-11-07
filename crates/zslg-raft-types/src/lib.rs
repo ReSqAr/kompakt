@@ -86,3 +86,17 @@ raft_kit::declare_raft_types!(
 );
 
 pub type Raft = raft_kit::Raft<TypeConfig>;
+
+/// The membership map for `members`, each with its dial address.
+#[must_use]
+pub fn membership_map<I>(
+    members: I,
+) -> std::collections::BTreeMap<zslg_node_types::NodeId, NodeInfo>
+where
+    I: IntoIterator<Item = (zslg_node_types::NodeId, PeerAddr)>,
+{
+    members
+        .into_iter()
+        .map(|(id, addr)| (id, NodeInfo::from(addr)))
+        .collect()
+}

@@ -102,3 +102,37 @@ pub struct SubscriptionEnded {
     pub peer_id: NodeId,
     pub reason: String,
 }
+
+impl ConsensusError {
+    /// Build [`ConsensusError::StaleStateWrite`].
+    #[must_use]
+    pub fn stale_state_write(
+        context: impl Into<String>,
+        expected: crate::RaftGeneration,
+        current: crate::RaftGeneration,
+    ) -> Self {
+        Self::StaleStateWrite(Box::new(StaleStateWrite {
+            context: context.into(),
+            expected,
+            current,
+        }))
+    }
+
+    /// Build [`ConsensusError::InvalidRaftState`].
+    #[must_use]
+    pub fn invalid_raft_state(context: impl Into<String>, source: crate::RaftStateError) -> Self {
+        Self::InvalidRaftState(Box::new(InvalidRaftState {
+            context: context.into(),
+            source,
+        }))
+    }
+
+    /// Build [`ConsensusError::SubscriptionEnded`].
+    #[must_use]
+    pub fn subscription_ended(peer_id: zslg_node_types::NodeId, reason: impl Into<String>) -> Self {
+        Self::SubscriptionEnded(Box::new(SubscriptionEnded {
+            peer_id,
+            reason: reason.into(),
+        }))
+    }
+}

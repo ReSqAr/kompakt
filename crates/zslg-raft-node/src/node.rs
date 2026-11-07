@@ -9,9 +9,9 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_consensus::ConsensusError;
 use zslg_consensus::{MembershipGate, RaftLeadership, StateReplicator};
-use zslg_consensus_types::ConsensusError;
-use zslg_net_types::NetError;
+use zslg_net::NetError;
 use zslg_raft::RaftConsensus;
 
 use futures::FutureExt as _;
@@ -23,25 +23,25 @@ use raft_kit::raft::{
 };
 use tracing::info;
 
-use crate::error::Error;
+use crate::Error;
 use crate::metrics;
+use zslg_consensus::NodeId;
+use zslg_consensus::RaftGeneration;
+use zslg_consensus::ReplicatedRaftState;
 use zslg_consensus::ToRaft;
-use zslg_consensus_types::RaftGeneration;
-use zslg_consensus_types::ReplicatedRaftState;
-use zslg_net_types::{PeerAddr, ServerName};
-use zslg_node_types::NodeId;
-use zslg_raft_types::{FencedStateWrite, NodeInfo, RaftResponse};
+use zslg_net::{PeerAddr, ServerName};
+use zslg_raft::{FencedStateWrite, NodeInfo, RaftResponse};
 
-pub(crate) struct RaftNode {
-    inner: raft_kit::Raft<zslg_raft_types::TypeConfig>,
+pub struct RaftNode {
+    inner: raft_kit::Raft<zslg_raft::TypeConfig>,
     gate: Arc<dyn MembershipGate>,
     client_write_timeout: std::time::Duration,
 }
 
 impl RaftNode {
     #[must_use]
-    pub(crate) fn new(
-        inner: raft_kit::Raft<zslg_raft_types::TypeConfig>,
+    pub fn new(
+        inner: raft_kit::Raft<zslg_raft::TypeConfig>,
         gate: Arc<dyn MembershipGate>,
         client_write_timeout: std::time::Duration,
     ) -> Self {
@@ -53,7 +53,7 @@ impl RaftNode {
     }
 
     #[must_use]
-    pub(in crate::raft) fn inner(&self) -> &raft_kit::Raft<zslg_raft_types::TypeConfig> {
+    pub fn inner(&self) -> &raft_kit::Raft<zslg_raft::TypeConfig> {
         &self.inner
     }
 
@@ -65,8 +65,8 @@ impl RaftNode {
     /// `voters` can legitimately lag forever once the leader stops
     /// replicating to it — its own metrics promptly reflect the demotion,
     /// which is what a same-process observability test needs.
-    #[cfg(test)]
-    pub(crate) async fn demote_to_learner_for_test(&self, node_id: NodeId) -> Result<(), Error> {
+    #[cfg(feature = "testing")]
+    pub async fn demote_to_learner_for_test(&self, node_id: NodeId) -> Result<(), Error> {
         let members: BTreeSet<NodeId> = self
             .inner
             .metrics()
@@ -83,7 +83,7 @@ impl RaftNode {
         Ok(())
     }
 
-    pub(crate) async fn shutdown(&self) {
+    pub async fn shutdown(&self) {
         let _ = self.inner.shutdown().await;
     }
 }
@@ -95,7 +95,7 @@ impl zslg_raft::RaftMetricsSource for RaftNode {
 }
 
 impl RaftNode {
-    pub(crate) async fn add_member_in(
+    pub async fn add_member_in(
         &self,
         new_node_id: NodeId,
         peer_addr: PeerAddr,
@@ -206,7 +206,7 @@ impl RaftNode {
 impl RaftConsensus for RaftNode {
     async fn append_entries(
         &self,
-        rpc: AppendEntriesRequest<zslg_raft_types::TypeConfig>,
+        rpc: AppendEntriesRequest<zslg_raft::TypeConfig>,
     ) -> Result<AppendEntriesResponse<NodeId>, RaftError<NodeId>> {
         self.inner.append_entries(rpc).await
     }
@@ -220,15 +220,15 @@ impl RaftConsensus for RaftNode {
 
     async fn install_snapshot(
         &self,
-        rpc: InstallSnapshotRequest<zslg_raft_types::TypeConfig>,
+        rpc: InstallSnapshotRequest<zslg_raft::TypeConfig>,
     ) -> Result<InstallSnapshotResponse<NodeId>, RaftError<NodeId, InstallSnapshotError>> {
         self.inner.install_snapshot(rpc).await
     }
 
     async fn add_member(
         &self,
-        new_node_id: zslg_node_types::NodeId,
-        peer_addr: zslg_net_types::PeerAddr,
+        new_node_id: zslg_consensus::NodeId,
+        peer_addr: zslg_net::PeerAddr,
     ) -> Result<(), zslg_raft::Error> {
         self.add_member_in(new_node_id, peer_addr)
             .await
@@ -239,7 +239,7 @@ impl RaftConsensus for RaftNode {
 // ── RaftLeadership (leader queries + membership remove) ─────────────────
 
 impl RaftNode {
-    pub(crate) async fn remove_member_in(&self, node_id: NodeId) -> Result<(), Error> {
+    pub async fn remove_member_in(&self, node_id: NodeId) -> Result<(), Error> {
         let metrics = self.inner.metrics().borrow().clone();
         let members: BTreeSet<NodeId> = metrics
             .membership_config
@@ -283,7 +283,7 @@ impl RaftLeadership for RaftNode {
 
     async fn remove_member(
         &self,
-        node_id: zslg_node_types::NodeId,
+        node_id: zslg_consensus::NodeId,
     ) -> Result<(), zslg_consensus::Error> {
         self.remove_member_in(node_id).await.map_err(Into::into)
     }
@@ -292,15 +292,15 @@ impl RaftLeadership for RaftNode {
 // ── StateReplicator (fenced cluster-state write) ─────────────────────────
 
 impl RaftNode {
-    pub(crate) async fn replicate_state_in(
+    pub async fn replicate_state_in(
         &self,
         state: ReplicatedRaftState,
         expected_generation: RaftGeneration,
         context: &'static str,
     ) -> Result<(), Error> {
         // See `StateReplicator::replicate_state` for the pre-flight contract.
-        zslg_consensus_types::validate_replicated_state(&state)
-            .map_err(|source| Error::invalid_raft_state(context, source))?;
+        zslg_consensus::validate_replicated_state(&state)
+            .map_err(|source| ConsensusError::invalid_raft_state(context, source))?;
         // openraft's call has no deadline, and the integrator is a single
         // serial task — one wedged wait would stall every leader job
         // (`RaftConfig::client_write_timeout`). Time out instead; the
@@ -314,7 +314,7 @@ impl RaftNode {
         )
         .await
         .map_err(|_| {
-            crate::metrics::raft_client_write_timeout();
+            metrics::raft_client_write_timeout();
             Error::Net(NetError::Rpc(format!(
                 "raft client_write ({context}) timed out after {:?}",
                 self.client_write_timeout
@@ -325,11 +325,11 @@ impl RaftNode {
             RaftResponse::Applied => Ok(()),
             RaftResponse::RejectedStaleGeneration { expected, current } => {
                 metrics::raft_fenced_write();
-                Err(Error::stale_state_write(context, expected, current))
+                Err(ConsensusError::stale_state_write(context, expected, current).into())
             }
             RaftResponse::RejectedInvalidState { reason } => {
                 metrics::raft_fenced_write();
-                Err(Error::invalid_raft_state(context, reason))
+                Err(ConsensusError::invalid_raft_state(context, reason).into())
             }
         }
     }
@@ -339,12 +339,64 @@ impl RaftNode {
 impl StateReplicator for RaftNode {
     async fn replicate_state(
         &self,
-        state: zslg_consensus_types::ReplicatedRaftState,
-        expected_generation: zslg_consensus_types::RaftGeneration,
+        state: zslg_consensus::ReplicatedRaftState,
+        expected_generation: zslg_consensus::RaftGeneration,
         context: &'static str,
     ) -> Result<(), zslg_consensus::Error> {
         self.replicate_state_in(state, expected_generation, context)
             .await
+            .map_err(Into::into)
+    }
+}
+
+#[async_trait::async_trait]
+impl zslg_raft::ClusterBootstrap for RaftNode {
+    async fn initialize(
+        &self,
+        members: std::collections::BTreeMap<NodeId, NodeInfo>,
+    ) -> Result<(), zslg_raft::Error> {
+        self.inner
+            .initialize(members)
+            .await
+            .to_raft("Raft::initialize")
+            .map_err(Into::into)
+    }
+
+    async fn wait_leader(
+        &self,
+        leader: NodeId,
+        context: &'static str,
+    ) -> Result<(), zslg_raft::Error> {
+        self.inner
+            .wait(None)
+            .current_leader(leader, context)
+            .await
+            .map(|_| ())
+            .map_err(|e| ConsensusError::Raft(format!("{context}: {e}")).into())
+    }
+
+    async fn wait_applied_at_least(
+        &self,
+        index: u64,
+        context: &'static str,
+    ) -> Result<(), zslg_raft::Error> {
+        self.inner
+            .wait(None)
+            .applied_index_at_least(Some(index), context)
+            .await
+            .map(|_| ())
+            .map_err(|e| ConsensusError::Raft(format!("{context}: {e}")).into())
+    }
+
+    async fn write_fenced(
+        &self,
+        write: FencedStateWrite,
+    ) -> Result<RaftResponse, zslg_raft::Error> {
+        self.inner
+            .client_write(write)
+            .await
+            .map(|r| r.data)
+            .to_raft("client_write")
             .map_err(Into::into)
     }
 }

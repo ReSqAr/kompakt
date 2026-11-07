@@ -4500,11 +4500,12 @@ dependencies = [
  "zslg-peers",
  "zslg-quorum-read",
  "zslg-raft",
+ "zslg-raft-node",
  "zslg-raft-rpc",
+ "zslg-raft-startup",
  "zslg-raft-state",
  "zslg-raft-storage",
  "zslg-raft-tracker",
- "zslg-raft-types",
  "zslg-snapshot",
  "zslg-snapshot-types",
  "zslg-time",
@@ -4846,6 +4847,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "zslg-raft-node"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "error-union",
+ "futures",
+ "metrics-kit",
+ "raft-kit",
+ "tokio",
+ "tracing",
+ "zslg-consensus",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
 name = "zslg-raft-rpc"
 version = "0.1.0"
 dependencies = [
@@ -4856,6 +4877,30 @@ dependencies = [
  "zslg-consensus",
  "zslg-net",
  "zslg-raft",
+]
+
+[[package]]
+name = "zslg-raft-startup"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "backoff-kit",
+ "error-union",
+ "futures",
+ "metrics-kit",
+ "shutdown",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "zslg-consensus",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-quorum-read",
+ "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
 ]
 
 [[package]]

@@ -861,7 +861,7 @@ impl InitialisingReplicaNode {
                 router.clone(),
                 startup_config,
                 &mut shutdown,
-            ).boxed() => res,
+            ).boxed() => res.map_err(Error::from),
             () = cancelled.cancelled() => {
                 info!("raft startup cancelled — node stopped before it became ready");
                 Err(Error::Lifecycle(LifecycleError::StartupCancelled))
@@ -1101,7 +1101,10 @@ impl ReplicaNode {
     /// the demotion, which is what this test needs to assert on.
     #[cfg(test)]
     pub(crate) async fn remove_member_for_test(&self, victim: NodeId) -> Result<(), Error> {
-        self.raft.demote_to_learner_for_test(victim).await
+        self.raft
+            .demote_to_learner_for_test(victim)
+            .await
+            .map_err(Error::from)
     }
 
     /// True from construction: a `ReplicaNode` only exists after its server is

@@ -12,7 +12,6 @@
 //! cross-module contracts that justify their values — startup is unbounded
 //! (`startup_phase_timeout`) and the client-write backstop must outlast an
 //! election (`client_write_timeout`) — see the field docs.
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use zslg_consensus::MembershipGate;
 use zslg_lifecycle_types::ConfigError;
@@ -25,34 +24,19 @@ use rocksdb_kit::Storage;
 use shutdown::Shutdown;
 use zslg_consensus::ToRaft;
 use zslg_consensus_types::RaftStateHandle;
-use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 use zslg_raft_rpc::{NetworkFactory, PeerRegistrationWatcher};
 use zslg_raft_state::RaftStatePublisher;
 use zslg_raft_storage::RocksRaftStorage;
-use zslg_raft_types::NodeInfo;
 
 mod membership;
-mod node;
-mod startup;
 
 #[cfg(test)]
 mod tests;
 
 pub(crate) use membership::MembershipConfig;
-pub(crate) use node::RaftNode;
-pub(crate) use startup::{RaftStartupConfig, run_raft_startup};
-
-#[must_use]
-fn membership_map<I>(members: I) -> BTreeMap<NodeId, NodeInfo>
-where
-    I: IntoIterator<Item = (NodeId, PeerAddr)>,
-{
-    members
-        .into_iter()
-        .map(|(id, addr)| (id, NodeInfo::from(addr)))
-        .collect()
-}
+pub(crate) use zslg_raft_node::RaftNode;
+pub(crate) use zslg_raft_startup::{RaftStartupConfig, run_raft_startup};
 
 pub(crate) async fn setup_raft(
     router: Arc<dyn Router>,

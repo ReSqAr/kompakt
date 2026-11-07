@@ -9,10 +9,12 @@ use zslg_net_types::NetError;
 use zslg_snapshot_types::SnapshotError;
 use zslg_time_types::ClockError;
 
+mod cluster_bootstrap;
 mod raft_consensus;
 mod raft_metrics;
 mod raft_transport;
 
+pub use cluster_bootstrap::ClusterBootstrap;
 pub use raft_consensus::RaftConsensus;
 pub use raft_metrics::RaftMetricsSource;
 pub use raft_transport::RaftTransport;
@@ -33,4 +35,6 @@ error_union! {
     }
 }
 
-pub use zslg_raft_types::{FencedStateWrite, NodeInfo, Raft, RaftResponse, TypeConfig};
+pub use zslg_raft_types::{
+    FencedStateWrite, NodeInfo, Raft, RaftResponse, TypeConfig, membership_map,
+};

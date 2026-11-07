@@ -125,16 +125,6 @@ const ALL_LABEL_KEYS: &[&str] = &[
 // ── raft / consensus ────────────────────────────────────────────────────────
 
 metrics!("zslg_", raft; {
-    counter raft_fenced_write  RAFT_FENCED_WRITES_TOTAL "raft_fenced_writes_total"
-        "Fenced state writes rejected by the apply-time generation CAS \
-         (StaleStateWrite). Expected around leadership churn; sustained rate \
-         without churn = bug.";
-    counter raft_client_write_timeout RAFT_CLIENT_WRITE_TIMEOUTS_TOTAL
-        "raft_client_write_timeouts_total" "Fenced state writes abandoned because \
-         openraft's client_write did not resolve within raft_client_write_timeout. \
-         openraft has no deadline of its own, so this is the backstop against a \
-         partitioned leader stalling the integrator — and with it every leader \
-         job. Any non-zero rate warrants investigation.";
     labeled_counter membership_change MEMBERSHIP_CHANGES_TOTAL "membership_changes_total"
         "Completed membership-change attempts by outcome."
         (state: OpState) [LABEL_STATE => state.as_str()];
@@ -161,13 +151,6 @@ metrics!("zslg_", raft; {
     custom  leader_intent_batch LEADER_INTENT_BATCHES_TOTAL "leader_intent_batches_total"
         Counter None "Raft proposals issued by the leader integrator. Divide \
         leader_intents_total{state=\"applied\"} by this for the coalescing factor.";
-    custom  node_rejoin   NODE_REJOINS_TOTAL  "node_rejoins_total"  Counter None
-        "Nodes with no local state that joined an existing cluster. Covers \
-         initial cluster formation, scale-out, and an operator wiping a node \
-         and rejoining it under a new NodeId after data loss — \
-         indistinguishable from inside the process. A LIFECYCLE counter, not an \
-         alarm: expect n-1 on a healthy n-node startup. Alert on unexpected \
-         CHANGES, not on a non-zero value.";
     custom  node_last_seen NODE_LAST_SEEN_TIMESTAMP_SECONDS "node_last_seen_timestamp_seconds"
         Gauge Seconds "Unix-epoch seconds of the last successful liveness probe \
         reply from each peer (label node_id), per observing node. Cluster \
@@ -230,23 +213,6 @@ label_enum!(#[doc = "`state` label of [`LEADER_INTENTS_TOTAL`]."] IntentState {
     /// writing `EntryPayload::Normal`.
     StaleFence => "stale_fence",
 });
-
-/// A node with **no local state** joined an existing cluster. Three causes,
-/// indistinguishable from inside the process (all are "empty state, cluster
-/// already exists"): initial cluster formation, scale-out, and an operator
-/// wiping a node and rejoining it under a new `NodeId` after data loss.
-///
-/// So this is a **lifecycle counter, not an alarm** — it reads non-zero on
-/// every healthy multi-node startup (n-1 on formation of an n-node cluster).
-/// Alert on it *changing when you did not deploy anything*, never on it being
-/// non-zero.
-///
-/// The `HardCrashRestart` decision is deliberately not counted here: that path
-/// refuses to start, so any metric it emits is only exported if a scrape lands
-/// before the process exits. Its `error!` log is the reliable signal.
-pub(crate) fn node_rejoin() {
-    metrics::counter!(NODE_REJOINS_TOTAL).increment(1);
-}
 
 /// Unix-epoch seconds when this node last received a successful liveness probe
 /// reply from `node_id`. Emitted from the liveness worker; Grafana derives
@@ -1146,6 +1112,10 @@ metrics!("zslg_", probes; {
 // ---------------------------------------------------------------------------
 
 const ALL_METRICS: &[&[MetricDef]] = &[
+    // --- startup (zslg-raft-startup) ---
+    zslg_raft_startup::metrics::METRICS,
+    // --- raft node (zslg-raft-node) ---
+    zslg_raft_node::metrics::METRICS,
     // --- raft state (zslg-raft-state) ---
     zslg_raft_state::metrics::METRICS,
     // --- raft storage (zslg-raft-storage) ---
@@ -1455,13 +1425,13 @@ mod tests {
         let recorder = metrics_util::debugging::DebuggingRecorder::new();
         let snapshotter = recorder.snapshotter();
         metrics::with_local_recorder(&recorder, || {
-            ::metrics::counter!(RAFT_FENCED_WRITES_TOTAL).increment(1);
+            ::metrics::counter!(zslg_raft_node::metrics::RAFT_FENCED_WRITES_TOTAL).increment(1);
         });
         let snap = snapshotter.snapshot();
         let map = snap.into_hashmap();
         let found = map
             .keys()
-            .any(|ck| ck.key().name() == RAFT_FENCED_WRITES_TOTAL);
+            .any(|ck| ck.key().name() == zslg_raft_node::metrics::RAFT_FENCED_WRITES_TOTAL);
         assert!(found, "raft_fenced_writes_total counter should be present");
     }
 

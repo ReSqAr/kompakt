@@ -541,18 +541,18 @@ mod tests {
             let current = self.state.snapshot();
             if self.stale_budget.load(Ordering::Relaxed) > 0 {
                 self.stale_budget.fetch_sub(1, Ordering::Relaxed);
-                return Err(Error::stale_state_write(
+                return Err(Error::Consensus(ConsensusError::stale_state_write(
                     context,
                     expected_generation,
                     current.generation,
-                ));
+                )));
             }
             if expected_generation != current.generation {
-                return Err(Error::stale_state_write(
+                return Err(Error::Consensus(ConsensusError::stale_state_write(
                     context,
                     expected_generation,
                     current.generation,
-                ));
+                )));
             }
             // The integrator must never propose a state the fence would reject;
             // asserting that here turns any such bug into a test failure rather

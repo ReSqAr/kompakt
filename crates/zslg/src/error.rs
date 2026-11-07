@@ -12,7 +12,7 @@
 
 use error_union::error_union;
 use serde::{Deserialize, Serialize};
-use zslg_consensus_types::{ConsensusError, InvalidRaftState, StaleStateWrite, SubscriptionEnded};
+use zslg_consensus_types::ConsensusError;
 use zslg_lifecycle_types::{ConfigError, LifecycleError};
 use zslg_log_types::LogError;
 use zslg_net_types::NetError;
@@ -48,6 +48,8 @@ error_union! {
     from zslg_quorum_read::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_object_store_config::Error { Snapshot }
     from zslg_node_id::Error { Config, Log }
+    from zslg_raft_startup::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_raft_node::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_raft_tracker::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_raft_storage::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_net_client::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
@@ -151,46 +153,12 @@ port_error_bridge!(
 // is `#[error(transparent)]`, so error text is unchanged.
 
 impl Error {
-    /// Build [`Error::StaleStateWrite`].
-    #[must_use]
-    pub(crate) fn stale_state_write(
-        context: impl Into<String>,
-        expected: zslg_consensus_types::RaftGeneration,
-        current: zslg_consensus_types::RaftGeneration,
-    ) -> Self {
-        Self::Consensus(ConsensusError::StaleStateWrite(Box::new(StaleStateWrite {
-            context: context.into(),
-            expected,
-            current,
-        })))
-    }
-
-    /// Build [`Error::InvalidRaftState`].
-    #[must_use]
-    pub(crate) fn invalid_raft_state(
-        context: impl Into<String>,
-        source: zslg_consensus_types::RaftStateError,
-    ) -> Self {
-        Self::Consensus(ConsensusError::InvalidRaftState(Box::new(
-            InvalidRaftState {
-                context: context.into(),
-                source,
-            },
-        )))
-    }
-
-    /// Build [`Error::SubscriptionEnded`].
+    /// Build [`ConsensusError::SubscriptionEnded`] as an `Error`.
     #[must_use]
     pub(crate) fn subscription_ended(peer_id: NodeId, reason: impl Into<String>) -> Self {
-        Self::Consensus(ConsensusError::SubscriptionEnded(Box::new(
-            SubscriptionEnded {
-                peer_id,
-                reason: reason.into(),
-            },
-        )))
+        ConsensusError::subscription_ended(peer_id, reason).into()
     }
 }
-
 impl Error {
     /// A stable, low-cardinality label naming the error variant — for metric
     /// labels (e.g. `loadgen_errors_total{kind=...}`) and structured logging.

@@ -28,7 +28,7 @@ use raft_kit::Config;
 use raft_kit::storage::Adaptor;
 
 use crate::network::{LocalReplicaClient, RemoteRouter, RpcServerConfig, SocketOpts};
-use crate::raft::{RaftNode, membership_map};
+use crate::raft::RaftNode;
 use crate::tests::ReadyReplica;
 use crate::tests::fast_raft_config as raft_config;
 use shutdown::Shutdown;
@@ -37,8 +37,9 @@ use zslg_consensus_types::ReplicatedRaftState;
 use zslg_hlc_clock::HlcClock;
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
+use zslg_raft::Raft;
+use zslg_raft::membership_map;
 use zslg_raft_rpc::NetworkFactory;
-use zslg_raft_types::Raft;
 
 struct ClusterNode {
     node_id: NodeId,
@@ -176,7 +177,7 @@ async fn three_node_tcp_cluster_commits_a_command() {
         let expected_generation = leader_node.raft_state.snapshot().generation;
         leader_node
             .raft
-            .client_write(zslg_raft_types::FencedStateWrite {
+            .client_write(zslg_raft::FencedStateWrite {
                 expected_generation,
                 state: ReplicatedRaftState {
                     replica: ReplicaMembership::single(target_set.clone()),

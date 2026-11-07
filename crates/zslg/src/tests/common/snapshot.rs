@@ -15,7 +15,7 @@ use zslg_consensus_types::ReplicatedRaftState;
 use zslg_hlc_gate::HlcGate;
 use zslg_node_types::NodeId;
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
-use zslg_raft_types::Raft;
+use zslg_raft::Raft;
 
 pub(crate) struct SnapshotHarness {
     pub(crate) _dir: tempfile::TempDir,

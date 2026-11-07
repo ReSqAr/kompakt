@@ -59,8 +59,8 @@ use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
+use zslg_raft::{NodeInfo, Raft, TypeConfig};
 use zslg_raft_storage::build_raft_for_test;
-use zslg_raft_types::{NodeInfo, Raft, TypeConfig};
 // ── fault injection: pairwise partitions ─────────────────────────────
 
 /// Shared handle that cuts and heals in-process network links. Cloned into
@@ -383,7 +383,7 @@ pub(crate) async fn write_state_fenced(
     raft_state: &RaftStateHandle,
     state: zslg_consensus_types::ReplicatedRaftState,
 ) -> Result<(), String> {
-    use zslg_raft_types::{FencedStateWrite, RaftResponse};
+    use zslg_raft::{FencedStateWrite, RaftResponse};
     // The transient outcomes keep different clocks, and only one of them is
     // this handle's to wait out:
     //
@@ -545,7 +545,7 @@ impl ReplicaOnly {
 impl RaftTransport for ReplicaOnly {
     async fn append_entries(
         &self,
-        rpc: raft_kit::raft::AppendEntriesRequest<zslg_raft_types::TypeConfig>,
+        rpc: raft_kit::raft::AppendEntriesRequest<zslg_raft::TypeConfig>,
     ) -> Result<
         Result<
             raft_kit::raft::AppendEntriesResponse<zslg_node_types::NodeId>,
@@ -569,7 +569,7 @@ impl RaftTransport for ReplicaOnly {
     }
     async fn install_snapshot(
         &self,
-        rpc: raft_kit::raft::InstallSnapshotRequest<zslg_raft_types::TypeConfig>,
+        rpc: raft_kit::raft::InstallSnapshotRequest<zslg_raft::TypeConfig>,
     ) -> Result<
         Result<
             raft_kit::raft::InstallSnapshotResponse<zslg_node_types::NodeId>,
@@ -747,7 +747,7 @@ impl ProbeOnly {
 impl RaftTransport for ProbeOnly {
     async fn append_entries(
         &self,
-        rpc: raft_kit::raft::AppendEntriesRequest<zslg_raft_types::TypeConfig>,
+        rpc: raft_kit::raft::AppendEntriesRequest<zslg_raft::TypeConfig>,
     ) -> Result<
         Result<
             raft_kit::raft::AppendEntriesResponse<zslg_node_types::NodeId>,
@@ -771,7 +771,7 @@ impl RaftTransport for ProbeOnly {
     }
     async fn install_snapshot(
         &self,
-        rpc: raft_kit::raft::InstallSnapshotRequest<zslg_raft_types::TypeConfig>,
+        rpc: raft_kit::raft::InstallSnapshotRequest<zslg_raft::TypeConfig>,
     ) -> Result<
         Result<
             raft_kit::raft::InstallSnapshotResponse<zslg_node_types::NodeId>,

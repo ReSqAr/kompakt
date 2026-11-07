@@ -35,30 +35,33 @@ use tracing::{debug, info, warn};
 
 use super::bootstrap::{JoinAttempt, attempt_join_once};
 
-use crate::error::Error;
-use crate::raft::RaftNode;
-use zslg_consensus_types::EvictionStatus;
-use zslg_net_types::PeerAddr;
-use zslg_node_types::NodeId;
+use crate::Error;
+use zslg_consensus::EvictionStatus;
+use zslg_consensus::NodeId;
+use zslg_net::PeerAddr;
+use zslg_raft::ClusterBootstrap;
 
 /// How often the monitor re-evaluates whether it needs to probe.
-pub(in crate::raft) const REJOIN_RECONCILE_INTERVAL: Duration = Duration::from_secs(5);
+pub(crate) const REJOIN_RECONCILE_INTERVAL: Duration = Duration::from_secs(5);
 
 /// How long the node must be continuously unsettled (no leader, or not in its
 /// own voter set) before the monitor starts re-joining by address. Comfortably
 /// larger than an election round so normal churn does not trigger it.
-pub(in crate::raft) const REJOIN_LEADERLESS_GRACE: Duration = Duration::from_secs(15);
+pub(crate) const REJOIN_LEADERLESS_GRACE: Duration = Duration::from_secs(15);
 
 /// "Is the node currently settled into a working cluster?" — has a leader and is
 /// a voter in its own membership view. Abstracted for testability.
-pub(in crate::raft) trait MembershipView: Send + Sync + 'static {
+pub(crate) trait MembershipView: Send + Sync + 'static {
     #[must_use]
     fn is_settled(&self, self_node_id: NodeId) -> bool;
 }
 
-impl MembershipView for RaftNode {
+/// The settled-ness of a node, read from the engine's metrics.
+pub(crate) struct NodeView(pub Arc<dyn ClusterBootstrap>);
+
+impl MembershipView for NodeView {
     fn is_settled(&self, self_node_id: NodeId) -> bool {
-        let metrics = self.inner().metrics();
+        let metrics = self.0.metrics();
         let m = metrics.borrow();
         m.current_leader.is_some()
             && m.membership_config
@@ -71,12 +74,12 @@ impl MembershipView for RaftNode {
 /// One re-join sweep over the configured peers. Abstracted so the monitor's
 /// control flow can be tested without a live network.
 #[async_trait]
-pub(in crate::raft) trait RejoinProbe: Send + Sync + 'static {
+pub(crate) trait RejoinProbe: Send + Sync + 'static {
     async fn attempt(&self) -> JoinAttempt;
 }
 
 /// Production probe: re-runs the real `AddMember` handshake by address.
-pub(in crate::raft) struct RpcRejoinProbe {
+pub(crate) struct RpcRejoinProbe {
     net: Arc<dyn Router>,
     peers_watcher: Arc<dyn PeersWatcher>,
     self_node_id: NodeId,
@@ -85,7 +88,7 @@ pub(in crate::raft) struct RpcRejoinProbe {
 
 impl RpcRejoinProbe {
     #[must_use]
-    pub(in crate::raft) fn new(
+    pub(crate) fn new(
         net: Arc<dyn Router>,
         peers_watcher: Arc<dyn PeersWatcher>,
         self_node_id: NodeId,
@@ -115,16 +118,16 @@ impl RejoinProbe for RpcRejoinProbe {
 }
 
 /// Wiring for [`RejoinMonitor`].
-pub(in crate::raft) struct RejoinMonitorInputs {
-    pub(in crate::raft) self_node_id: NodeId,
-    pub(in crate::raft) view: Arc<dyn MembershipView>,
-    pub(in crate::raft) probe: Arc<dyn RejoinProbe>,
-    pub(in crate::raft) reconcile_interval: Duration,
-    pub(in crate::raft) leaderless_grace: Duration,
+pub(crate) struct RejoinMonitorInputs {
+    pub self_node_id: NodeId,
+    pub view: Arc<dyn MembershipView>,
+    pub probe: Arc<dyn RejoinProbe>,
+    pub reconcile_interval: Duration,
+    pub leaderless_grace: Duration,
     /// Where this monitor publishes "has a reachable peer denied us". Cloned
     /// into `RejoinMonitor`; the caller keeps its own clone to hand to
     /// `learner::read::can_serve_clients`.
-    pub(in crate::raft) eviction: EvictionStatus,
+    pub eviction: EvictionStatus,
 }
 
 /// Background task implementing the continuous re-join / eviction-detection loop.
@@ -133,17 +136,17 @@ pub(in crate::raft) struct RejoinMonitorInputs {
 /// keeps running — it never returns early from group removal. `run()` only
 /// returns on cancellation (`Ok(())`); ending the process is the
 /// orchestrator's call, not this monitor's.
-pub(in crate::raft) struct RejoinMonitor {
+pub(crate) struct RejoinMonitor {
     inputs: RejoinMonitorInputs,
 }
 
 impl RejoinMonitor {
     #[must_use]
-    pub(in crate::raft) fn new(inputs: RejoinMonitorInputs) -> Self {
+    pub(crate) fn new(inputs: RejoinMonitorInputs) -> Self {
         Self { inputs }
     }
 
-    pub(in crate::raft) async fn run(self, cancel: CancellationToken) -> Result<(), Error> {
+    pub(crate) async fn run(self, cancel: CancellationToken) -> Result<(), Error> {
         info!(node_id = ?self.inputs.self_node_id, "rejoin monitor: starting");
         let mut ticker = tokio::time::interval(self.inputs.reconcile_interval);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -241,7 +244,11 @@ impl RejoinMonitor {
 )]
 mod tests {
     use super::*;
-    use crate::tests::nid;
+    fn nid(byte: u8) -> NodeId {
+        let mut b = [0u8; 16];
+        b[15] = byte;
+        NodeId::from_uuid(uuid::Uuid::from_bytes(b))
+    }
 
     struct FixedView(bool);
     impl MembershipView for FixedView {

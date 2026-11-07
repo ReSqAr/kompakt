@@ -42,7 +42,7 @@ use zslg_log_types::{DataId, LogIndex};
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
-use zslg_raft_types::Raft;
+use zslg_raft::Raft;
 use zslg_snapshot_types::CompressionLevel;
 use zslg_time_types::Hlc;
 
@@ -520,7 +520,7 @@ async fn invariant_stable_order_is_hlc_order() {
 #[tokio::test]
 async fn fenced_write_rejected_on_stale_generation() {
     use zslg_consensus_types::RaftGeneration;
-    use zslg_raft_types::{FencedStateWrite, RaftResponse};
+    use zslg_raft::{FencedStateWrite, RaftResponse};
 
     let h = boot().await;
     let _ = h.leader_id;
