@@ -4,18 +4,18 @@
 //! Raft voter may be absent from `config.peers` before eviction.
 use zslg_lifecycle_types::ConfigError;
 
-use zslg_consensus_types::SpareSelectionStrategy;
+use zslg_consensus::SpareSelectionStrategy;
 
 /// Membership and replica node management configuration.
 #[derive(Debug, Clone)]
-pub(crate) struct MembershipConfig {
-    pub(crate) replica_node_count: u32,
-    pub(crate) replica_node_max_failures: u32,
+pub struct MembershipConfig {
+    pub replica_node_count: u32,
+    pub replica_node_max_failures: u32,
     /// Uninterrupted absence from `config.peers` before a Raft voter is
     /// evicted. Zero turns eviction off (`jobs::voters::Eviction`).
-    pub(crate) forced_node_removal_timeout: std::time::Duration,
-    pub(crate) poll_interval: std::time::Duration,
-    pub(crate) spare_selection: SpareSelectionStrategy,
+    pub forced_node_removal_timeout: std::time::Duration,
+    pub poll_interval: std::time::Duration,
+    pub spare_selection: SpareSelectionStrategy,
 }
 
 impl Default for MembershipConfig {
@@ -31,14 +31,14 @@ impl Default for MembershipConfig {
 }
 
 impl MembershipConfig {
-    pub(crate) fn validate(&self) -> Result<(), crate::error::Error> {
+    pub fn validate(&self) -> Result<(), crate::Error> {
         if self.replica_node_count < 1 {
-            return Err(crate::error::Error::Config(
-                ConfigError::InvalidConfiguration(format!(
+            return Err(crate::Error::Config(ConfigError::InvalidConfiguration(
+                format!(
                     "replica_node_count must be >= 1 (got {})",
                     self.replica_node_count
-                )),
-            ));
+                ),
+            )));
         }
         Ok(())
     }
@@ -54,7 +54,7 @@ impl MembershipConfig {
 )]
 mod tests {
     use super::*;
-    use crate::error::Error;
+    use crate::Error;
 
     #[test]
     fn rejects_replica_count_below_one() {

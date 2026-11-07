@@ -19,6 +19,9 @@ mod compaction_tests;
 mod jobs_tests;
 
 #[cfg(test)]
+mod membership_change_tests;
+
+#[cfg(test)]
 mod snapshot_build_tests;
 
 #[cfg(test)]
@@ -31,10 +34,10 @@ mod snapshot_member_lifecycle_tests;
 mod leadership_churn_tests;
 
 use crate::leader::jobs::LeaderHandles;
-pub(super) use crate::leader::jobs::membership::liveness::LivenessConfig;
 pub(super) use config::SnapshotConfig;
 use zslg_consensus::{RaftLeadership, RaftStateView, StateReplicator};
 pub(in crate::leader) use zslg_leader_integrator::Integrator;
+pub(super) use zslg_leader_membership::LivenessConfig;
 use zslg_net::{PeersWatcher, Router};
 use zslg_snapshot::SnapshotStore;
 
@@ -46,8 +49,8 @@ pub(in crate::leader) use zslg_leader_snapshot::create::{SnapshotInputs, build_s
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::raft::MembershipConfig;
 use shutdown::Shutdown;
+use zslg_leader_membership::MembershipConfig;
 use zslg_log::{LocalStoreView, StableLogSnapshot};
 use zslg_time::Clock;
 
@@ -168,15 +171,27 @@ pub(super) fn spawn_leader_loop(
             interval: config.snapshot.cleanup_interval,
         },
     );
-    jobs::membership::spawn(shutdown, &handles, &config.membership, &config.liveness);
-    jobs::voters::spawn(
+    zslg_leader_membership::spawn_membership(
         shutdown,
-        &handles,
+        zslg_leader_membership::MembershipHandles {
+            self_node_id: handles.self_node_id,
+            raft_state: handles.raft_state.clone(),
+            leadership: handles.leadership.clone(),
+            router: handles.router.clone(),
+            intents: handles.intents.clone(),
+        },
+        &config.membership,
+        &config.liveness,
+    );
+    zslg_leader_membership::spawn_voters(
+        shutdown,
+        zslg_leader_membership::VoterHandles {
+            self_node_id: handles.self_node_id,
+            leadership: handles.leadership.clone(),
+            router: handles.router.clone(),
+        },
         &config.membership,
         config.self_server_name,
         config.peers_watcher,
-        Arc::new(jobs::membership::NetworkMembershipObserver::new(
-            handles.router.clone(),
-        )),
     );
 }

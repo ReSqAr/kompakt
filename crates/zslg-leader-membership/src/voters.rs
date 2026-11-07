@@ -26,48 +26,25 @@ use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
-use crate::error::Error;
-use crate::leader::jobs::is_local_leader;
-use crate::leader::jobs::membership::MembershipObserver;
+use crate::Error;
+use crate::job::MembershipObserver;
 
-use zslg_consensus_types::metrics::{LeaderJob, leader_job_ran};
-use zslg_net_types::ServerName;
-use zslg_node_types::NodeId;
+use zslg_consensus::NodeId;
+use zslg_consensus::metrics::{LeaderJob, leader_job_ran};
+use zslg_net::ServerName;
 
-/// Spawn `leader:voters` on the shutdown tree. Touches openraft's own member
-/// list, writes no replicated state, and deliberately ignores liveness.
-pub(in crate::leader) fn spawn(
-    shutdown: &mut shutdown::Shutdown<crate::Error>,
-    handles: &crate::leader::jobs::LeaderHandles,
-    config: &crate::raft::MembershipConfig,
-    self_server_name: ServerName,
-    peers_watcher: Arc<dyn PeersWatcher>,
-    observer: Arc<dyn MembershipObserver>,
-) {
-    let job = VoterEvictionJob {
-        self_node_id: handles.self_node_id,
-        self_server_name,
-        leadership: handles.leadership.clone(),
-        peers_watcher,
-        observer,
-        eviction: Eviction::from_timeout(config.forced_node_removal_timeout),
-        interval: config.poll_interval,
-    };
-    shutdown.spawn("leader:voters", job.run(shutdown.token()));
-}
-
-pub(in crate::leader) struct VoterEvictionJob {
-    pub(in crate::leader) self_node_id: NodeId,
-    pub(in crate::leader) self_server_name: ServerName,
-    pub(in crate::leader) leadership: Arc<dyn RaftLeadership>,
-    pub(in crate::leader) peers_watcher: Arc<dyn PeersWatcher>,
-    pub(in crate::leader) observer: Arc<dyn MembershipObserver>,
-    pub(in crate::leader) eviction: Eviction,
-    pub(in crate::leader) interval: Duration,
+pub(crate) struct VoterEvictionJob {
+    pub self_node_id: NodeId,
+    pub self_server_name: ServerName,
+    pub leadership: Arc<dyn RaftLeadership>,
+    pub peers_watcher: Arc<dyn PeersWatcher>,
+    pub observer: Arc<dyn MembershipObserver>,
+    pub eviction: Eviction,
+    pub interval: Duration,
 }
 
 impl VoterEvictionJob {
-    pub(in crate::leader) async fn run(self, cancel: CancellationToken) -> Result<(), Error> {
+    pub(crate) async fn run(self, cancel: CancellationToken) -> Result<(), Error> {
         info!("leader:voters: starting");
         let mut ticker = interval(self.interval);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -97,7 +74,7 @@ impl VoterEvictionJob {
         absent_since: &mut AbsentFromConfigTracker,
         self_absent_since: &mut AbsentFromConfigTracker,
     ) {
-        if !is_local_leader(self.leadership.as_ref(), self.self_node_id) {
+        if !self.leadership.is_leader(self.self_node_id) {
             absent_since.clear();
             self_absent_since.clear();
             return;
@@ -276,12 +253,12 @@ impl SelfEvictionProbe {
         // `is_quorum` takes a `ReplicaMembership`, not a bare set, so wrap the
         // voter set in a `Single`. Reusing it rather than hand-rolling a
         // majority keeps one definition of "quorum" in the crate.
-        let membership = zslg_consensus_types::ReplicaMembership::single(self.voters.clone());
-        if zslg_consensus_types::is_quorum(&membership, &self.rejecting) {
+        let membership = zslg_consensus::ReplicaMembership::single(self.voters.clone());
+        if zslg_consensus::is_quorum(&membership, &self.rejecting) {
             return Some(true);
         }
         let max_possible: BTreeSet<NodeId> = self.rejecting.union(&self.pending).copied().collect();
-        if !zslg_consensus_types::is_quorum(&membership, &max_possible) {
+        if !zslg_consensus::is_quorum(&membership, &max_possible) {
             return Some(false);
         }
         None
@@ -292,14 +269,14 @@ impl SelfEvictionProbe {
 /// zero to turn eviction off, which is a different thing from a zero-length
 /// wait and so is a different variant.
 #[derive(Debug, Clone, Copy)]
-pub(in crate::leader) enum Eviction {
+pub(crate) enum Eviction {
     Disabled,
     After(Duration),
 }
 
 impl Eviction {
     #[must_use]
-    pub(in crate::leader) fn from_timeout(timeout: Duration) -> Self {
+    pub(crate) fn from_timeout(timeout: Duration) -> Self {
         if timeout.is_zero() {
             Self::Disabled
         } else {
@@ -310,14 +287,14 @@ impl Eviction {
 
 /// How long each voter has been continuously absent from `config.peers`.
 #[derive(Debug, Default)]
-pub(in crate::leader) struct AbsentFromConfigTracker {
+pub(crate) struct AbsentFromConfigTracker {
     since: HashMap<NodeId, Instant>,
 }
 
 impl AbsentFromConfigTracker {
     /// Drop every timer. Called on demotion: a node that is re-promoted must
     /// not evict on the strength of observations from a previous epoch.
-    pub(in crate::leader) fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.since.clear();
     }
 
@@ -325,7 +302,7 @@ impl AbsentFromConfigTracker {
     ///
     /// A voter that reappears loses its timer, so eviction requires
     /// *uninterrupted* absence for the whole period.
-    pub(in crate::leader) fn observe(
+    pub(crate) fn observe(
         &mut self,
         absent_voters: &BTreeSet<NodeId>,
         now: Instant,
@@ -352,7 +329,7 @@ impl AbsentFromConfigTracker {
 #[allow(clippy::expect_used, clippy::panic, reason = "test code")]
 mod tests {
     use super::*;
-    use crate::tests::nid;
+    use zslg_consensus_fake::nid;
 
     /// Stable `NodeId` for a short name, for readable quorum-predicate tests.
     fn nid_for(name: &str) -> NodeId {

@@ -29,12 +29,9 @@ use zslg_raft_rpc::{NetworkFactory, PeerRegistrationWatcher};
 use zslg_raft_state::RaftStatePublisher;
 use zslg_raft_storage::RocksRaftStorage;
 
-mod membership;
-
 #[cfg(test)]
 mod tests;
 
-pub(crate) use membership::MembershipConfig;
 pub(crate) use zslg_raft_node::RaftNode;
 pub(crate) use zslg_raft_startup::{RaftStartupConfig, run_raft_startup};
 

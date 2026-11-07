@@ -19,39 +19,51 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
-use zslg_consensus::RaftStateView;
-use zslg_net::Router;
-use zslg_net_types::NetError;
+use zslg_consensus::{IntentSubmitter, RaftLeadership, RaftStateView};
+use zslg_net::NetError;
+use zslg_net::{PeersWatcher, Router, ServerName};
 
 use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::error::Error;
-use crate::leader::jobs::is_local_leader;
-use crate::leader::jobs::membership::liveness::LivenessState;
-use crate::metrics::{self, OpState};
+use crate::Error;
+use crate::change::{MembershipChangeInputs, MembershipChangeManager};
+use crate::config::MembershipConfig;
+use crate::liveness::{LivenessConfig, LivenessState, LivenessWorker, LivenessWorkerInputs};
+use crate::metrics;
+use crate::voters::{Eviction, VoterEvictionJob};
+use metrics_kit::OpState;
 use pace_kit::Pace;
-use zslg_consensus_types::RaftGeneration;
-use zslg_consensus_types::metrics::{LeaderJob, leader_job_ran};
-use zslg_consensus_types::{RaftState, ReplicaMembership, ReplicaStatus};
-use zslg_node_types::NodeId;
-use zslg_time_types::Hlc;
+use zslg_consensus::NodeId;
+use zslg_consensus::RaftGeneration;
+use zslg_consensus::metrics::{LeaderJob, leader_job_ran};
+use zslg_consensus::{RaftState, ReplicaMembership, ReplicaStatus};
+use zslg_time::Hlc;
 
-pub(in crate::leader) mod change;
-pub(in crate::leader) mod liveness;
+/// What the membership jobs read and write through.
+#[derive(Clone)]
+pub struct MembershipHandles {
+    pub self_node_id: NodeId,
+    pub raft_state: Arc<dyn RaftStateView>,
+    pub leadership: Arc<dyn RaftLeadership>,
+    pub router: Arc<dyn Router>,
+    pub intents: Arc<dyn IntentSubmitter>,
+}
 
 /// Spawn the liveness prober and the job that turns its live set into
 /// replica-set changes. Liveness is wired here because this job is its only
-/// consumer, so nothing about it is nameable outside this module.
-pub(in crate::leader) fn spawn(
-    shutdown: &mut shutdown::Shutdown<crate::Error>,
-    handles: &crate::leader::jobs::LeaderHandles,
-    config: &crate::raft::MembershipConfig,
-    liveness_config: &liveness::LivenessConfig,
-) {
-    let (worker, liveness_state) = liveness::LivenessWorker::new(
-        liveness::LivenessWorkerInputs {
+/// consumer, so nothing about it is nameable outside this crate.
+pub fn spawn_membership<E>(
+    shutdown: &mut shutdown::Shutdown<E>,
+    handles: MembershipHandles,
+    config: &MembershipConfig,
+    liveness_config: &LivenessConfig,
+) where
+    E: From<Error> + From<shutdown::Stopped> + std::fmt::Display + Send + 'static,
+{
+    let (worker, liveness_state) = LivenessWorker::new(
+        LivenessWorkerInputs {
             self_node_id: handles.self_node_id,
             raft_state: handles.raft_state.clone(),
             leadership: handles.leadership.clone(),
@@ -67,10 +79,12 @@ pub(in crate::leader) fn spawn(
         },
         shutdown.token(),
     );
-    shutdown.spawn("leader:liveness", worker.run());
+    shutdown.spawn("leader:liveness", async move {
+        worker.run().await.map_err(E::from)
+    });
 
-    let driver: Arc<dyn MembershipDriver> = Arc::new(change::MembershipChangeManager::new(
-        change::MembershipChangeInputs {
+    let driver: Arc<dyn MembershipDriver> =
+        Arc::new(MembershipChangeManager::new(MembershipChangeInputs {
             self_node_id: handles.self_node_id,
             intents: handles.intents.clone(),
             leadership: handles.leadership.clone(),
@@ -79,8 +93,7 @@ pub(in crate::leader) fn spawn(
             replica_node_count: config.replica_node_count,
             spare_selection: config.spare_selection,
             live_nodes: Arc::new(liveness_state.clone()),
-        },
-    ));
+        }));
 
     let job = MembershipJob {
         self_node_id: handles.self_node_id,
@@ -91,19 +104,56 @@ pub(in crate::leader) fn spawn(
         liveness_state,
         poll_interval: config.poll_interval,
     };
-    shutdown.spawn("leader:membership", job.run(shutdown.token()));
+    let cancel = shutdown.token();
+    shutdown.spawn("leader:membership", async move {
+        job.run(cancel).await.map_err(E::from)
+    });
+}
+
+/// What the voter-eviction job reads.
+#[derive(Clone)]
+pub struct VoterHandles {
+    pub self_node_id: NodeId,
+    pub leadership: Arc<dyn RaftLeadership>,
+    pub router: Arc<dyn Router>,
+}
+
+/// Spawn `leader:voters` on the shutdown tree. Touches openraft's own member
+/// list, writes no replicated state, and deliberately ignores liveness.
+pub fn spawn_voters<E>(
+    shutdown: &mut shutdown::Shutdown<E>,
+    handles: VoterHandles,
+    config: &MembershipConfig,
+    self_server_name: ServerName,
+    peers_watcher: Arc<dyn PeersWatcher>,
+) where
+    E: From<Error> + From<shutdown::Stopped> + std::fmt::Display + Send + 'static,
+{
+    let job = VoterEvictionJob {
+        self_node_id: handles.self_node_id,
+        self_server_name,
+        leadership: handles.leadership,
+        peers_watcher,
+        observer: Arc::new(NetworkMembershipObserver::new(handles.router)),
+        eviction: Eviction::from_timeout(config.forced_node_removal_timeout),
+        interval: config.poll_interval,
+    };
+    let cancel = shutdown.token();
+    shutdown.spawn("leader:voters", async move {
+        job.run(cancel).await.map_err(E::from)
+    });
 }
 
 /// What one `tick()` of the membership state machine achieved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::leader) enum TickOutcome {
+pub enum TickOutcome {
     Idle,
     Pending,
     Complete,
 }
 
 #[async_trait::async_trait]
-pub(in crate::leader) trait MembershipObserver: Send + Sync + 'static {
+pub trait MembershipObserver: Send + Sync + 'static {
     /// One `fetch_status` round trip. Returns the whole [`ReplicaStatus`] so
     /// step 2's generation and step 2b's `max_hlc` come from one observation.
     async fn observe(&self, peer: NodeId) -> Result<ReplicaStatus, crate::Error>;
@@ -112,24 +162,21 @@ pub(in crate::leader) trait MembershipObserver: Send + Sync + 'static {
 /// The membership state machine, behind a trait so the job's loop can be
 /// driven by a counting fake in `jobs::pacing_tests`.
 #[async_trait::async_trait]
-pub(in crate::leader) trait MembershipDriver: Send + Sync + 'static {
+pub trait MembershipDriver: Send + Sync + 'static {
     async fn maybe_initiate(&self) -> Result<(), crate::Error>;
 
     async fn tick(&self) -> Result<TickOutcome, crate::Error>;
 }
 
-#[cfg(test)]
-mod change_tests;
-
 /// The only production [`MembershipObserver`]; the trait exists so tests can
 /// answer in-process.
-pub(in crate::leader) struct NetworkMembershipObserver {
+pub struct NetworkMembershipObserver {
     router: Arc<dyn Router>,
 }
 
 impl NetworkMembershipObserver {
     #[must_use]
-    pub(in crate::leader) fn new(router: Arc<dyn Router>) -> Self {
+    pub fn new(router: Arc<dyn Router>) -> Self {
         Self { router }
     }
 }
@@ -154,22 +201,22 @@ impl MembershipObserver for NetworkMembershipObserver {
 /// The `min` keeps a configured interval authoritative. Debouncing is free
 /// here: every wake-up re-reads current state, so events arriving during the
 /// wait fold into the pass that follows.
-pub(in crate::leader) const MEMBERSHIP_STEP_FLOOR: Duration = Duration::from_millis(100);
+pub const MEMBERSHIP_STEP_FLOOR: Duration = Duration::from_millis(100);
 
-pub(in crate::leader) struct MembershipJob {
-    pub(in crate::leader) self_node_id: NodeId,
-    pub(in crate::leader) leadership: Arc<dyn zslg_consensus::RaftLeadership>,
-    pub(in crate::leader) raft_state: Arc<dyn RaftStateView>,
-    pub(in crate::leader) driver: Arc<dyn MembershipDriver>,
-    pub(in crate::leader) liveness_state: LivenessState,
+pub struct MembershipJob {
+    pub self_node_id: NodeId,
+    pub leadership: Arc<dyn zslg_consensus::RaftLeadership>,
+    pub raft_state: Arc<dyn RaftStateView>,
+    pub driver: Arc<dyn MembershipDriver>,
+    pub liveness_state: LivenessState,
     /// Wakes on every change to the live set — which is the set itself, so
     /// there is nothing to drain and nothing to miss.
-    pub(in crate::leader) liveness_events: tokio::sync::watch::Receiver<BTreeSet<NodeId>>,
-    pub(in crate::leader) poll_interval: Duration,
+    pub liveness_events: tokio::sync::watch::Receiver<BTreeSet<NodeId>>,
+    pub poll_interval: Duration,
 }
 
 impl MembershipJob {
-    pub(in crate::leader) async fn run(mut self, cancel: CancellationToken) -> Result<(), Error> {
+    pub async fn run(mut self, cancel: CancellationToken) -> Result<(), Error> {
         info!("leader:membership: starting");
         let mut ticker = interval(self.poll_interval);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
@@ -226,7 +273,7 @@ impl MembershipJob {
     /// Start a change if warranted, then advance whichever step is committed.
     /// Both are idempotent, so an extra call is only wasted work.
     async fn step(&self) {
-        if !is_local_leader(self.leadership.as_ref(), self.self_node_id) {
+        if !self.leadership.is_leader(self.self_node_id) {
             return;
         }
         if let Err(e) = self.driver.maybe_initiate().await {
@@ -260,12 +307,12 @@ impl MembershipJob {
 /// The initial live set: everyone the leader might need to talk to before the
 /// first liveness round has run.
 #[must_use]
-pub(in crate::leader) fn initial_live_set(
+pub(crate) fn initial_live_set(
     raft_state: &dyn RaftStateView,
     leadership: &dyn zslg_consensus::RaftLeadership,
     self_node_id: NodeId,
 ) -> BTreeSet<NodeId> {
-    zslg_consensus_types::all_targets(&raft_state.snapshot().replica)
+    zslg_consensus::all_targets(&raft_state.snapshot().replica)
         .into_iter()
         .chain(leadership.voter_ids())
         .chain(std::iter::once(self_node_id))
@@ -278,7 +325,7 @@ pub(in crate::leader) fn initial_live_set(
 /// Our own last-handled view only — never per-replica generation ACKs, which
 /// must be read fresh from each response (CLAUDE.md §12).
 #[derive(Debug, PartialEq, Eq)]
-pub(in crate::leader) struct MembershipRaftState {
+pub(crate) struct MembershipRaftState {
     generation: RaftGeneration,
     /// Watermark advances matter because step 3 of a membership change waits on
     /// them (CLAUDE.md §8; the reasoning is on `meta::drain_satisfied`).
@@ -305,8 +352,8 @@ impl From<&RaftState> for MembershipRaftState {
 )]
 mod debounce_tests {
     use super::*;
-    use crate::tests::nid;
-    use zslg_consensus_types::Exit;
+    use zslg_consensus::Exit;
+    use zslg_consensus_fake::nid;
 
     #[test]
     fn membership_view_ignores_leader_and_term_changes() {

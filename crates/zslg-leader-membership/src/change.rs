@@ -22,41 +22,41 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
+use zslg_consensus::{CandidateInfo, SpareSelectionStrategy};
 use zslg_consensus::{RaftLeadership, RaftStateView};
-use zslg_consensus_types::{CandidateInfo, SpareSelectionStrategy};
 use zslg_lifecycle_types::ConfigError;
 
 use async_trait::async_trait;
 use futures::FutureExt as _;
 use tracing::{debug, info, warn};
 
-use crate::error::Error;
-use crate::leader::jobs::membership::{MembershipDriver, MembershipObserver, TickOutcome};
-use zslg_consensus_types::RaftGeneration;
-use zslg_consensus_types::{Exit, ReplicaMembership};
-use zslg_node_types::NodeId;
+use crate::Error;
+use crate::job::{MembershipDriver, MembershipObserver, TickOutcome};
+use zslg_consensus::NodeId;
+use zslg_consensus::RaftGeneration;
+use zslg_consensus::{Exit, ReplicaMembership};
 use zslg_quorum_read::{FanOutResponse, fan_out_quorum};
-use zslg_time_types::Hlc;
+use zslg_time::Hlc;
 
-pub(in crate::leader) trait LivenessQuery: Send + Sync + 'static {
+pub trait LivenessQuery: Send + Sync + 'static {
     #[must_use]
     fn candidates(&self) -> BTreeMap<NodeId, CandidateInfo>;
 }
 
-pub(in crate::leader) struct MembershipChangeInputs {
-    pub(in crate::leader) self_node_id: NodeId,
+pub struct MembershipChangeInputs {
+    pub self_node_id: NodeId,
     /// Membership steps are published through the leader's single Raft
     /// writer, which validates each transition before it can reach the log.
-    pub(in crate::leader) intents: Arc<dyn zslg_consensus::IntentSubmitter>,
-    pub(in crate::leader) leadership: Arc<dyn RaftLeadership>,
-    pub(in crate::leader) raft_state: Arc<dyn RaftStateView>,
-    pub(in crate::leader) observer: Arc<dyn MembershipObserver>,
-    pub(in crate::leader) replica_node_count: u32,
-    pub(in crate::leader) spare_selection: SpareSelectionStrategy,
-    pub(in crate::leader) live_nodes: Arc<dyn LivenessQuery>,
+    pub intents: Arc<dyn zslg_consensus::IntentSubmitter>,
+    pub leadership: Arc<dyn RaftLeadership>,
+    pub raft_state: Arc<dyn RaftStateView>,
+    pub observer: Arc<dyn MembershipObserver>,
+    pub replica_node_count: u32,
+    pub spare_selection: SpareSelectionStrategy,
+    pub live_nodes: Arc<dyn LivenessQuery>,
 }
 
-pub(in crate::leader) struct MembershipChangeManager {
+pub struct MembershipChangeManager {
     inputs: MembershipChangeInputs,
     /// The generation this leader saw *its own* joint config commit at.
     ///
@@ -68,7 +68,7 @@ pub(in crate::leader) struct MembershipChangeManager {
 
 impl MembershipChangeManager {
     #[must_use]
-    pub(in crate::leader) fn new(inputs: MembershipChangeInputs) -> Self {
+    pub fn new(inputs: MembershipChangeInputs) -> Self {
         Self {
             inputs,
             episode: Mutex::new(None),
@@ -77,7 +77,7 @@ impl MembershipChangeManager {
 
     /// Step 1, and the abort path: if `new` has converged back on the set in
     /// force this collapses instead, which drops nobody and needs no bound.
-    pub(in crate::leader) async fn initiate(&self, new: BTreeSet<NodeId>) -> Result<(), Error> {
+    pub async fn initiate(&self, new: BTreeSet<NodeId>) -> Result<(), Error> {
         if new.is_empty() {
             return Err(Error::Config(ConfigError::InvalidConfiguration(
                 "membership change: new_replica_set must not be empty".into(),
@@ -120,7 +120,7 @@ impl MembershipChangeManager {
     /// no further write can be acked without `next` — step 2b's precondition.
     async fn generation_quorum(
         &self,
-        state: &zslg_consensus_types::RaftState,
+        state: &zslg_consensus::RaftState,
         old: &BTreeSet<NodeId>,
         next: &BTreeSet<NodeId>,
         minimum_generation: RaftGeneration,
@@ -267,10 +267,7 @@ impl MembershipChangeManager {
 /// decision — the one that discards step 2 — is assertable without a metrics
 /// recorder.
 #[must_use]
-pub(in crate::leader) fn needs_retarget(
-    current_next: &BTreeSet<NodeId>,
-    live: &BTreeSet<NodeId>,
-) -> bool {
+pub fn needs_retarget(current_next: &BTreeSet<NodeId>, live: &BTreeSet<NodeId>) -> bool {
     !current_next.is_subset(live)
 }
 
@@ -405,10 +402,8 @@ impl MembershipDriver for MembershipChangeManager {
                 // quorum of `next` is bounded by `exit`, so the stable prefix
                 // must cover it before those nodes are dropped. Re-checked
                 // independently at the Raft write point.
-                if !zslg_consensus_types::drain_satisfied(
-                    state.manifest_state.manifest_watermark,
-                    *exit,
-                ) {
+                if !zslg_consensus::drain_satisfied(state.manifest_state.manifest_watermark, *exit)
+                {
                     debug!(
                         current_watermark = ?state.manifest_state.manifest_watermark,
                         ?exit,
@@ -492,7 +487,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::tests::nid;
+    use zslg_consensus_fake::nid;
 
     fn set(ids: &[NodeId]) -> BTreeSet<NodeId> {
         ids.iter().copied().collect()

@@ -27,11 +27,6 @@ use object_store::memory::InMemory;
 use parking_lot::Mutex as SyncMutex;
 use tempfile::TempDir;
 
-use crate::error::Error;
-use crate::leader::jobs::membership::change::{
-    LivenessQuery, MembershipChangeInputs, MembershipChangeManager,
-};
-use crate::leader::jobs::membership::{MembershipDriver, MembershipObserver, TickOutcome};
 use crate::learner::LocalStore;
 use crate::learner::StableLog;
 use crate::raft::RaftNode;
@@ -43,6 +38,8 @@ use zslg_consensus_types::RaftStateHandle;
 use zslg_consensus_types::ReplicatedRaftState;
 use zslg_consensus_types::SpareSelectionStrategy;
 use zslg_hlc_gate::HlcGate;
+use zslg_leader_membership::{LivenessQuery, MembershipChangeInputs, MembershipChangeManager};
+use zslg_leader_membership::{MembershipDriver, MembershipObserver, TickOutcome};
 use zslg_leader_snapshot::create::{SnapshotEntryInputs, SnapshotResult, create_snapshot_entry};
 use zslg_log::LocalStoreMut;
 use zslg_log_types::LogIndex;
@@ -98,7 +95,7 @@ impl LocalObserver {
 
 #[async_trait]
 impl MembershipObserver for LocalObserver {
-    async fn observe(&self, peer: NodeId) -> Result<ReplicaStatus, crate::Error> {
+    async fn observe(&self, peer: NodeId) -> Result<ReplicaStatus, zslg_leader_membership::Error> {
         let states = self.states.lock();
         match states.get(&peer) {
             Some(apply) => Ok(ReplicaStatus {
@@ -112,9 +109,9 @@ impl MembershipObserver for LocalObserver {
                 max_hlc: self.max_hlc.lock().get(&peer).copied().flatten(),
                 peer_names: Vec::new(),
             }),
-            None => Err(Error::Consensus(ConsensusError::Raft(format!(
-                "peer {peer:?} not registered"
-            )))),
+            None => Err(zslg_leader_membership::Error::Consensus(
+                ConsensusError::Raft(format!("peer {peer:?} not registered")),
+            )),
         }
     }
 }

@@ -14,7 +14,6 @@ path = "src/lib.rs"
 workspace = true
 
 [dependencies]
-async-trait = { workspace = true }
 bytesize = { workspace = true }
 console-subscriber = { workspace = true, optional = true }
 crossbeam-channel = { workspace = true }
@@ -27,7 +26,6 @@ metrics-kit = { workspace = true }
 metrics-exporter-prometheus = { workspace = true, optional = true }
 object_store = { workspace = true }
 raft-kit = { workspace = true }
-parking_lot = { workspace = true }
 rocksdb-kit = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
 shutdown = { workspace = true }
@@ -36,7 +34,6 @@ tikv-jemallocator = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "fs", "signal", "net"] }
 tokio-util = { workspace = true, features = ["io-util"] }
 tracing = { workspace = true }
-pace-kit = { workspace = true }
 zslg-consensus = { workspace = true }
 zslg-consensus-types = { workspace = true }
 zslg-lifecycle-types = { workspace = true }
@@ -73,6 +70,7 @@ zslg-writer = { workspace = true }
 zslg-leader-integrator = { workspace = true, features = ["testing"] }
 zslg-leader-compaction = { workspace = true }
 zslg-leader-snapshot = { workspace = true }
+zslg-leader-membership = { workspace = true, features = ["testing"] }
 zslg-raft = { workspace = true }
 zslg-snapshot = { workspace = true }
 zslg-snapshot-types = { workspace = true }
@@ -80,6 +78,9 @@ zslg-time = { workspace = true }
 zslg-time-types = { workspace = true }
 
 [dev-dependencies]
+async-trait = { workspace = true }
+pace-kit = { workspace = true }
+parking_lot = { workspace = true }
 warn-throttle = { workspace = true }
 rand = { workspace = true }
 bytes = { workspace = true }

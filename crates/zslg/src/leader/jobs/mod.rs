@@ -38,9 +38,6 @@ use zslg_log::{LocalStoreView, StableLogSnapshot};
 use zslg_node_types::NodeId;
 use zslg_time::Clock;
 
-pub(in crate::leader) mod membership;
-pub(in crate::leader) mod voters;
-
 #[cfg(test)]
 mod pacing_tests;
 
@@ -57,13 +54,4 @@ pub(in crate::leader) struct LeaderHandles {
     pub(in crate::leader) self_node_id: NodeId,
     /// Unused by `cleanup` and `voters`, which write no replicated state.
     pub(in crate::leader) intents: Arc<dyn IntentSubmitter>,
-}
-
-/// Every job's first gate.
-#[must_use]
-pub(in crate::leader) fn is_local_leader(
-    leadership: &dyn RaftLeadership,
-    self_node_id: NodeId,
-) -> bool {
-    leadership.is_leader(self_node_id)
 }

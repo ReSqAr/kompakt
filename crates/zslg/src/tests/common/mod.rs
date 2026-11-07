@@ -32,7 +32,7 @@ pub(crate) use cutoff_observer::CutoffObserver;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-pub(crate) use zslg_net_fake::{fn_remote, probe_router, replica_only};
+pub(crate) use zslg_net_fake::{fn_remote, replica_only};
 use zslg_net_types::NetError;
 
 use crate::Error;

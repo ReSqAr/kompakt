@@ -30,14 +30,14 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::Error;
-use crate::leader::jobs::membership::liveness::LivenessState;
-use crate::leader::jobs::membership::{MEMBERSHIP_STEP_FLOOR, MembershipJob};
-use crate::leader::jobs::membership::{MembershipDriver, TickOutcome};
 use crossbeam_combinators::Channel;
 use pace_kit::Pace;
 use zslg_consensus_types::RaftStateHandle;
 use zslg_consensus_types::{RaftManifestState, RaftState, ReplicaMembership};
 use zslg_leader_integrator::Integrator;
+use zslg_leader_membership::LivenessState;
+use zslg_leader_membership::{MEMBERSHIP_STEP_FLOOR, MembershipJob};
+use zslg_leader_membership::{MembershipDriver, TickOutcome};
 use zslg_leader_snapshot::{SNAPSHOT_LOOP_FLOOR, SnapshotJob};
 use zslg_log::{LocalStoreView, StableLogSnapshot};
 use zslg_log_types::Data;
@@ -97,11 +97,11 @@ struct CountingDriver {
 
 #[async_trait::async_trait]
 impl MembershipDriver for CountingDriver {
-    async fn maybe_initiate(&self) -> Result<(), Error> {
+    async fn maybe_initiate(&self) -> Result<(), zslg_leader_membership::Error> {
         Ok(())
     }
 
-    async fn tick(&self) -> Result<TickOutcome, Error> {
+    async fn tick(&self) -> Result<TickOutcome, zslg_leader_membership::Error> {
         let n = self.ticks.fetch_add(1, Ordering::SeqCst) + 1;
         let _ = self.bump.send(n);
         Ok(TickOutcome::Idle)

@@ -1,21 +1,21 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_consensus::CandidateInfo;
+use zslg_consensus::ConsensusError;
 use zslg_consensus::{RaftLeadership, RaftStateView};
-use zslg_consensus_types::CandidateInfo;
-use zslg_consensus_types::ConsensusError;
 use zslg_lifecycle_types::ConfigError;
+use zslg_net::NetError;
 use zslg_net::Router;
-use zslg_net_types::NetError;
 
 use parking_lot::Mutex as SyncMutex;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::error::Error;
-use crate::leader::jobs::membership::change::LivenessQuery;
-use zslg_node_types::NodeId;
+use crate::Error;
+use crate::change::LivenessQuery;
+use zslg_consensus::NodeId;
 
 /// The live set and its change notification in one primitive.
 ///
@@ -24,7 +24,7 @@ use zslg_node_types::NodeId;
 /// a lossy one, since removals mutated the set without emitting anything and
 /// were noticed only on the consumer's next poll tick.
 #[derive(Clone)]
-pub(in crate::leader) struct LivenessState {
+pub struct LivenessState {
     /// A **receiver**, deliberately: the only sender belongs to the worker, so
     /// a consumer observes the channel closing when the worker dies. Holding a
     /// sender here would make that unobservable, and a consumer would go on
@@ -34,29 +34,29 @@ pub(in crate::leader) struct LivenessState {
     rtts: Arc<SyncMutex<HashMap<NodeId, Duration>>>,
     /// Test-only: keeps a fixed set's sender alive, since there is no worker
     /// behind it to own one.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     _fixed: Option<Arc<watch::Sender<BTreeSet<NodeId>>>>,
 }
 
 impl LivenessState {
     #[must_use]
-    pub(in crate::leader) fn live_nodes(&self) -> BTreeSet<NodeId> {
+    pub fn live_nodes(&self) -> BTreeSet<NodeId> {
         self.live.borrow().clone()
     }
 
     /// Wakes on every change to the live set, and reports the worker's death by
     /// closing.
     #[must_use]
-    pub(in crate::leader) fn subscribe(&self) -> watch::Receiver<BTreeSet<NodeId>> {
+    pub fn subscribe(&self) -> watch::Receiver<BTreeSet<NodeId>> {
         self.live.clone()
     }
 
     /// A state with a fixed live set and no worker behind it, for tests that
     /// drive a job which *requires* a `LivenessState` but is not exercising
     /// liveness itself.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     #[must_use]
-    pub(in crate::leader) fn fixed_for_test(live: BTreeSet<NodeId>) -> Self {
+    pub fn fixed_for_test(live: BTreeSet<NodeId>) -> Self {
         let (tx, rx) = watch::channel(live);
         Self {
             live: rx,
@@ -84,20 +84,20 @@ impl LivenessQuery for LivenessState {
     }
 }
 
-pub(in crate::leader) struct LivenessWorkerInputs {
-    pub(in crate::leader) self_node_id: NodeId,
-    pub(in crate::leader) raft_state: Arc<dyn RaftStateView>,
-    pub(in crate::leader) leadership: Arc<dyn RaftLeadership>,
-    pub(in crate::leader) initial_live: BTreeSet<NodeId>,
-    pub(in crate::leader) router: Arc<dyn Router>,
-    pub(in crate::leader) interval: Duration,
+pub(crate) struct LivenessWorkerInputs {
+    pub self_node_id: NodeId,
+    pub raft_state: Arc<dyn RaftStateView>,
+    pub leadership: Arc<dyn RaftLeadership>,
+    pub initial_live: BTreeSet<NodeId>,
+    pub router: Arc<dyn Router>,
+    pub interval: Duration,
     /// Upper bound on a single probe; an over-deadline probe counts as a
     /// failure.
-    pub(in crate::leader) probe_timeout: Duration,
-    pub(in crate::leader) max_failures: u32,
+    pub probe_timeout: Duration,
+    pub max_failures: u32,
 }
 
-pub(in crate::leader) struct LivenessWorker {
+pub(crate) struct LivenessWorker {
     self_node_id: NodeId,
     raft_state: Arc<dyn RaftStateView>,
     leadership: Arc<dyn RaftLeadership>,
@@ -113,7 +113,7 @@ pub(in crate::leader) struct LivenessWorker {
 
 impl LivenessWorker {
     #[must_use]
-    pub(in crate::leader) fn new(
+    pub(crate) fn new(
         inputs: LivenessWorkerInputs,
         cancel: CancellationToken,
     ) -> (Self, LivenessState) {
@@ -123,7 +123,7 @@ impl LivenessWorker {
         let state = LivenessState {
             live: live_rx,
             rtts: rtts.clone(),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             _fixed: None,
         };
         let worker = Self {
@@ -142,7 +142,7 @@ impl LivenessWorker {
         (worker, state)
     }
 
-    pub(in crate::leader) async fn run(self) -> Result<(), Error> {
+    pub(crate) async fn run(self) -> Result<(), Error> {
         info!(self_node_id = ?self.self_node_id, "liveness worker: starting");
         let mut ticker = tokio::time::interval(self.interval);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -157,7 +157,7 @@ impl LivenessWorker {
 
             let snapshot = self.raft_state.snapshot();
             let voter_ids = self.leadership.voter_ids();
-            let peers: BTreeSet<NodeId> = zslg_consensus_types::all_targets(&snapshot.replica)
+            let peers: BTreeSet<NodeId> = zslg_consensus::all_targets(&snapshot.replica)
                 .into_iter()
                 .chain(voter_ids)
                 .filter(|&id| id != self.self_node_id)
@@ -225,7 +225,7 @@ impl LivenessWorker {
                         debug!(?peer, ?rtt, "liveness probe ok");
                     }
                     Err(zslg_net::Error::Consensus(ConsensusError::UnexpectedNodeId(ids))) => {
-                        let zslg_consensus_types::UnexpectedNodeId { expected, actual } = *ids;
+                        let zslg_consensus::UnexpectedNodeId { expected, actual } = *ids;
                         debug!(
                             ?peer,
                             ?expected,
@@ -270,9 +270,9 @@ impl LivenessWorker {
 
 /// Liveness probing configuration.
 #[derive(Debug, Clone)]
-pub(crate) struct LivenessConfig {
-    pub(crate) probe_interval: Duration,
-    pub(crate) probe_timeout: Duration,
+pub struct LivenessConfig {
+    pub probe_interval: Duration,
+    pub probe_timeout: Duration,
 }
 
 impl Default for LivenessConfig {
@@ -285,11 +285,11 @@ impl Default for LivenessConfig {
 }
 
 impl LivenessConfig {
-    pub(crate) fn validate(&self) -> Result<(), crate::error::Error> {
+    pub fn validate(&self) -> Result<(), crate::Error> {
         if self.probe_timeout.is_zero() {
-            return Err(crate::error::Error::Config(
-                ConfigError::InvalidConfiguration("liveness_probe_timeout must be > 0".to_owned()),
-            ));
+            return Err(crate::Error::Config(ConfigError::InvalidConfiguration(
+                "liveness_probe_timeout must be > 0".to_owned(),
+            )));
         }
         Ok(())
     }
@@ -311,9 +311,9 @@ mod tests {
 
     use async_trait::async_trait;
     use shutdown::Shutdown;
-    use zslg_consensus_types::RaftStateHandle;
-    use zslg_consensus_types::{RaftState, ReplicaMembership};
-    use zslg_net_types::ServerName;
+    use zslg_consensus::RaftStateHandle;
+    use zslg_consensus::{RaftState, ReplicaMembership};
+    use zslg_net::ServerName;
 
     struct NoVoters;
     impl NoVoters {
@@ -335,13 +335,13 @@ mod tests {
         }
         async fn remove_member(
             &self,
-            node_id: zslg_node_types::NodeId,
+            node_id: zslg_consensus::NodeId,
         ) -> Result<(), zslg_consensus::Error> {
             self.remove_member_in(node_id).await.map_err(Into::into)
         }
     }
 
-    use crate::tests::nid;
+    use zslg_consensus_fake::nid;
 
     fn raft_state_with_peers(peers: &[NodeId]) -> Arc<dyn RaftStateView> {
         let state = RaftStateHandle::new();
@@ -374,7 +374,7 @@ mod tests {
 
     impl FailProbe {
         pub(crate) async fn probe_in(&self) -> Result<(), Error> {
-            Err(crate::error::Error::Net(NetError::Rpc("simulated".into())))
+            Err(crate::Error::Net(NetError::Rpc("simulated".into())))
         }
     }
 
@@ -403,7 +403,7 @@ mod tests {
                 raft_state: raft_state_with_peers(&[peer]),
                 leadership: Arc::new(NoVoters),
                 initial_live: BTreeSet::new(),
-                router: crate::tests::probe_router(Arc::new(FailProbe)),
+                router: zslg_net_fake::probe_router(Arc::new(FailProbe)),
                 interval: Duration::from_millis(10),
                 probe_timeout: Duration::from_secs(5),
                 max_failures: 1,
@@ -443,7 +443,7 @@ mod tests {
                 raft_state,
                 leadership: Arc::new(NoVoters),
                 initial_live: BTreeSet::new(),
-                router: crate::tests::probe_router(probe),
+                router: zslg_net_fake::probe_router(probe),
                 interval,
                 probe_timeout: Duration::from_secs(5),
                 max_failures: 5,
@@ -486,7 +486,7 @@ mod tests {
                 raft_state,
                 leadership: Arc::new(NoVoters),
                 initial_live: BTreeSet::new(),
-                router: crate::tests::probe_router(probe),
+                router: zslg_net_fake::probe_router(probe),
                 interval: Duration::from_millis(10),
                 probe_timeout: Duration::from_secs(5),
                 max_failures: 5,
@@ -540,7 +540,7 @@ mod tests {
                 raft_state,
                 leadership: Arc::new(NoVoters),
                 initial_live: BTreeSet::from([peer]),
-                router: crate::tests::probe_router(probe),
+                router: zslg_net_fake::probe_router(probe),
                 interval,
                 probe_timeout: Duration::from_secs(5),
                 max_failures: 1,
@@ -580,7 +580,7 @@ mod tests {
                 raft_state,
                 leadership: Arc::new(NoVoters),
                 initial_live: BTreeSet::from([self_id]),
-                router: crate::tests::probe_router(probe),
+                router: zslg_net_fake::probe_router(probe),
                 interval,
                 probe_timeout: Duration::from_secs(5),
                 max_failures: 5,
@@ -624,7 +624,7 @@ mod tests {
                 raft_state,
                 leadership: Arc::new(NoVoters),
                 initial_live: BTreeSet::from([self_id, peer, departed]),
-                router: crate::tests::probe_router(probe),
+                router: zslg_net_fake::probe_router(probe),
                 interval: Duration::from_millis(10),
                 probe_timeout: Duration::from_secs(5),
                 max_failures: 5,
@@ -700,7 +700,7 @@ mod tests {
                 raft_state,
                 leadership: Arc::new(NoVoters),
                 initial_live: peers.iter().copied().collect(),
-                router: crate::tests::probe_router(probe),
+                router: zslg_net_fake::probe_router(probe),
                 interval: Duration::from_millis(10),
                 probe_timeout: Duration::from_secs(5),
                 max_failures: 5,
@@ -753,7 +753,7 @@ mod tests {
                 raft_state,
                 leadership: Arc::new(NoVoters),
                 initial_live: BTreeSet::from([peer]),
-                router: crate::tests::probe_router(Arc::new(WedgedProbe)),
+                router: zslg_net_fake::probe_router(Arc::new(WedgedProbe)),
                 interval: Duration::from_millis(10),
                 probe_timeout: Duration::from_millis(50),
                 max_failures: 1,
