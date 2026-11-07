@@ -4439,7 +4439,6 @@ name = "zslg"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "backoff-kit",
  "bytes",
  "bytesize",
  "clap",
@@ -4518,6 +4517,7 @@ dependencies = [
  "zslg-subscriber",
  "zslg-time",
  "zslg-time-types",
+ "zslg-writer",
 ]
 
 [[package]]
@@ -5259,6 +5259,35 @@ dependencies = [
  "proptest",
  "serde",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "zslg-writer"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "backoff-kit",
+ "bytes",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "dashmap",
+ "error-union",
+ "futures",
+ "metrics-kit",
+ "rand 0.10.3",
+ "tokio",
+ "tracing",
+ "zslg-consensus",
+ "zslg-consensus-fake",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-log-fake",
+ "zslg-net",
+ "zslg-net-fake",
+ "zslg-quorum-read",
+ "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
 ]
 
 [[package]]

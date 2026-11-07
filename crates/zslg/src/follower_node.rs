@@ -36,7 +36,6 @@ use crate::error::Error;
 use crate::learner::LearnerConfig;
 use crate::learner::{LearnerService, StableLog, spawn_learner, spawn_stable_store};
 use crate::network::setup_router;
-use crate::writer::WriterService;
 use rocksdb_kit::{CfSpec, Storage, StorageConfig};
 use shutdown::Shutdown;
 use zslg_hlc_clock::{HlcClock, run_clock_gauges};
@@ -45,6 +44,7 @@ use zslg_node_types::NodeId;
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use zslg_object_store_config::IntoArcObjectStore;
 use zslg_raft_tracker::{RaftTrackerConfig, spawn_raft_tracker_streamer};
+use zslg_writer::WriterService;
 
 /// Configuration for a follower node.
 ///
@@ -293,8 +293,8 @@ impl FollowerNodeConfig {
     /// Validate all sub-configs and required timeouts.
     /// Produce the writer constructor config.
     #[must_use]
-    pub(crate) fn writer_config(&self, node_id: NodeId) -> crate::writer::WriterConfig {
-        crate::writer::WriterConfig {
+    pub(crate) fn writer_config(&self, node_id: NodeId) -> zslg_writer::WriterConfig {
+        zslg_writer::WriterConfig {
             node_id,
             write_timeout: self.write_timeout,
         }

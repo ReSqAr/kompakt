@@ -10,7 +10,7 @@
 //! ```
 //!
 //! Fan-out, quorum evaluation, reconnect and resend are all
-//! [`crate::quorum::Coordinator`]'s. What is left here is the identity and the
+//! [`crate::coordinator::Coordinator`]'s. What is left here is the identity and the
 //! deadline.
 //!
 //! Minting identity — rather than deriving it from the payload — is what makes
@@ -24,29 +24,30 @@
 
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_consensus::ConsensusError;
 use zslg_consensus::RaftStateTracker;
-use zslg_consensus_types::ConsensusError;
 use zslg_lifecycle_types::ConfigError;
-use zslg_log_types::LogError;
+use zslg_log::LogError;
 use zslg_net::Router;
 
 use bytes::Bytes;
 use tracing::warn;
 
-use crate::error::Error;
-use crate::metrics::{self, OpState};
-use crate::quorum::Coordinator;
-use zslg_log_types::Data;
-use zslg_node_types::NodeId;
+use crate::Error;
+use crate::coordinator::Coordinator;
+use crate::metrics;
+use metrics_kit::OpState;
+use zslg_consensus::NodeId;
+use zslg_log::Data;
 use zslg_time::Clock;
 
-pub(crate) struct WriterConfig {
-    pub(crate) node_id: NodeId,
-    pub(crate) write_timeout: Duration,
+pub struct WriterConfig {
+    pub node_id: NodeId,
+    pub write_timeout: Duration,
 }
 
 impl WriterConfig {
-    pub(crate) fn validate(&self) -> Result<(), Error> {
+    pub fn validate(&self) -> Result<(), Error> {
         if self.write_timeout.is_zero() {
             return Err(Error::Config(ConfigError::InvalidConfiguration(
                 "write_timeout must be > 0".to_owned(),
@@ -57,7 +58,7 @@ impl WriterConfig {
 }
 
 #[derive(Clone)]
-pub(crate) struct WriterService {
+pub struct WriterService {
     coord: Arc<Coordinator>,
     clock: Arc<dyn Clock>,
     node_id: NodeId,
@@ -66,7 +67,7 @@ pub(crate) struct WriterService {
 
 impl WriterService {
     #[must_use]
-    pub(crate) fn new(
+    pub fn new(
         router: Arc<dyn Router>,
         raft_state: Arc<dyn RaftStateTracker>,
         clock: Arc<dyn Clock>,
@@ -86,11 +87,10 @@ impl WriterService {
 
 #[async_trait::async_trait]
 impl zslg_log::Writer for WriterService {
-    async fn write(&self, blob: Bytes) -> Result<zslg_log_types::DataId, zslg_log::Error> {
-        let result: Result<zslg_log_types::DataId, Error> = async {
+    async fn write(&self, blob: Bytes) -> Result<zslg_log::DataId, zslg_log::Error> {
+        let result: Result<zslg_log::DataId, Error> = async {
             let creation_hlc = self.clock.now();
-            let data_id =
-                zslg_log_types::DataId::from_parts(creation_hlc, self.node_id, rand::random());
+            let data_id = zslg_log::DataId::from_parts(creation_hlc, self.node_id, rand::random());
 
             let _in_flight = metrics::writes_in_flight_guard();
             let probe = metrics::write_duration_probe();
@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn writer_config_rejects_zero_write_timeout() {
         let c = WriterConfig {
-            node_id: zslg_node_types::NodeId::new_v4(),
+            node_id: zslg_consensus::NodeId::new_v4(),
             write_timeout: Duration::ZERO,
         };
         assert!(matches!(

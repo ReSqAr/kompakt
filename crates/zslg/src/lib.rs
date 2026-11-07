@@ -39,6 +39,10 @@ use console_subscriber as _;
 #[cfg(feature = "jemalloc")]
 use tikv_jemallocator as _;
 
+// `rand` is used by the `loadgen` example only.
+#[cfg(test)]
+use rand as _;
+
 mod database;
 pub(crate) mod error;
 pub(crate) mod follower_node;
@@ -50,14 +54,12 @@ pub(crate) mod learner_node;
 pub(crate) mod metrics;
 pub(crate) mod network;
 pub(crate) mod observability;
-pub(crate) mod quorum;
 pub(crate) mod raft;
 pub(crate) mod replica;
 pub(crate) mod replica_node;
 #[cfg(test)]
 #[cfg(test)]
 mod tests;
-pub(crate) mod writer;
 pub(crate) mod writer_node;
 
 pub use crate::error::Error;

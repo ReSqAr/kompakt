@@ -16,11 +16,9 @@ workspace = true
 [dependencies]
 async-trait = { workspace = true }
 bytesize = { workspace = true }
-bytes = { workspace = true }
 console-subscriber = { workspace = true, optional = true }
 crossbeam-channel = { workspace = true }
 crossbeam-combinators = { workspace = true, features = ["tokio"] }
-dashmap = { workspace = true }
 error-union = { workspace = true }
 framing = { workspace = true }
 futures = { workspace = true }
@@ -30,7 +28,6 @@ metrics-exporter-prometheus = { workspace = true, optional = true }
 object_store = { workspace = true }
 raft-kit = { workspace = true }
 parking_lot = { workspace = true }
-rand = { workspace = true }
 rocksdb-kit = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
 shutdown = { workspace = true }
@@ -59,7 +56,6 @@ zslg-net-client = { workspace = true }
 zslg-net-server = { workspace = true }
 zslg-net-router = { workspace = true }
 zslg-raft-storage = { workspace = true }
-backoff-kit = { workspace = true }
 zslg-peers = { workspace = true }
 zslg-raft-rpc = { workspace = true }
 zslg-raft-state = { workspace = true }
@@ -73,6 +69,7 @@ zslg-subscriber = { workspace = true }
 zslg-reader = { workspace = true }
 zslg-replica-log = { workspace = true }
 zslg-replica-service = { workspace = true }
+zslg-writer = { workspace = true }
 zslg-raft = { workspace = true }
 zslg-snapshot = { workspace = true }
 zslg-snapshot-types = { workspace = true }
@@ -80,6 +77,9 @@ zslg-time = { workspace = true }
 zslg-time-types = { workspace = true }
 
 [dev-dependencies]
+rand = { workspace = true }
+bytes = { workspace = true }
+dashmap = { workspace = true }
 zslg-replica-log = { workspace = true, features = ["testing"] }
 zslg-reader = { workspace = true, features = ["testing"] }
 zslg-local-store = { workspace = true, features = ["testing"] }

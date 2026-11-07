@@ -48,7 +48,6 @@ use crate::raft::{MembershipConfig, RaftConfig};
 use crate::raft::{RaftNode, run_raft_startup, setup_raft};
 use crate::replica::ReplicaLogConfig;
 use crate::replica::{ReplicaService, spawn_replica};
-use crate::writer::WriterService;
 use crate::{database, network};
 #[cfg(test)]
 use rocksdb_kit::ColumnFamily;
@@ -67,6 +66,7 @@ use zslg_peers::PeersMembershipGate;
 use zslg_raft_tracker::NoOpRaftViewer;
 use zslg_snapshot_types::CompactionTier;
 use zslg_snapshot_types::CompressionLevel;
+use zslg_writer::WriterService;
 
 #[derive(Debug, Clone)]
 pub struct ReplicaNodeConfig {
@@ -515,8 +515,8 @@ impl ReplicaNodeConfig {
     /// Validate all sub-configs and cross-field constraints.
     /// Produce the writer constructor config.
     #[must_use]
-    pub(crate) fn writer_config(&self, node_id: NodeId) -> crate::writer::WriterConfig {
-        crate::writer::WriterConfig {
+    pub(crate) fn writer_config(&self, node_id: NodeId) -> zslg_writer::WriterConfig {
+        zslg_writer::WriterConfig {
             node_id,
             write_timeout: self.write_timeout,
         }

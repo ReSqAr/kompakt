@@ -22,12 +22,12 @@ use crate::ByteSize;
 use crate::Error;
 
 use crate::network::setup_router;
-use crate::writer::WriterService;
 use shutdown::Shutdown;
 use zslg_hlc_clock::{HlcClock, run_clock_gauges};
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 use zslg_raft_tracker::{RaftTracker, RaftTrackerConfig, spawn_raft_tracker_streamer};
+use zslg_writer::WriterService;
 
 pub struct WriterNode {
     config: WriterNodeConfig,
@@ -249,8 +249,8 @@ impl WriterNodeConfig {
 
     /// Produce the writer constructor config.
     #[must_use]
-    pub(crate) fn writer_config(&self, node_id: NodeId) -> crate::writer::WriterConfig {
-        crate::writer::WriterConfig {
+    pub(crate) fn writer_config(&self, node_id: NodeId) -> zslg_writer::WriterConfig {
+        zslg_writer::WriterConfig {
             node_id,
             write_timeout: self.write_timeout,
         }

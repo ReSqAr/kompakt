@@ -34,8 +34,8 @@ use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
+use zslg_consensus::ConsensusError;
 use zslg_consensus::RaftStateTracker;
-use zslg_consensus_types::ConsensusError;
 use zslg_net::Router;
 
 use crossbeam_channel::{Receiver, Sender};
@@ -43,14 +43,14 @@ use dashmap::DashMap;
 use dashmap::mapref::entry::Entry as MapEntry;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
-use crate::error::Error;
+use crate::Error;
 use crate::metrics::{self, WriteRpcOutcome};
 use crossbeam_combinators::Channel;
-use zslg_consensus_types::{all_targets, is_quorum};
+use zslg_consensus::NodeId;
+use zslg_consensus::{all_targets, is_quorum};
+use zslg_log::Data;
+use zslg_log::DataId;
 use zslg_log::{StampedWrite, WriteOutcome};
-use zslg_log_types::Data;
-use zslg_log_types::DataId;
-use zslg_node_types::NodeId;
 use zslg_quorum_read::metrics::FanoutResponseState;
 
 /// Global in-flight cap. A permit is held for a write's whole life, so this
@@ -500,19 +500,21 @@ mod tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use zslg_net::NetError;
     use zslg_net::ReplicaClient;
-    use zslg_net_types::NetError;
 
     use async_trait::async_trait;
     use futures::stream::BoxStream;
 
     use super::*;
 
-    use crate::tests::{make_data, nid, replica_only};
-    use zslg_consensus_types::RaftGeneration;
-    use zslg_consensus_types::{RaftManifestState, RaftState, ReplicaMembership, ReplicaStatus};
+    use zslg_consensus::RaftGeneration;
+    use zslg_consensus::{RaftManifestState, RaftState, ReplicaMembership, ReplicaStatus};
+    use zslg_consensus_fake::nid;
+    use zslg_log::LogIndex;
     use zslg_log::Replica;
-    use zslg_log_types::LogIndex;
+    use zslg_log_fake::make_data;
+    use zslg_net_fake::replica_only;
 
     fn state(generation: u64, replicas: &[NodeId]) -> RaftState {
         RaftState {
@@ -604,12 +606,12 @@ mod tests {
     }
 
     impl Router for ScriptRouter {
-        fn register_peer(&self, _: NodeId, _: zslg_net_types::PeerAddr) {}
+        fn register_peer(&self, _: NodeId, _: zslg_net::PeerAddr) {}
         fn remote(&self, node_id: NodeId) -> Arc<dyn ReplicaClient> {
             let resp = self.script.get(&node_id).cloned().unwrap_or(Resp::Down);
             replica_only(Arc::new(FakeReplica { resp }))
         }
-        fn remote_direct(&self, _: zslg_net_types::PeerAddr) -> Arc<dyn ReplicaClient> {
+        fn remote_direct(&self, _: zslg_net::PeerAddr) -> Arc<dyn ReplicaClient> {
             unimplemented!("ScriptRouter: direct dial not used")
         }
     }
