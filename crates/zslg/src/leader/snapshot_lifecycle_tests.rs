@@ -26,15 +26,13 @@ use zslg_snapshot::{CleanupReport, SnapshotStore, SnapshotWrite};
 use bytes::Bytes;
 use uuid::Uuid;
 
-use crate::leader::jobs::snapshot::create::{
-    SnapshotEntryInputs, SnapshotResult, create_snapshot_entry,
-};
 use crate::learner::LocalStore;
 use crate::learner::integrate_manifest_for_test;
 use crate::raft::RaftNode;
 use zslg_consensus_types::RaftStateHandle;
 use zslg_consensus_types::ReplicaMembership;
 use zslg_consensus_types::ReplicatedRaftState;
+use zslg_leader_snapshot::create::{SnapshotEntryInputs, SnapshotResult, create_snapshot_entry};
 use zslg_log::{LocalStoreMut, StableLogSnapshot};
 use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};
@@ -161,7 +159,7 @@ async fn snapshot_refuses_to_commit_an_aborted_window() {
         .await
         .expect_err("an aborted window must fail the snapshot");
     assert!(
-        matches!(err, Error::Log(LogError::StreamTruncated { ref what }) if what == "truncated window"),
+        matches!(err, zslg_leader_snapshot::Error::Log(LogError::StreamTruncated { ref what }) if what == "truncated window"),
         "expected StreamTruncated, got: {err:?}"
     );
 
@@ -587,8 +585,8 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
     use std::sync::atomic::AtomicBool;
 
     use crate::error::Error;
-    use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
     use zslg_consensus_types::RaftGeneration;
+    use zslg_leader_snapshot::create::{SnapshotInputs, build_snapshot};
     use zslg_log::LocalStoreView;
     use zslg_log::Replica;
     use zslg_log_types::LogIndex;
@@ -798,7 +796,7 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
 /// §10.2 — slow-replica fault mode).
 #[tokio::test]
 async fn snapshot_quorum_tolerates_one_wedged_replica() {
-    use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
+    use zslg_leader_snapshot::create::{SnapshotInputs, build_snapshot};
     use zslg_log::Replica;
     use zslg_time_types::HlcParts;
 
@@ -897,9 +895,9 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use crate::error::Error;
-    use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
     use crate::tests::ReadyReplica;
     use crossbeam_combinators::Channel;
+    use zslg_leader_snapshot::create::{SnapshotInputs, build_snapshot};
     use zslg_log::Replica;
     use zslg_log_types::SnapshotEntry;
     use zslg_net_types::ServerName;

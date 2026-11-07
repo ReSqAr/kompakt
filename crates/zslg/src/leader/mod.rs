@@ -9,6 +9,7 @@
 //! one job at a time can deadlock. Safety therefore sits at the write point —
 //! see [`integrator`].
 
+mod config;
 pub(crate) mod jobs;
 
 #[cfg(test)]
@@ -18,20 +19,29 @@ mod compaction_tests;
 mod jobs_tests;
 
 #[cfg(test)]
+mod snapshot_build_tests;
+
+#[cfg(test)]
+mod snapshot_lifecycle_tests;
+
+#[cfg(test)]
+mod snapshot_member_lifecycle_tests;
+
+#[cfg(test)]
 mod leadership_churn_tests;
 
 use crate::leader::jobs::LeaderHandles;
 pub(super) use crate::leader::jobs::membership::liveness::LivenessConfig;
-pub(super) use crate::leader::jobs::snapshot::SnapshotConfig;
+pub(super) use config::SnapshotConfig;
 use zslg_consensus::{RaftLeadership, RaftStateView, StateReplicator};
 pub(in crate::leader) use zslg_leader_integrator::Integrator;
 use zslg_net::{PeersWatcher, Router};
 use zslg_snapshot::SnapshotStore;
 
 #[cfg(test)]
-pub(crate) use jobs::snapshot::create::SnapshotResult;
+pub(crate) use zslg_leader_snapshot::create::SnapshotResult;
 #[cfg(test)]
-pub(in crate::leader) use jobs::snapshot::create::{SnapshotInputs, build_snapshot};
+pub(in crate::leader) use zslg_leader_snapshot::create::{SnapshotInputs, build_snapshot};
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -97,13 +107,38 @@ pub(super) fn spawn_leader_loop(
         intents,
     };
 
-    jobs::cutoff::spawn(shutdown, &handles, &config.snapshot);
-    jobs::snapshot::spawn(
+    zslg_leader_snapshot::spawn_cutoff(
         shutdown,
-        &handles,
-        &config.snapshot,
-        config.poll_interval,
-        config.quorum_wait_timeout,
+        zslg_leader_snapshot::CutoffHandles {
+            self_node_id: handles.self_node_id,
+            clock: handles.clock.clone(),
+            leadership: handles.leadership.clone(),
+            raft_state: handles.raft_state.clone(),
+            intents: handles.intents.clone(),
+        },
+        zslg_leader_snapshot::CutoffConfig {
+            cutoff_lag: config.snapshot.cutoff_timeout,
+            interval: config.snapshot.interval,
+        },
+    );
+    zslg_leader_snapshot::spawn_snapshot(
+        shutdown,
+        zslg_leader_snapshot::SnapshotHandles {
+            self_node_id: handles.self_node_id,
+            local_store: handles.local_store.clone(),
+            stable_log: handles.stable_log.clone(),
+            snapshot_store: handles.snapshot_store.clone(),
+            raft_state: handles.raft_state.clone(),
+            router: handles.router.clone(),
+            leadership: handles.leadership.clone(),
+            intents: handles.intents.clone(),
+        },
+        zslg_leader_snapshot::SnapshotJobConfig {
+            quorum_poll_interval: config.poll_interval,
+            quorum_wait_timeout: config.quorum_wait_timeout,
+            compression: config.snapshot.compression,
+            max_snapshot_entries: config.snapshot.max_snapshot_entries,
+        },
     );
     zslg_leader_compaction::spawn(
         shutdown,
@@ -120,7 +155,19 @@ pub(super) fn spawn_leader_loop(
             interval: config.snapshot.compaction_interval,
         },
     );
-    jobs::cleanup::spawn(shutdown, &handles, &config.snapshot);
+    zslg_leader_snapshot::spawn_cleanup(
+        shutdown,
+        zslg_leader_snapshot::CleanupHandles {
+            self_node_id: handles.self_node_id,
+            snapshot_store: handles.snapshot_store.clone(),
+            leadership: handles.leadership.clone(),
+            raft_state: handles.raft_state.clone(),
+        },
+        zslg_leader_snapshot::CleanupConfig {
+            retention: config.snapshot.cleanup_retention,
+            interval: config.snapshot.cleanup_interval,
+        },
+    );
     jobs::membership::spawn(shutdown, &handles, &config.membership, &config.liveness);
     jobs::voters::spawn(
         shutdown,

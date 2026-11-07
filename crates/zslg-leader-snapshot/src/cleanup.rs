@@ -13,46 +13,62 @@
 //! Writes no Raft state, so it holds no intent submitter.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::error::Error;
-use crate::leader::jobs::{LeaderHandles, is_local_leader};
+use crate::Error;
+use zslg_consensus::{RaftLeadership, RaftStateView};
+use zslg_snapshot::SnapshotStore;
 
-use zslg_consensus_types::metrics::{LeaderJob, leader_job_ran};
-use zslg_node_types::NodeId;
-use zslg_snapshot_types::SnapshotId;
+use zslg_consensus::NodeId;
+use zslg_consensus::metrics::{LeaderJob, leader_job_ran};
+use zslg_snapshot::SnapshotId;
 
-/// Spawn `leader:cleanup` on the shutdown tree. Writes no Raft state, so it
-/// never touches `handles.intents`.
-pub(in crate::leader) fn spawn(
-    shutdown: &mut shutdown::Shutdown<crate::Error>,
-    handles: &crate::leader::jobs::LeaderHandles,
-    config: &crate::leader::jobs::snapshot::SnapshotConfig,
-) {
-    let job = CleanupJob {
-        self_node_id: handles.self_node_id,
-        handles: handles.clone(),
-        retention: config.cleanup_retention,
-        interval: config.cleanup_interval,
-    };
-    shutdown.spawn("leader:cleanup", job.run(shutdown.token()));
+/// What the cleanup job reads. Writes no Raft state, so it holds no intent
+/// submitter.
+#[derive(Clone)]
+pub struct CleanupHandles {
+    pub self_node_id: NodeId,
+    pub snapshot_store: Arc<dyn SnapshotStore>,
+    pub leadership: Arc<dyn RaftLeadership>,
+    pub raft_state: Arc<dyn RaftStateView>,
 }
 
-pub(in crate::leader) struct CleanupJob {
-    pub(in crate::leader) self_node_id: NodeId,
-    pub(in crate::leader) handles: LeaderHandles,
-    pub(in crate::leader) retention: Duration,
-    pub(in crate::leader) interval: Duration,
+/// Cleanup tunings.
+#[derive(Debug, Clone)]
+pub struct CleanupConfig {
+    pub retention: Duration,
+    pub interval: Duration,
+}
+
+/// Spawn `leader:cleanup` on the shutdown tree.
+pub fn spawn_cleanup<E>(
+    shutdown: &mut shutdown::Shutdown<E>,
+    handles: CleanupHandles,
+    config: CleanupConfig,
+) where
+    E: From<Error> + From<shutdown::Stopped> + std::fmt::Display + Send + 'static,
+{
+    let job = CleanupJob { handles, config };
+    let cancel = shutdown.token();
+    shutdown.spawn("leader:cleanup", async move {
+        job.run(cancel).await.map_err(E::from)
+    });
+}
+
+struct CleanupJob {
+    handles: CleanupHandles,
+    config: CleanupConfig,
 }
 
 impl CleanupJob {
-    pub(in crate::leader) async fn run(self, cancel: CancellationToken) -> Result<(), Error> {
+    async fn run(self, cancel: CancellationToken) -> Result<(), Error> {
         info!("leader:cleanup: starting");
-        let mut ticker = interval(self.interval);
+        let mut ticker = interval(self.config.interval);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
             tokio::select! {
@@ -70,7 +86,7 @@ impl CleanupJob {
     }
 
     async fn tick(&self) {
-        if !is_local_leader(self.handles.leadership.as_ref(), self.self_node_id) {
+        if !self.handles.leadership.is_leader(self.handles.self_node_id) {
             return;
         }
         let live: BTreeSet<SnapshotId> = self
@@ -85,7 +101,7 @@ impl CleanupJob {
         match self
             .handles
             .snapshot_store
-            .cleanup_snapshots(live, self.retention)
+            .cleanup_snapshots(live, self.config.retention)
             .await
         {
             Ok(report) => debug!(?report, "cleanup ok"),

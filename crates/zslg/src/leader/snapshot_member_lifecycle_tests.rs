@@ -32,9 +32,6 @@ use crate::leader::jobs::membership::change::{
     LivenessQuery, MembershipChangeInputs, MembershipChangeManager,
 };
 use crate::leader::jobs::membership::{MembershipDriver, MembershipObserver, TickOutcome};
-use crate::leader::jobs::snapshot::create::{
-    SnapshotEntryInputs, SnapshotResult, create_snapshot_entry,
-};
 use crate::learner::LocalStore;
 use crate::learner::StableLog;
 use crate::raft::RaftNode;
@@ -46,6 +43,7 @@ use zslg_consensus_types::RaftStateHandle;
 use zslg_consensus_types::ReplicatedRaftState;
 use zslg_consensus_types::SpareSelectionStrategy;
 use zslg_hlc_gate::HlcGate;
+use zslg_leader_snapshot::create::{SnapshotEntryInputs, SnapshotResult, create_snapshot_entry};
 use zslg_log::LocalStoreMut;
 use zslg_log_types::LogIndex;
 use zslg_node_types::NodeId;

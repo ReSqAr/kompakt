@@ -30,11 +30,9 @@ use uuid::Uuid;
 
 use zslg_log::{LocalStoreMut, StableLogSnapshot};
 
-use crate::leader::jobs::snapshot::create::{
-    SnapshotEntryInputs, SnapshotResult, create_snapshot_entry,
-};
 use crate::learner::LocalStore;
 use crate::learner::integrate_manifest_for_test;
+use zslg_leader_snapshot::create::{SnapshotEntryInputs, SnapshotResult, create_snapshot_entry};
 use zslg_log_types::Data;
 use zslg_log_types::DataId;
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};

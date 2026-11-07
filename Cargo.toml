@@ -64,6 +64,7 @@ metrics-kit = { path = "crates/metrics-kit" }
 nvzn = { path = "crates/nvzn" }
 objectstorage-cache = { path = "crates/objectstorage-cache" }
 rocksdb-kit = { path = "crates/rocksdb-kit" }
+zslg-leader-snapshot = { path = "crates/zslg-leader-snapshot" }
 zslg-leader-compaction = { path = "crates/zslg-leader-compaction" }
 zslg-leader-integrator = { path = "crates/zslg-leader-integrator" }
 zslg-writer = { path = "crates/zslg-writer" }

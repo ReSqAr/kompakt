@@ -36,7 +36,6 @@ tikv-jemallocator = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "fs", "signal", "net"] }
 tokio-util = { workspace = true, features = ["io-util"] }
 tracing = { workspace = true }
-warn-throttle = { workspace = true }
 pace-kit = { workspace = true }
 zslg-consensus = { workspace = true }
 zslg-consensus-types = { workspace = true }
@@ -73,6 +72,7 @@ zslg-replica-service = { workspace = true }
 zslg-writer = { workspace = true }
 zslg-leader-integrator = { workspace = true, features = ["testing"] }
 zslg-leader-compaction = { workspace = true }
+zslg-leader-snapshot = { workspace = true }
 zslg-raft = { workspace = true }
 zslg-snapshot = { workspace = true }
 zslg-snapshot-types = { workspace = true }
@@ -80,6 +80,7 @@ zslg-time = { workspace = true }
 zslg-time-types = { workspace = true }
 
 [dev-dependencies]
+warn-throttle = { workspace = true }
 rand = { workspace = true }
 bytes = { workspace = true }
 dashmap = { workspace = true }

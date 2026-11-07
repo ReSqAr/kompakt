@@ -30,16 +30,15 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::Error;
-use crate::leader::jobs::LeaderHandles;
 use crate::leader::jobs::membership::liveness::LivenessState;
 use crate::leader::jobs::membership::{MEMBERSHIP_STEP_FLOOR, MembershipJob};
 use crate::leader::jobs::membership::{MembershipDriver, TickOutcome};
-use crate::leader::jobs::snapshot::{SNAPSHOT_LOOP_FLOOR, SnapshotJob};
 use crossbeam_combinators::Channel;
 use pace_kit::Pace;
 use zslg_consensus_types::RaftStateHandle;
 use zslg_consensus_types::{RaftManifestState, RaftState, ReplicaMembership};
 use zslg_leader_integrator::Integrator;
+use zslg_leader_snapshot::{SNAPSHOT_LOOP_FLOOR, SnapshotJob};
 use zslg_log::{LocalStoreView, StableLogSnapshot};
 use zslg_log_types::Data;
 use zslg_log_types::LogIndex;
@@ -513,26 +512,25 @@ fn spawn_always_failing_snapshot_job() -> SnapshotHarness {
     let (intents, integrator_cancel) =
         Integrator::spawn_for_test(Arc::new(NoopReplicator), raft_state.clone());
 
-    let handles = LeaderHandles {
-        clock: Arc::new(crate::tests::FixedClock { now: Hlc(1) }),
+    let handles = zslg_leader_snapshot::SnapshotHandles {
+        self_node_id: node,
         local_store,
         stable_log: Arc::new(EmptyStableLog),
         snapshot_store: Arc::new(UnusedSnapshotStore(CancellationToken::new())),
-        leadership: Arc::new(SelfLeader(node)),
         raft_state,
         router,
-        self_node_id: node,
-        intents: intents.clone(),
+        leadership: Arc::new(SelfLeader(node)),
+        intents,
     };
 
     let job = SnapshotJob {
-        self_node_id: node,
         handles,
-        intents,
-        quorum_poll_interval: Duration::from_millis(10),
-        quorum_wait_timeout: Duration::from_secs(30),
-        compression: CompressionLevel::fast(),
-        max_snapshot_entries: std::num::NonZeroUsize::MAX,
+        config: zslg_leader_snapshot::SnapshotJobConfig {
+            quorum_poll_interval: Duration::from_millis(10),
+            quorum_wait_timeout: Duration::from_secs(30),
+            compression: CompressionLevel::fast(),
+            max_snapshot_entries: std::num::NonZeroUsize::MAX,
+        },
         build_warn: warn_throttle::ThrottledWarn::new(std::time::Duration::from_secs(5)),
     };
     let cancel = CancellationToken::new();

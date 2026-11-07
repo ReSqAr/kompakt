@@ -4492,6 +4492,7 @@ dependencies = [
  "zslg-hlc-gate",
  "zslg-leader-compaction",
  "zslg-leader-integrator",
+ "zslg-leader-snapshot",
  "zslg-lifecycle-types",
  "zslg-local-store",
  "zslg-log",
@@ -4639,6 +4640,31 @@ dependencies = [
  "zslg-lifecycle-types",
  "zslg-log",
  "zslg-net",
+ "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-leader-snapshot"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-combinators",
+ "error-union",
+ "metrics",
+ "metrics-kit",
+ "metrics-util",
+ "pace-kit",
+ "shutdown",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "warn-throttle",
+ "zslg-consensus",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-quorum-read",
  "zslg-raft",
  "zslg-snapshot",
  "zslg-time",

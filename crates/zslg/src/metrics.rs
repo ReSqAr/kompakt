@@ -36,14 +36,10 @@
     reason = "u64::try_from(usize) on bounded metric values (counts, lengths)"
 )]
 
-use metrics_kit::{
-    LABEL_STATE, MetricDef, Unit, label_enum, lossy_f64, metrics, set_gauge, unix_now_secs,
-};
-use std::time::Duration;
-
 pub(crate) use metrics_kit::OpState;
 #[cfg(test)]
 use metrics_kit::{LABEL_NONE, MetricKind, set_flag};
+use metrics_kit::{LABEL_STATE, MetricDef, Unit, lossy_f64, metrics, set_gauge, unix_now_secs};
 
 // ---------------------------------------------------------------------------
 // Registry types
@@ -69,7 +65,6 @@ pub(crate) const METRIC_PREFIX: &str = "zslg_";
 // Label keys
 // ---------------------------------------------------------------------------
 
-const LABEL_STEP: &str = "step";
 /// Peer identity (`NodeId::to_string()`). High-cardinality but bounded by cluster
 /// size; the enum-valued-label rule targets bounded vocabularies, not node ids.
 const LABEL_NODE_ID: &str = "node_id";
@@ -83,7 +78,7 @@ const LABEL_CF: &str = "cf";
 /// that `no_label_key_collides_with_prometheus_scrape_labels` keeps checking
 /// the whole set rather than whichever subset was current when it was written.
 #[cfg(test)]
-const ALL_LABEL_KEYS: &[&str] = &[LABEL_STATE, LABEL_STEP, LABEL_NODE_ID, LABEL_CF, LABEL_NONE];
+const ALL_LABEL_KEYS: &[&str] = &[LABEL_STATE, LABEL_NODE_ID, LABEL_CF, LABEL_NONE];
 
 // ---------------------------------------------------------------------------
 // Metrics: each name constant is immediately followed by its emission
@@ -165,29 +160,10 @@ metrics!("zslg_", subscription; {
 // ── snapshots / leader background tasks ─────────────────────────────────────
 
 metrics!("zslg_", snapshots; {
-    labeled_counter snapshot_creation SNAPSHOT_CREATION_TOTAL "snapshot_creation_total"
-        "Snapshot creation attempts by outcome (see SnapshotState). \
-         waiting_for_stable_log is backpressure, not failure: the leader's \
-         local stable log has not re-ingested its own last snapshot yet."
-        (state: SnapshotState) [LABEL_STATE => state.as_str()];
-    custom  snapshot_creation_step SNAPSHOT_CREATION_DURATION_SECONDS
-        "snapshot_creation_duration_seconds" Histogram Seconds
-        "Snapshot creation latency per step (set_cutoff, await_quorum, \
-         write_object, commit) plus total.";
-    gauge_usize snapshot_entries SNAPSHOT_ENTRIES_COUNT "snapshot_entries_count" Count
-        "Entries in the last successful snapshot." (n: usize);
 });
 
 // ── snapshots / leader background tasks: hand-written emission helpers ──────
 // (custom rows above; each fn below emits the metrics named in its row)
-
-pub(crate) fn snapshot_creation_step(step: SnapshotStep, elapsed: Duration) {
-    metrics::histogram!(
-        SNAPSHOT_CREATION_DURATION_SECONDS,
-        LABEL_STEP => step.as_str(),
-    )
-    .record(elapsed);
-}
 
 // ── HLC / clock ──────────────────────────────────────────────────────────────
 
@@ -321,30 +297,6 @@ pub(crate) fn storage_actual_delayed_write_rate(value: u64) {
 // ---------------------------------------------------------------------------
 // Label-value vocabularies
 // ---------------------------------------------------------------------------
-
-label_enum!(#[doc = "`state` label of [`SNAPSHOT_CREATION_TOTAL`]."] SnapshotState {
-    Success => "success",
-    /// The (watermark, cutoff] window was empty — nothing to snapshot.
-    NoopEmptyWindow => "noop_empty_window",
-    /// The replica quorum did not confirm the cutoff in time.
-    FailureQuorumTimeout => "failure_quorum_timeout",
-    /// The final fenced commit lost the generation CAS (leadership churn).
-    FailureStaleGeneration => "failure_stale_generation",
-    FailureObjectStore => "failure_object_store",
-    FailureStorage => "failure_storage",
-    /// The leader's local stable log has not caught up with the manifest yet,
-    /// so index assignment cannot proceed. Backpressure, not failure — it
-    /// clears once the leader re-ingests its own last snapshot.
-    WaitingForStableLog => "waiting_for_stable_log",
-});
-
-label_enum!(#[doc = "`step` label of [`SNAPSHOT_CREATION_DURATION_SECONDS`]."] SnapshotStep {
-    SetCutoff => "set_cutoff",
-    AwaitQuorum => "await_quorum",
-    WriteObject => "write_object",
-    Commit => "commit",
-    Total => "total",
-});
 
 // ---------------------------------------------------------------------------
 // RAII timing probe
@@ -509,6 +461,8 @@ pub(crate) fn jemalloc_stats(s: &JemallocStats) {
 const ALL_METRICS: &[&[MetricDef]] = &[
     // --- leader job heartbeat (zslg-consensus-types) ---
     zslg_consensus_types::metrics::METRICS,
+    // --- leader snapshot jobs (zslg-leader-snapshot) ---
+    zslg_leader_snapshot::metrics::METRICS,
     // --- leader compaction (zslg-leader-compaction) ---
     zslg_leader_compaction::metrics::METRICS,
     // --- leader integrator (zslg-leader-integrator) ---
@@ -843,28 +797,6 @@ mod tests {
             .keys()
             .any(|ck| ck.key().name() == zslg_raft_node::metrics::RAFT_FENCED_WRITES_TOTAL);
         assert!(found, "raft_fenced_writes_total counter should be present");
-    }
-
-    #[test]
-    fn labeled_histogram_emission_is_observable() {
-        let recorder = metrics_util::debugging::DebuggingRecorder::new();
-        let snapshotter = recorder.snapshotter();
-        metrics::with_local_recorder(&recorder, || {
-            ::metrics::histogram!(
-                SNAPSHOT_CREATION_DURATION_SECONDS,
-                LABEL_STEP => SnapshotStep::Total.as_str(),
-            )
-            .record(std::time::Duration::from_millis(42));
-        });
-        let snap = snapshotter.snapshot();
-        let map = snap.into_hashmap();
-        let found = map
-            .keys()
-            .any(|ck| ck.key().name() == SNAPSHOT_CREATION_DURATION_SECONDS);
-        assert!(
-            found,
-            "snapshot_creation_duration_seconds histogram should be present"
-        );
     }
 
     #[test]

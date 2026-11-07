@@ -38,10 +38,7 @@ use zslg_log::{LocalStoreView, StableLogSnapshot};
 use zslg_node_types::NodeId;
 use zslg_time::Clock;
 
-pub(in crate::leader) mod cleanup;
-pub(in crate::leader) mod cutoff;
 pub(in crate::leader) mod membership;
-pub(in crate::leader) mod snapshot;
 pub(in crate::leader) mod voters;
 
 #[cfg(test)]

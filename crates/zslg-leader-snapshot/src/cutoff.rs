@@ -24,49 +24,57 @@ use tokio::time::{Instant, MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::error::Error;
-use crate::leader::jobs::is_local_leader;
+use crate::Error;
 use crate::metrics::{self, SnapshotState, SnapshotStep};
-use zslg_consensus::{IntentOutcome, IntentSubmitter, RaftIntent};
-use zslg_consensus_types::metrics::{LeaderJob, leader_job_ran};
-use zslg_node_types::NodeId;
+use zslg_consensus::NodeId;
+use zslg_consensus::metrics::{LeaderJob, leader_job_ran};
+use zslg_consensus::{IntentOutcome, IntentSubmitter, RaftIntent, RaftLeadership};
 use zslg_time::Clock;
-use zslg_time_types::Hlc;
+use zslg_time::Hlc;
 
-/// Spawn `leader:cutoff` on the shutdown tree.
-pub(in crate::leader) fn spawn(
-    shutdown: &mut shutdown::Shutdown<crate::Error>,
-    handles: &crate::leader::jobs::LeaderHandles,
-    config: &crate::leader::jobs::snapshot::SnapshotConfig,
-) {
-    let job = CutoffJob {
-        self_node_id: handles.self_node_id,
-        clock: handles.clock.clone(),
-        leadership: handles.leadership.clone(),
-        raft_state: handles.raft_state.clone(),
-        intents: handles.intents.clone(),
-        cutoff_lag: config.cutoff_timeout,
-        interval: config.interval,
-    };
-    shutdown.spawn("leader:cutoff", job.run(shutdown.token()));
+/// What the cutoff job reads and writes through.
+#[derive(Clone)]
+pub struct CutoffHandles {
+    pub self_node_id: NodeId,
+    pub clock: Arc<dyn Clock>,
+    pub leadership: Arc<dyn RaftLeadership>,
+    pub raft_state: Arc<dyn RaftStateView>,
+    pub intents: Arc<dyn IntentSubmitter>,
 }
 
-pub(in crate::leader) struct CutoffJob {
-    pub(in crate::leader) self_node_id: NodeId,
-    pub(in crate::leader) clock: Arc<dyn Clock>,
-    pub(in crate::leader) leadership: Arc<dyn zslg_consensus::RaftLeadership>,
-    pub(in crate::leader) raft_state: Arc<dyn RaftStateView>,
-    pub(in crate::leader) intents: Arc<dyn IntentSubmitter>,
+/// Cutoff tunings.
+#[derive(Debug, Clone)]
+pub struct CutoffConfig {
     /// How far behind "now" a new cutoff is placed, so in-flight writes below it
     /// have already been accepted or rejected.
-    pub(in crate::leader) cutoff_lag: Duration,
-    pub(in crate::leader) interval: Duration,
+    pub cutoff_lag: Duration,
+    pub interval: Duration,
+}
+
+/// Spawn `leader:cutoff` on the shutdown tree.
+pub fn spawn_cutoff<E>(
+    shutdown: &mut shutdown::Shutdown<E>,
+    handles: CutoffHandles,
+    config: CutoffConfig,
+) where
+    E: From<Error> + From<shutdown::Stopped> + std::fmt::Display + Send + 'static,
+{
+    let job = CutoffJob { handles, config };
+    let cancel = shutdown.token();
+    shutdown.spawn("leader:cutoff", async move {
+        job.run(cancel).await.map_err(E::from)
+    });
+}
+
+struct CutoffJob {
+    handles: CutoffHandles,
+    config: CutoffConfig,
 }
 
 impl CutoffJob {
-    pub(in crate::leader) async fn run(self, cancel: CancellationToken) -> Result<(), Error> {
+    async fn run(self, cancel: CancellationToken) -> Result<(), Error> {
         info!("leader:cutoff: starting");
-        let mut ticker = interval(self.interval);
+        let mut ticker = interval(self.config.interval);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
             tokio::select! {
@@ -84,12 +92,16 @@ impl CutoffJob {
     }
 
     async fn tick(&self) {
-        if !is_local_leader(self.leadership.as_ref(), self.self_node_id) {
+        if !self.handles.leadership.is_leader(self.handles.self_node_id) {
             return;
         }
-        let state = self.raft_state.snapshot();
+        let state = self.handles.raft_state.snapshot();
         let watermark = state.manifest_state.manifest_watermark;
-        let Some(cutoff) = next_cutoff(self.clock.as_ref(), self.cutoff_lag, watermark) else {
+        let Some(cutoff) = next_cutoff(
+            self.handles.clock.as_ref(),
+            self.config.cutoff_lag,
+            watermark,
+        ) else {
             debug!(?watermark, "cutoff would open an empty window; skipping");
             metrics::snapshot_creation(SnapshotState::NoopEmptyWindow);
             return;
@@ -97,6 +109,7 @@ impl CutoffJob {
 
         let started = Instant::now();
         match self
+            .handles
             .intents
             .submit(RaftIntent::AdvanceCutoff { cutoff })
             .await
@@ -129,11 +142,7 @@ impl CutoffJob {
 /// a fresh leader whose clock has not yet passed the previous leader's
 /// watermark — expected, not an error (CLAUDE.md §12).
 #[must_use]
-pub(in crate::leader) fn next_cutoff(
-    clock: &dyn Clock,
-    lag: Duration,
-    watermark: Option<Hlc>,
-) -> Option<Hlc> {
+fn next_cutoff(clock: &dyn Clock, lag: Duration, watermark: Option<Hlc>) -> Option<Hlc> {
     let cutoff = compute_cutoff(clock, lag);
     match watermark {
         Some(wm) if cutoff <= wm => None,
@@ -147,10 +156,10 @@ pub(in crate::leader) fn next_cutoff(
 /// carrying a logical counter would reject or admit writes at the same physical
 /// millisecond depending on this leader's local event count.
 #[must_use]
-pub(in crate::leader) fn compute_cutoff(clock: &dyn Clock, lag: Duration) -> Hlc {
+fn compute_cutoff(clock: &dyn Clock, lag: Duration) -> Hlc {
     let parts = clock.now().parts();
-    let lag_ms = zslg_time_types::duration_as_ms_clamped(lag);
-    Hlc::from_parts(zslg_time_types::HlcParts {
+    let lag_ms = zslg_time::duration_as_ms_clamped(lag);
+    Hlc::from_parts(zslg_time::HlcParts {
         physical_ms: parts.physical_ms.saturating_sub(lag_ms),
         logical: 0,
     })

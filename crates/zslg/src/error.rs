@@ -50,6 +50,7 @@ error_union! {
     from zslg_replica_service::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_leader_integrator::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_leader_compaction::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_leader_snapshot::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_writer::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_reader::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_subscriber::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
@@ -156,29 +157,6 @@ impl Error {
             Error::Consensus(ConsensusError::MembershipDenied { .. }) => "membership_denied",
             Error::Lifecycle(LifecycleError::Shutdown) => "shutdown",
             Error::Lifecycle(LifecycleError::NotReady(_)) => "not_ready",
-        }
-    }
-
-    /// The `zslg_snapshot_creation_total` failure bucket for this error. Lives on
-    /// the error type so new variants get classified here, next to their
-    /// definition, instead of in a caller-side catch-all.
-    #[must_use]
-    pub(crate) fn snapshot_state(&self) -> crate::metrics::SnapshotState {
-        use crate::metrics::SnapshotState;
-        match self {
-            Error::Consensus(ConsensusError::StaleStateWrite { .. }) => {
-                SnapshotState::FailureStaleGeneration
-            }
-            Error::Consensus(ConsensusError::QuorumUnreachable)
-            | Error::Log(LogError::QuorumReadTimeout { .. }) => SnapshotState::FailureQuorumTimeout,
-            Error::Snapshot(SnapshotError::ObjectStore(_)) => SnapshotState::FailureObjectStore,
-            Error::Log(LogError::StableLogBehindManifest { .. }) => {
-                SnapshotState::WaitingForStableLog
-            }
-            // HLC-cutoff rejection comes from a replica RPC error; the
-            // leader sees it as a fan-out failure. Everything else counts
-            // as a storage-side failure.
-            _ => SnapshotState::FailureStorage,
         }
     }
 }
@@ -360,22 +338,5 @@ mod tests {
     fn conversion_traits_pass_through_ok() {
         let r: Result<u32, std::io::Error> = Ok(42);
         assert_eq!(r.to_storage("ctx").expect("ok"), 42);
-    }
-
-    /// A stable log trailing the manifest is backpressure, not failure: the
-    /// leader simply has not re-ingested its own last snapshot yet. It must not
-    /// land in a `failure_*` bucket, or `zslg_snapshot_creation_total{state=~"failure.*"}`
-    /// alerts on normal operation.
-    #[test]
-    fn stable_log_behind_manifest_is_not_a_failure_state() {
-        use crate::metrics::SnapshotState;
-        use zslg_log_types::LogIndex;
-
-        let e = Error::Log(LogError::StableLogBehindManifest {
-            end_index: Some(LogIndex(41)),
-            manifest_end_index: LogIndex(99),
-        });
-        assert_eq!(e.snapshot_state(), SnapshotState::WaitingForStableLog);
-        assert_eq!(e.kind(), "stable_log_behind_manifest");
     }
 }
