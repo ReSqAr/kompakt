@@ -4,7 +4,7 @@ Working document for the IAIC interview. Current model only.
 
 ## Where we are
 
-Interview closed (D1-D15). Design doc written; waiting for sign-off. Prediction track record so far: wrong on Q6 (user wants more crates), Q7 (finer), Q11 (facade only), Q13 (one PR). Right on the rest — so the user leans towards more crates, smaller steps, layering hidden from consumers. Then the implementation layer cut (database, object-store, quorum, clock impl, net, raft, learner, leader, replica, facade). No design doc yet.
+Interview closed (D1-D15). Design doc pass 2 done (P1-P7 in the log); waiting for sign-off. Prediction track record so far: wrong on Q6 (user wants more crates), Q7 (finer), Q11 (facade only), Q13 (one PR). Right on the rest — so the user leans towards more crates, smaller steps, layering hidden from consumers. Then the implementation layer cut (database, object-store, quorum, clock impl, net, raft, learner, leader, replica, facade). No design doc yet.
 
 ## Model of the problem
 
@@ -37,3 +37,11 @@ candidate  foundation = several domain crates, each types+traits (time, log, con
   D8 (§2.1), and whether `zslg-net-wire` is really a library.
 - Biggest implementation risk: the `ClusterBootstrap` port not covering
   everything `startup` does, and fault hooks that need new ports.
+
+## After pass 2
+
+- Most consequential for sign-off: P2 (D4 change: ports return the composed
+  error). Expected answer: accept, since the alternative is a catch-all.
+- Most likely pushback: the number of assemblies (8), and whether every group
+  needs a types/ports split (time's port crate is one trait).
+- Implementation rule from the user: stop and ask when the plan does not fit.

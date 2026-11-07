@@ -1,357 +1,422 @@
 # zslg / nvzn crate split — design
 
 Process: `nlnr/docs/iaic.md`. Decisions D1–D15 are in
-`2026-11-07_log_crate_split.md`; this document is the spec. Status: waiting for
-sign-off. Branch `ccr-3ceece9d-e3tfbt`, base `6aa354b`.
+`2026-11-07_log_crate_split.md`; this document is the spec. Status: second pass
+done (more crates, import patterns, corners), waiting for sign-off. Branch
+`ccr-3ceece9d-e3tfbt`, base `6aa354b`.
 
-Reading order: §1 is the whole idea; §2–§4 deepen it layer by layer; §5–§6
-cover testing and landing the change; §7 applies the same rules to nvzn; §8.4 lists what I want you to look at.
+Reading order: §1 is the whole idea; §2 states the roles and rules; §3 shows the
+corners the first draft walked into and how the structure avoids them; §4–§6
+deepen the foundation, implementations and assemblies; §7–§8 cover testing and
+landing; §9 nvzn; §10.4 lists what to look at.
 
 ---
 
 ## 1. The idea
 
 zslg (50k lines incl. tests) and nvzn (6k) are one crate each. This change
-cuts them into ~55 small, internal crates so that the layering — today a
-convention that the module graph already violates — is enforced by Cargo.
+cuts them into ~70 small, internal crates so that the layering — today a
+convention the module graph already violates — is enforced by Cargo.
 
 ```text
-                         consumers (btrb, nlnr, nvzn's users)
-                                      │ only ever see
-                                      ▼
-  ┌───────────────────────────  zslg  (facade) ───────────────────────────┐
-  │  composition root: nodes, setup_raft, leader loop, observability      │
-  └───▲────────────▲────────────▲────────────▲────────────▲───────────────┘
-      │            │            │            │            │
-  implementations (siblings, no edges between them; ports only)
-  database · object-store · raft-* · net-* · stable-log · reader · leader-* ...
-      │            │            │            │            │
-  ┌───┴────────────┴────────────┴────────────┴────────────┴───────────────┐
-  │ foundation: five groups, each = types + ports + its error + its metrics│
-  │   time ◄── log ◄── snapshot ◄── consensus ◄── net                      │
-  │ libraries: bytesize · warn-throttle · cancelled · shutdown · framing · │
-  │            metrics-kit                                                 │
-  └────────────────────────────────────────────────────────────────────────┘
-  fakes: one per group (zslg-<group>-fake), dev-dependencies of the layer above
+  consumers (btrb, nlnr, nvzn's users) ──> zslg (facade: re-exports only)
+                                              │
+  assemblies    nodes (writer, learner, follower, replica) ─> learner, leader,
+                raft-setup, observability                     (wiring, no logic)
+                                              │
+  implementations   database · object-store · raft-* · net-* · stable-log ·
+  (siblings)        reader · replica-* · leader-* ...    one port each, no edges
+                                              │
+  procedures        quorum-read · net-wire     (shared logic over the foundation)
+                                              │
+  ports             zslg-time · -log · -snapshot · -consensus · -net   (traits)
+                                              │
+  error             zslg-error                 (composes the group errors)
+                                              │
+  types             zslg-<group>-types: time · log · snapshot · consensus · raft · net
+                                              │
+  libraries         bytesize · warn-throttle · cancelled · shutdown · framing ·
+                    metrics-kit
+  fakes             zslg-<group>-fake, next to each ports crate
 ```
 
-Three layers and one rule that does the work: an
-implementation crate depends on foundation and libraries, never on another
-implementation. The facade is the only crate that names concrete types from
-several implementations.
+Each layer may depend only on layers below it; inside the implementation layer
+there are no edges at all. That one rule is what makes the layering
+enforceable, and every other rule below exists to keep it from forcing a bad
+move.
 
 ### 1.1 Goals, non-goals, success criteria
 
 Goal (D1): layering enforced by the compiler, yielding many small, targeted,
-non-reusable crates. Build and test time are welcome side effects, not targets.
-Moving code and introducing new traits to decouple is allowed.
+non-reusable crates; more crates whenever a piece splits off cleanly (D7, D14).
+Build and test time are welcome side effects. Moving code and introducing new
+traits to decouple is allowed.
 
-Non-goals: no behaviour change, no wire-format change, no metric-name change,
-no new features, no public-API change for consumers other than what §3.3
-states for errors. Crates are `publish = false`; reuse outside this repository
-is not a goal.
+Non-goals: no behaviour, wire-format or metric-name change, no new features,
+no consumer-visible API change other than the error nesting in §4.4. Crates are
+`publish = false`.
 
-Success criteria, all checked at every commit (§6):
-- fmt, clippy `-D warnings`, and the full test suite green;
-- `describe_metrics()` output byte-identical to before the change;
-- btrb, nvzn and a nlnr checkout build against the facade without edits other
-  than the error nesting in §3.3;
-- at the end, `cargo tree` shows no implementation→implementation edge (§6.3).
+Success criteria, checked at every commit (§8): fmt, clippy `-D warnings`,
+full test suite green; `describe_metrics()` byte-identical to before; btrb,
+nvzn and nlnr build against the facades; at the end the layering test (§8.3)
+passes.
 
 ### 1.2 Current state
 
-The module graph has cycles that make the folders unusable as crates, but they
-are shallow. Real compile-time back-edges are four misplaced items (§3.2); most
-other upward edges are doc links and test imports. Inside the big subfolders
-the files are largely independent of each other. The consumer surface is small:
-nlnr uses `zslg::Hlc` and `zslg::ObjectStoreConfig`; nvzn uses ports and
-foundation types; btrb is the composition root for `ReplicaNode`.
+The module graph has cycles, but they are shallow: four misplaced items (§4.3)
+plus port signatures and errors that already cross concerns (§3). Inside the
+big subfolders the files are largely independent. The consumer surface is
+small: nlnr uses `zslg::Hlc` and `zslg::ObjectStoreConfig`; nvzn uses ports
+and foundation types; btrb is the composition root for `ReplicaNode`.
 
-### 1.3 Constraints and assumptions
+### 1.3 Constraints
 
-- The workspace denies `wildcard_imports` and many other lints; every new crate
-  carries `[lints] workspace = true`. Moves rewrite imports explicitly.
-- The orphan rule applies: a trait impl lives in the crate of the trait or of
-  the type. §3.1 shows where this bites (`ordered.rs`).
-- nlnr pins kompakt by git rev and cargo finds a package by name, so
-  directory layout and crate count are invisible to consumers (D11, D15).
-- Cross-crate calls lose inlining; hot-path leaf functions get `#[inline]`
-  (§5.4).
+- The workspace denies `wildcard_imports`; every crate carries
+  `[lints] workspace = true`; moves rewrite imports explicitly, no shims.
+- The orphan rule: a trait impl lives with the trait or the type (§4.2).
+- nlnr pins kompakt by git rev and cargo finds packages by name, so crate
+  count and layout are invisible to consumers (D11, D15).
+- Cross-crate calls lose inlining; hot-path leaf functions get `#[inline]`.
 
 ---
 
-## 2. The layers
+## 2. Roles and rules
 
-### 2.1 Roles and the one rule
+### 2.1 The roles
 
-Every crate has exactly one role, readable from its name (D15):
+Every crate has one role, readable from its name (D15). "May depend on" is for
+normal dependencies; dev-dependencies follow §7.3.
 
-| role | name | may depend on |
-|---|---|---|
-| library | `zslg-bytesize`, `-warn-throttle`, `-cancelled`, `-shutdown`, `-framing`, `-metrics-kit`, `-net-wire` | nothing in zslg (net-wire: net group) |
-| foundation group | `zslg-<group>` | libraries, lower groups |
-| fake | `zslg-<group>-fake` | its group, lower groups, libraries |
-| implementation | `zslg-<what>` | foundation, libraries |
-| facade | `zslg` | everything |
-
-A library is code that implements no port (a codec, a newtype, a macro kit);
-implementations may use it. This refines D8: "ports only between
-implementations" is "no edge between two crates that each implement a port".
-
-### 2.2 The five foundation groups
-
-Each group is a crate with the types its ports mention, the ports, the group's
-error (D4) and its metric vocabulary (D5). Dependencies point left:
-
-```text
-time        Hlc                           Clock, HlcCutoff view
-log         Data, DataId, LogIndex,       Reader, Writer, StableLog, LocalStoreView/Mut,
-            Stable/UnstableEvent          StableArchiveReader, Replica
-snapshot    SnapshotId, SnapshotMetadata, SnapshotStore
-            CompressionLevel
-consensus   NodeId, RaftGeneration,       RaftConsensus, RaftPeer, RaftLeadership,
-            RaftState(Handle), TypeConfig, RaftMembership, StateReplicator, RaftStateView,
-            NodeInfo, FencedStateWrite,    QuorumCheck, SpareSelection, MembershipGate,
-            RaftStateError, is_quorum      ClusterBootstrap (new, §4.2)
-net         PeerAddr, HostPort,           Peers, Router, ReplicaClient, LivenessProbe,
-            ServerName, RPC messages      LivenessQuery
-```
-
-`is_quorum` is pure arithmetic over membership types and moves into
-`consensus`; the coordinator that collects acks stays an implementation (§4.1).
-
-### 2.3 Libraries
-
-`zslg-bytesize` (`ByteSize`, config newtype; its parse error becomes its own),
-`zslg-warn-throttle` (118 lines, no deps), `zslg-cancelled` (`Cancelled`,
-`Shutdown`), `zslg-shutdown` (the supervision tree, generic over the task
-result), `zslg-framing` (`[record | crc32]`, `Corrupt` error). `zslg-metrics-kit`
-holds the mechanism of `metrics.rs` (§3.4). `zslg-net-wire` holds the RPC wire
-codec and TCP layer (`network/framing`, `network/tcp.rs`, 1.2k lines); it
-implements no port, it is a codec the client, server and router share.
-
----
-
-## 3. The foundation in detail
-
-### 3.1 Where today's files go
-
-`api/` is already a set of ports; its files follow the table in §2.2. The two
-grab-bag files dissolve: `ids.rs` item by item (`NodeId`/`RaftGeneration` →
-consensus, `LogIndex`/`DataId` → log, `PeerAddr`/`HostPort`/`ServerName` → net,
-`SnapshotId` → snapshot), and `meta.rs` the same way (`Data`, events → log;
-`SnapshotMetadata` → snapshot; `RaftState`, `ReplicaMembership`, `Exit` →
-consensus).
-
-`ordered.rs` (the `Key`/`Successor` impls for `OrderedChannel`) cannot stay one
-file: the orphan rule puts each impl in the crate that defines the type. `Hlc`'s
-goes to `zslg-time`, `LogIndex`'s and `DataId`'s to `zslg-log`; both depend on
-`crossbeam-combinators`. This refines D3, which kept `ordered` whole in `log`.
-
-Fields that were `pub(crate)` (`NodeId(pub(crate) Uuid)`, `LogIndex(pub(crate)
-u64)`) become reachable from implementation crates, so each gets the smallest
-accessor it needs (`new`, `raw`). Nothing new is exposed through the facade.
-
-### 3.2 The four misplaced items
-
-These are the real cycles; each is a prerequisite commit of the crate that
-needs it (§6):
-
-```text
-TypeConfig, NodeInfo, FencedStateWrite, RaftLogIndex, RaftResponse,
-RaftStateError          raft/types.rs        ->  consensus   (api + network used them)
-CompressionLevel        object_store/        ->  snapshot    (api/snapshot_store used it)
-Clock impl vs port      hlc implements api   ->  port in time, impl in zslg-hlc-clock
-RaftStateHandle,
-EvictionStatus          raft/state, startup  ->  consensus   (learner read path used them)
-```
-
-### 3.3 Errors
-
-Each group owns its error: `ClockError` (HlcCutoff, DriftTooLarge,
-ClockSkewTooLarge), `LogError` (StableLogGap, StableLogBehindManifest,
-StreamTruncated, Storage, Codec), `SnapshotError` (ObjectStore, Compression),
-`ConsensusError` (NotLeader, QuorumUnreachable, StaleStateWrite,
-InvalidRaftState, …), `NetError` (Rpc, UnknownPeer, MembershipDenied).
-Ports return their group's error.
-
-`zslg::Error` stays the public type (D11) and is built from the group errors
-with `#[from]` plus the cross-cutting and startup variants (`Cancelled`,
-`Shutdown`, `InvalidConfiguration`, `Observability`, `StartupCancelled`,
-`HardCrashDataLoss`). This is the one visible API change: code matching
-`Error::NotLeader { .. }` matches `Error::Consensus(ConsensusError::NotLeader
-{ .. })`. nlnr does not match on `zslg::Error`; nvzn's 24 uses are mostly
-`Result<_, zslg::Error>` and need no edit. Each group error has a `From` into
-`zslg::Error`, so `?` keeps working across groups.
-
-### 3.4 Metrics
-
-`metrics.rs` (2.7k lines) is cut at its existing `// ── section ──` markers
-(D5). `zslg-metrics-kit` keeps `MetricDef`, the registry macro, `label_enum!`,
-probes and `describe_all`. Each crate that emits metrics owns a
-`pub const METRICS: &[MetricDef]`, its label enums and its emission helpers; a
-label enum used by two crates lives in the lower one.
-
-The facade concatenates every crate's `METRICS` in `describe_metrics()` and has
-a test that name uniqueness holds across crates. The `zslg_` namespace is applied
-by the registry macro, so exported names do not change; the golden test in §6.2
-proves it.
-
----
-
-## 4. The implementations in detail
-
-### 4.1 The crate list
-
-Source column is today's path under `crates/zslg/src`. Sizes in lines.
-
-| crate | source | lines | notes |
+| role | names | contents | may depend on |
 |---|---|---|---|
-| `zslg-database` | `database/` | 1.3k | RocksDB `Storage`, node id |
-| `zslg-object-store` | `object_store/` (config, snapshot_store) | 1.1k | `SnapshotStore` impl; owns the `s3` feature |
-| `zslg-object-format` | `object_store/framing.rs` | 0.4k | candidate cut (§4.5) |
-| `zslg-hlc-clock` | `hlc/clock.rs` | 0.6k | `HlcClock` implements `Clock` |
-| `zslg-hlc-gate` | `hlc/gate.rs`, `cutoff.rs` | 0.7k | write-admission generation barrier |
-| `zslg-writer` | `writer.rs`, `quorum/{coordinator,fanout}.rs` | 1.3k | `Writer` + ack collection |
-| `zslg-net-client` | `network/{client,transport}/` | 1.6k | ports spoken over the wire |
-| `zslg-net-server` | `network/server/` | 0.7k | |
-| `zslg-net-router` | `network/router/` | 0.4k | |
-| `zslg-raft` | `raft/{node,membership}.rs` | 0.4k | `RaftNode`; three port impls + `ClusterBootstrap` |
-| `zslg-raft-startup` | `raft/startup/` | 1.3k | decision procedure (§4.2) |
+| library | `zslg-bytesize`, `-warn-throttle`, `-cancelled`, `-shutdown`, `-framing`, `-metrics-kit`, `-database` | code that knows no zslg domain | other libraries |
+| types | `zslg-<group>-types` | data, invariants over it, shared cells, group error, label enums | libraries, lower types |
+| error | `zslg-error` | the composed `Error` | types |
+| ports | `zslg-<group>` | traits; re-exports its group's types | types, error, lower ports |
+| procedure | `zslg-quorum-read`, `zslg-net-wire` | shared logic over the foundation, implements no port | ports, types, error, libraries |
+| fake | `zslg-<group>-fake` | in-memory port implementations | ports, types, error, libraries |
+| implementation | `zslg-<what>` | implements one or a few ports | everything below, nothing beside |
+| assembly | `zslg-<role>-node`, `zslg-learner`, `zslg-leader`, `zslg-raft-setup`, `zslg-observability` | wiring of implementations | implementations, lower assemblies, everything below |
+| facade | `zslg` | `pub use` only, integration tests, examples | assemblies, ports |
+
+### 2.2 The import rules
+
+Three rules keep the import patterns boring:
+
+1. **One path per item per layer.** Outside the types and error layers, a type
+   is imported through its group's ports crate (`use zslg_log::{Reader, Data,
+   LogIndex}`), never from `zslg-log-types` directly. This is the import
+   pattern of D3; the types crates exist for the dependency graph, not for
+   import sites.
+2. **No sideways edges among implementations**, not even as dev-dependencies
+   (§7.3). A need for one is a missing port, procedure or assembly.
+3. **Assemblies wire, they do not decide.** An assembly holds configuration,
+   construction and task spawning. Logic found in an assembly during the move
+   goes down into an implementation or procedure.
+
+The layering test (§8.3) checks all three from `cargo metadata` and the crate
+names.
+
+---
+
+## 3. Corners: where the first draft would have forced a bad move
+
+The first draft had five group crates, each types *and* ports, in a chain
+`time ← log ← snapshot ← consensus ← net`, with per-group errors returned by
+ports and the facade as the only composition root. Tracing the real edges shows
+five places where that structure leaves only bad moves.
+
+### 3.1 Port signatures cross groups
+
+```text
+StableLog, StableArchiveReader (log)   need SnapshotEntry          -> it is {LogIndex, Data}: a log type
+Replica (log)                          needs RaftState, ReplicaStatus  (consensus)
+ReplicaClient (net)                    bundles LivenessProbe + RaftMembership + RaftTransport + Replica
+SnapshotStore (snapshot)               needs ObjectStoreReason, a metric label enum
+```
+
+In a chain of types-and-ports crates each of these is an upward edge; the only
+moves would be to drag types into the wrong group or to fuse groups. Splitting
+each group into a types crate and a ports crate removes the problem: the types
+crates form a chain, and a ports crate may use the types of *any* group. The
+chain only has to hold for data, where it is natural.
+
+### 3.2 Errors cross groups
+
+Implementations raise errors from several groups today: `learner/read.rs`
+raises `NotReady`, `ObjectStore`, `Lagged`; `replica/mod.rs` raises `HlcCutoff`,
+`NotAReplica`, `Shutdown`; `snapshot_store.rs` raises `Storage` and
+`StreamTruncated`. If a port could return only its own group's error (first
+draft of D4), the only moves would be a catch-all `Other(Box<dyn Error>)` or an
+upward edge. So the composed `Error` moves from the facade down to `zslg-error`,
+between the types and the ports. Group errors stay where D4 put them, as
+structured enums in their types crates; ports return `zslg_error::Error`; the
+facade re-exports it as `zslg::Error`. **This changes D4** (§10.4).
+
+### 3.3 openraft would leak into everyone
+
+`TypeConfig`, `NodeInfo`, `RaftResponse`, `FencedStateWrite` are openraft
+vocabulary. In the consensus group they would make every crate that needs a
+`NodeId` compile openraft's generics. They get their own `zslg-raft-types`,
+which only the raft-facing ports (`RaftConsensus`, `RaftPeer`,
+`ClusterBootstrap`) and the net messages depend on.
+
+### 3.4 Shared logic used by two implementations
+
+`ReplicaPoller::check` and `sync_quorum` (`learner/quorum.rs`, 0.55k) are used
+by the reader *and* by the leader's snapshot job in production. With only
+"implementation" available as a role, the moves are a duplicate or a sideways
+edge. They are logic over ports (`Router`, `LocalStoreView`, `QuorumCheck`) and
+implement none, so they become the first **procedure** crate, `zslg-quorum-read`.
+Pure rules over data (`validate_transition`, used by raft-storage, the
+integrator and membership) and shared cells (`RaftStateHandle`,
+`EvictionStatus`) are not procedures; they go into the types crates.
+
+### 3.5 One composition root becomes the new grab bag
+
+The four node files (2.8k lines) plus `setup_raft`, the leader loop,
+`spawn_learner` and observability would all land in the facade, and each node
+would import a dozen implementation crates. The read side is assembled the
+same way in three nodes (`spawn_learner`, `LearnerService`, `GatedReader`). So
+composition gets its own layer: `zslg-learner`, `zslg-leader`,
+`zslg-raft-setup`, `zslg-observability`, and one crate per node. The facade is
+reduced to `pub use`, integration tests and examples.
+
+---
+
+## 4. The foundation
+
+### 4.1 Types crates
+
+```text
+zslg-time-types        Hlc, ClockError, Key impl for Hlc
+zslg-log-types         Data, DataId, LogIndex, Stable/UnstableEvent, SnapshotEntry,
+                       LogError, Key impls, LogType label
+zslg-snapshot-types    SnapshotId, SnapshotMetadata, CompressionLevel, SnapshotError,
+                       ObjectStoreReason/Op labels
+zslg-consensus-types   NodeId, RaftGeneration, RaftState, ReplicaMembership, Exit,
+                       ReplicaStatus, RaftStateHandle, EvictionStatus,
+                       validate_transition, is_quorum, ConsensusError, RaftStateError
+zslg-raft-types        TypeConfig, NodeInfo, RaftResponse, FencedStateWrite, RaftLogIndex
+zslg-net-types         PeerAddr, HostPort, ServerName, RPC messages, NetError
+```
+
+The chain is `time ← log ← snapshot ← consensus ← raft ← net`. Each types crate
+depends on `zslg-metrics-kit` for its label enums (§4.5).
+
+### 4.2 Ports crates
+
+`zslg-time` (`Clock`), `zslg-log` (`Reader`, `Writer`, `StableLog`,
+`LocalStoreView/Mut`, `StableArchiveReader`, `Replica`, the replica submit port
+of §5.4), `zslg-snapshot` (`SnapshotStore`), `zslg-consensus`
+(`RaftConsensus`, `RaftPeer`, `RaftLeadership`, `RaftMembership`,
+`StateReplicator`, `RaftStateView`, `QuorumCheck`, `SpareSelection`,
+`MembershipGate`, `ClusterBootstrap`), `zslg-net` (`Peers`, `Router`,
+`ReplicaClient`, `LivenessProbe`, `LivenessQuery`). Each re-exports its group's
+types (§2.2 rule 1).
+
+`ordered.rs` is split by the orphan rule: each `Key`/`Successor` impl goes to
+the crate defining the type (`Hlc` → time-types; `LogIndex`, `DataId` →
+log-types).
+
+### 4.3 The four misplaced items
+
+Each is a prerequisite commit of the crate that needs it:
+
+```text
+TypeConfig & co (raft/types.rs)         -> zslg-raft-types
+CompressionLevel (object_store/)        -> zslg-snapshot-types
+Clock port vs HlcClock impl (hlc/)      -> port in zslg-time, impl in zslg-hlc-clock
+RaftStateHandle, EvictionStatus         -> zslg-consensus-types
+```
+
+Fields that were `pub(crate)` (`NodeId(pub(crate) Uuid)`) get the smallest
+accessor implementation crates need; nothing new reaches the facade.
+
+### 4.4 Errors
+
+Group errors (D4) live in the types crates: `ClockError`, `LogError`,
+`SnapshotError`, `ConsensusError`, `NetError`. `zslg-error` composes them with
+`#[from]`, plus the cross-cutting and startup variants (`Cancelled`,
+`Shutdown` from `zslg-cancelled`, `InvalidConfiguration`, `NotReady`,
+`StartupCancelled`, `HardCrashDataLoss`). Ports return `zslg_error::Error`; a
+function wholly inside one group may return its group error.
+
+The visible change for consumers is the nesting: `Error::NotLeader { .. }`
+becomes `Error::Consensus(ConsensusError::NotLeader { .. })`. nlnr does not
+match on `zslg::Error`; nvzn's uses are `Result<_, zslg::Error>`.
+
+### 4.5 Metrics
+
+`metrics.rs` (2.7k) is cut at its `// ── section ──` markers (D5).
+`zslg-metrics-kit` keeps the mechanism. Label enums that appear in port
+signatures or are shared by two implementations live in the types crates;
+everything else lives with the crate that emits it, as a `METRICS` slice plus
+emission helpers. `zslg-observability` concatenates them in
+`describe_metrics()` and tests name uniqueness; the `zslg_` namespace is
+applied by the macro, so names do not change (§8.2 golden test).
+
+---
+
+## 5. Implementations
+
+### 5.1 The list
+
+Source paths are under `crates/zslg/src`.
+
+| crate | source | lines | implements |
+|---|---|---|---|
+| `zslg-database` | `database/` | 1.3k | library, listed here for completeness (§5.5) |
+| `zslg-object-store` | `object_store/{mod,snapshot_store}.rs` | 1.1k | `SnapshotStore`; owns `s3` |
+| `zslg-object-format` | `object_store/framing.rs` | 0.4k | candidate (§5.6) |
+| `zslg-hlc-clock` | `hlc/clock.rs` | 0.6k | `Clock` |
+| `zslg-hlc-gate` | `hlc/{gate,cutoff}.rs` | 0.7k | write admission |
+| `zslg-writer` | `writer.rs`, `quorum/{coordinator,fanout}.rs` | 1.3k | `Writer` |
+| `zslg-net-client` | `network/{client,transport}/` | 1.6k | `RaftPeer`, `ReplicaClient` over RPC |
+| `zslg-net-server` | `network/server/` | 0.7k | RPC dispatch to ports |
+| `zslg-net-router` | `network/router/` | 0.4k | `Router` |
+| `zslg-raft` | `raft/{node,membership}.rs` | 0.4k | consensus ports + `ClusterBootstrap` |
+| `zslg-raft-startup` | `raft/startup/` | 1.3k | the startup procedure (§5.2) |
 | `zslg-raft-storage` | `raft/raft_storage/` | 2.5k | openraft storage traits |
-| `zslg-raft-rpc` | `raft/rpc/` | 0.2k | openraft network factory, peer registration |
-| `zslg-raft-state` | `raft/state/` (publisher) | 0.5k | gauges, leadership events |
-| `zslg-raft-tracker` | `raft/tracker/` | 0.5k | |
-| `zslg-local-store` | `learner/local_store/` | 2.5k | candidate cut (§4.5) |
-| `zslg-stable-log` | `learner/stable_log/` | 2.3k | snapshot loader candidate cut |
-| `zslg-stable-archive` | `learner/stable_archive/` | 0.2k | |
-| `zslg-subscriber` | `learner/subscriber/` | 0.8k | |
-| `zslg-reader` | `learner/{read,quorum}.rs` | 2.8k | `Reader`; `sync_quorum` |
-| `zslg-replica-log` | `replica/{log,purge}.rs` | 2.4k | |
-| `zslg-replica-service` | `replica/mod.rs` | 0.9k | RPC service |
+| `zslg-raft-rpc` | `raft/rpc/` | 0.2k | openraft network factory |
+| `zslg-raft-state` | `raft/state/state_publisher.rs` | 0.5k | state gauges, leadership events |
+| `zslg-raft-tracker` | `raft/tracker/` | 0.5k | `RaftStateTracker` |
+| `zslg-local-store` | `learner/local_store/` | 2.5k | `LocalStoreView/Mut` |
+| `zslg-stable-log` | `learner/stable_log/` | 2.3k | `StableLog` |
+| `zslg-stable-archive` | `learner/stable_archive/` | 0.2k | `StableArchiveReader` |
+| `zslg-subscriber` | `learner/subscriber/` | 0.8k | pulls replica logs into `LocalStoreMut` |
+| `zslg-reader` | `learner/read.rs` | 2.2k | `Reader` |
+| `zslg-replica-log` | `replica/{log,purge}.rs` | 2.4k | replica submit port |
+| `zslg-replica-service` | `replica/mod.rs` | 0.9k | `Replica` |
 | `zslg-leader-integrator` | `leader/integrator.rs` | 1.1k | the single Raft writer |
 | `zslg-leader-membership` | `leader/jobs/{membership/,voters.rs}` | 3.5k | |
 | `zslg-leader-snapshot` | `leader/jobs/{snapshot/,cutoff.rs,cleanup.rs}` | 2.9k | |
 | `zslg-leader-compaction` | `leader/jobs/compaction/` | 0.9k | |
 
-### 4.2 Raft: decide, then execute
+### 5.2 Raft: decide, then execute (D14)
 
-`startup/` drives an `openraft::Raft` (`initialize`, `client_write`, `metrics`,
-`wait`) through bootstrap, join and rejoin (D14). The decision procedure moves
-to `zslg-raft-startup` and talks to a port in `consensus`:
+`zslg-raft-startup` holds the bootstrap/join/rejoin decision procedure and
+talks to `ClusterBootstrap` in `zslg-consensus`:
 
 ```rust
 trait ClusterBootstrap {
-    async fn initialize(&self, members: Membership) -> Result<(), ConsensusError>;
-    async fn write_fenced(&self, w: FencedStateWrite) -> Result<RaftResponse, ConsensusError>;
-    async fn wait_leader(&self, within: Duration) -> Result<NodeId, ConsensusError>;
+    async fn initialize(&self, members: Membership) -> Result<(), Error>;
+    async fn write_fenced(&self, w: FencedStateWrite) -> Result<RaftResponse, Error>;
+    async fn wait_leader(&self, within: Duration) -> Result<NodeId, Error>;
     fn metrics(&self) -> watch::Receiver<RaftMetricsView>;
 }
 ```
 
 `RaftNode` implements it over openraft. The verbs are what startup calls today;
-the implementation phase confirms nothing else reaches into openraft, and adds a
-verb rather than a back-door if something does. `setup_raft` — adopt storage,
-wire the router, spawn the watchers — is composition and moves to the facade.
-`raft-storage` and `raft-rpc` implement openraft's own traits (`RaftLogStorage`,
-`RaftNetworkFactory`), which are the ports for those two.
+if the move finds another call into openraft, I stop and ask (§8.1) rather than
+adding a back door. `raft-storage` and `raft-rpc` implement openraft's own
+traits, which are their ports. `setup_raft` is wiring and goes to
+`zslg-raft-setup`.
 
-### 4.3 Leader and learner
+### 5.3 Leader and learner
 
-The leader's jobs run as concurrent tasks and write to Raft only through the
-integrator's intents. Each job crate depends on `consensus` ports
-(`RaftLeadership`, `StateReplicator`, `RaftStateView`), `log`/`snapshot` ports
-and `time`. The leader loop that spawns and supervises the jobs
-(`leader/mod.rs`, `jobs/mod.rs`, 220 lines) is composition and moves to the
-facade. `zslg-leader-snapshot` and `zslg-stable-log` both know the snapshot
-object layout; that knowledge belongs to `zslg-snapshot` and moves there as a
-prerequisite commit.
+Leader jobs depend on consensus, log and snapshot ports, `zslg-quorum-read`
+for replica freshness, and `time`. In production they already go through ports
+(`LocalStoreView`, `SnapshotStore`, `RaftStateView`); only their tests use the
+concrete stores (§7.3). The reader splices `StableLog`, `StableArchiveReader`
+and `LocalStoreView` and never names a concrete store.
 
-The reader splices three sources (local stable log, stable archive, unstable
-store) through the `StableLog`, `StableArchiveReader` and `LocalStoreView`
-ports; it no longer names the concrete stores. `zslg-subscriber` writes through
-`LocalStoreMut`.
+### 5.4 Network and replica
 
-### 4.4 Network and replica
+Client, server and router use `zslg-net-wire` (the RPC codec and TCP layer; a
+procedure, since its envelope carries `Hlc` and `NodeId`) and ports, nothing
+else concrete. `StaticPeers` and `PermissiveGate`
+move to `zslg-net-fake`. `zslg-replica-service` calls the replica log through
+a small submit/fence port in `zslg-log`, shaped by what `replica/mod.rs` calls
+today.
 
-`zslg-net-client` implements `RaftPeer`, `ReplicaClient` and friends by speaking
-RPC; `zslg-net-server` accepts connections and dispatches to `RaftConsensus`,
-`Replica` and `StateReplicator` ports; `zslg-net-router` routes by node id.
-All three use `zslg-net-wire` and nothing else concrete. `StaticPeers` and
-`PermissiveGate` (test and example doubles today) move to `zslg-net-fake`.
+### 5.5 Storage engines are libraries with a domain
 
-`zslg-replica-service` currently calls the concrete replica log directly; it gets a
-small submit/fence port in `log` (named in the implementation commit, shaped by
-what `replica/mod.rs` calls).
+`zslg-database` (RocksDB column families) implements no zslg port but is used
+by raft-storage, stable-log, local-store and replica-log. It is a library in
+the §2.1 sense (no zslg domain beyond `ByteSize` and its own error), so the
+four implementations may share it. The same test applies to anything else
+found to be used by two implementations: if it knows no zslg domain it is a
+library; if it works over ports it is a procedure; otherwise it is a missing
+port, and I ask.
 
-### 4.5 Candidate cuts, to be confirmed commit by commit
+### 5.6 Candidate cuts, confirmed commit by commit
 
-D7/D14: split whenever the pieces share no private state. The file-level
-import scan suggests these; each is its own commit, and if a commit finds shared
-private state it is merged back and recorded in the log, not forced.
+Each is its own commit; if a commit finds shared private state, I stop and
+ask (§8.1) instead of forcing it.
 
 ```text
-local_store/    key.rs, recent_ids.rs, purge.rs, store.rs (1.7k)  -> store + keys
-stable_log/     purge.rs, snapshot_loader.rs (0.6k)               -> loader separate
-leader membership   change.rs (0.7k), liveness.rs (0.7k, uses change)
-hlc/            clock | gate | cutoff   (cutoff may fold into gate)
-object_store/   framing.rs (0.4k) | snapshot_store.rs (0.9k)
+local_store/   recent_ids.rs (0.2k, bounded DataId dedup set)  -> library candidate
+               key.rs, purge.rs, store.rs (1.7k)
+stable_log/    snapshot_loader.rs (0.6k)                       -> own implementation
+leader membership   change.rs | liveness.rs
+hlc/           gate.rs | cutoff.rs
+object_store/  framing.rs | snapshot_store.rs
+learner/       read.rs (2.2k) — look for the splice vs. gating split (GatedReader)
+replica/       log.rs (2.2k) — flush loop vs. store
 ```
 
 ---
 
-## 5. Fakes, tests, hooks
+## 6. Assemblies
 
-### 5.1 Three kinds of test support (D9, D10)
+| crate | source | wires |
+|---|---|---|
+| `zslg-raft-setup` | `raft/mod.rs` (`setup_raft`) | raft, raft-storage, raft-rpc, raft-state, net-router |
+| `zslg-learner` | `learner/mod.rs` (`spawn_learner`, `LearnerService`, `GatedReader` wiring) | local-store, stable-log, stable-archive, subscriber, reader |
+| `zslg-leader` | `leader/mod.rs`, `leader/jobs/mod.rs` | integrator and the job crates |
+| `zslg-observability` | `observability.rs`, process/jemalloc gauges | metrics aggregation, `prometheus`, `jemalloc`, `tokio-console` features |
+| `zslg-writer-node` | `writer_node.rs` | raft-setup, writer, net-* |
+| `zslg-learner-node` | `learner_node.rs` | raft-setup, learner |
+| `zslg-follower-node` | `follower_node.rs` | raft-setup, learner |
+| `zslg-replica-node` | `replica_node.rs` (1.5k) | raft-setup, learner, leader, replica-* |
 
-```text
-fakes of ports       zslg-<group>-fake   time, log, snapshot, consensus, net
-fault hooks          `testing` feature on the owning implementation crate
-whole-system harness tests/common + integration tests, in the facade
-```
-
-The 11 `_for_test` hooks (`demote_to_learner_for_test`,
-`seed_foreign_membership_for_test`, `integrate_manifest_for_test`, …) become
-`pub` behind `testing`, enabled only by the facade's dev-dependencies. A hook
-that no port can express is listed in the commit message as a candidate for a
-real port.
-
-### 5.2 The fakes
-
-Duplicated test doubles are consolidated when their group's fake crate is
-created: `FakeLeadership`/`StaticLeadership` → one fake `RaftLeadership`; both
-`StaticLiveness`; `FakeReplica`/`FakeUpstreamReplica`; `FakeRaft`/
-`NoopReplicator` → one `StateReplicator`; `StubLocalStore`, `NoOpCheck`,
-`NoOpRaftViewer`, `NoOpProbe`. `zslg-log-fake` also takes `nvzn::testing::
-TestLog` (an in-memory `Reader`/`Writer`, 140 lines of channel plumbing), which
-today lives in the wrong crate.
-
-### 5.3 What tests move where
-
-Unit tests move with their source into the new crate. The 5k lines of
-integration tests and the cluster harness stay in the facade and keep using
-the facade's public items plus `testing` hooks. Tests that today reach into
-module internals without a hook are moved next to the code they test.
-
-### 5.4 Performance guard
-
-Hot-path leaf functions in `time` and `log` types (`Hlc` ops, `LogIndex`
-arithmetic, `DataId` comparison) get `#[inline]`. The loadgen example is run
-before and after the series and compared (§6.2). If a regression shows, the
-fix is `#[inline]` or merging the two crates, not a revert of the split.
+Node crates depend on the lower assemblies, never on each other. The facade
+`pub use`s the node types, their configs, `Error`, the public foundation
+types and `describe_metrics`/`configure_prometheus`; the list equals today's
+`lib.rs`. Features are forwarded under today's names.
 
 ---
 
-## 6. Landing the change
+## 7. Fakes, tests, hooks
 
-### 6.1 One PR, one crate per commit (D13)
+### 7.1 Three kinds of test support (D9, D10)
 
-One branch, one PR, one commit per crate, each green. A prerequisite move (one
-of §3.2, an error split, an accessor) is its own commit before the crate that
-needs it. Imports are rewritten in the extraction commit; no re-export shim is
-left behind. Large moves are expected; mixed moves are not.
+Fakes of ports in `zslg-<group>-fake`; the 11 `_for_test` fault hooks as a
+`testing` feature on the owning implementation; the cluster harness and
+integration tests in the facade.
 
-### 6.2 Gates at every commit
+### 7.2 Consolidating the fakes
+
+Duplicated doubles become one each when their fake crate is created:
+`FakeLeadership`/`StaticLeadership`, the two `StaticLiveness`,
+`FakeReplica`/`FakeUpstreamReplica`, `FakeRaft`/`NoopReplicator`, plus
+`StubLocalStore`, `NoOpCheck`, `NoOpRaftViewer`, `NoOpProbe`. `zslg-log-fake`
+also takes `nvzn::testing::TestLog`.
+
+### 7.3 Tests that need a real sibling
+
+Some unit tests use real siblings: the leader's snapshot and compaction tests
+build a real `LocalStore`, `StableLog` and `RemoteSnapshotStore`. A
+dev-dependency from one implementation to another would be the one sideways
+edge the structure cannot see, so these tests move to the lowest assembly that
+depends on both (`zslg-leader`) or are rewritten against the fakes when they
+only need the port. Which one is decided per test in its commit; the default
+is to move, because rewriting a test changes what it proves.
+
+---
+
+## 8. Landing the change
+
+### 8.1 One PR, one crate per commit (D13) — and stop when the plan breaks
+
+One branch, one PR, one commit per crate, each green; prerequisite moves are
+their own commits before the crate that needs them. **If something does not
+split the way this document says — a missing port, shared private state, a
+test that cannot move — I stop and ask how to proceed.** No improvised
+traits, re-export shims, `pub` back doors or fused crates to get past it.
+
+### 8.2 Gates at every commit
 
 ```text
 cargo fmt --all -- --check
@@ -360,113 +425,132 @@ cargo test --workspace
 describe_metrics() golden       (names, kinds, units, help — identical)
 ```
 
-Plus, on the milestones (after the foundation, after the implementations, at the
-end): btrb and nvzn examples build; a nlnr checkout builds against the facade;
-loadgen before/after; a clean build and an incremental build of one leaf crate,
-timed, recorded in the post document as the B data point.
+At milestones (after §9 step 6, step 12, the end): btrb and nvzn examples build;
+nlnr builds against the facade; loadgen before/after; a clean build and an
+incremental build of one leaf crate are timed for the post document.
 
-### 6.3 Enforcing the layering
+### 8.3 The layering test
 
-Cargo already rejects cycles. The rule "no implementation→implementation edge"
-is enforced by one test in the facade that reads `cargo metadata` and checks
-each crate's workspace dependencies against its role (§2.1), the role being
-derived from the name. A new crate with a wrong dependency fails the test.
+A test in the facade reads `cargo metadata`, assigns each workspace crate its
+role from the name (§2.1), and fails on any normal or dev dependency the role
+table does not allow, and on any crate outside types/error/ports that depends
+on a `-types` crate directly (§2.2 rule 1). It is added in the first commit so
+every later commit is checked.
 
 ---
 
-## 7. nvzn
+## 9. nvzn
 
-Same rules, in this design (D12). nvzn is already acyclic.
+Same rules (D12). nvzn has one domain and one error, so it has no
+types/ports split and no error crate.
 
-| crate | source | notes |
+| crate | role | source |
 |---|---|---|
-| `nvzn-types` | `ids.rs`, `events.rs`, `view.rs`, `projection.rs` | no internal deps |
-| `nvzn-store` | `store/{mod,config,overlay}.rs` | the `Store` port and the shared write machinery (`CommitBatch`, `WriteTransactionImpl`) |
-| `nvzn-store-rocksdb` | `store/rocksdb.rs` | |
-| `nvzn-store-fake` | `store/inmemory.rs` | the in-memory store, a fake of `Store` |
-| `nvzn-resultset` | `resultset/` | query ops |
-| `nvzn-dispatcher` | `dispatcher/` | log → store fold |
-| `nvzn-live` | `live.rs` | wait for projections |
-| `nvzn-reader` | `reader.rs` | |
-| `nvzn-metrics` | `metrics.rs` | central vocabulary, see below |
-| `nvzn` | `lib.rs`, `testing.rs` | facade; `TestLog` moves to `zslg-log-fake` |
+| `nvzn-types` | types | `ids.rs`, `events.rs`, `view.rs`, `projection.rs` traits, `Error`, `FoldState` |
+| `nvzn-store` | ports | `Store`, `ReadTransaction`, `WriteTransaction`, `store/config.rs` |
+| `nvzn-store-overlay` | procedure | `store/overlay.rs` (`CommitBatch`, `WriteTransactionImpl`), shared by both stores |
+| `nvzn-store-rocksdb` | implementation | `store/rocksdb.rs` |
+| `nvzn-store-fake` | fake | `store/inmemory.rs` |
+| `nvzn-resultset` | implementation | `resultset/` |
+| `nvzn-metrics` | types | `metrics.rs` (central vocabulary, see below) |
+| `nvzn-dispatcher` | implementation | `dispatcher/` |
+| `nvzn-live` | implementation | `live.rs` |
+| `nvzn-reader` | assembly | `reader.rs` |
+| `nvzn` | facade | `lib.rs`, `testing.rs` |
 
-`overlay.rs` is shared by the RocksDB and in-memory stores, so it lives with
-the port. nvzn is a consumer of zslg and may not import `zslg-metrics-kit`
-(D11); with ~850 lines of vocabulary used by four crates, nvzn keeps one
-`nvzn-metrics` crate instead of D5's per-crate split. This is the one place D5
-is not applied, and it is flagged in §8.
+Corner found in this pass: `live` and `reader` both read the dispatcher's
+`FoldState` and `Subscriptions`, and `reader` returns `live::Live`. `FoldState`
+is a shared cell (69 lines) and goes to `nvzn-types`; `reader` is wiring over
+`live`, the store and the dispatcher's subscriptions, so it is an assembly. The
+open point is `Subscriptions` (dispatcher's live-subscriber registry, read by
+`reader`): it is either a shared cell (types) or a port the dispatcher
+implements. I'll decide it with you when the move gets there, not by
+improvising (§8.1).
+
+nvzn cannot use `zslg-metrics-kit` (D11: nvzn sees only the zslg facade), so
+its ~850 lines of vocabulary stay one `nvzn-metrics` crate, the one place D5 is
+not applied.
 
 ---
 
-## 8. Alternatives, risks, what to check
+## 10. Alternatives, edge cases, what to check
 
-### 8.1 Alternatives rejected (see the log for reasons)
+### 10.1 Alternatives rejected
 
-One `core` crate; a single Error crate; associated error types on ports; a
-central metrics crate; a `zslg-support` crate; nvzn importing group crates;
-nested directory layout; a PR per layer or per crate; implementations
-depending on each other.
+One `core` crate; a single error crate below everything; associated error
+types on ports; a central metrics crate; a `zslg-support` crate; nvzn
+importing group crates; nested directories; a PR per layer or per crate;
+implementations depending on each other. From this pass: types and ports in one
+crate per group (§3.1); ports returning only their group's error (§3.2);
+the facade as the only composition root (§3.5); dev-dependencies between
+implementations (§7.3).
 
-### 8.2 Edge cases
+### 10.2 Edge cases
 
-- Orphan rule: `Key` impls and any `From` between group errors must sit in the
-  crate of the trait or the type (§3.1).
-- `tracing` targets default to the module path, so `RUST_LOG=zslg=debug` must
-  still match `zslg_raft::…`. `EnvFilter` target directives match by prefix, so
-  it should; the first extraction commit verifies it and the observability doc
-  is updated if not.
-- Features: `s3`, `prometheus`, `tokio-console`, `jemalloc`, `heap-profiling`
-  live in the owning crate; the facade forwards them under the same names.
-- Workspace dependency versions stay in `[workspace.dependencies]`; each crate
-  lists only what it uses, which will surface unused dependencies.
+- `RUST_LOG=zslg=debug` must still match `zslg_raft::…`. `EnvFilter` target
+  directives match by prefix, so it should; the first extraction commit
+  verifies it.
+- Features (`s3`, `prometheus`, `tokio-console`, `jemalloc`,
+  `heap-profiling`) live in the owning crate; the facade forwards them.
 - `pub(crate)` ports become `pub` in internal crates; the facade's `pub use`
-  list is unchanged, so the consumer-visible API is the same.
+  list is unchanged.
+- Hot-path functions on `Hlc`, `LogIndex`, `DataId` get `#[inline]`; loadgen
+  before/after catches a regression.
 
-### 8.3 Complexity: essential and accepted
+### 10.3 Complexity
 
-Essential: a port set that actually decouples (new: `ClusterBootstrap`, the
-replica submit port, a few verbs on existing ports). Accepted: ~60 crates
-instead of 2 (+ the facades), more `Cargo.toml` files, public-in-internal visibility. Avoided:
-shims, wildcard re-exports, duplicate fakes.
+Essential: a port set that actually decouples (`ClusterBootstrap`, the
+replica submit port, a few verbs on existing ports) and a role table that
+says where any new piece goes. Accepted: ~70 crates, more `Cargo.toml` files,
+public-in-internal visibility. Avoided: shims, wildcard re-exports, duplicate
+fakes, sideways edges.
 
-### 8.4 Please look at
+### 10.4 Please look at
 
-1. §3.1: `ordered.rs` is split by the orphan rule — a refinement of D3.
-2. §2.1: libraries may be used by implementations — a refinement of D8.
-3. §7: `nvzn-metrics` is central, unlike D5.
-4. §4.1/§4.5: the crate list is a proposal; the candidate cuts are confirmed
-   per commit, and anything that shares private state is merged back.
-5. §3.3: the nested `Error` match is the one visible API change.
+Changed in this pass:
+1. §3.1/§4.1–4.2: each group is a types crate and a ports crate (+6 crates,
+   incl. `zslg-raft-types`). Ports re-export their types (§2.2 rule 1).
+2. §3.2/§4.4: **D4 changes** — ports return the composed `Error`, which now
+   lives in `zslg-error` below the ports; group errors stay structured inside it.
+3. §2.1/§3.4: new role *procedure* (`zslg-quorum-read`, `zslg-net-wire`,
+   `nvzn-store-overlay`).
+4. §3.5/§6: new role *assembly* (8 crates); the facade only re-exports.
+5. §7.3: no dev-dependencies between implementations; such tests move up.
+6. §9: nvzn's `reader` is an assembly; `Subscriptions` is an open point.
+
+Carried over: `ordered.rs` split by the orphan rule (§4.2); libraries usable
+by implementations, incl. `zslg-database` (§5.5); central `nvzn-metrics`
+(§9); the nested `Error` match (§4.4).
 
 ---
 
-## 9. Implementation order
+## 11. Implementation order
 
-A linearisation of the DAG. Each line is one or more commits (prerequisites
-first, then the extraction).
+A linearisation of the DAG; each line is one or more commits, prerequisites
+first.
 
 ```text
- 1  libraries      bytesize, warn-throttle, cancelled, shutdown, framing, metrics-kit
- 2  time           (Hlc, Clock, ClockError, Key impl) + time-fake
- 3  log            (ids, events, ports, LogError, Key impls) + log-fake (+ TestLog)
- 4  snapshot       (+ snapshot layout moved from leader/learner) + snapshot-fake
- 5  consensus      (the four misplaced items, ports, ClusterBootstrap) + consensus-fake
- 6  net            (PeerAddr..., messages, ports) + net-wire + net-fake
- ── thin vertical slice: facade still holds all implementations; everything builds
- 7  database, object-store, hlc-clock, hlc-gate
- 8  net-client, net-server, net-router
- 9  raft-storage, raft-rpc, raft-state, raft-tracker, raft (RaftNode), raft-startup
-10  local-store, stable-log, stable-archive, subscriber, reader
-11  replica-log, replica-service, writer
-12  leader-integrator, leader-membership, leader-snapshot, leader-compaction
-13  facade finalised: nodes, setup_raft, leader loop, layering test, README
-14  nvzn: types, store, store-rocksdb, store-fake, resultset, dispatcher, live,
-    reader, metrics, facade
+ 1  layering test (roles from names; passes trivially on today's two crates)
+ 2  libraries: bytesize, warn-throttle, cancelled, shutdown, framing, metrics-kit,
+    database
+ 3  types: time, log, snapshot, consensus, raft, net  (+ the four moves of §4.3)
+ 4  zslg-error
+ 5  ports: time, log, snapshot, consensus (+ ClusterBootstrap), net
+ 6  fakes: time, log (+ TestLog), snapshot, consensus, net
+ ── checkpoint: foundation enforced; one big implementation crate left; all green
+ 7  procedures: quorum-read, net-wire
+ 8  object-store, hlc-clock, hlc-gate
+ 9  net-client, net-server, net-router
+10  raft-storage, raft-rpc, raft-state, raft-tracker, raft, raft-startup
+11  local-store, stable-log, stable-archive, subscriber, reader
+12  replica-log, replica-service, writer
+13  leader-integrator, leader-membership, leader-snapshot, leader-compaction
+ ── checkpoint: no implementation code left in zslg
+14  assemblies: raft-setup, learner, leader, observability, the four nodes
+15  facade reduced to pub use + integration tests + examples
+16  nvzn: types, metrics, store, store-overlay, store-rocksdb, store-fake,
+    resultset, dispatcher, live, reader, facade
 ```
 
-Steps 1–6 are the foundation and leave one big implementation crate — that is
-the checkpoint: everything below it is enforced, everything above it is still
-the old code, and the whole workspace builds and passes. Steps 7–12 then peel
-implementations off bottom-up. After step 14 a post document records the review,
-the surprises and the build-time numbers.
+After step 16 a post document records the review, surprises and build-time
+numbers.

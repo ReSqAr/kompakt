@@ -253,3 +253,49 @@ contradicts D11; moves the facade path) and one workspace per family.
 Remaining decisions have no wide-reaching consequences; the open items are
 listed in the design doc §8.4 for sign-off. Design doc:
 `2026-11-07_design_crate_split.md`.
+
+## Design pass 2 (2026-11-07): more crates, import patterns, corners
+
+User asked for a second pass: can we create even more small crates; does the
+structure avoid weird import patterns; above all, do not paint ourselves into a
+corner where the only move is a bad one. Process instruction for the
+implementation phase: **if something does not work out as planned, ask first
+instead of Frankenstein-ing the structure** (design doc §8.1).
+
+Corners found by tracing real edges, and the proposed changes (pending
+sign-off):
+
+- P1. Port signatures cross groups (`Replica` needs `RaftState`,
+  `ReplicaClient` bundles ports of three groups, `SnapshotStore` names a metric
+  label). A chain of types+ports crates turns each into an upward edge.
+  Proposal: split each group into `zslg-<group>-types` and `zslg-<group>`
+  (ports); types form the chain, ports may use any types. Ports re-export
+  their types so import sites keep the D3 pattern. Refines D2/D3.
+- P2. Errors cross groups (read path raises NotReady/ObjectStore/Lagged; replica
+  service raises HlcCutoff/NotAReplica/Shutdown). Ports returning only their
+  group's error leave a catch-all or an upward edge. Proposal: `zslg-error`
+  between types and ports; ports return the composed error; group errors stay
+  structured inside it. **Changes D4.**
+- P3. openraft vocabulary in consensus would leak openraft into every crate
+  needing `NodeId`. Proposal: `zslg-raft-types`.
+- P4. `ReplicaPoller`/`sync_quorum` are used by the reader and the leader's
+  snapshot job in production. Proposal: new role *procedure* (shared logic over
+  the foundation, implements no port): `zslg-quorum-read`; `zslg-net-wire`
+  reclassified as a procedure (its envelope carries Hlc/NodeId). Pure rules
+  (`validate_transition`) and shared cells (`RaftStateHandle`,
+  `EvictionStatus`) go into types.
+- P5. The facade as only composition root becomes a grab bag (4 nodes, setup,
+  leader loop, read-side assembly used by 3 nodes). Proposal: new role
+  *assembly*: raft-setup, learner, leader, observability, one crate per node;
+  the facade only re-exports.
+- P6. Leader tests build real sibling stores. Proposal: no dev-dependencies
+  between implementations; such tests move to the lowest assembly or onto the
+  fakes, decided per test.
+- P7. nvzn: `live` and `reader` read dispatcher state (`FoldState`,
+  `Subscriptions`); `reader` returns `Live`. Proposal: `FoldState` to
+  `nvzn-types`, `reader` is an assembly, `nvzn-store-overlay` a procedure;
+  `Subscriptions` left as an open point to decide with the user during the move.
+- `zslg-database` is a library (no zslg domain), usable by the four storage
+  implementations.
+
+Crate count rises from ~55 to ~70.
