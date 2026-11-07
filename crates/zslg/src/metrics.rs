@@ -103,12 +103,6 @@ metrics!("zslg_", raft; {
          and discards the step-2 generation quorum, so a sustained rate means \
          the change is restarting, not progressing.";
 
-    custom  leader_intent   LEADER_INTENTS_TOTAL "leader_intents_total" Counter None
-        "Raft-state intents resolved by the leader integrator, by outcome \
-         (applied/already_satisfied/superseded/failed).";
-    custom  leader_intent_batch LEADER_INTENT_BATCHES_TOTAL "leader_intent_batches_total"
-        Counter None "Raft proposals issued by the leader integrator. Divide \
-        leader_intents_total{state=\"applied\"} by this for the coalescing factor.";
     custom  node_last_seen NODE_LAST_SEEN_TIMESTAMP_SECONDS "node_last_seen_timestamp_seconds"
         Gauge Seconds "Unix-epoch seconds of the last successful liveness probe \
         reply from each peer (label node_id), per observing node. Cluster \
@@ -120,40 +114,6 @@ metrics!("zslg_", raft; {
 
 // ── raft / consensus: hand-written emission helpers ────────────────────────
 // (custom rows above; each fn below emits the metrics named in its row)
-
-/// One intent resolved by the integrator, by outcome.
-pub(crate) fn leader_intent(outcome: IntentState) {
-    metrics::counter!(LEADER_INTENTS_TOTAL, LABEL_STATE => outcome.as_str()).increment(1);
-}
-
-/// One Raft proposal issued by the integrator, carrying one or more intents.
-///
-/// The coalescing signal is the ratio:
-/// `rate(leader_intents_total{state="applied"}) / rate(leader_intent_batches_total)`
-/// — above 1 means several jobs' writes rode one Raft entry instead of
-/// contending for the generation fence. Sustained 1 is fine at low load and
-/// worth a look under it. Counters rather than a histogram because the registry
-/// requires histograms to carry a real unit, and "intents" is a count.
-pub(crate) fn leader_intent_batch() {
-    metrics::counter!(LEADER_INTENT_BATCHES_TOTAL).increment(1);
-}
-
-label_enum!(#[doc = "`state` label of [`LEADER_INTENTS_TOTAL`]."] IntentState {
-    /// Folded into a proposal that committed.
-    Applied => "applied",
-    /// Already true in the committed state; nothing proposed.
-    AlreadySatisfied => "already_satisfied",
-    /// The premise no longer held, so the submitter must recompute.
-    Superseded => "superseded",
-    /// The proposal itself failed (Raft error).
-    Failed => "failed",
-    /// The proposal lost the generation fence. The integrator is the only
-    /// writer of replicated state and it writes serially, so within a leader
-    /// epoch this cannot happen: a non-zero rate outside an election means
-    /// either a deposed leader is still submitting or something else is
-    /// writing `EntryPayload::Normal`.
-    StaleFence => "stale_fence",
-});
 
 /// Unix-epoch seconds when this node last received a successful liveness probe
 /// reply from `node_id`. Emitted from the liveness worker; Grafana derives
@@ -552,6 +512,8 @@ pub(crate) fn jemalloc_stats(s: &JemallocStats) {
 const ALL_METRICS: &[&[MetricDef]] = &[
     // --- leader job heartbeat (zslg-consensus-types) ---
     zslg_consensus_types::metrics::METRICS,
+    // --- leader integrator (zslg-leader-integrator) ---
+    zslg_leader_integrator::metrics::METRICS,
     // --- writer (zslg-writer) ---
     zslg_writer::metrics::METRICS,
     // --- replica log and service (zslg-replica-log, zslg-replica-service) ---

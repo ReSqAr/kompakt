@@ -9,7 +9,6 @@
 //! one job at a time can deadlock. Safety therefore sits at the write point —
 //! see [`integrator`].
 
-mod integrator;
 pub(crate) mod jobs;
 
 #[cfg(test)]
@@ -21,8 +20,8 @@ mod leadership_churn_tests;
 use crate::leader::jobs::LeaderHandles;
 pub(super) use crate::leader::jobs::membership::liveness::LivenessConfig;
 pub(super) use crate::leader::jobs::snapshot::SnapshotConfig;
-pub(in crate::leader) use integrator::Integrator;
 use zslg_consensus::{RaftLeadership, RaftStateView, StateReplicator};
+pub(in crate::leader) use zslg_leader_integrator::Integrator;
 use zslg_net::{PeersWatcher, Router};
 use zslg_snapshot::SnapshotStore;
 

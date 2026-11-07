@@ -23,6 +23,7 @@ pub use raft_leadership::RaftLeadership;
 pub use raft_membership::{AddMemberOutcome, RaftMembership};
 pub use raft_state::{RaftStateTracker, RaftStateView};
 pub use state_replicator::StateReplicator;
+pub use zslg_consensus_types::metrics;
 pub use zslg_consensus_types::{
     CandidateInfo, ConsensusError, EvictionStatus, Exit, IntentOutcome, InvalidRaftState,
     RaftGeneration, RaftIntent, RaftLogIndex, RaftManifestState, RaftState, RaftStateError,

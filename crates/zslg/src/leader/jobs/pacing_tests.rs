@@ -30,7 +30,6 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::Error;
-use crate::leader::integrator::Integrator;
 use crate::leader::jobs::LeaderHandles;
 use crate::leader::jobs::membership::liveness::LivenessState;
 use crate::leader::jobs::membership::{MEMBERSHIP_STEP_FLOOR, MembershipJob};
@@ -40,6 +39,7 @@ use crossbeam_combinators::Channel;
 use pace_kit::Pace;
 use zslg_consensus_types::RaftStateHandle;
 use zslg_consensus_types::{RaftManifestState, RaftState, ReplicaMembership};
+use zslg_leader_integrator::Integrator;
 use zslg_log::{LocalStoreView, StableLogSnapshot};
 use zslg_log_types::Data;
 use zslg_log_types::LogIndex;

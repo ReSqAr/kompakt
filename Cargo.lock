@@ -4490,6 +4490,7 @@ dependencies = [
  "zslg-consensus-types",
  "zslg-hlc-clock",
  "zslg-hlc-gate",
+ "zslg-leader-integrator",
  "zslg-lifecycle-types",
  "zslg-local-store",
  "zslg-log",
@@ -4595,6 +4596,29 @@ dependencies = [
  "tokio-util",
  "tracing",
  "zslg-consensus",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-leader-integrator"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crossbeam-combinators",
+ "error-union",
+ "metrics",
+ "metrics-kit",
+ "metrics-util",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-consensus-fake",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-raft",
+ "zslg-snapshot",
  "zslg-time",
 ]
 

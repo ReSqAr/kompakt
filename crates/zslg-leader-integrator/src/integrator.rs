@@ -27,18 +27,18 @@
 //! others drained with it.
 
 use std::sync::Arc;
+use zslg_consensus::ConsensusError;
 use zslg_consensus::{IntentOutcome, IntentSubmitter, RaftIntent, RaftStateView, StateReplicator};
-use zslg_consensus_types::ConsensusError;
 use zslg_lifecycle_types::LifecycleError;
 
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::error::Error;
+use crate::Error;
 use crate::metrics::IntentState;
-use zslg_consensus_types::RaftState;
-use zslg_consensus_types::ReplicatedRaftState;
+use zslg_consensus::RaftState;
+use zslg_consensus::ReplicatedRaftState;
 
 /// Queue depth. Every submitter awaits its own reply, so this only has to
 /// absorb one drain's worth of concurrent jobs.
@@ -61,7 +61,7 @@ impl IntentRequest {
 
 /// Submission handle held by every leader job.
 #[derive(Clone)]
-pub(in crate::leader) struct IntentQueue {
+pub struct IntentQueue {
     tx: mpsc::Sender<IntentRequest>,
 }
 
@@ -80,7 +80,7 @@ impl IntentSubmitter for IntentQueue {
 }
 
 /// Owns the receiving half of the intent queue.
-pub(in crate::leader) struct Integrator {
+pub struct Integrator {
     rx: mpsc::Receiver<IntentRequest>,
     state_replicator: Arc<dyn StateReplicator>,
     raft_state: Arc<dyn RaftStateView>,
@@ -88,7 +88,7 @@ pub(in crate::leader) struct Integrator {
 
 impl Integrator {
     #[must_use]
-    pub(in crate::leader) fn new(
+    pub fn new(
         state_replicator: Arc<dyn StateReplicator>,
         raft_state: Arc<dyn RaftStateView>,
     ) -> (Self, Arc<dyn IntentSubmitter>) {
@@ -105,19 +105,19 @@ impl Integrator {
 
     /// The real publish path — premise checks, transition validation, the
     /// generation fence — without standing up the whole leader.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     #[must_use]
-    pub(in crate::leader) fn spawn_for_test(
+    pub fn spawn_for_test(
         state_replicator: Arc<dyn StateReplicator>,
         raft_state: Arc<dyn RaftStateView>,
     ) -> (Arc<dyn IntentSubmitter>, CancellationToken) {
         let (integrator, submitter) = Self::new(state_replicator, raft_state);
         let cancel = CancellationToken::new();
-        tokio::spawn(integrator.run(cancel.clone()));
+        tokio::spawn(integrator.run::<Error>(cancel.clone()));
         (submitter, cancel)
     }
 
-    pub(in crate::leader) async fn run(mut self, cancel: CancellationToken) -> Result<(), Error> {
+    pub async fn run<E>(mut self, cancel: CancellationToken) -> Result<(), E> {
         info!("leader integrator: starting");
         loop {
             let first = tokio::select! {
@@ -135,8 +135,8 @@ impl Integrator {
             }
             let started = tokio::time::Instant::now();
             self.integrate_batch(batch).await;
-            zslg_consensus_types::metrics::leader_job_ran(
-                zslg_consensus_types::metrics::LeaderJob::Integrator,
+            zslg_consensus::metrics::leader_job_ran(
+                zslg_consensus::metrics::LeaderJob::Integrator,
                 started.elapsed(),
             );
         }
@@ -255,14 +255,14 @@ fn fold_checked(
     match apply_intent(proposed, intent) {
         Ok(Applied::NoOp) => Ok(Applied::NoOp),
         Ok(Applied::Changed) => {
-            let verdict = zslg_consensus_types::validate_replicated_state(proposed)
+            let verdict = zslg_consensus::validate_replicated_state(proposed)
                 .map_err(|e| e.to_string())
                 .and_then(|()| {
-                    zslg_consensus_types::validate_transition(&before_fold.replica, proposed)
+                    zslg_consensus::validate_transition(&before_fold.replica, proposed)
                         .map_err(|e| e.to_string())
                 })
                 .and_then(|()| {
-                    zslg_consensus_types::validate_cutoff_advance(before_fold.hlc_cutoff, proposed)
+                    zslg_consensus::validate_cutoff_advance(before_fold.hlc_cutoff, proposed)
                         .map_err(|e| e.to_string())
                 });
             match verdict {
@@ -399,15 +399,15 @@ fn apply_intent(
 mod tests {
     use std::collections::BTreeSet;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use zslg_consensus_types::{Exit, RaftGeneration, ReplicaMembership};
-    use zslg_log_types::LogIndex;
-    use zslg_snapshot_types::{SnapshotId, SnapshotMetadata};
-    use zslg_time_types::Hlc;
+    use zslg_consensus::{Exit, RaftGeneration, ReplicaMembership};
+    use zslg_log::LogIndex;
+    use zslg_snapshot::{SnapshotId, SnapshotMetadata};
+    use zslg_time::Hlc;
 
     use super::*;
-    use crate::tests::nid;
-    use zslg_consensus_types::RaftStateHandle;
-    use zslg_node_types::NodeId;
+    use zslg_consensus::NodeId;
+    use zslg_consensus::RaftStateHandle;
+    use zslg_consensus_fake::nid;
 
     // ── harness ──────────────────────────────────────────────────────────
     //
@@ -494,15 +494,12 @@ mod tests {
             // The integrator must never propose a state the fence would reject;
             // asserting that here turns any such bug into a test failure rather
             // than a silent value-rejection in production.
-            zslg_consensus_types::validate_replicated_state(&state)
+            zslg_consensus::validate_replicated_state(&state)
                 .expect("integrator proposed a structurally invalid state");
-            zslg_consensus_types::validate_transition(&current.replica, &state)
+            zslg_consensus::validate_transition(&current.replica, &state)
                 .expect("integrator proposed an illegal membership transition");
-            zslg_consensus_types::validate_cutoff_advance(
-                current.manifest_state.hlc_cutoff,
-                &state,
-            )
-            .expect("integrator proposed a regressing hlc cutoff");
+            zslg_consensus::validate_cutoff_advance(current.manifest_state.hlc_cutoff, &state)
+                .expect("integrator proposed a regressing hlc cutoff");
             self.proposals.fetch_add(1, Ordering::Relaxed);
             let next = RaftGeneration(current.generation.raw().saturating_add(1));
             self.state.apply_replicated(state, next).map_err(Into::into)
@@ -513,8 +510,8 @@ mod tests {
     impl StateReplicator for FakeRaft {
         async fn replicate_state(
             &self,
-            state: zslg_consensus_types::ReplicatedRaftState,
-            expected_generation: zslg_consensus_types::RaftGeneration,
+            state: zslg_consensus::ReplicatedRaftState,
+            expected_generation: zslg_consensus::RaftGeneration,
             context: &'static str,
         ) -> Result<(), zslg_consensus::Error> {
             self.replicate_state_in(state, expected_generation, context)
@@ -548,7 +545,7 @@ mod tests {
         let view: Arc<dyn RaftStateView> = Arc::new(raft.state.clone());
         let (integrator, submitter) = Integrator::new(raft.clone(), view);
         let cancel = CancellationToken::new();
-        tokio::spawn(integrator.run(cancel.clone()));
+        tokio::spawn(integrator.run::<Error>(cancel.clone()));
         (raft, submitter, cancel)
     }
 
