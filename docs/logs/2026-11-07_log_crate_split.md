@@ -386,3 +386,31 @@ prove durability, which an in-memory KV fake would not model, there is no
 second engine, and a trait introduced now risks growing RocksDB-shaped or
 acquiring back doors. Introducing it later only touches `rocksdb-kit`.
 Follow-up candidate, not in scope: `nvzn-store-rocksdb` onto the same kit.
+
+## Design pass 3 (2026-11-07): all decisions integrated
+
+Consistency pass over D1–D20. Fixes (pending sign-off with the rest of the doc):
+
+- Raft becomes a full group (`zslg-raft-types` + `zslg-raft` ports:
+  RaftConsensus, RaftPeer, RaftTransport, ClusterBootstrap). Reason: import
+  rule 1 routes types through ports crates, so openraft vocabulary re-exported
+  by `zslg-consensus` would leak to every `NodeId` user — undoing P3. The
+  implementation is renamed `zslg-raft-node`; `zslg-raft-fake` added for
+  startup's tests (D14 said consensus-fake). RPC messages (embed openraft
+  requests) move from net-types to `zslg-net-wire`.
+- Types crates form a DAG, not a chain: consensus ports use `PeerAddr`/
+  `ServerName`; `zslg-net-types` needs only lifecycle.
+- Roles are declared in `[package.metadata.layer]`, not derived from names:
+  `zslg-leader` (assembly) and `zslg-reader` (implementation) look alike.
+  Refines D15 (names still follow it).
+- Lifecycle has no ports crate; it is the one exception to import rule 1.
+- The facade may depend on implementations: today's public list includes
+  `ObjectStoreConfig` (object-store) and `CompactionTier` (leader-compaction).
+- `TestLog` reaches nvzn via `zslg::testing` (facade, `testing` feature), not
+  by nvzn depending on `zslg-log-fake` (would break D11).
+- `SpareSelectionStrategy` (public) moves to consensus-types with the other
+  misplaced items.
+- Layering test also fails on a lockfile package sharing a workspace library's
+  name (unprefixed names like `bytesize` could clash later).
+
+Crate count: ~75.

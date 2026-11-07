@@ -4,7 +4,7 @@ Working document for the IAIC interview. Current model only.
 
 ## Where we are
 
-Interview closed (D1-D15). Design doc pass 2 done (P1-P7 in the log); waiting for sign-off. Prediction track record so far: wrong on Q6 (user wants more crates), Q7 (finer), Q11 (facade only), Q13 (one PR). Right on the rest — so the user leans towards more crates, smaller steps, layering hidden from consumers. Then the implementation layer cut (database, object-store, quorum, clock impl, net, raft, learner, leader, replica, facade). No design doc yet.
+Interview closed (D1-D15). Design doc pass 3 done (all of D1-D20 integrated); waiting for sign-off. Prediction track record so far: wrong on Q6 (user wants more crates), Q7 (finer), Q11 (facade only), Q13 (one PR). Right on the rest — so the user leans towards more crates, smaller steps, layering hidden from consumers. Then the implementation layer cut (database, object-store, quorum, clock impl, net, raft, learner, leader, replica, facade). No design doc yet.
 
 ## Model of the problem
 
@@ -44,3 +44,9 @@ candidate  foundation = several domain crates, each types+traits (time, log, con
 - Most likely pushback: the number of assemblies (8), and whether every group
   needs a types/ports split (time's port crate is one trait).
 - Implementation rule from the user: stop and ask when the plan does not fit.
+
+## After pass 3
+
+- Most likely comment: the raft group split (ports crate `zslg-raft`, impl
+  renamed `zslg-raft-node`) and role metadata instead of names.
+- Remaining open points are local: `Subscriptions` in nvzn, candidate cuts.
