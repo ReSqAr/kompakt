@@ -41,7 +41,7 @@ pub(in crate::leader) mod liveness;
 /// replica-set changes. Liveness is wired here because this job is its only
 /// consumer, so nothing about it is nameable outside this module.
 pub(in crate::leader) fn spawn(
-    shutdown: &mut crate::shutdown::Shutdown,
+    shutdown: &mut shutdown::Shutdown<crate::Error>,
     handles: &crate::leader::jobs::LeaderHandles,
     config: &crate::raft::MembershipConfig,
     liveness_config: &liveness::LivenessConfig,

@@ -44,12 +44,12 @@ use crate::network::server::DispatchHandler;
 use crate::network::server::RpcServer;
 pub(crate) use crate::network::server::RpcServerConfig;
 pub(crate) use crate::network::tcp::SocketOpts;
-use crate::shutdown::Shutdown;
 pub(crate) use peers::PeersMembershipGate;
 #[cfg(test)]
 pub(crate) use peers::permissive_gate;
 pub(crate) use peers::static_peers;
 pub(crate) use router::{LocalReplicaClient, PeerRouter, RemoteRouter};
+use shutdown::Shutdown;
 
 /// Build an outbound [`Router`] from the client tuning config. The `RpcClient`
 /// is captured inside and never handed back, so it stays confined to `network`.
@@ -72,7 +72,7 @@ pub(crate) fn bind_server(
     client: Arc<dyn ReplicaClient>,
     hlc_clock: Arc<dyn Clock>,
     server_config: RpcServerConfig,
-    shutdown: &mut Shutdown,
+    shutdown: &mut Shutdown<Error>,
 ) -> Result<std::net::SocketAddr, Error> {
     let handler = Arc::new(DispatchHandler::new(client));
     let server = RpcServer::bind(handler, hlc_clock, server_config, shutdown.token())?;

@@ -25,8 +25,8 @@ use crate::ids::NodeId;
 use crate::ids::PeerAddr;
 use crate::network::setup_router;
 use crate::raft::{RaftTracker, RaftTrackerConfig, spawn_raft_tracker_streamer};
-use crate::shutdown::Shutdown;
 use crate::writer::WriterService;
+use shutdown::Shutdown;
 
 pub struct WriterNode {
     config: WriterNodeConfig,
@@ -35,7 +35,7 @@ pub struct WriterNode {
     raft_tracker: Arc<RaftTracker>,
     router: Arc<dyn api::Router>,
     writer: Arc<WriterService>,
-    shutdown: Shutdown,
+    shutdown: Shutdown<Error>,
 }
 
 impl WriterNode {

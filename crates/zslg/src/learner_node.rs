@@ -33,7 +33,7 @@ use crate::network::setup_router;
 use crate::object_store::IntoArcObjectStore;
 use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use crate::raft::{RaftTrackerConfig, spawn_raft_tracker_streamer};
-use crate::shutdown::Shutdown;
+use shutdown::Shutdown;
 
 /// Configuration for a free-standing learner node.
 ///
@@ -335,7 +335,7 @@ pub struct LearnerNode {
     /// The node's one RocksDB. Held so [`run`](Self::run) can join the
     /// background retire compactions before the handle drops.
     storage: Arc<Storage>,
-    shutdown: Shutdown,
+    shutdown: Shutdown<Error>,
 }
 
 impl LearnerNode {

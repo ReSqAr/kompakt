@@ -29,7 +29,7 @@ pub(in crate::leader) mod merge;
 
 /// Spawn `leader:compaction` on the shutdown tree.
 pub(in crate::leader) fn spawn(
-    shutdown: &mut crate::shutdown::Shutdown,
+    shutdown: &mut shutdown::Shutdown<crate::Error>,
     handles: &crate::leader::jobs::LeaderHandles,
     config: &crate::leader::jobs::snapshot::SnapshotConfig,
 ) {

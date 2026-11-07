@@ -32,6 +32,7 @@ postcard = { workspace = true, features = ["alloc", "use-std"] }
 rand = { workspace = true }
 rust-rocksdb = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
+shutdown = { workspace = true }
 socket2 = { workspace = true }
 thiserror = { workspace = true }
 tikv-jemalloc-ctl = { workspace = true, optional = true }

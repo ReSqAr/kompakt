@@ -53,9 +53,9 @@ use crate::raft::{
 use crate::raft::{MembershipConfig, RaftConfig, SpareSelectionStrategy};
 use crate::replica::ReplicaLogConfig;
 use crate::replica::{ReplicaService, spawn_replica};
-use crate::shutdown::Shutdown;
 use crate::writer::WriterService;
 use crate::{api, database, network};
+use shutdown::Shutdown;
 
 #[derive(Debug, Clone)]
 pub struct ReplicaNodeConfig {
@@ -655,7 +655,7 @@ pub struct ReplicaNode {
     /// background retire compactions before the handle drops — a detached one
     /// keeps the DB, and its LOCK, alive past this node.
     storage: Arc<Storage>,
-    shutdown: Shutdown,
+    shutdown: Shutdown<Error>,
 }
 
 impl std::fmt::Debug for ReplicaNode {
@@ -694,7 +694,7 @@ pub struct InitialisingReplicaNode {
     router: Arc<PeerRouter>,
     has_local_state: bool,
     _self_client: Arc<dyn api::ReplicaClient>,
-    shutdown: Shutdown,
+    shutdown: Shutdown<Error>,
 }
 
 impl std::fmt::Debug for InitialisingReplicaNode {
@@ -801,7 +801,7 @@ impl InitialisingReplicaNode {
     )]
     async fn into_ready(
         self,
-    ) -> Result<ReplicaNode, Box<(Shutdown, Duration, Arc<RaftNode>, Error)>> {
+    ) -> Result<ReplicaNode, Box<(Shutdown<Error>, Duration, Arc<RaftNode>, Error)>> {
         let Self {
             config,
             node_id,

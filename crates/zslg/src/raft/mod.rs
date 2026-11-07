@@ -25,7 +25,7 @@ use crate::raft::raft_storage::RocksRaftStorage;
 use crate::raft::rpc::NetworkFactory;
 use crate::raft::rpc::PeerRegistrationWatcher;
 use crate::raft::state::RaftStatePublisher;
-use crate::shutdown::Shutdown;
+use shutdown::Shutdown;
 
 mod membership;
 mod node;
@@ -79,7 +79,7 @@ pub(crate) async fn setup_raft(
     storage: Arc<Storage>,
     config: &RaftConfig,
     gate: Arc<dyn MembershipGate>,
-    shutdown: &mut Shutdown,
+    shutdown: &mut Shutdown<Error>,
 ) -> Result<(Arc<RaftNode>, bool), Error> {
     let raft_storage = RocksRaftStorage::open(raft_state.clone(), storage).await?;
     let has_local_state = raft_storage.has_durable_state().await?;

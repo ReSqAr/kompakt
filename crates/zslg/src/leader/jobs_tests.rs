@@ -50,7 +50,7 @@ use crate::raft::RaftNode;
 use crate::raft::SpareSelectionStrategy;
 use crate::replica::ReplicaLogStore;
 use crate::replica::ReplicaService;
-use crate::shutdown::Shutdown;
+use shutdown::Shutdown;
 
 use crate::tests::fast_raft_config as raft_config;
 use crate::tests::make_data;
@@ -139,7 +139,7 @@ fn make_remote_router(clock: Arc<HlcClock>) -> Arc<RemoteRouter> {
 /// the token with the `Shutdown` makes that impossible to get wrong here.
 struct LeaderTasks {
     cancel: CancellationToken,
-    shutdown: Shutdown,
+    shutdown: Shutdown<crate::Error>,
 }
 
 impl LeaderTasks {
@@ -168,7 +168,11 @@ fn spawn_loop(
     compaction_interval: Duration,
     compaction_tiers: Vec<CompactionTier>,
     membership_poll_interval: Duration,
-) -> (LeaderTasks, Shutdown, Arc<dyn crate::api::ReplicaClient>) {
+) -> (
+    LeaderTasks,
+    Shutdown<crate::Error>,
+    Arc<dyn crate::api::ReplicaClient>,
+) {
     let (drained_cutoff_tx, drained_cutoff_rx) =
         tokio::sync::watch::channel::<Option<crate::hlc::Hlc>>(None);
     let applier_cancel = CancellationToken::new();

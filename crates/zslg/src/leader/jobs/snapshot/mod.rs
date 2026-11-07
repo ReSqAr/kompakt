@@ -41,7 +41,7 @@ mod member_lifecycle_tests;
 
 /// Spawn `leader:snapshot` on the shutdown tree.
 pub(in crate::leader) fn spawn(
-    shutdown: &mut crate::shutdown::Shutdown,
+    shutdown: &mut shutdown::Shutdown<crate::Error>,
     handles: &crate::leader::jobs::LeaderHandles,
     config: &SnapshotConfig,
     quorum_poll_interval: Duration,

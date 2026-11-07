@@ -46,7 +46,7 @@ use crate::ids::{NodeId, PeerAddr, RaftGeneration};
 use crate::meta::{RaftState, ReplicaMembership};
 use crate::quorum::{FanOutResponse, fan_out_quorum};
 use crate::raft::{FencedStateWrite, RaftNode, membership_map};
-use crate::shutdown::Shutdown;
+use shutdown::Shutdown;
 
 const JOIN_INITIAL_BACKOFF: Duration = Duration::from_millis(50);
 const JOIN_MAX_BACKOFF: Duration = Duration::from_secs(10);
@@ -191,7 +191,7 @@ pub(crate) async fn run_raft_startup(
         self_peer_addr,
         startup_phase_timeout,
     }: RaftStartupConfig,
-    shutdown: &mut Shutdown,
+    shutdown: &mut Shutdown<Error>,
 ) -> Result<EvictionStatus, Error> {
     let fence_present = run_phase(
         "fence_check",

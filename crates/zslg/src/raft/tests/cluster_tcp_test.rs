@@ -32,15 +32,15 @@ use crate::ids::{NodeId, PeerAddr};
 use crate::network::{LocalReplicaClient, RemoteRouter, RpcServerConfig, SocketOpts};
 use crate::raft::rpc::NetworkFactory;
 use crate::raft::{Raft, RaftNode, RaftStateHandle, membership_map};
-use crate::shutdown::Shutdown;
 use crate::tests::ReadyReplica;
 use crate::tests::fast_raft_config as raft_config;
+use shutdown::Shutdown;
 
 struct ClusterNode {
     node_id: NodeId,
     raft: Raft,
     raft_state: RaftStateHandle,
-    shutdown: Shutdown,
+    shutdown: Shutdown<crate::Error>,
     peer_addr: PeerAddr,
     net: Arc<dyn Router>,
     _tempdir: tempfile::TempDir,

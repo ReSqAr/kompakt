@@ -23,7 +23,7 @@ use crate::api::{RaftStateTracker, Router};
 use crate::error::Error;
 use crate::ids::PeerAddr;
 use crate::raft::{RaftTracker, RaftTrackerConfig};
-use crate::shutdown::Shutdown;
+use shutdown::Shutdown;
 
 /// Create a fresh [`RaftTracker`], register the stream supervisor with
 /// `shutdown`, and block until a quorum of write targets have been discovered
@@ -32,7 +32,7 @@ use crate::shutdown::Shutdown;
 pub(crate) async fn spawn_raft_tracker_streamer(
     router: Arc<dyn Router>,
     config: RaftTrackerConfig,
-    shutdown: &mut Shutdown,
+    shutdown: &mut Shutdown<Error>,
 ) -> Result<Arc<RaftTracker>, Error> {
     let raft_tracker = Arc::new(RaftTracker::new());
     let cancel = shutdown.token();

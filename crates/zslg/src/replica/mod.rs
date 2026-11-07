@@ -47,8 +47,8 @@ use crate::ids::{DataId, LogIndex, NodeId};
 use crate::meta::{Data, ReplicaStatus};
 use crate::metrics::{self, ReplicaWriteState};
 use crate::replica::log::flush_loop;
-use crate::shutdown::Shutdown;
 use crossbeam_combinators::Channel;
+use shutdown::Shutdown;
 use warn_throttle::WarnThrottle;
 
 /// Minimum spacing between replica-write-rejection `warn!`s. Rejections recur at
@@ -422,7 +422,7 @@ pub(crate) async fn spawn_replica(
     hlc_cutoff: &Arc<HlcGate>,
     storage: Arc<crate::database::storage::Storage>,
     config: &ReplicaLogConfig,
-    shutdown: &mut Shutdown,
+    shutdown: &mut Shutdown<Error>,
     peers: Arc<dyn PeersWatcher>,
 ) -> Result<Arc<ReplicaService>, Error> {
     info!("spawning replica log store");

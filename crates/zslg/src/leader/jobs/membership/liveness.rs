@@ -307,8 +307,8 @@ mod tests {
     use crate::ids::ServerName;
     use crate::meta::{RaftState, ReplicaMembership};
     use crate::raft::RaftStateHandle;
-    use crate::shutdown::Shutdown;
     use async_trait::async_trait;
+    use shutdown::Shutdown;
 
     struct NoVoters;
     #[async_trait::async_trait]
@@ -370,7 +370,7 @@ mod tests {
     async fn dropping_the_worker_closes_the_live_set_channel() {
         let self_id = nid(0);
         let peer = nid(1);
-        let shutdown = Shutdown::new();
+        let shutdown = Shutdown::<crate::Error>::new();
         let (worker, state) = LivenessWorker::new(
             LivenessWorkerInputs {
                 self_node_id: self_id,

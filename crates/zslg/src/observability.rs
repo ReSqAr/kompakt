@@ -141,7 +141,7 @@ const PROCESS_GAUGE_INTERVAL: Duration = Duration::from_secs(1);
 /// Future that reads `/proc/self/{stat,status}` every [`PROCESS_GAUGE_INTERVAL`]
 /// and emits [`metrics::process_cpu_seconds`] and
 /// [`metrics::process_memory_rss_bytes`]. Pass to
-/// [`crate::shutdown::Shutdown::spawn`] for lifecycle management.
+/// [`shutdown::Shutdown::spawn`] for lifecycle management.
 ///
 /// CPU is cumulative *clock ticks* converted to seconds via `sysconf(_SC_CLK_TCK)`
 /// (100 Hz on Linux). Memory is resident set size (VmRSS), which climbs toward the

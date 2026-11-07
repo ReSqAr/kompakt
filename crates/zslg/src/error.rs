@@ -406,6 +406,12 @@ impl Error {
     }
 }
 
+impl From<shutdown::Stopped> for Error {
+    fn from(_: shutdown::Stopped) -> Self {
+        Error::Shutdown
+    }
+}
+
 impl From<framing::FrameError> for Error {
     fn from(e: framing::FrameError) -> Self {
         Error::Codec(e.to_string())

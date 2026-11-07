@@ -34,7 +34,7 @@ use crate::metrics::{self, LeaderJob};
 /// Spawn `leader:voters` on the shutdown tree. Touches openraft's own member
 /// list, writes no replicated state, and deliberately ignores liveness.
 pub(in crate::leader) fn spawn(
-    shutdown: &mut crate::shutdown::Shutdown,
+    shutdown: &mut shutdown::Shutdown<crate::Error>,
     handles: &crate::leader::jobs::LeaderHandles,
     config: &crate::raft::MembershipConfig,
     self_server_name: ServerName,

@@ -27,7 +27,7 @@ use crate::metrics::{self, LeaderJob};
 /// Spawn `leader:cleanup` on the shutdown tree. Writes no Raft state, so it
 /// never touches `handles.intents`.
 pub(in crate::leader) fn spawn(
-    shutdown: &mut crate::shutdown::Shutdown,
+    shutdown: &mut shutdown::Shutdown<crate::Error>,
     handles: &crate::leader::jobs::LeaderHandles,
     config: &crate::leader::jobs::snapshot::SnapshotConfig,
 ) {

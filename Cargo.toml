@@ -62,6 +62,7 @@ error-union = { path = "crates/error-union" }
 framing = { path = "crates/framing" }
 nvzn = { path = "crates/nvzn" }
 objectstorage-cache = { path = "crates/objectstorage-cache" }
+shutdown = { path = "crates/shutdown" }
 warn-throttle = { path = "crates/warn-throttle" }
 zslg = { path = "crates/zslg" }
 

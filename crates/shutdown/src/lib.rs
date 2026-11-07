@@ -15,6 +15,10 @@
 //!
 //! Each task is named at spawn purely so the log can say which one stopped the
 //! node. A node that stops must never be a mystery.
+//!
+//! The error type is the caller's: tasks return `Result<(), E>`, and the one
+//! failure the supervisor itself raises (a task that ended without being
+//! asked to, or panicked) is [`Stopped`], which `E` must be able to represent.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -22,17 +26,22 @@ use std::time::Duration;
 use tokio::task::{Id, JoinSet};
 use tokio_util::sync::CancellationToken;
 
-use crate::error::Error;
+/// A background task ended although nobody asked it to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stopped;
 
-pub(crate) struct Shutdown {
+pub struct Shutdown<E> {
     cancel: CancellationToken,
-    workers: JoinSet<Result<(), Error>>,
+    workers: JoinSet<Result<(), E>>,
     names: HashMap<Id, &'static str>,
 }
 
-impl Shutdown {
+impl<E> Shutdown<E>
+where
+    E: std::fmt::Display + From<Stopped> + Send + 'static,
+{
     #[must_use]
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             cancel: CancellationToken::new(),
             workers: JoinSet::new(),
@@ -41,13 +50,13 @@ impl Shutdown {
     }
 
     #[must_use]
-    pub(crate) fn token(&self) -> CancellationToken {
+    pub fn token(&self) -> CancellationToken {
         self.cancel.clone()
     }
 
-    pub(crate) fn spawn<F>(&mut self, name: &'static str, fut: F)
+    pub fn spawn<F>(&mut self, name: &'static str, fut: F)
     where
-        F: Future<Output = Result<(), Error>> + Send + 'static,
+        F: Future<Output = Result<(), E>> + Send + 'static,
     {
         let handle = self.workers.spawn(fut);
         self.names.insert(handle.id(), name);
@@ -62,7 +71,7 @@ impl Shutdown {
     ///
     /// An already-cancelled task is the one exit that is skipped rather than
     /// acted on — it is the drain working as intended.
-    pub(crate) async fn run(mut self, drain_timeout: Duration) -> Result<(), Error> {
+    pub async fn run(mut self, drain_timeout: Duration) -> Result<(), E> {
         // Logged at `error` so the reason survives `RUST_LOG=warn`.
         let outcome = loop {
             match self.workers.join_next_with_id().await {
@@ -77,7 +86,7 @@ impl Shutdown {
                         "background task exited unexpectedly (returned Ok — a run-forever \
                          loop ended); shutting the node down"
                     );
-                    break Err(Error::Shutdown);
+                    break Err(Stopped.into());
                 }
                 Some(Ok((id, Err(e)))) => {
                     let name = self.name(id);
@@ -134,22 +143,25 @@ impl Shutdown {
 
     /// If the cancellation token was already fired, the exit was requested
     /// externally → `Ok(())`. Otherwise the task exited on its own → `Err`.
-    fn fatal_or_ok(&self, error: Option<Error>) -> Result<(), Error> {
+    fn fatal_or_ok(&self, error: Option<E>) -> Result<(), E> {
         if self.cancel.is_cancelled() {
             Ok(())
         } else {
-            Err(error.unwrap_or(Error::Shutdown))
+            Err(error.unwrap_or_else(|| Stopped.into()))
         }
     }
 }
 
-impl Default for Shutdown {
+impl<E> Default for Shutdown<E>
+where
+    E: std::fmt::Display + From<Stopped> + Send + 'static,
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl std::fmt::Debug for Shutdown {
+impl<E> std::fmt::Debug for Shutdown<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Shutdown")
             .field("workers", &self.workers.len())
@@ -173,9 +185,23 @@ mod tests {
 
     use super::*;
 
+    #[derive(Debug, PartialEq, thiserror::Error)]
+    enum Error {
+        #[error("stopped")]
+        Stopped,
+        #[error("denied")]
+        Denied,
+    }
+
+    impl From<Stopped> for Error {
+        fn from(_: Stopped) -> Self {
+            Error::Stopped
+        }
+    }
+
     #[tokio::test]
     async fn run_with_cancel_returns_ok() {
-        let mut shutdown = Shutdown::new();
+        let mut shutdown = Shutdown::<Error>::new();
         let token = shutdown.token();
         let counter = Arc::new(AtomicU32::new(0));
 
@@ -198,15 +224,13 @@ mod tests {
 
     #[tokio::test]
     async fn run_without_cancel_returns_error() {
-        let mut shutdown = Shutdown::new();
+        let mut shutdown = Shutdown::<Error>::new();
         let token = shutdown.token();
 
         // Spawn a task that returns an error without cancellation.
         shutdown.spawn("test", async move {
             tokio::time::sleep(Duration::from_millis(10)).await;
-            Err(Error::MembershipDenied {
-                node_id: crate::ids::NodeId::new_v4(),
-            })
+            Err(Error::Denied)
         });
 
         // Another task that waits for cancellation.
@@ -218,14 +242,14 @@ mod tests {
 
         let result = shutdown.run(Duration::from_secs(5)).await;
         assert!(
-            matches!(result, Err(Error::MembershipDenied { .. })),
-            "expected MembershipDenied, got {result:?}"
+            result == Err(Error::Denied),
+            "expected Denied, got {result:?}"
         );
     }
 
     #[tokio::test]
     async fn run_clean_exit_without_cancel_is_error() {
-        let mut shutdown = Shutdown::new();
+        let mut shutdown = Shutdown::<Error>::new();
         let token = shutdown.token();
 
         // A task that completes cleanly (Ok(())) without being cancelled.
@@ -246,7 +270,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_aborts_workers_that_ignore_cancel() {
-        let mut shutdown = Shutdown::new();
+        let mut shutdown = Shutdown::<Error>::new();
         let token = shutdown.token();
 
         // A task that checks the token and exits promptly — this satisfies
@@ -273,14 +297,14 @@ mod tests {
 
     #[tokio::test]
     async fn run_with_zero_workers_returns_ok() {
-        let shutdown = Shutdown::new();
+        let shutdown = Shutdown::<Error>::new();
         let result = shutdown.run(Duration::from_millis(10)).await;
         assert!(result.is_ok());
     }
 
     #[test]
     fn debug_output_includes_worker_count() {
-        let s = Shutdown::new();
+        let s = Shutdown::<Error>::new();
         let dbg = format!("{s:?}");
         assert!(dbg.contains("Shutdown"));
         assert!(dbg.contains("workers"));

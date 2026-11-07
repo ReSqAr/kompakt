@@ -60,7 +60,6 @@ pub(crate) mod quorum;
 pub(crate) mod raft;
 pub(crate) mod replica;
 pub(crate) mod replica_node;
-pub(crate) mod shutdown;
 #[cfg(test)]
 pub(crate) mod test_stream;
 #[cfg(test)]

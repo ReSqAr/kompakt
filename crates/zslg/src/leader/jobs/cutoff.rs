@@ -32,7 +32,7 @@ use crate::metrics::{self, LeaderJob, SnapshotState, SnapshotStep};
 
 /// Spawn `leader:cutoff` on the shutdown tree.
 pub(in crate::leader) fn spawn(
-    shutdown: &mut crate::shutdown::Shutdown,
+    shutdown: &mut shutdown::Shutdown<crate::Error>,
     handles: &crate::leader::jobs::LeaderHandles,
     config: &crate::leader::jobs::snapshot::SnapshotConfig,
 ) {

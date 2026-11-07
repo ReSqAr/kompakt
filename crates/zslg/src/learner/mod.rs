@@ -124,8 +124,8 @@ use tracing::info;
 
 use crate::api::{LocalStoreMut, RaftStateView, Router, SnapshotStore};
 use crate::hlc::HlcClock;
-use crate::shutdown::Shutdown;
 use crate::{Error, Reader, api};
+use shutdown::Shutdown;
 use stable_log::SnapshotLoader;
 
 #[derive(Clone)]
@@ -181,7 +181,7 @@ pub(crate) async fn spawn_learner(
     raft_state: Arc<dyn RaftStateView>,
     router: Arc<dyn Router>,
     config: &LearnerConfig,
-    shutdown: &mut Shutdown,
+    shutdown: &mut Shutdown<Error>,
 ) -> Result<Arc<LearnerService>, Error> {
     info!("spawning learner subsystems");
     let local_store = local_store::spawn_local_store(

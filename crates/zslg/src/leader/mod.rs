@@ -38,7 +38,7 @@ use crate::api::{
     StateReplicator,
 };
 use crate::raft::MembershipConfig;
-use crate::shutdown::Shutdown;
+use shutdown::Shutdown;
 
 /// The leader-loop config bundle. Produced by
 /// [`ReplicaNodeConfig::leader_loop_config`](crate::replica_node::ReplicaNodeConfig::leader_loop_config).
@@ -69,7 +69,7 @@ pub(super) struct LeaderLoopConfig {
     reason = "the leader wires every handle at spawn; the single config arg already bundles tunings"
 )]
 pub(super) fn spawn_leader_loop(
-    shutdown: &mut Shutdown,
+    shutdown: &mut Shutdown<crate::Error>,
     clock: Arc<dyn Clock>,
     local_store: Arc<dyn LocalStoreView>,
     stable_log: Arc<dyn StableLogSnapshot>,

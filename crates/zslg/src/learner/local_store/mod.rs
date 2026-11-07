@@ -42,7 +42,7 @@ use crate::Error;
 use crate::api::StableLogSnapshot;
 use crate::database::storage::Storage;
 use crate::learner::local_store::purge::spawn_local_store_purge_worker;
-use crate::shutdown::Shutdown;
+use shutdown::Shutdown;
 
 pub(in crate::learner::local_store) use recent_ids::Dedup;
 pub(crate) use store::LocalStore;
@@ -180,7 +180,7 @@ pub(in crate::learner) async fn spawn_local_store(
     stable_log: Arc<dyn StableLogSnapshot>,
     storage: Arc<Storage>,
     config: &LocalStoreConfig,
-    shutdown: &mut Shutdown,
+    shutdown: &mut Shutdown<Error>,
 ) -> Result<Arc<LocalStore>, Error> {
     let (store, integrate_rx) =
         store::create_local_store(config, storage, stable_log.clone()).await?;

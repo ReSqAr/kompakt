@@ -15,14 +15,14 @@ use tracing::{debug, warn};
 use crate::api::{LocalStoreMut, StableLogSnapshot};
 use crate::error::Error;
 use crate::hlc::{Hlc, hlc_subtract};
-use crate::shutdown::Shutdown;
+use shutdown::Shutdown;
 
 /// Floor on the gap between two threshold advances, however fast `end_hlc`
 /// moves.
 const PURGE_MIN_INTERVAL: Duration = Duration::from_secs(30);
 
 pub(in crate::learner) fn spawn_local_store_purge_worker(
-    shutdown: &mut Shutdown,
+    shutdown: &mut Shutdown<Error>,
     local_store: Arc<dyn LocalStoreMut>,
     stable_log: Arc<dyn StableLogSnapshot>,
     purge_grace_period: Duration,
