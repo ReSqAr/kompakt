@@ -340,3 +340,23 @@ already hand-writes a duplicate mechanism (`MetricKind`, `MetricDef`,
 `nvzn-metrics` crate is dropped; nvzn's vocabulary moves to its emitting
 crates; `StopReason` (public, shared) goes to `nvzn-types`; a golden test pins
 nvzn's metric names.
+
+### D18. General rule: unprefixed = domain-free library, usable by any family
+
+Generalises D17. A crate without a `zslg-`/`nvzn-` prefix is a workspace-wide
+library that knows no domain of any family (like `crossbeam-combinators`);
+the layering test enforces that it depends on no `zslg-*`/`nvzn-*` crate
+(`btrb`, the application, is the explicit exception). Renamed: `bytesize`,
+`warn-throttle`, `shutdown`, `framing`, `metrics-kit`, `error-union`. No name
+collides with a package in either lockfile today.
+
+What the rule changed when applied:
+- `zslg-lifecycle` is not domain-free (`StartupCancelled`, `HardCrashDataLoss`
+  are zslg semantics): it becomes `zslg-lifecycle-types`, the bottom of the
+  types chain.
+- `zslg-database` was misclassified as a library: `Subsystem` enumerates zslg's
+  column families and `node_id.rs` is zslg's node identity. The mechanism
+  (`storage.rs`: one explicit open, budget, complete CF list) is domain-free.
+  Proposed split: `rocksdb-kit` + `zslg-node-id` + the schema. Open: schema as
+  a shared `Subsystem` enum in a types crate, or per-implementation column
+  family declarations listed by the assembly (D5 pattern).

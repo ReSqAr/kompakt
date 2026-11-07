@@ -32,7 +32,7 @@ convention the module graph already violates — is enforced by Cargo.
   ports             zslg-time · -log · -snapshot · -consensus · -net   (traits;
                                                every crate has its own error union)
                                               │
-  types             zslg-<group>-types: time · log · snapshot · consensus · raft · net
+  types             zslg-<group>-types: lifecycle · time · log · snapshot · consensus · raft · net
                                               │
   libraries         bytesize · warn-throttle · lifecycle · shutdown · framing ·
                     metrics-kit · database · error-union
@@ -88,7 +88,7 @@ normal dependencies; dev-dependencies follow §7.3.
 
 | role | names | contents | may depend on |
 |---|---|---|---|
-| library | `zslg-bytesize`, `-warn-throttle`, `-lifecycle`, `-shutdown`, `-framing`, `-database`, `-error-union`; workspace-wide: `metrics-kit` | code that knows no zslg domain | other libraries |
+| library | unprefixed, workspace-wide (D18): `bytesize`, `warn-throttle`, `shutdown`, `framing`, `metrics-kit`, `error-union`; like `crossbeam-combinators` | code that knows no domain of any family | other libraries; never a `zslg-*`/`nvzn-*` crate |
 | types | `zslg-<group>-types` | data, invariants over it, shared cells, the group's leaf error, label enums | libraries, lower types |
 | ports | `zslg-<group>` | traits, the crate's error union; re-exports its group's types | types, lower ports, libraries |
 | procedure | `zslg-quorum-read`, `zslg-net-wire` | shared logic over the foundation, implements no port | ports, types, libraries |
@@ -238,9 +238,10 @@ accessor implementation crates need; nothing new reaches the facade.
 `ClockError`, `LogError`, `SnapshotError`, `ConsensusError`, `NetError`; plus
 `LifecycleError` (`Cancelled`, `Shutdown`, `NotReady`, `StartupCancelled`,
 `HardCrashDataLoss`) and `ConfigError` (`InvalidConfiguration`) in the
-`zslg-lifecycle` library.
+`zslg-lifecycle-types`, the bottom of the types chain (its `StartupCancelled`
+and `HardCrashDataLoss` are zslg semantics, so it is not a library).
 
-**Unions** are declared with `error_union!` from the `zslg-error-union`
+**Unions** are declared with `error_union!` from the `error-union`
 library (~60 lines of `macro_rules!`). Every crate with fallible functions on
 its boundary — ports crates, implementations, procedures, assemblies — has one:
 
@@ -295,7 +296,7 @@ Source paths are under `crates/zslg/src`.
 
 | crate | source | lines | implements |
 |---|---|---|---|
-| `zslg-database` | `database/` | 1.3k | library, listed here for completeness (§5.5) |
+| `zslg-database` | `database/` | 1.3k | **open** (§5.5) |
 | `zslg-object-store` | `object_store/{mod,snapshot_store}.rs` | 1.1k | `SnapshotStore`; owns `s3` |
 | `zslg-object-format` | `object_store/framing.rs` | 0.4k | candidate (§5.6) |
 | `zslg-hlc-clock` | `hlc/clock.rs` | 0.6k | `Clock` |
@@ -359,15 +360,27 @@ move to `zslg-net-fake`. `zslg-replica-service` calls the replica log through
 a small submit/fence port in `zslg-log`, shaped by what `replica/mod.rs` calls
 today.
 
-### 5.5 Storage engines are libraries with a domain
+### 5.5 The node's RocksDB: domain-free engine, domain schema (open)
 
-`zslg-database` (RocksDB column families) implements no zslg port but is used
-by raft-storage, stable-log, local-store and replica-log. It is a library in
-the §2.1 sense (no zslg domain beyond `ByteSize` and its own error), so the
-four implementations may share it. The same test applies to anything else
-found to be used by two implementations: if it knows no zslg domain it is a
-library; if it works over ports it is a procedure; otherwise it is a missing
-port, and I ask.
+`database/` is used by raft-storage, stable-log, local-store and replica-log,
+so it must be a library or a procedure. The first draft called it a library;
+the general rule of D18 (a library knows no domain of any family) shows it is
+not: `Subsystem` enumerates zslg's column families (`StableLog`, `ReplicaLog`,
+`LocalStoreData`, `LocalStoreCursors`, `RaftLog`, `RaftMeta`, `NodeId`), and
+`node_id.rs` is zslg's write-once node identity. The mechanism itself
+(`storage.rs`, 1.1k: one explicit open, the caller states root, memory budget
+and the complete column-family list — "the descriptor list is the schema") is
+domain-free.
+
+So it splits: an unprefixed `rocksdb-kit` (the open, budget, block cache,
+typed column-family handles), `zslg-node-id` (an implementation), and the
+schema. Where the schema lives is open — a shared `Subsystem` enum in a types
+crate, or each storage implementation declaring its own column family with
+the assembly listing them (the D5 pattern). To be decided with the user.
+
+The test stays: anything used by two implementations is a library if it knows
+no domain, a procedure if it works over the foundation, otherwise a missing
+port — and then I ask.
 
 ### 5.6 Candidate cuts, confirmed commit by commit
 
@@ -464,8 +477,10 @@ A test in the facade reads `cargo metadata`, assigns each workspace crate its
 role from the name (§2.1), and fails on any normal or dev dependency the role
 table does not allow, and on any crate outside types/ports that depends
 on a `-types` crate directly (§2.2 rule 1), and on an `error_union!` that
-names another union as a leaf. It is added in the first commit so
-every later commit is checked.
+names another union as a leaf. An unprefixed crate (a library) must not
+depend on any `zslg-*` or `nvzn-*` crate; `btrb` is the one application and
+is listed explicitly. It is added in the first commit so every later commit
+is checked.
 
 ---
 
@@ -548,7 +563,7 @@ Changed in this pass:
    incl. `zslg-raft-types`). Ports re-export their types (§2.2 rule 1).
 2. §3.2/§4.4: errors are `thiserror` leaves per group plus a flat
    `error_union!` per crate (D16); no global error crate. D6's `zslg-cancelled`
-   becomes `zslg-lifecycle`, since it now holds the lifecycle leaf.
+   becomes `zslg-lifecycle-types`, since it now holds the lifecycle leaf.
 3. §2.1/§3.4: new role *procedure* (`zslg-quorum-read`, `zslg-net-wire`,
    `nvzn-store-overlay`).
 4. §3.5/§6: new role *assembly* (8 crates); the facade only re-exports.
@@ -558,7 +573,7 @@ Changed in this pass:
    central `nvzn-metrics` crate is gone.
 
 Carried over: `ordered.rs` split by the orphan rule (§4.2); libraries usable
-by implementations, incl. `zslg-database` (§5.5); the nested `Error` match
+by implementations (§5.5); the nested `Error` match
 (§4.4).
 
 ---
@@ -571,9 +586,8 @@ first.
 ```text
  1  layering test (roles from names; passes trivially on today's two crates)
  2  libraries: metrics-kit (namespace argument, generic conversion row), bytesize,
-    warn-throttle, lifecycle, shutdown, framing,
-    database, error-union
- 3  types: time, log, snapshot, consensus, raft, net  (+ the four moves of §4.3)
+    warn-throttle, shutdown, framing, error-union, rocksdb-kit (pending §5.5)
+ 3  types: lifecycle, time, log, snapshot, consensus, raft, net  (+ the four moves of §4.3)
  4  ports: time, log, snapshot, consensus (+ ClusterBootstrap), net
  5  fakes: time, log (+ TestLog), snapshot, consensus, net
  ── checkpoint: foundation enforced; one big implementation crate left; all green
