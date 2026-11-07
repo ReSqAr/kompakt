@@ -4,7 +4,7 @@ Working document for the IAIC interview. Current model only.
 
 ## Where we are
 
-Q1-Q13 settled (D1-D13). Asked Q14 (raft startup vs RaftNode). After Q14: probably 1-2 more checks (naming, where `setup_raft` and the other composition code lands), then the design doc. Then the implementation layer cut (database, object-store, quorum, clock impl, net, raft, learner, leader, replica, facade). No design doc yet.
+Q1-Q14 settled (D1-D14). Asked Q15 (naming/layout). After Q15: design doc. Prediction track record so far: wrong on Q6 (user wants more crates), Q7 (finer), Q11 (facade only), Q13 (one PR). Right on the rest — so the user leans towards more crates, smaller steps, layering hidden from consumers. Then the implementation layer cut (database, object-store, quorum, clock impl, net, raft, learner, leader, replica, facade). No design doc yet.
 
 ## Model of the problem
 

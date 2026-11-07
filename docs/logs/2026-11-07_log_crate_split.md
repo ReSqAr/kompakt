@@ -220,7 +220,26 @@ openraft's own plug points (storage traits, network factory) and never touch
 `RaftNode::new` already takes a ready `Raft`; only `setup_raft` (adopts
 storage, wires router, spawns watchers) joins them, i.e. it is composition.
 
+### D14. Split raft startup from RaftNode behind `ClusterBootstrap`
+
+`zslg-raft-startup` holds the decision procedure (bootstrap vs join vs rejoin)
+and depends on a narrow port in the `consensus` group
+(`ClusterBootstrap { initialize, write_fenced, wait_leader, metrics }`);
+`zslg-raft` (`RaftNode`) implements it over openraft; startup is unit-tested
+with `zslg-consensus-fake`. `setup_raft` (adopts storage, wires router, spawns
+watchers) is composition and goes to the facade. The port's verbs are shaped by
+what startup actually calls; the design doc confirms nothing reaches into
+openraft beyond them. Rejected: startup + RaftNode in one crate (the riskiest
+protocol logic stays testable only against a real raft).
+
+User addition: more crates are welcome whenever a piece splits off cleanly
+(reinforces D7). The design doc therefore does a file-level pass over the large
+subfolders (local_store 1.7k `store.rs`, hlc clock/cutoff/gate, quorum
+coordinator/fanout, network framing vs client, membership change/liveness,
+object_store framing/snapshot_store) and proposes every cut whose pieces share
+no private state. First impression from a rough import scan: files inside the
+big subfolders are mostly independent of each other.
+
 ## Open
 
-- Q14: `startup` + `RaftNode` — one crate (honest coupling around the openraft
-  handle), or split the startup decision procedure from the openraft calls?
+- Q15: crate naming and directory layout for ~40 crates.
