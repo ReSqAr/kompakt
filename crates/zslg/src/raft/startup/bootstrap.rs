@@ -35,12 +35,13 @@ use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
 use zslg_consensus_types::ConsensusError;
 use zslg_lifecycle_types::LifecycleError;
+use zslg_snapshot::SnapshotStore;
 
 use super::rejoin::{
     REJOIN_LEADERLESS_GRACE, REJOIN_RECONCILE_INTERVAL, RejoinMonitor, RejoinMonitorInputs,
     RejoinProbe, RpcRejoinProbe,
 };
-use crate::api::{AddMemberOutcome, PeersWatcher, RaftStateView, Router, SnapshotStore};
+use crate::api::{AddMemberOutcome, PeersWatcher, RaftStateView, Router};
 use crate::error::{Error, ToRaft};
 use crate::quorum::{FanOutResponse, fan_out_quorum};
 use crate::raft::{RaftNode, membership_map};

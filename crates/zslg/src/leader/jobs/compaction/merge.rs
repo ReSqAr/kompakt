@@ -33,8 +33,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 use zslg_log_types::LogError;
+use zslg_snapshot::SnapshotStore;
 
-use crate::api::{RaftStateView, SnapshotStore};
+use crate::api::RaftStateView;
 use crate::error::Error;
 use crate::leader::integrator::{IntentOutcome, IntentSubmitter};
 use crate::metrics::{self, OpState};
@@ -439,7 +440,6 @@ mod tests {
 
     use uuid::Uuid;
 
-    use crate::api::SnapshotStore;
     use zslg_log::{LocalStoreMut, StableLogSnapshot};
 
     use crate::leader::jobs::snapshot::create::{

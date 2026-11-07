@@ -4471,6 +4471,7 @@ dependencies = [
  "zslg-net-types",
  "zslg-node-types",
  "zslg-raft-types",
+ "zslg-snapshot",
  "zslg-snapshot-types",
  "zslg-time",
  "zslg-time-types",
@@ -4563,6 +4564,23 @@ dependencies = [
  "zslg-consensus-types",
  "zslg-net-types",
  "zslg-node-types",
+]
+
+[[package]]
+name = "zslg-snapshot"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crossbeam-combinators",
+ "error-union",
+ "object_store",
+ "tokio-util",
+ "zslg-consensus-types",
+ "zslg-lifecycle-types",
+ "zslg-log-types",
+ "zslg-net-types",
+ "zslg-snapshot-types",
+ "zslg-time-types",
 ]
 
 [[package]]

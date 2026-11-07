@@ -28,12 +28,13 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 use zslg_lifecycle_types::{ConfigError, LifecycleError};
+use zslg_snapshot::SnapshotStore;
 
 use std::num::NonZeroUsize;
 
 use crate::ByteSize;
 use crate::api::PeersWatcher;
-use crate::api::{RaftStateView, SnapshotStore};
+use crate::api::RaftStateView;
 use crate::error::Error;
 use crate::hlc::{HlcClock, HlcGate, run_clock_gauges};
 use crate::leader::spawn_leader_loop;

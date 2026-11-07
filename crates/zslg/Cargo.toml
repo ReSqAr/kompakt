@@ -50,6 +50,7 @@ zslg-log-types = { workspace = true }
 zslg-net-types = { workspace = true }
 zslg-node-types = { workspace = true }
 zslg-raft-types = { workspace = true }
+zslg-snapshot = { workspace = true }
 zslg-snapshot-types = { workspace = true }
 zslg-time = { workspace = true }
 zslg-time-types = { workspace = true }

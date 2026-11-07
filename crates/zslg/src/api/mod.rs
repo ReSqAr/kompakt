@@ -37,7 +37,6 @@ mod raft_peer;
 mod raft_state;
 mod replica_client;
 mod router;
-mod snapshot_store;
 mod spare_selection;
 mod state_replicator;
 
@@ -54,6 +53,5 @@ pub(crate) use raft_state::RaftStateTracker;
 pub use raft_state::RaftStateView;
 pub(crate) use replica_client::ReplicaClient;
 pub(crate) use router::Router;
-pub(crate) use snapshot_store::{CleanupReport, EntryMeta, SnapshotStore, SnapshotWrite};
 pub(crate) use spare_selection::{CandidateInfo, SpareSelector};
 pub(crate) use state_replicator::StateReplicator;

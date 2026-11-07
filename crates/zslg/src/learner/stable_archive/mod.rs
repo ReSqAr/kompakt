@@ -10,8 +10,9 @@
 //! range that was ever stable is recoverable here.
 
 use std::sync::Arc;
+use zslg_snapshot::SnapshotStore;
 
-use crate::api::{RaftStateView, SnapshotStore};
+use crate::api::RaftStateView;
 use crate::error::Error;
 use crossbeam_combinators::{Channel, Contiguous, Finite, NonDecreasing, OrderedChannel};
 use zslg_log::ArchiveStream;
@@ -104,7 +105,8 @@ impl StableArchiveReader for ObjectStoreArchiveReader {
                                 zslg_snapshot_types::ObjectStoreReason::ArchiveRead,
                             )
                             .await
-                            .unwrap_or_else(|e| Channel::once(Err(e)))
+                            .map(Channel::err_into)
+                            .unwrap_or_else(|e| Channel::once(Err(Error::from(e))))
                     })
                 });
                 let ch = Channel::chain_all(phases)

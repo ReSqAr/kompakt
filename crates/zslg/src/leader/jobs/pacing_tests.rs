@@ -21,12 +21,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use zslg_log_types::LogError;
+use zslg_log_types::SnapshotEntry;
+use zslg_snapshot::{CleanupReport, SnapshotStore, SnapshotWrite};
 
 use tokio::sync::watch;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-use crate::api::{RaftLeadership, SnapshotStore};
+use crate::api::RaftLeadership;
 use crate::error::Error;
 use crate::leader::integrator::Integrator;
 use crate::leader::jobs::LeaderHandles;
@@ -375,9 +377,8 @@ impl StableLogSnapshot for EmptyStableLog {
 /// object is written.
 struct UnusedSnapshotStore(CancellationToken);
 
-#[async_trait::async_trait]
-impl SnapshotStore for UnusedSnapshotStore {
-    async fn write_snapshot(
+impl UnusedSnapshotStore {
+    pub(crate) async fn write_snapshot_in(
         &self,
         _id: SnapshotId,
         _entries: Channel<
@@ -386,10 +387,10 @@ impl SnapshotStore for UnusedSnapshotStore {
         >,
         _compression: CompressionLevel,
         _reason: zslg_snapshot_types::ObjectStoreReason,
-    ) -> Result<crate::api::SnapshotWrite, Error> {
+    ) -> Result<zslg_snapshot::SnapshotWrite, Error> {
         unimplemented!("pacing tests never reach the object write")
     }
-    async fn read_snapshot(
+    pub(crate) async fn read_snapshot_in(
         &self,
         _id: SnapshotId,
         _reason: zslg_snapshot_types::ObjectStoreReason,
@@ -399,21 +400,67 @@ impl SnapshotStore for UnusedSnapshotStore {
     > {
         unimplemented!("pacing tests never read a snapshot")
     }
-    fn shutdown_token(&self) -> CancellationToken {
-        self.0.clone()
-    }
-    async fn has_bootstrap_fence(&self) -> Result<bool, Error> {
+    pub(crate) async fn has_bootstrap_fence_in(&self) -> Result<bool, Error> {
         Ok(true)
     }
-    async fn write_bootstrap_fence(&self) -> Result<(), Error> {
+    pub(crate) async fn write_bootstrap_fence_in(&self) -> Result<(), Error> {
         unimplemented!("pacing tests never write a fence")
     }
-    async fn cleanup_snapshots(
+    pub(crate) async fn cleanup_snapshots_in(
         &self,
         _live_snapshots: BTreeSet<SnapshotId>,
         _cleanup_retention: Duration,
-    ) -> Result<crate::api::CleanupReport, Error> {
+    ) -> Result<zslg_snapshot::CleanupReport, Error> {
         unimplemented!("pacing tests never clean up")
+    }
+}
+
+#[async_trait::async_trait]
+impl SnapshotStore for UnusedSnapshotStore {
+    async fn write_snapshot(
+        &self,
+        id: SnapshotId,
+        entries: Channel<
+            Result<SnapshotEntry, zslg_snapshot::Error>,
+            crossbeam_combinators::Finite,
+        >,
+        compression: CompressionLevel,
+        reason: zslg_snapshot_types::ObjectStoreReason,
+    ) -> Result<SnapshotWrite, zslg_snapshot::Error> {
+        self.write_snapshot_in(id, entries.err_into(), compression, reason)
+            .await
+            .map_err(Into::into)
+    }
+    async fn read_snapshot(
+        &self,
+        id: SnapshotId,
+        reason: zslg_snapshot_types::ObjectStoreReason,
+    ) -> Result<
+        Channel<Result<SnapshotEntry, zslg_snapshot::Error>, crossbeam_combinators::Finite>,
+        zslg_snapshot::Error,
+    > {
+        self.read_snapshot_in(id, reason)
+            .await
+            .map(Channel::err_into)
+            .map_err(Into::into)
+    }
+    fn shutdown_token(&self) -> CancellationToken {
+        self.0.clone()
+    }
+    async fn has_bootstrap_fence(&self) -> Result<bool, zslg_snapshot::Error> {
+        self.has_bootstrap_fence_in().await.map_err(Into::into)
+    }
+    async fn write_bootstrap_fence(&self) -> Result<(), zslg_snapshot::Error> {
+        self.write_bootstrap_fence_in().await.map_err(Into::into)
+    }
+    async fn cleanup_snapshots(
+        &self,
+        live_snapshots: std::collections::BTreeSet<SnapshotId>,
+        cleanup_retention: std::time::Duration,
+    ) -> Result<CleanupReport, zslg_snapshot::Error> {
+        self.cleanup_snapshots_in(live_snapshots, cleanup_retention)
+            .await
+            .map_err(Into::into)
     }
 }
 

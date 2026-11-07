@@ -1075,8 +1075,8 @@ mod tests {
 
     #[tokio::test]
     async fn read_snapshot_then_append_matches() {
-        use crate::api::SnapshotStore as _;
         use zslg_log_types::SnapshotEntry;
+        use zslg_snapshot::SnapshotStore as _;
         use zslg_snapshot_types::CompressionLevel;
         use zslg_snapshot_types::SnapshotId;
 
@@ -1114,7 +1114,10 @@ mod tests {
             .read_snapshot(id, zslg_snapshot_types::ObjectStoreReason::ArchiveRead)
             .await
             .expect("read_snapshot");
-        let n = log.append(entries_rx.err_into()).await.expect("append");
+        let n = log
+            .append(entries_rx.err_into::<crate::Error>().err_into())
+            .await
+            .expect("append");
         assert_eq!(n, 5);
         assert_eq!(log.end_index(), Some(LogIndex(4)));
         assert_eq!(

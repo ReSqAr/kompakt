@@ -20,6 +20,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 use zslg_log_types::Data;
+use zslg_snapshot::SnapshotStore;
 use zslg_snapshot_types::CompressionLevel;
 
 use object_store::ObjectStore;
@@ -27,7 +28,7 @@ use object_store::memory::InMemory;
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
-use crate::api::{LivenessProbe, RaftLeadership, Router, SnapshotStore, StateReplicator};
+use crate::api::{LivenessProbe, RaftLeadership, Router, StateReplicator};
 use crate::hlc::CutoffApplier;
 use crate::hlc::HlcClock;
 use crate::hlc::HlcGate;
@@ -485,7 +486,7 @@ async fn leader_loop_compacts_manifest() {
             .snapshot_store
             .write_snapshot(
                 meta.snapshot_id,
-                crossbeam_combinators::Channel::once(Ok::<_, crate::Error>(entry)),
+                crossbeam_combinators::Channel::once(Ok::<_, zslg_snapshot::Error>(entry)),
                 CompressionLevel::fast(),
                 zslg_snapshot_types::ObjectStoreReason::SnapshotCreate,
             )

@@ -27,29 +27,29 @@ use zslg_snapshot_types::CompressionLevel;
 use zslg_snapshot_types::SnapshotId;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(crate) struct CleanupReport {
-    pub(crate) snapshots_deleted: Vec<Path>,
+pub struct CleanupReport {
+    pub snapshots_deleted: Vec<Path>,
 }
 
 /// Where an entry sits: its global index and HLC.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct EntryMeta {
-    pub(crate) index: zslg_log_types::LogIndex,
-    pub(crate) hlc: zslg_time_types::Hlc,
+pub struct EntryMeta {
+    pub index: zslg_log_types::LogIndex,
+    pub hlc: zslg_time_types::Hlc,
 }
 
 /// What a snapshot write produced: the entries and the object's sizes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct SnapshotWrite {
-    pub(crate) count: usize,
+pub struct SnapshotWrite {
+    pub count: usize,
     /// The last entry written; `None` for an empty write.
-    pub(crate) last: Option<EntryMeta>,
-    pub(crate) stored_bytes: u64,
-    pub(crate) uncompressed_bytes: u64,
+    pub last: Option<EntryMeta>,
+    pub stored_bytes: u64,
+    pub uncompressed_bytes: u64,
 }
 
 #[async_trait::async_trait]
-pub(crate) trait SnapshotStore: Send + Sync {
+pub trait SnapshotStore: Send + Sync {
     /// Write a snapshot object from `entries`. The feeder must cancel on
     /// [`shutdown_token`](Self::shutdown_token).
     ///

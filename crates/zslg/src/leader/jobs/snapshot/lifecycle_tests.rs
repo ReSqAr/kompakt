@@ -19,6 +19,7 @@ use crate::test_stream::ChannelTestExt as _;
 use std::sync::Arc;
 use std::time::Duration;
 use zslg_log_types::LogError;
+use zslg_snapshot::{CleanupReport, SnapshotStore, SnapshotWrite};
 
 use bytes::Bytes;
 use uuid::Uuid;
@@ -896,8 +897,8 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use crate::api::RaftLeadership;
     use crate::api::Router;
-    use crate::api::{RaftLeadership, SnapshotStore};
     use crate::error::Error;
     use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
     use crate::tests::ReadyReplica;
@@ -988,11 +989,15 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
         async fn write_snapshot(
             &self,
             id: SnapshotId,
-            entries: Channel<Result<SnapshotEntry, Error>, crossbeam_combinators::Finite>,
+            entries: Channel<
+                Result<SnapshotEntry, zslg_snapshot::Error>,
+                crossbeam_combinators::Finite,
+            >,
             compression: CompressionLevel,
-            _reason: zslg_snapshot_types::ObjectStoreReason,
-        ) -> Result<crate::api::SnapshotWrite, Error> {
+            reason: zslg_snapshot_types::ObjectStoreReason,
+        ) -> Result<SnapshotWrite, zslg_snapshot::Error> {
             self.writes.fetch_add(1, Ordering::Relaxed);
+            let _ = reason;
             self.inner
                 .write_snapshot(
                     id,
@@ -1002,35 +1007,34 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
                 )
                 .await
         }
-
         async fn read_snapshot(
             &self,
             id: SnapshotId,
-            _reason: zslg_snapshot_types::ObjectStoreReason,
-        ) -> Result<Channel<Result<SnapshotEntry, Error>, crossbeam_combinators::Finite>, Error>
-        {
+            reason: zslg_snapshot_types::ObjectStoreReason,
+        ) -> Result<
+            Channel<Result<SnapshotEntry, zslg_snapshot::Error>, crossbeam_combinators::Finite>,
+            zslg_snapshot::Error,
+        > {
+            let _ = reason;
             self.inner
                 .read_snapshot(id, zslg_snapshot_types::ObjectStoreReason::ArchiveRead)
                 .await
         }
-
         fn shutdown_token(&self) -> tokio_util::sync::CancellationToken {
             self.inner.shutdown_token()
         }
 
-        async fn has_bootstrap_fence(&self) -> Result<bool, Error> {
+        async fn has_bootstrap_fence(&self) -> Result<bool, zslg_snapshot::Error> {
             self.inner.has_bootstrap_fence().await
         }
-
-        async fn write_bootstrap_fence(&self) -> Result<(), Error> {
+        async fn write_bootstrap_fence(&self) -> Result<(), zslg_snapshot::Error> {
             self.inner.write_bootstrap_fence().await
         }
-
         async fn cleanup_snapshots(
             &self,
-            live_snapshots: BTreeSet<SnapshotId>,
-            cleanup_retention: Duration,
-        ) -> Result<crate::api::CleanupReport, Error> {
+            live_snapshots: std::collections::BTreeSet<SnapshotId>,
+            cleanup_retention: std::time::Duration,
+        ) -> Result<CleanupReport, zslg_snapshot::Error> {
             self.inner
                 .cleanup_snapshots(live_snapshots, cleanup_retention)
                 .await

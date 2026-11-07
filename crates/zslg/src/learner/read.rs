@@ -702,7 +702,10 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
     use zslg_lifecycle_types::LifecycleError;
+    use zslg_log_types::SnapshotEntry;
+    use zslg_snapshot::{CleanupReport, SnapshotWrite};
     use zslg_snapshot_types::SnapshotError;
+    use zslg_snapshot_types::{CompressionLevel, SnapshotId};
 
     use crate::Reader;
     use crate::api::QuorumCheck;
@@ -754,7 +757,7 @@ mod tests {
         local_store: Arc<LocalStore>,
         stable_log: Arc<StableLog>,
         deadtime: Duration,
-        snapshot_store: Arc<dyn crate::api::SnapshotStore>,
+        snapshot_store: Arc<dyn zslg_snapshot::SnapshotStore>,
         raft_state: Arc<dyn crate::api::RaftStateView>,
     ) -> ReaderImpl {
         reader_shut_down_by(
@@ -771,7 +774,7 @@ mod tests {
         local_store: Arc<LocalStore>,
         stable_log: Arc<StableLog>,
         deadtime: Duration,
-        snapshot_store: Arc<dyn crate::api::SnapshotStore>,
+        snapshot_store: Arc<dyn zslg_snapshot::SnapshotStore>,
         raft_state: Arc<dyn crate::api::RaftStateView>,
         shutdown: Cancellation,
     ) -> ReaderImpl {
@@ -814,9 +817,8 @@ mod tests {
         }
     }
 
-    #[async_trait]
-    impl crate::api::SnapshotStore for ScriptedSnapshotStore {
-        async fn write_snapshot(
+    impl ScriptedSnapshotStore {
+        pub(crate) async fn write_snapshot_in(
             &self,
             _id: zslg_snapshot_types::SnapshotId,
             _entries: crossbeam_combinators::Channel<
@@ -825,10 +827,10 @@ mod tests {
             >,
             _compression: zslg_snapshot_types::CompressionLevel,
             _reason: zslg_snapshot_types::ObjectStoreReason,
-        ) -> Result<crate::api::SnapshotWrite, crate::Error> {
+        ) -> Result<zslg_snapshot::SnapshotWrite, crate::Error> {
             unimplemented!("reader tests never write snapshots")
         }
-        async fn read_snapshot(
+        pub(crate) async fn read_snapshot_in(
             &self,
             id: zslg_snapshot_types::SnapshotId,
             _reason: zslg_snapshot_types::ObjectStoreReason,
@@ -854,21 +856,67 @@ mod tests {
                 entries.into_iter().map(Ok).collect(),
             ))
         }
-        fn shutdown_token(&self) -> tokio_util::sync::CancellationToken {
-            tokio_util::sync::CancellationToken::new()
-        }
-        async fn has_bootstrap_fence(&self) -> Result<bool, crate::Error> {
+        pub(crate) async fn has_bootstrap_fence_in(&self) -> Result<bool, crate::Error> {
             unimplemented!()
         }
-        async fn write_bootstrap_fence(&self) -> Result<(), crate::Error> {
+        pub(crate) async fn write_bootstrap_fence_in(&self) -> Result<(), crate::Error> {
             unimplemented!()
         }
-        async fn cleanup_snapshots(
+        pub(crate) async fn cleanup_snapshots_in(
             &self,
             _live: std::collections::BTreeSet<zslg_snapshot_types::SnapshotId>,
             _retention: Duration,
-        ) -> Result<crate::api::CleanupReport, crate::Error> {
+        ) -> Result<zslg_snapshot::CleanupReport, crate::Error> {
             unimplemented!()
+        }
+    }
+
+    #[async_trait]
+    impl zslg_snapshot::SnapshotStore for ScriptedSnapshotStore {
+        async fn write_snapshot(
+            &self,
+            id: SnapshotId,
+            entries: Channel<
+                Result<SnapshotEntry, zslg_snapshot::Error>,
+                crossbeam_combinators::Finite,
+            >,
+            compression: CompressionLevel,
+            reason: zslg_snapshot_types::ObjectStoreReason,
+        ) -> Result<SnapshotWrite, zslg_snapshot::Error> {
+            self.write_snapshot_in(id, entries.err_into(), compression, reason)
+                .await
+                .map_err(Into::into)
+        }
+        async fn read_snapshot(
+            &self,
+            id: SnapshotId,
+            reason: zslg_snapshot_types::ObjectStoreReason,
+        ) -> Result<
+            Channel<Result<SnapshotEntry, zslg_snapshot::Error>, crossbeam_combinators::Finite>,
+            zslg_snapshot::Error,
+        > {
+            self.read_snapshot_in(id, reason)
+                .await
+                .map(Channel::err_into)
+                .map_err(Into::into)
+        }
+        fn shutdown_token(&self) -> tokio_util::sync::CancellationToken {
+            tokio_util::sync::CancellationToken::new()
+        }
+        async fn has_bootstrap_fence(&self) -> Result<bool, zslg_snapshot::Error> {
+            self.has_bootstrap_fence_in().await.map_err(Into::into)
+        }
+        async fn write_bootstrap_fence(&self) -> Result<(), zslg_snapshot::Error> {
+            self.write_bootstrap_fence_in().await.map_err(Into::into)
+        }
+        async fn cleanup_snapshots(
+            &self,
+            live_snapshots: std::collections::BTreeSet<SnapshotId>,
+            cleanup_retention: std::time::Duration,
+        ) -> Result<CleanupReport, zslg_snapshot::Error> {
+            self.cleanup_snapshots_in(live_snapshots, cleanup_retention)
+                .await
+                .map_err(Into::into)
         }
     }
 
@@ -1488,7 +1536,7 @@ mod tests {
     /// must be kept alive for the reader's lifetime.
     async fn scripted_reader(
         stable_log: Arc<dyn StableLogSnapshot>,
-        snapshot_store: Arc<dyn crate::api::SnapshotStore>,
+        snapshot_store: Arc<dyn zslg_snapshot::SnapshotStore>,
         raft_state: Arc<dyn crate::api::RaftStateView>,
     ) -> (tempfile::TempDir, ReaderImpl) {
         let debouncer = Arc::new(QuorumReadDebouncer::for_test(

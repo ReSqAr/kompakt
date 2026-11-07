@@ -20,11 +20,12 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 use zslg_lifecycle_types::ConfigError;
 use zslg_net_types::NetError;
+use zslg_snapshot::SnapshotStore;
 
 use std::num::NonZeroUsize;
 
 use crate::ByteSize;
-use crate::api::{self, RaftStateView, SnapshotStore};
+use crate::api::{self, RaftStateView};
 use crate::database;
 use crate::error::Error;
 use crate::hlc::{HlcClock, run_clock_gauges};

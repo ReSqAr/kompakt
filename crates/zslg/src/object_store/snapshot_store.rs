@@ -35,6 +35,7 @@ use std::io;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use zslg_log_types::LogError;
+use zslg_snapshot::{CleanupReport, EntryMeta, SnapshotStore, SnapshotWrite};
 use zslg_snapshot_types::SnapshotError;
 
 use bytes::Bytes;
@@ -48,7 +49,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use crate::Error;
-use crate::api::{CleanupReport, EntryMeta, SnapshotStore, SnapshotWrite};
+
 use crate::error::ToStorage as _;
 use crate::metrics::{self, ObjectStoreOp, OpState};
 use crate::object_store::framing;
@@ -275,9 +276,8 @@ impl RemoteSnapshotStore {
     }
 }
 
-#[async_trait::async_trait]
-impl SnapshotStore for RemoteSnapshotStore {
-    async fn write_snapshot(
+impl RemoteSnapshotStore {
+    pub(crate) async fn write_snapshot_in(
         &self,
         id: SnapshotId,
         entries: Channel<Result<SnapshotEntry, Error>, crossbeam_combinators::Finite>,
@@ -297,7 +297,7 @@ impl SnapshotStore for RemoteSnapshotStore {
         Ok(written)
     }
 
-    async fn read_snapshot(
+    pub(crate) async fn read_snapshot_in(
         &self,
         id: SnapshotId,
         reason: zslg_snapshot_types::ObjectStoreReason,
@@ -352,11 +352,7 @@ impl SnapshotStore for RemoteSnapshotStore {
         Ok(ch)
     }
 
-    fn shutdown_token(&self) -> CancellationToken {
-        self.cancel.clone()
-    }
-
-    async fn has_bootstrap_fence(&self) -> Result<bool, Error> {
+    pub(crate) async fn has_bootstrap_fence_in(&self) -> Result<bool, Error> {
         let path = bootstrap_fence_path();
         let probe = metrics::object_store_request_probe(ObjectStoreOp::Head);
         let result = match self.store.head(&path).await {
@@ -374,7 +370,7 @@ impl SnapshotStore for RemoteSnapshotStore {
         clippy::expect_used,
         reason = "fence body is a small constant string, len fits u64"
     )]
-    async fn write_bootstrap_fence(&self) -> Result<(), Error> {
+    pub(crate) async fn write_bootstrap_fence_in(&self) -> Result<(), Error> {
         let path = bootstrap_fence_path();
         let body = make_fence_body();
         let byte_len = u64::try_from(body.len()).expect("fence body fits u64");
@@ -397,7 +393,7 @@ impl SnapshotStore for RemoteSnapshotStore {
         result
     }
 
-    async fn cleanup_snapshots(
+    pub(crate) async fn cleanup_snapshots_in(
         &self,
         live_snapshots: BTreeSet<SnapshotId>,
         cleanup_retention: Duration,
@@ -430,6 +426,56 @@ impl SnapshotStore for RemoteSnapshotStore {
             "cleanup tick complete",
         );
         Ok(CleanupReport { snapshots_deleted })
+    }
+}
+
+#[async_trait::async_trait]
+impl SnapshotStore for RemoteSnapshotStore {
+    async fn write_snapshot(
+        &self,
+        id: SnapshotId,
+        entries: Channel<
+            Result<SnapshotEntry, zslg_snapshot::Error>,
+            crossbeam_combinators::Finite,
+        >,
+        compression: CompressionLevel,
+        reason: zslg_snapshot_types::ObjectStoreReason,
+    ) -> Result<SnapshotWrite, zslg_snapshot::Error> {
+        self.write_snapshot_in(id, entries.err_into(), compression, reason)
+            .await
+            .map_err(Into::into)
+    }
+    async fn read_snapshot(
+        &self,
+        id: SnapshotId,
+        reason: zslg_snapshot_types::ObjectStoreReason,
+    ) -> Result<
+        Channel<Result<SnapshotEntry, zslg_snapshot::Error>, crossbeam_combinators::Finite>,
+        zslg_snapshot::Error,
+    > {
+        self.read_snapshot_in(id, reason)
+            .await
+            .map(Channel::err_into)
+            .map_err(Into::into)
+    }
+    fn shutdown_token(&self) -> CancellationToken {
+        self.cancel.clone()
+    }
+
+    async fn has_bootstrap_fence(&self) -> Result<bool, zslg_snapshot::Error> {
+        self.has_bootstrap_fence_in().await.map_err(Into::into)
+    }
+    async fn write_bootstrap_fence(&self) -> Result<(), zslg_snapshot::Error> {
+        self.write_bootstrap_fence_in().await.map_err(Into::into)
+    }
+    async fn cleanup_snapshots(
+        &self,
+        live_snapshots: std::collections::BTreeSet<SnapshotId>,
+        cleanup_retention: std::time::Duration,
+    ) -> Result<CleanupReport, zslg_snapshot::Error> {
+        self.cleanup_snapshots_in(live_snapshots, cleanup_retention)
+            .await
+            .map_err(Into::into)
     }
 }
 
@@ -539,7 +585,7 @@ mod tests {
         let id = SnapshotId::from_u128(1);
         let records = vec![entry(0)];
         let n = store
-            .write_snapshot(
+            .write_snapshot_in(
                 id,
                 entries_channel(records.clone()),
                 CompressionLevel::fast(),
@@ -549,7 +595,7 @@ mod tests {
             .expect("write");
         assert_eq!(n.count, records.len());
         let rx = store
-            .read_snapshot(id, zslg_snapshot_types::ObjectStoreReason::ArchiveRead)
+            .read_snapshot_in(id, zslg_snapshot_types::ObjectStoreReason::ArchiveRead)
             .await
             .expect("read");
         let got: Vec<SnapshotEntry> = rx.items().filter_map(|r| r.ok()).collect();
@@ -562,7 +608,7 @@ mod tests {
         let id = SnapshotId::from_u128(2);
         let records: Vec<SnapshotEntry> = (0..10).map(entry).collect();
         let n = store
-            .write_snapshot(
+            .write_snapshot_in(
                 id,
                 entries_channel(records.clone()),
                 CompressionLevel::fast(),
@@ -572,7 +618,7 @@ mod tests {
             .expect("write");
         assert_eq!(n.count, records.len());
         let rx = store
-            .read_snapshot(id, zslg_snapshot_types::ObjectStoreReason::ArchiveRead)
+            .read_snapshot_in(id, zslg_snapshot_types::ObjectStoreReason::ArchiveRead)
             .await
             .expect("read");
         let got: Vec<SnapshotEntry> = rx.items().filter_map(|r| r.ok()).collect();
@@ -584,7 +630,7 @@ mod tests {
         let store = store();
         let records: Vec<SnapshotEntry> = vec![];
         let n = store
-            .write_snapshot(
+            .write_snapshot_in(
                 SnapshotId::from_u128(3),
                 entries_channel(records),
                 CompressionLevel::fast(),
@@ -614,7 +660,7 @@ mod tests {
         drop(tx);
 
         let result = store
-            .write_snapshot(
+            .write_snapshot_in(
                 id,
                 Channel::closed(rx),
                 CompressionLevel::standard(),
@@ -629,7 +675,7 @@ mod tests {
         // Upload aborted (not finished) → no snapshot object remains at the path.
         assert!(
             store
-                .read_snapshot(id, zslg_snapshot_types::ObjectStoreReason::ArchiveRead)
+                .read_snapshot_in(id, zslg_snapshot_types::ObjectStoreReason::ArchiveRead)
                 .await
                 .is_err(),
             "no object should remain after an aborted write"
@@ -652,7 +698,7 @@ mod tests {
         let id = SnapshotId::from_u128(77);
         let records: Vec<SnapshotEntry> = (0..10).map(entry).collect();
         store
-            .write_snapshot(
+            .write_snapshot_in(
                 id,
                 entries_channel(records),
                 CompressionLevel::fast(),
@@ -665,7 +711,7 @@ mod tests {
         // delivered entry and must terminate the stream with an Err item.
         cancel.cancel();
         let mut rx = store
-            .read_snapshot(id, zslg_snapshot_types::ObjectStoreReason::ArchiveRead)
+            .read_snapshot_in(id, zslg_snapshot_types::ObjectStoreReason::ArchiveRead)
             .await
             .expect("read opens");
         let mut saw_err = false;
@@ -687,7 +733,7 @@ mod tests {
     async fn read_missing_snapshot_errors() {
         let store = store();
         let result = store
-            .read_snapshot(
+            .read_snapshot_in(
                 SnapshotId::from_u128(999),
                 zslg_snapshot_types::ObjectStoreReason::ArchiveRead,
             )
@@ -700,22 +746,22 @@ mod tests {
     #[tokio::test]
     async fn fence_absent_on_fresh_store() {
         let store = store();
-        assert!(!store.has_bootstrap_fence().await.expect("ok"));
+        assert!(!store.has_bootstrap_fence_in().await.expect("ok"));
     }
 
     #[tokio::test]
     async fn write_then_read_detects_fence() {
         let store = store();
-        store.write_bootstrap_fence().await.expect("write");
-        assert!(store.has_bootstrap_fence().await.expect("ok"));
+        store.write_bootstrap_fence_in().await.expect("write");
+        assert!(store.has_bootstrap_fence_in().await.expect("ok"));
     }
 
     #[tokio::test]
     async fn write_fence_is_idempotent() {
         let store = store();
-        store.write_bootstrap_fence().await.expect("first");
-        store.write_bootstrap_fence().await.expect("second");
-        assert!(store.has_bootstrap_fence().await.expect("ok"));
+        store.write_bootstrap_fence_in().await.expect("first");
+        store.write_bootstrap_fence_in().await.expect("second");
+        assert!(store.has_bootstrap_fence_in().await.expect("ok"));
     }
 
     // ── snapshot path formatting ─────────────────────────────────────────
@@ -815,7 +861,7 @@ mod tests {
         let store = store();
         let sid = SnapshotId::from_u128(42);
         store
-            .write_snapshot(
+            .write_snapshot_in(
                 sid,
                 entries_channel(vec![entry(0)]),
                 CompressionLevel::fast(),
@@ -825,7 +871,7 @@ mod tests {
             .expect("write");
 
         let report = store
-            .cleanup_snapshots(BTreeSet::from([sid]), TEST_RETENTION)
+            .cleanup_snapshots_in(BTreeSet::from([sid]), TEST_RETENTION)
             .await
             .expect("ok");
         assert!(
@@ -846,7 +892,7 @@ mod tests {
         let store = snapshot_store_with_time_source(Box::new(move || now_ms));
         let orphan_sid = SnapshotId::from_u128(99);
         store
-            .write_snapshot(
+            .write_snapshot_in(
                 orphan_sid,
                 entries_channel(vec![entry(0)]),
                 CompressionLevel::fast(),
@@ -857,7 +903,7 @@ mod tests {
 
         let live_sid = SnapshotId::from_u128(1);
         store
-            .write_snapshot(
+            .write_snapshot_in(
                 live_sid,
                 entries_channel(vec![entry(1)]),
                 CompressionLevel::fast(),
@@ -867,14 +913,14 @@ mod tests {
             .expect("write live");
 
         let report = store
-            .cleanup_snapshots(BTreeSet::from([live_sid]), TEST_RETENTION)
+            .cleanup_snapshots_in(BTreeSet::from([live_sid]), TEST_RETENTION)
             .await
             .expect("ok");
 
         assert_eq!(report.snapshots_deleted, vec![snapshot_path(orphan_sid)]);
         // Live snapshot still reachable.
         let _ = store
-            .read_snapshot(
+            .read_snapshot_in(
                 live_sid,
                 zslg_snapshot_types::ObjectStoreReason::ArchiveRead,
             )
@@ -893,7 +939,7 @@ mod tests {
         let store = snapshot_store_with_time_source(Box::new(move || now_ms));
         let orphan_sid = SnapshotId::from_u128(7);
         store
-            .write_snapshot(
+            .write_snapshot_in(
                 orphan_sid,
                 entries_channel(vec![entry(0)]),
                 CompressionLevel::fast(),
@@ -903,7 +949,7 @@ mod tests {
             .expect("write orphan");
 
         let report = store
-            .cleanup_snapshots(BTreeSet::new(), TEST_RETENTION)
+            .cleanup_snapshots_in(BTreeSet::new(), TEST_RETENTION)
             .await
             .expect("ok");
         assert_eq!(report.snapshots_deleted.len(), 1);

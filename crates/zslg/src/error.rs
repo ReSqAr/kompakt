@@ -42,6 +42,7 @@ error_union! {
     }
     from zslg_time::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_log::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_snapshot::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
 }
 
 /// Bring a value that carries a port crate's error back to zslg's own `Error`:
@@ -109,7 +110,7 @@ macro_rules! port_error_bridge {
     )+};
 }
 
-port_error_bridge!(zslg_time::Error, zslg_log::Error);
+port_error_bridge!(zslg_time::Error, zslg_log::Error, zslg_snapshot::Error);
 
 // ── Boxed variant payloads ────────────────────────────────────────────────────
 //

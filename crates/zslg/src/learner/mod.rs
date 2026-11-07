@@ -49,6 +49,7 @@ pub(crate) use stable_log::STABLE_LOG_CF;
 pub(crate) use stable_log::StableLogConfig;
 pub(crate) use stable_log::{StableLog, spawn_stable_store};
 use zslg_lifecycle_types::ConfigError;
+use zslg_snapshot::SnapshotStore;
 
 #[cfg(test)]
 pub(crate) use stable_log::integrate_manifest_for_test;
@@ -127,7 +128,7 @@ use std::time::Duration;
 
 use tracing::info;
 
-use crate::api::{RaftStateView, Router, SnapshotStore};
+use crate::api::{RaftStateView, Router};
 use crate::hlc::HlcClock;
 use crate::{Error, Reader};
 use shutdown::Shutdown;

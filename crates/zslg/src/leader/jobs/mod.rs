@@ -30,10 +30,11 @@
 
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_snapshot::SnapshotStore;
 
 use tokio::time::Instant;
 
-use crate::api::{RaftLeadership, RaftStateView, Router, SnapshotStore};
+use crate::api::{RaftLeadership, RaftStateView, Router};
 use crate::leader::IntentSubmitter;
 use zslg_log::{LocalStoreView, StableLogSnapshot};
 use zslg_node_types::NodeId;

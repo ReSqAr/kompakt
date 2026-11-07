@@ -28,8 +28,9 @@ use std::time::Duration;
 use tracing::{debug, warn};
 use zslg_consensus_types::ConsensusError;
 use zslg_log_types::LogError;
+use zslg_snapshot::SnapshotStore;
 
-use crate::api::{RaftStateView, Router, SnapshotStore};
+use crate::api::{RaftStateView, Router};
 use crate::error::ToStorage;
 use crate::error::{Error, Home};
 use crate::learner::ReplicaPoller;
@@ -192,7 +193,7 @@ pub(in crate::leader) async fn create_snapshot_entry(
         .snapshot_store
         .write_snapshot(
             snapshot_id,
-            entries,
+            entries.err_into(),
             inputs.compression,
             zslg_snapshot_types::ObjectStoreReason::SnapshotCreate,
         )
