@@ -129,10 +129,10 @@ use std::time::Duration;
 
 use tracing::info;
 
-use crate::hlc::HlcClock;
 use crate::{Error, Reader};
 use shutdown::Shutdown;
 use stable_log::SnapshotLoader;
+use zslg_hlc_clock::HlcClock;
 use zslg_log::LocalStoreMut;
 
 #[derive(Clone)]

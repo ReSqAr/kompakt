@@ -42,7 +42,6 @@ use tikv_jemallocator as _;
 mod database;
 pub(crate) mod error;
 pub(crate) mod follower_node;
-pub(crate) mod hlc;
 #[cfg(test)]
 mod layering;
 pub(crate) mod leader;
@@ -63,7 +62,6 @@ pub(crate) mod writer_node;
 
 pub use crate::error::Error;
 pub use crate::follower_node::{FollowerNode, FollowerNodeConfig};
-pub use crate::hlc::HlcClock;
 pub use crate::learner_node::{LearnerNode, LearnerNodeConfig};
 #[cfg(feature = "prometheus")]
 pub use crate::observability::configure_prometheus;
@@ -76,6 +74,7 @@ pub use zslg_consensus_types::{
     ConsensusError, Exit, RaftGeneration, RaftManifestState, RaftState, RaftStateHandle,
     ReplicaMembership, SpareSelectionStrategy,
 };
+pub use zslg_hlc_clock::HlcClock;
 pub use zslg_lifecycle_types::{ConfigError, LifecycleError};
 pub use zslg_log::{Error as LogApiError, Reader, StableStream, Writer};
 pub use zslg_log_types::{Data, DataId, LogError, LogIndex, StableLogEvent, UnstableEvent};

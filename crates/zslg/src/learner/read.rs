@@ -720,7 +720,7 @@ mod tests {
 
     /// A node clock for the reader under test.
     fn test_clock() -> Arc<dyn zslg_time::Clock> {
-        Arc::new(crate::hlc::HlcClock::new(Duration::from_secs(60)))
+        Arc::new(zslg_hlc_clock::HlcClock::new(Duration::from_secs(60)))
     }
     use async_trait::async_trait;
     use futures::StreamExt;

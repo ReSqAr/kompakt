@@ -37,8 +37,7 @@
 )]
 
 use metrics_kit::{
-    LABEL_STATE, MetricDef, Unit, label_enum, lossy_f64, lossy_f64_signed, metrics, set_gauge,
-    unix_now_secs,
+    LABEL_STATE, MetricDef, Unit, label_enum, lossy_f64, metrics, set_gauge, unix_now_secs,
 };
 use std::time::Duration;
 
@@ -51,7 +50,7 @@ use zslg_time_types::Hlc;
 /// HLC gauges export the physical-millisecond part: the raw `u64` exceeds f64's
 /// exact-integer range.
 fn hlc_physical_ms(hlc: Hlc) -> u64 {
-    hlc.parts().physical_ms
+    hlc.physical_ms()
 }
 
 // ---------------------------------------------------------------------------
@@ -84,7 +83,6 @@ const LABEL_METHOD: &str = "method";
 const LABEL_SOURCE: &str = "source";
 const LABEL_REASON: &str = "reason";
 const LABEL_KIND: &str = "kind";
-const LABEL_DIRECTION: &str = "direction";
 const LABEL_OUTCOME: &str = "outcome";
 const LABEL_PEER_ID: &str = "peer_id";
 /// Peer identity (`NodeId::to_string()`). High-cardinality but bounded by cluster
@@ -114,7 +112,6 @@ const ALL_LABEL_KEYS: &[&str] = &[
     LABEL_SOURCE,
     LABEL_REASON,
     LABEL_KIND,
-    LABEL_DIRECTION,
     LABEL_OUTCOME,
     LABEL_PEER_ID,
     LABEL_NODE_ID,
@@ -392,44 +389,10 @@ metrics!("zslg_", write_path_replica; {
          enforced at ingress as hlc_drift_too_large on the fresh per-RPC \
          HLC, not here.)"
         (state: ReplicaWriteState) [LABEL_STATE => state.as_str()];
-    custom  hlc_guards_inc  HLC_GUARDS_IN_FLIGHT  "hlc_guards_in_flight"
-        Gauge Count "Outstanding HlcGuards (writes admitted but not yet \
-         durable + broadcast). Cutoff drain blocks on these.";
-    labeled_counter hlc_cutoff_set HLC_CUTOFF_SETS_TOTAL "hlc_cutoff_sets_total"
-        "Cutoff set attempts on this replica. rejected_backwards is expected \
-         once per leader change; alert on sustained rate."
-        (state: CutoffSetState) [LABEL_STATE => state.as_str()];
-    hist_duration hlc_drift HLC_DRIFT_SECONDS "hlc_drift_seconds"
-        "Absolute drift between a peer HLC physical-ms and local wall clock \
-         observed during integrate(). Values beyond the configured skew limit \
-         are rejected; the histogram reveals the normal operating band. Under \
-         load this is dominated by receive-buffer latency, not clock skew."
-        (drift: Duration);
-    labeled_counter hlc_drift_rejection HLC_DRIFT_REJECTIONS_TOTAL
-        "hlc_drift_rejections_total"
-        "Peer HLC integrations rejected as hlc_drift_too_large, by direction. \
-         `behind` (older peer stamp) is usually receive-buffer latency under \
-         load; `ahead` points at a genuinely fast peer clock."
-        (direction: DriftDirection) [LABEL_DIRECTION => direction.as_str()];
 });
 
 // ── write path (replica side) + HLC cutoff: hand-written emission helpers ───
 // (custom rows above; each fn below emits the metrics named in its row)
-
-pub(crate) fn hlc_guards_inc() {
-    metrics::gauge!(HLC_GUARDS_IN_FLIGHT).increment(1.0);
-}
-
-pub(crate) fn hlc_guards_dec() {
-    metrics::gauge!(HLC_GUARDS_IN_FLIGHT).decrement(1.0);
-}
-
-label_enum!(#[doc = "`direction` label of [`HLC_DRIFT_REJECTIONS_TOTAL`]."] DriftDirection {
-    /// Peer HLC physical-ms is behind local (older) — usually buffer latency.
-    Behind => "behind",
-    /// Peer HLC physical-ms is ahead of local (newer) — peer clock ahead.
-    Ahead => "ahead",
-});
 
 // ── logs and replication ────────────────────────────────────────────────────
 
@@ -613,26 +576,12 @@ pub(crate) fn snapshot_creation_step(step: SnapshotStep, elapsed: Duration) {
 // ── HLC / clock ──────────────────────────────────────────────────────────────
 
 metrics!("zslg_", hlc; {
-    gauge_via     hlc_now_physical_ms HLC_NOW_PHYSICAL_MS "hlc_now_physical_ms" Milliseconds
-        "Physical-millisecond part of the node's current HLC." (hlc: Hlc => hlc_physical_ms);
-    gauge   hlc_logical HLC_LOGICAL "hlc_logical" Count
-        "Logical component of the node's current HLC. Sustained high \
-         values = wall clock stalled or heavy same-millisecond traffic."
-        (logical: u64);
-    custom  hlc_wall_clock_drift_ms HLC_WALL_CLOCK_DRIFT_MS "hlc_wall_clock_drift_ms"
-        Gauge Milliseconds
-        "Signed difference between the HLC physical part and the wall \
-         clock. Approaching max_clock_skew = imminent write rejections.";
     gauge_via     hlc_cutoff_physical_ms HLC_CUTOFF_PHYSICAL_MS "hlc_cutoff_physical_ms" Milliseconds
         "Physical-millisecond part of this replica's HLC cutoff." (cutoff: Hlc => hlc_physical_ms);
 });
 
 // ── HLC / clock: hand-written emission helpers ──────────────────────────────
 // (custom rows above; each fn below emits the metrics named in its row)
-
-pub(crate) fn hlc_wall_clock_drift_ms(drift_ms: i64) {
-    metrics::gauge!(HLC_WALL_CLOCK_DRIFT_MS).set(lossy_f64_signed(drift_ms));
-}
 
 // ── read path / learner stores ───────────────────────────────────────────────
 
@@ -1142,13 +1091,6 @@ label_enum!(#[doc = "`state` label of [`REPLICA_WRITE_REQUESTS_TOTAL`]."] Replic
     FailStorage => "fail_storage",
 });
 
-label_enum!(#[doc = "`state` label of [`HLC_CUTOFF_SETS_TOTAL`]. `rejected_backwards` is \
-*expected* after a leader change (design doc gotcha: a new leader's first proposed cutoff \
-may precede its predecessor's); alert on sustained rate, not occurrence."] CutoffSetState {
-    Accepted => "accepted",
-    RejectedBackwards => "rejected_backwards",
-});
-
 label_enum!(#[doc = "`log_type` label ([`LOG_WRITES_TOTAL`], [`LOG_INDEX_FRONTIER`], \
 [`PURGED_ENTRIES_TOTAL`])."] LogType {
     Local => "local",
@@ -1396,10 +1338,6 @@ metrics!("zslg_", probes; {
         "Fresh-dial cost paid on a unary keep-alive pool miss (DNS + TCP \
          connect + socket setup). A pool hit reuses an idle connection and \
          is not recorded here; see rpc_conn_reuse_total for the hit rate.";
-    probe_unlabeled hlc_cutoff_drain_probe HLC_CUTOFF_DRAIN_DURATION_SECONDS
-        "hlc_cutoff_drain_duration_seconds"
-        "Time set_cutoff waited for in-flight HlcGuards to drain before \
-         ACKing. Tail growth = slow write paths holding guards.";
     probe_unlabeled replica_append_postcommit_probe REPLICA_APPEND_POSTCOMMIT_SECONDS
         "replica_append_postcommit_seconds"
         "Post-fsync work per replica-log flush: frontier update, broadcast, \
@@ -1501,6 +1439,9 @@ impl Drop for RpcServerGuard {
 // ---------------------------------------------------------------------------
 
 const ALL_METRICS: &[&[MetricDef]] = &[
+    // --- HLC clock and gate (zslg-hlc-clock, zslg-hlc-gate) ---
+    zslg_hlc_clock::metrics::METRICS,
+    zslg_hlc_gate::metrics::METRICS,
     // --- object store (zslg-object-store) ---
     zslg_object_store::metrics::METRICS,
     // --- quorum fan-out (zslg-quorum-read) ---

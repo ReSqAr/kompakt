@@ -17,12 +17,13 @@ use parking_lot::Mutex as SyncMutex;
 use tokio::sync::watch;
 
 use crate::error::Error;
-use crate::hlc::{HlcClock, HlcGate};
 use crate::replica::ReplicaLogStore;
 use crate::replica::ReplicaService;
 use crossbeam_combinators::{Channel, Finite, Infinite};
 use zslg_consensus_types::RaftStateHandle;
 use zslg_consensus_types::{RaftState, ReplicaMembership, ReplicaStatus};
+use zslg_hlc_clock::HlcClock;
+use zslg_hlc_gate::HlcGate;
 use zslg_log::{Replica, StampedWrite, WriteOutcome};
 use zslg_log_types::{DataId, LogIndex};
 use zslg_net_types::PeerAddr;

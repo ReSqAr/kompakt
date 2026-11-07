@@ -11,9 +11,9 @@ use tracing::info;
 use super::peer::ReplicationSubscriber;
 
 use crate::error::Error;
-use crate::hlc::HlcClock;
 use crate::learner::LocalStore;
 use warn_throttle::ThrottledWarn;
+use zslg_hlc_clock::HlcClock;
 use zslg_log::LocalStoreMut;
 use zslg_node_types::NodeId;
 

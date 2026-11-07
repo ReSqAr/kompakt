@@ -304,9 +304,9 @@ mod tests {
 
         let cancel = CancellationToken::new();
         let client = RpcClient::new(
-            Arc::new(crate::hlc::HlcClock::new(std::time::Duration::from_secs(
-                60,
-            ))),
+            Arc::new(zslg_hlc_clock::HlcClock::new(
+                std::time::Duration::from_secs(60),
+            )),
             test_client_config(),
             cancel.clone(),
         );

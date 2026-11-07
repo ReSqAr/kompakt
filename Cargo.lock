@@ -4466,6 +4466,8 @@ dependencies = [
  "warn-throttle",
  "zslg-consensus",
  "zslg-consensus-types",
+ "zslg-hlc-clock",
+ "zslg-hlc-gate",
  "zslg-lifecycle-types",
  "zslg-log",
  "zslg-log-types",
@@ -4518,6 +4520,31 @@ dependencies = [
  "zslg-node-types",
  "zslg-snapshot-types",
  "zslg-time-types",
+]
+
+[[package]]
+name = "zslg-hlc-clock"
+version = "0.1.0"
+dependencies = [
+ "metrics-kit",
+ "parking_lot 0.13.0",
+ "proptest",
+ "tokio",
+ "tokio-util",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-hlc-gate"
+version = "0.1.0"
+dependencies = [
+ "metrics-kit",
+ "parking_lot 0.13.0",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-time",
 ]
 
 [[package]]

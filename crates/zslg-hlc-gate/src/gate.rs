@@ -31,7 +31,7 @@ use std::time::Duration;
 use tokio::sync::{Mutex as AsyncMutex, Notify};
 
 use crate::metrics;
-use zslg_time_types::{CutoffError, Hlc};
+use zslg_time::{CutoffError, Hlc};
 
 /// Cadence for warning that a `set_cutoff` drain is still waiting on in-flight
 /// writes. A single stuck `HlcGuard` blocks the drain — and with it the leader's
@@ -51,7 +51,7 @@ impl Drop for TrackedHlcCutoff {
     }
 }
 
-pub(crate) struct HlcGate {
+pub struct HlcGate {
     current: SyncMutex<Arc<TrackedHlcCutoff>>,
     set_lock: AsyncMutex<()>,
 }
@@ -70,7 +70,7 @@ impl Default for HlcGate {
     }
 }
 
-pub(crate) struct HlcGuard {
+pub struct HlcGuard {
     _tracked: Arc<TrackedHlcCutoff>,
 }
 
@@ -92,7 +92,7 @@ impl std::fmt::Debug for HlcGuard {
 
 impl HlcGate {
     #[must_use]
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             current: SyncMutex::new(Arc::new(TrackedHlcCutoff {
                 cutoff: None,
@@ -112,7 +112,7 @@ impl HlcGate {
     /// `(wm, cutoff]` is built from a catch-up that has already run, and every
     /// later snapshot starts strictly above `cutoff`. A write admitted at
     /// exactly the cutoff would be ACKed into no snapshot at all.
-    pub(crate) fn check_hlc(&self, hlc: Hlc) -> Result<HlcGuard, CutoffError> {
+    pub fn check_hlc(&self, hlc: Hlc) -> Result<HlcGuard, CutoffError> {
         let current = self.current.lock();
         if let Some(cutoff) = current.cutoff
             && hlc <= cutoff
@@ -133,7 +133,7 @@ impl HlcGate {
     /// for. It is still not a fast path: the check sits behind `set_lock`, so a
     /// concurrent drain of the same value is awaited before answering `false`.
     #[must_use]
-    pub(crate) async fn set_cutoff(&self, new: Hlc) -> bool {
+    pub async fn set_cutoff(&self, new: Hlc) -> bool {
         let _lock = self.set_lock.lock().await;
 
         let mut notified = {

@@ -1,4 +1,5 @@
-//! Hybrid logical clocks — the crate's one notion of time and order.
+//! The hybrid logical clock: monotonic stamps, and absorption of peer clocks
+//! within a skew limit. Implements `Clock`.
 //!
 //! ```text
 //!    63                                  16 15             0
@@ -16,21 +17,12 @@
 //! **Comparing raws is meaningful; subtracting them is not.** A difference of
 //! raw `u64`s is dominated by the logical bits — one millisecond reads as
 //! 65 536 — so anything measuring a *duration* (clock skew, drift, a tier
-//! window) must go through [`Hlc::parts`] and subtract `physical_ms`.
-//!
-//! Three responsibilities, one per file:
-//!
-//! | [`HlcClock`] | mints | monotonic stamps, absorbs peer clocks within a skew limit |
-//! | [`HlcGate`] | admits | rejects writes at or below the cutoff, drains before advancing it |
-//! | [`CutoffApplier`] | applies | drives the gate from committed Raft state |
+//! window) must go through `Hlc::parts` and subtract `physical_ms`.
 
 mod clock;
-mod cutoff;
-mod gate;
-#[cfg(test)]
-mod gate_concurrency_tests;
+pub mod metrics;
 
-pub use clock::HlcClock;
-pub(crate) use clock::run_clock_gauges;
-pub(crate) use cutoff::CutoffApplier;
-pub(crate) use gate::{HlcGate, HlcGuard};
+pub use clock::{HlcClock, run_clock_gauges};
+
+/// The one error this implementation raises: its port's.
+pub use zslg_time::Error;

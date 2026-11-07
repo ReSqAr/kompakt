@@ -30,9 +30,6 @@ use object_store::memory::InMemory;
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
-use crate::hlc::CutoffApplier;
-use crate::hlc::HlcClock;
-use crate::hlc::HlcGate;
 use crate::leader::jobs::membership::liveness::LivenessConfig;
 use crate::leader::{LeaderLoopConfig, SnapshotConfig, spawn_leader_loop};
 use crate::learner::LocalStore;
@@ -48,6 +45,9 @@ use shutdown::Shutdown;
 use zslg_consensus_types::ReplicaMembership;
 use zslg_consensus_types::ReplicatedRaftState;
 use zslg_consensus_types::SpareSelectionStrategy;
+use zslg_hlc_clock::HlcClock;
+use zslg_hlc_gate::CutoffApplier;
+use zslg_hlc_gate::HlcGate;
 use zslg_log::{LocalStoreMut, StableLogSnapshot};
 use zslg_log_types::LogIndex;
 use zslg_log_types::SnapshotEntry;
@@ -196,7 +196,7 @@ fn spawn_loop(
             drained_cutoff_tx,
             applier_cancel.clone(),
         )
-        .run(),
+        .run::<crate::Error>(),
     );
 
     let replica = Arc::new(ReplicaService::new(

@@ -50,7 +50,6 @@ use tokio::sync::watch;
 use zslg_snapshot_types::CompressionLevel;
 
 use crate::error::Error;
-use crate::hlc::HlcGate;
 use crate::leader::{SnapshotInputs, build_snapshot};
 use crate::learner::LocalStore;
 use crate::learner::StableLog;
@@ -62,6 +61,7 @@ use crate::tests::{FixedClock, MapPeerRouter, ReadyReplica};
 use crate::tests::{Partition, TestNode};
 use zslg_consensus_types::ReplicaMembership;
 use zslg_consensus_types::ReplicatedRaftState;
+use zslg_hlc_gate::HlcGate;
 use zslg_log::{LocalStoreMut, LocalStoreView, Replica, StableLogSnapshot};
 use zslg_log_types::Data;
 use zslg_log_types::LogIndex;

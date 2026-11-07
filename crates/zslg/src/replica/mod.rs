@@ -46,13 +46,14 @@ use tokio::sync::watch;
 use tracing::{info, warn};
 
 use crate::error::Error;
-use crate::hlc::{CutoffApplier, HlcClock, HlcGate, HlcGuard};
 use crate::metrics::{self, ReplicaWriteState};
 use crate::replica::log::flush_loop;
 use crossbeam_combinators::Channel;
 use shutdown::Shutdown;
 use warn_throttle::WarnThrottle;
 use zslg_consensus_types::ReplicaStatus;
+use zslg_hlc_clock::HlcClock;
+use zslg_hlc_gate::{CutoffApplier, HlcGate, HlcGuard};
 use zslg_log::{Replica, StampedWrite, WriteOutcome};
 use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};

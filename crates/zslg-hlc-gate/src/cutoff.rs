@@ -28,12 +28,11 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
-use crate::error::Error;
-use crate::hlc::HlcGate;
+use crate::HlcGate;
 use crate::metrics::{self, CutoffSetState};
-use zslg_time_types::Hlc;
+use zslg_time::Hlc;
 
-pub(crate) struct CutoffApplier {
+pub struct CutoffApplier {
     raft_state: Arc<dyn RaftStateView>,
     hlc_gate: Arc<HlcGate>,
     drained_tx: watch::Sender<Option<Hlc>>,
@@ -42,7 +41,7 @@ pub(crate) struct CutoffApplier {
 
 impl CutoffApplier {
     #[must_use]
-    pub(crate) fn new(
+    pub fn new(
         raft_state: Arc<dyn RaftStateView>,
         hlc_gate: Arc<HlcGate>,
         drained_tx: watch::Sender<Option<Hlc>>,
@@ -56,7 +55,7 @@ impl CutoffApplier {
         }
     }
 
-    pub(crate) async fn run(self) -> Result<(), Error> {
+    pub async fn run<E>(self) -> Result<(), E> {
         tracing::info!("cutoff applier: starting");
         // Subscribe before snapshotting: a cutoff committed between the two
         // then arrives as an event, rather than waiting for the next unrelated
@@ -116,8 +115,8 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::*;
-    use zslg_consensus_types::RaftStateHandle;
-    use zslg_consensus_types::{RaftManifestState, RaftState};
+    use zslg_consensus::RaftStateHandle;
+    use zslg_consensus::{RaftManifestState, RaftState};
 
     fn state_with(cutoff: Option<Hlc>, watermark: Option<Hlc>) -> RaftState {
         RaftState {
@@ -149,7 +148,7 @@ mod tests {
             drained_tx,
             cancel.clone(),
         );
-        let handle = tokio::spawn(applier.run());
+        let handle = tokio::spawn(applier.run::<crate::Error>());
 
         tokio::time::timeout(Duration::from_secs(5), async {
             while *drained_rx.borrow() != Some(Hlc(100)) {
@@ -186,7 +185,7 @@ mod tests {
             drained_tx,
             cancel.clone(),
         );
-        let handle = tokio::spawn(applier.run());
+        let handle = tokio::spawn(applier.run::<crate::Error>());
 
         // Initial cutoff: 200.
         tokio::time::timeout(Duration::from_secs(5), async {

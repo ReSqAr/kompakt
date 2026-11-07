@@ -617,7 +617,7 @@ mod tests {
     use tokio::net::TcpListener;
 
     use super::*;
-    use crate::hlc::HlcClock;
+    use zslg_hlc_clock::HlcClock;
 
     fn test_opts(unary_timeout: Duration) -> RpcClientConfig {
         RpcClientConfig {

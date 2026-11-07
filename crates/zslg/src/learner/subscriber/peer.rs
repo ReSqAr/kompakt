@@ -17,8 +17,8 @@
 //! reconnect from a peer that is merely flaky. Neither half is enough alone.
 
 use crate::Error;
-use crate::hlc::HlcClock;
 use std::sync::Arc;
+use zslg_hlc_clock::HlcClock;
 use zslg_log::{LocalStoreMut, Replica};
 use zslg_log_types::Data;
 use zslg_log_types::LogError;
@@ -184,10 +184,10 @@ mod tests {
     use futures::stream::BoxStream;
 
     use super::*;
-    use crate::hlc::HlcClock;
     use crate::tests::{fresh_local, make_meta, upstream as upstream_id};
     use crossbeam_combinators::{Channel, Finite, Infinite};
     use zslg_consensus_types::ReplicaStatus;
+    use zslg_hlc_clock::HlcClock;
     use zslg_log::{LocalStoreView, Replica, StampedWrite, WriteOutcome};
     use zslg_log_types::Data;
     use zslg_log_types::LogIndex;

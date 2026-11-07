@@ -54,6 +54,8 @@ zslg-quorum-read = { workspace = true }
 zslg-object-store-config = { workspace = true }
 zslg-node-id = { workspace = true }
 zslg-object-store = { workspace = true }
+zslg-hlc-clock = { workspace = true }
+zslg-hlc-gate = { workspace = true }
 zslg-raft = { workspace = true }
 zslg-raft-types = { workspace = true }
 zslg-snapshot = { workspace = true }

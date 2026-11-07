@@ -27,12 +27,12 @@
 )]
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use zslg_time_types::ClockError;
+use zslg_time::ClockError;
 
 use parking_lot::Mutex as SyncMutex;
 
-use crate::error::Error;
-use zslg_time_types::{HLC_MAX_PHYSICAL_MS, Hlc, HlcParts, duration_as_ms_clamped};
+use crate::Error;
+use zslg_time::{HLC_MAX_PHYSICAL_MS, Hlc, HlcParts, duration_as_ms_clamped};
 
 pub struct HlcClock {
     inner: SyncMutex<Inner>,
@@ -52,7 +52,7 @@ struct Inner {
 
 impl HlcClock {
     #[must_use]
-    pub(crate) fn new(skew_limit: Duration) -> Self {
+    pub fn new(skew_limit: Duration) -> Self {
         Self::with_time_source(skew_limit, Box::new(wall_clock_ms_now))
     }
 
@@ -149,7 +149,7 @@ impl HlcClock {
     /// Absolute physical-ms difference between the local clock and a peer HLC,
     /// without advancing or mutating state. Used to watch a peer's HLC drift
     /// toward the rejection threshold before it triggers `integrate`'s error.
-    pub(crate) fn skew_against(&self, peer: Hlc) -> Duration {
+    pub fn skew_against(&self, peer: Hlc) -> Duration {
         let pt_ms = self.read_physical_ms();
         Duration::from_millis(peer.parts().physical_ms.abs_diff(pt_ms))
     }
@@ -166,16 +166,16 @@ impl zslg_time::Clock for HlcClock {
     }
 
     fn integrate(&self, peer: Hlc) -> Result<Hlc, zslg_time::Error> {
-        self.integrate(peer).map_err(Into::into)
+        self.integrate(peer)
     }
 }
 
 /// 1 s ticker emitting `zslg_hlc_now_physical_ms` / `zslg_hlc_logical` /
 /// `zslg_hlc_wall_clock_drift_ms`. Spawned once per node from `Node::new`.
-pub(crate) async fn run_clock_gauges(
+pub async fn run_clock_gauges<E>(
     clock: std::sync::Arc<HlcClock>,
     cancel: tokio_util::sync::CancellationToken,
-) -> Result<(), Error> {
+) -> Result<(), E> {
     let mut ticker = tokio::time::interval(Duration::from_secs(1));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {

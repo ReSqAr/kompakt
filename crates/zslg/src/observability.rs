@@ -71,7 +71,7 @@ fn buckets_for(unit: Option<Unit>) -> &'static [f64] {
 /// straight past the 200 ms skew limit, so a heatmap could not show which side
 /// of it drift sits on. ~25 ms resolution across the 0.1–0.3 s band.
 const BUCKET_OVERRIDES: &[(&str, &[f64])] = &[(
-    metrics::HLC_DRIFT_SECONDS,
+    zslg_hlc_clock::metrics::HLC_DRIFT_SECONDS,
     &[
         0.005, 0.01, 0.02, 0.05, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2, 0.225, 0.25, 0.3, 0.4, 0.5,
         0.75, 1.0, 2.0, 5.0,

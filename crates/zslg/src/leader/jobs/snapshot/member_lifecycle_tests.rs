@@ -28,7 +28,6 @@ use parking_lot::Mutex as SyncMutex;
 use tempfile::TempDir;
 
 use crate::error::Error;
-use crate::hlc::HlcGate;
 use crate::leader::jobs::membership::change::{
     LivenessQuery, MembershipChangeInputs, MembershipChangeManager,
 };
@@ -46,6 +45,7 @@ use crate::tests::wait_for_leader;
 use zslg_consensus_types::RaftStateHandle;
 use zslg_consensus_types::ReplicatedRaftState;
 use zslg_consensus_types::SpareSelectionStrategy;
+use zslg_hlc_gate::HlcGate;
 use zslg_log::LocalStoreMut;
 use zslg_log_types::LogIndex;
 use zslg_node_types::NodeId;

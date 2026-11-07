@@ -24,8 +24,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::hlc::HlcGate;
-use zslg_time_types::Hlc;
+use crate::HlcGate;
+use zslg_time::Hlc;
 
 /// Writers admit at `hlc` well above every cutoff the advancer installs, so a
 /// rejection means the gate admitted against a cutoff it should not have.

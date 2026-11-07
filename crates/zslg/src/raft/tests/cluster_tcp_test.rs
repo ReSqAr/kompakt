@@ -27,7 +27,6 @@ use zslg_net::Router;
 use openraft::Config;
 use openraft::storage::Adaptor;
 
-use crate::hlc::HlcClock;
 use crate::network::{LocalReplicaClient, RemoteRouter, RpcServerConfig, SocketOpts};
 use crate::raft::rpc::NetworkFactory;
 use crate::raft::{RaftNode, membership_map};
@@ -36,6 +35,7 @@ use crate::tests::fast_raft_config as raft_config;
 use shutdown::Shutdown;
 use zslg_consensus_types::RaftStateHandle;
 use zslg_consensus_types::ReplicatedRaftState;
+use zslg_hlc_clock::HlcClock;
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 use zslg_raft_types::Raft;

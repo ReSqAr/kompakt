@@ -29,13 +29,13 @@ use crate::ByteSize;
 
 use crate::database;
 use crate::error::Error;
-use crate::hlc::{HlcClock, run_clock_gauges};
 use crate::learner::LearnerConfig;
 use crate::learner::{LearnerService, StableLog, spawn_learner, spawn_stable_store};
 use crate::network::setup_router;
 use crate::raft::{RaftTrackerConfig, spawn_raft_tracker_streamer};
 use rocksdb_kit::{CfSpec, Storage, StorageConfig};
 use shutdown::Shutdown;
+use zslg_hlc_clock::{HlcClock, run_clock_gauges};
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};

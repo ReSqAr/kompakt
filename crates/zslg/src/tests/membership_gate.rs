@@ -31,11 +31,11 @@ use zslg_net::Router;
 
 use crate::ReplicaNode;
 
-use crate::hlc::HlcClock;
 use crate::network::RemoteRouter;
 use crate::replica_node::ReplicaNodeConfig;
 use crate::tests::reserve_port;
 use crate::tests::wait_until_sync as wait_until;
+use zslg_hlc_clock::HlcClock;
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 

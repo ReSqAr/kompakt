@@ -37,7 +37,6 @@ use std::num::NonZeroUsize;
 use crate::ByteSize;
 
 use crate::error::Error;
-use crate::hlc::{HlcClock, HlcGate, run_clock_gauges};
 use crate::leader::spawn_leader_loop;
 use crate::leader::{LivenessConfig, SnapshotConfig};
 use crate::learner::LearnerConfig;
@@ -58,6 +57,8 @@ use rocksdb_kit::{CfSpec, Storage, StorageConfig};
 use shutdown::Shutdown;
 use zslg_consensus_types::SpareSelectionStrategy;
 use zslg_consensus_types::{EvictionStatus, RaftStateHandle};
+use zslg_hlc_clock::{HlcClock, run_clock_gauges};
+use zslg_hlc_gate::HlcGate;
 use zslg_net_types::ServerName;
 use zslg_net_types::{HostPort, PeerAddr};
 use zslg_node_types::NodeId;
