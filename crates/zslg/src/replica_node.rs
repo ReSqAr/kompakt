@@ -17,6 +17,9 @@
 //! unconditionally and gates on leadership itself (`crate::leader`), so
 //! promotion and demotion move no tasks.
 
+use crate::database::NODE_ID_CF;
+use crate::learner::{LOCAL_STORE_CURSORS_CF, LOCAL_STORE_DATA_CF, STABLE_LOG_CF};
+use crate::replica::REPLICA_LOG_CF;
 use futures::FutureExt as _;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -30,8 +33,6 @@ use std::num::NonZeroUsize;
 use crate::ByteSize;
 use crate::api::PeersWatcher;
 use crate::api::{RaftStateView, SnapshotStore};
-use crate::database::Subsystem;
-use crate::database::storage::{CfSpec, Storage, StorageConfig};
 use crate::error::Error;
 use crate::hlc::{HlcClock, HlcGate, run_clock_gauges};
 use crate::ids::ServerName;
@@ -55,6 +56,9 @@ use crate::replica::ReplicaLogConfig;
 use crate::replica::{ReplicaService, spawn_replica};
 use crate::writer::WriterService;
 use crate::{api, database, network};
+#[cfg(test)]
+use rocksdb_kit::ColumnFamily;
+use rocksdb_kit::{CfSpec, Storage, StorageConfig};
 use shutdown::Shutdown;
 
 #[derive(Debug, Clone)]
@@ -92,7 +96,7 @@ pub struct ReplicaNodeConfig {
     /// and allocator slack sit outside the budget.
     pub storage_memory: ByteSize,
     /// RocksDB overrides. `None` — the default — derives the term from
-    /// `storage_memory`; the derivations live in `database::storage` and are
+    /// `storage_memory`; the derivations live in `rocksdb_kit` and are
     /// the only place a value is written, so unsetting a knob is exactly the
     /// pre-knob behaviour. Set one only with a measurement behind it.
     ///
@@ -392,26 +396,26 @@ impl ReplicaNodeConfig {
             // Compression is a per-store footprint/CPU trade, never a
             // durability one — the block CRC is what protects a record.
             CfSpec {
-                subsystem: Subsystem::ReplicaLog,
+                cf: REPLICA_LOG_CF,
                 compress: self.replica_log_compression,
             },
             CfSpec {
-                subsystem: Subsystem::StableLog,
+                cf: STABLE_LOG_CF,
                 compress: self.stable_log_compression,
             },
             CfSpec {
-                subsystem: Subsystem::LocalStoreData,
+                cf: LOCAL_STORE_DATA_CF,
                 compress: self.learner_local_store_compression,
             },
             // Cursors follow the data family rather than carrying a second
             // knob: one overwritten slot per peer has no workload behind it.
             CfSpec {
-                subsystem: Subsystem::LocalStoreCursors,
+                cf: LOCAL_STORE_CURSORS_CF,
                 compress: self.learner_local_store_compression,
             },
             // One tiny, never-compressed row: the write-once node identity.
             CfSpec {
-                subsystem: Subsystem::NodeId,
+                cf: NODE_ID_CF,
                 compress: false,
             },
         ]);
@@ -419,7 +423,7 @@ impl ReplicaNodeConfig {
     }
 
     /// Produce the storage tuning: the budget plus the overrides, with every
-    /// unset one left to `database::storage`'s derivation from the budget.
+    /// unset one left to `rocksdb_kit`'s derivation from the budget.
     #[must_use]
     pub(crate) fn storage_config(&self) -> StorageConfig {
         StorageConfig {
@@ -932,7 +936,7 @@ impl ReplicaNode {
         config.validate()?;
 
         let mut shutdown = Shutdown::new();
-        database::create_storage_root(&config.db_path)
+        rocksdb_kit::create_storage_root(&config.db_path)
             .boxed()
             .await?;
 
@@ -1482,16 +1486,16 @@ mod compression_default_tests {
     #[test]
     fn compression_reaches_the_column_families() {
         let c = cfg();
-        let compress = |s: Subsystem| {
+        let compress = |s: ColumnFamily| {
             c.column_families()
                 .into_iter()
-                .find(|spec| spec.subsystem == s)
+                .find(|spec| spec.cf == s)
                 .map(|spec| spec.compress)
         };
-        assert_eq!(compress(Subsystem::ReplicaLog), Some(false));
-        assert_eq!(compress(Subsystem::StableLog), Some(true));
-        assert_eq!(compress(Subsystem::LocalStoreData), Some(false));
-        assert_eq!(compress(Subsystem::LocalStoreCursors), Some(false));
+        assert_eq!(compress(REPLICA_LOG_CF), Some(false));
+        assert_eq!(compress(STABLE_LOG_CF), Some(true));
+        assert_eq!(compress(LOCAL_STORE_DATA_CF), Some(false));
+        assert_eq!(compress(LOCAL_STORE_CURSORS_CF), Some(false));
     }
 
     /// A replica runs seven families and no more. The list IS the schema — it
@@ -1503,7 +1507,7 @@ mod compression_default_tests {
         let names: Vec<&str> = cfg()
             .column_families()
             .iter()
-            .map(|spec| spec.subsystem.cf_name())
+            .map(|spec| spec.cf.name())
             .collect();
         assert_eq!(
             names,

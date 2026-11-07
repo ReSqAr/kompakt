@@ -31,7 +31,7 @@ openraft = { workspace = true }
 parking_lot = { workspace = true }
 postcard = { workspace = true, features = ["alloc", "use-std"] }
 rand = { workspace = true }
-rust-rocksdb = { workspace = true }
+rocksdb-kit = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
 shutdown = { workspace = true }
 socket2 = { workspace = true }
@@ -46,6 +46,7 @@ warn-throttle = { workspace = true }
 zstd = { workspace = true }
 
 [dev-dependencies]
+rocksdb-kit = { workspace = true, features = ["testing"] }
 clap = { workspace = true, features = ["env"] }
 tracing-subscriber = { workspace = true, features = ["json"] }
 http-body-util = { workspace = true }

@@ -1,301 +1,50 @@
-//! The node's one RocksDB — opened explicitly, with every column family named.
-//!
-//! # Why one open, at one place
-//!
-//! Inferring DB identity from directory layout lets on-disk layout decide how
-//! many database instances a node runs: a store opening `<dir>` takes
-//! `dir.parent()` as the DB and `dir`'s leaf name as the column family, one
-//! store sits a level deeper than the rest — its parent is a different root,
-//! and a node running a learner quietly opens a second RocksDB with a second
-//! block cache sized at the *full* budget. The declared memory budget then
-//! means nothing: a node is charged two to three times it.
-//!
-//! Here the caller states the root, the budget and the complete list of column
-//! families. The descriptor list **is** the schema — no lazy creation, no
-//! reopen path guessing which families exist — which is also what makes the
-//! live family count known at open, so memtable sizing is exact rather than
-//! divided by a planning constant.
-//!
-//! # Why the budget is an argument
-//!
-//! A budget is a *node's* property, and loadgen runs six nodes in one process.
-//! It was a process-wide `static` before, which meant two nodes could not hold
-//! different budgets, whichever store opened first silently decided it, and a
-//! node type that forgot to set it inherited whatever the last one wanted.
-//!
-//! # Memory
-//!
-//! One knob. Block cache, memtables (via [`WriteBufferManager`]) and SST index
-//! and filter blocks are all charged to the same [`Cache`], so RSS tracks the
-//! budget with a known multiplier instead of being the sum of independent
-//! pools. Iterator-pinned blocks, compaction buffers, table readers for open
-//! SSTs and allocator fragmentation still sit outside it — bounded indirectly
-//! by `max_open_files` and the memtable sizing.
+//! The node's one RocksDB: opened once, with every column family named up
+//! front, under one memory budget.
 
 use std::path::Path;
 use std::sync::Arc;
 
+use bytesize::ByteSize;
 use rust_rocksdb::{
-    BlockBasedIndexType, BlockBasedOptions, BoundColumnFamily, Cache, ColumnFamilyDescriptor,
-    DBCompressionType, DBRecoveryMode, DBWithThreadMode, MultiThreaded, Options, WriteBatch,
-    WriteBufferManager,
+    BlockBasedIndexType, BlockBasedOptions, Cache, ColumnFamilyDescriptor, DBCompressionType,
+    DBRecoveryMode, DBWithThreadMode, MultiThreaded, Options, WriteBufferManager,
 };
 
-use super::Subsystem;
-use crate::Error;
-use crate::error::ToStorage;
-use bytesize::ByteSize;
-
-/// Background compaction + flush threads. Small machine: 2.
-///
-/// Derived constant, overridable per node via
-/// [`StorageConfig::max_background_jobs`]: it is the documented remediation
-/// when RSS overshoots the budget (compaction input/output buffers scale with
-/// it and sit outside the cache).
-const BACKGROUND_JOBS: i32 = 2;
-
-/// Memtables per column family. RocksDB needs at least two: one flushing
-/// while the other takes writes.
-///
-/// **Derived, not a knob.** Two is RocksDB's structural minimum, and every
-/// memtable term below divides the budget share by it, so raising it shrinks
-/// each memtable rather than buying anything. No measurement has wanted a
-/// third, so it stays a constant.
-const WRITE_BUFFERS_PER_CF: u64 = 2;
-
-/// Floor on a single memtable. Below roughly this, RocksDB flushes so often
-/// that compaction cannot keep up and the write path stalls on L0 instead of
-/// on memory — smaller stops buying memory and starts buying stalls.
-const MIN_WRITE_BUFFER_BYTES: u64 = 64 * 1024;
-
-/// Share of the budget memtables may take before flushes are forced.
-const MEMTABLE_SHARE_PERCENT: u64 = 40;
-
-/// How often RocksDB rewrites aged SSTs so retirement is actually reclaimed —
-/// that is, so the range tombstones purge writes are dropped and the space
-/// comes back. RocksDB's own default here is 30 days; this only shortens it.
-/// Pure space-versus-write-amplification — not a correctness value, because
-/// purge is durable the moment its batch is fenced.
-const RETIRE_SWEEP_DEFAULT: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+use crate::config::{StorageConfig, WRITE_BUFFERS_PER_CF, memtable_budget};
+use crate::error::StorageError;
+use crate::handles::{Batch, Cf, ColumnFamily, Pinned, Scan};
 
 /// One column family to create: which store owns it, and the one knob the
 /// owning store gets to choose.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct CfSpec {
-    pub(crate) subsystem: Subsystem,
+pub struct CfSpec {
+    pub cf: ColumnFamily,
     /// zstd, or none for the high-volume rebuildable stores.
-    pub(crate) compress: bool,
+    pub compress: bool,
 }
 
-fn memtable_budget(budget: ByteSize) -> u64 {
-    // saturating: a budget large enough to overflow this is not a budget.
-    budget
-        .as_u64()
-        .saturating_mul(MEMTABLE_SHARE_PERCENT)
-        .checked_div(100)
-        .unwrap_or(0)
-}
-
-/// The node's storage tuning: the memory budget, plus the few RocksDB terms
-/// worth overriding on a node that has been measured.
-///
-/// **Every override is `None` by default and every `None` derives from
-/// `memory`.** The derivations are the accessors below and they are the only
-/// place a value is written, so an unset knob and the pre-knob behaviour are
-/// the same number by construction rather than by two defaults agreeing.
-///
-/// The exposed set is deliberately short (CLAUDE.md §15's spirit, applied to
-/// configuration): everything else RocksDB offers stays a derived constant
-/// carrying a comment naming what it came from.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct StorageConfig {
-    /// Total memory the engine may hold — block cache, index and filter
-    /// blocks, and the memtables charged against it. The one number to move.
-    pub(crate) memory: ByteSize,
-    /// One memtable's size. Overridable because it is the term a measurement
-    /// actually caught: RocksDB's 64 MiB default was applied regardless of the
-    /// budget and a 64 MiB node was over its whole budget on one memtable.
-    pub(crate) write_buffer: Option<ByteSize>,
-    /// SST target size. Derived at 2x the memtable — a heuristic shape, not a
-    /// measured quantity, which is exactly why it has an override.
-    pub(crate) target_file_size: Option<ByteSize>,
-    /// Cap on retained WAL. Measured at 92 WAL files / 9.7 GB in five seconds
-    /// when it was unset.
-    pub(crate) max_total_wal: Option<ByteSize>,
-    /// Background compaction + flush threads. Compaction buffers scale with it
-    /// and sit outside the budget, so lowering it is the RSS-overshoot lever.
-    pub(crate) max_background_jobs: Option<i32>,
-    /// Open SST files. Each holds a table reader outside the block cache — the
-    /// other term that escapes the budget as the dataset grows.
-    pub(crate) max_open_files: Option<i32>,
-    /// Override for [`RETIRE_SWEEP_DEFAULT`]. See that constant.
-    pub(crate) retire_sweep: Option<std::time::Duration>,
-}
-
-impl StorageConfig {
-    /// A node's storage tuning with every override unset: the budget alone,
-    /// everything else derived from it.
-    ///
-    /// Test-only: production always comes from a node config, which has a field
-    /// per override and so builds the struct literally. Nothing outside a test
-    /// wants "the budget and nothing else".
-    #[must_use]
-    #[cfg(test)]
-    pub(crate) const fn new(memory: ByteSize) -> Self {
-        Self {
-            memory,
-            write_buffer: None,
-            target_file_size: None,
-            max_total_wal: None,
-            max_background_jobs: None,
-            max_open_files: None,
-            retire_sweep: None,
-        }
-    }
-
-    /// One memtable's size. The [`WriteBufferManager`] caps the total
-    /// independently; this is what keeps a SINGLE family from claiming the
-    /// whole share, which the manager alone does not prevent.
-    ///
-    /// `cf_count` is the real number of families, not a planning constant: an
-    /// explicit descriptor list makes the count known at open, so each replica
-    /// is sized for exactly the families it declares.
-    fn write_buffer_bytes(self, cf_count: usize) -> u64 {
-        if let Some(explicit) = self.write_buffer {
-            return explicit.as_u64().max(MIN_WRITE_BUFFER_BYTES);
-        }
-        let families = u64::try_from(cf_count).unwrap_or(1).max(1);
-        memtable_budget(self.memory)
-            .checked_div(families.saturating_mul(WRITE_BUFFERS_PER_CF))
-            .unwrap_or(MIN_WRITE_BUFFER_BYTES)
-            .max(MIN_WRITE_BUFFER_BYTES)
-    }
-
-    /// SST target size. Sized to the memtable that produces them: RocksDB's
-    /// 64 MiB default would have compaction assembling files far larger than
-    /// the whole budget, and its input/output buffers are outside the cache.
-    fn target_file_size_bytes(self, cf_count: usize) -> u64 {
-        match self.target_file_size {
-            Some(explicit) => explicit.as_u64().max(1),
-            // saturating: the factor is heuristic shape, not a quantity to
-            // preserve exactly.
-            None => self.write_buffer_bytes(cf_count).saturating_mul(2),
-        }
-    }
-
-    /// Cap on retained WAL. Bounds *disk*, but it is sized from the memory
-    /// budget on purpose: exceeding it forces the memtables holding the oldest
-    /// WAL to flush, so it is the backstop that keeps unflushed data — and the
-    /// WAL replay a restart would have to do — proportional to the budget.
-    fn max_total_wal_bytes(self) -> u64 {
-        match self.max_total_wal {
-            Some(explicit) => explicit.as_u64(),
-            // saturating: the doubling is heuristic headroom, not an exact
-            // quantity.
-            None => memtable_budget(self.memory)
-                .saturating_mul(2)
-                .max(1024 * 1024),
-        }
-    }
-
-    /// Background compaction + flush threads.
-    fn background_jobs(self) -> i32 {
-        self.max_background_jobs.unwrap_or(BACKGROUND_JOBS)
-    }
-
-    /// Open SST files, scaled off the budget when unset.
-    fn open_files(self) -> i32 {
-        if let Some(explicit) = self.max_open_files {
-            return explicit;
-        }
-        let scaled = self
-            .memory
-            .as_u64()
-            .checked_div(2 * 1024 * 1024)
-            .unwrap_or(0)
-            .clamp(16, 512);
-        i32::try_from(scaled).unwrap_or(64)
-    }
-
-    /// Reclamation cadence, in seconds. See [`RETIRE_SWEEP_DEFAULT`].
-    ///
-    /// `.max(1)`: RocksDB reads `periodic_compaction_seconds == 0` as
-    /// *disabled*, not "as often as possible". `Duration::as_secs()` truncates
-    /// sub-second durations to zero, so an operator configuring a short sweep
-    /// (say, 500ms, to reclaim aggressively in a test) would otherwise
-    /// silently turn reclamation off instead — the opposite of what they
-    /// asked for. Clamping here makes that trap unrepresentable rather than
-    /// merely unlikely, for every override however it arrives.
-    fn retire_sweep_secs(self) -> u64 {
-        self.retire_sweep
-            .unwrap_or(RETIRE_SWEEP_DEFAULT)
-            .as_secs()
-            .max(1)
-    }
-
-    /// Reject a tuning that cannot open, naming the knob and the constraint.
-    ///
-    /// Only the *explicit* values are checked: a derived one is produced by the
-    /// accessors above, which are total.
-    pub(crate) fn validate(self) -> Result<(), Error> {
-        if self.memory.as_u64() == 0 {
-            return Err(Error::InvalidConfiguration(
-                "storage_memory must be > 0: it is the whole engine's budget".to_owned(),
-            ));
-        }
-        if let Some(wb) = self.write_buffer
-            && wb.as_u64() < MIN_WRITE_BUFFER_BYTES
-        {
-            return Err(Error::InvalidConfiguration(format!(
-                "storage_write_buffer ({} bytes) must be >= {MIN_WRITE_BUFFER_BYTES} bytes: \
-                 below that RocksDB flushes faster than compaction can keep up and the \
-                 write path stalls on L0 instead of on memory",
-                wb.as_u64(),
-            )));
-        }
-        if let Some(tf) = self.target_file_size
-            && tf.as_u64() == 0
-        {
-            return Err(Error::InvalidConfiguration(
-                "storage_target_file_size must be > 0".to_owned(),
-            ));
-        }
-        if let Some(wal) = self.max_total_wal
-            && wal.as_u64() == 0
-        {
-            return Err(Error::InvalidConfiguration(
-                "storage_max_total_wal must be > 0: zero would force a flush on every write"
-                    .to_owned(),
-            ));
-        }
-        if let Some(jobs) = self.max_background_jobs
-            && jobs < 1
-        {
-            return Err(Error::InvalidConfiguration(format!(
-                "storage_max_background_jobs ({jobs}) must be >= 1: with no background \
-                 thread nothing flushes or compacts",
-            )));
-        }
-        if let Some(files) = self.max_open_files
-            && files == 0
-        {
-            return Err(Error::InvalidConfiguration(
-                "storage_max_open_files must be non-zero (-1 means unlimited)".to_owned(),
-            ));
-        }
-        if let Some(files) = self.max_open_files
-            && files < -1
-        {
-            return Err(Error::InvalidConfiguration(format!(
-                "storage_max_open_files ({files}) must be -1 (unlimited) or positive",
-            )));
+/// Create the storage root and fsync its *parent*, so the root's own directory
+/// entry is durable before any store opens beneath it. Without that, a crash can
+/// take the root with it and orphan everything the stores below believe they
+/// persisted. Called once per node, at boot.
+pub async fn create_storage_root(root: &Path) -> Result<(), StorageError> {
+    let root = root.to_path_buf();
+    tokio::task::spawn_blocking(move || -> Result<(), StorageError> {
+        std::fs::create_dir_all(&root)
+            .map_err(|e| StorageError::Storage(format!("create storage root: {e}")))?;
+        if let Some(parent) = root.parent() {
+            std::fs::File::open(parent)
+                .and_then(|d| d.sync_all())
+                .map_err(|e| StorageError::Storage(format!("fsync storage-root parent: {e}")))?;
         }
         Ok(())
-    }
+    })
+    .await
+    .map_err(|e| StorageError::Storage(format!("storage-root creation panicked: {e}")))?
 }
 
 /// DB-wide options plus the cache everything is charged to.
-fn db_options(cfg: StorageConfig) -> Result<(Options, Cache), Error> {
+fn db_options(cfg: StorageConfig) -> Result<(Options, Cache), StorageError> {
     let budget = cfg.memory;
     let cache = Cache::new_lru_cache(budget.as_usize()?);
     // Memtables charged to the SAME cache. Without this they are a separate
@@ -344,7 +93,7 @@ fn cf_options(
     cf_count: usize,
     cache: &Cache,
     compress: bool,
-) -> Result<Options, Error> {
+) -> Result<Options, StorageError> {
     let mut bb = BlockBasedOptions::default();
     bb.set_block_cache(cache);
     // Index + filter blocks inside the budget rather than growing without
@@ -394,7 +143,7 @@ fn cf_options(
 
 /// The node's storage: one RocksDB, one block cache, one column family per
 /// store.
-pub(crate) struct Storage {
+pub struct Storage {
     db: DBWithThreadMode<MultiThreaded>,
     cache: Cache,
     /// Every column family this storage has open, in the order [`open`]
@@ -402,19 +151,19 @@ pub(crate) struct Storage {
     /// back what was actually opened instead of re-deriving it.
     ///
     /// [`open`]: Self::open
-    subsystems: Vec<Subsystem>,
+    families: Vec<ColumnFamily>,
     /// Fault injection for the fail-stop tests. The claim under test — an
     /// append failure fail-stops the replica's flush loop and never continues —
     /// is worth pinning, but RocksDB writes into an already-open WAL and buffers
     /// in the memtable, so no filesystem trick fails a write deterministically.
     /// Hence an explicit seam. See [`Self::fail_writes_from_now_on`].
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     fail_writes: std::sync::atomic::AtomicBool,
     /// The same seam for the fence. Separate from
     /// [`fail_writes`](Self::fail_writes) because the claims differ: a failed
     /// *write* must leave the batch unapplied, a failed *fence* must take the
     /// node down. See [`Self::fail_fences_from_now_on`].
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     fail_fences: std::sync::atomic::AtomicBool,
 }
 
@@ -424,19 +173,17 @@ impl Storage {
     /// `cfs` is the complete schema: every family that will ever be used is
     /// named here, so there is no lazy creation and no reopen path that has to
     /// guess. That is what makes the live family count exact for sizing.
-    pub(crate) fn open(
+    pub fn open(
         root: &Path,
         cfg: StorageConfig,
         cfs: &[CfSpec],
-    ) -> Result<Arc<Self>, Error> {
+    ) -> Result<Arc<Self>, StorageError> {
         cfg.validate()?;
-        std::fs::create_dir_all(root).to_storage("create rocksdb root")?;
+        std::fs::create_dir_all(root)
+            .map_err(|e| StorageError::Storage(format!("create rocksdb root: {e}")))?;
         let (db_opts, cache) = db_options(cfg)?;
 
-        let mut subsystems = Vec::with_capacity(cfs.len());
-        for spec in cfs {
-            subsystems.push(spec.subsystem);
-        }
+        let families: Vec<ColumnFamily> = cfs.iter().map(|spec| spec.cf).collect();
 
         // In a multi-node-in-one-process test, a killed node's `Arc<Storage>`
         // clones may still be held by aborted tokio tasks whose drop is
@@ -457,7 +204,7 @@ impl Storage {
                 let mut descriptors = Vec::with_capacity(cfs.len());
                 for spec in cfs {
                     let opts = cf_options(cfg, cfs.len(), &cache, spec.compress)?;
-                    descriptors.push(ColumnFamilyDescriptor::new(spec.subsystem.cf_name(), opts));
+                    descriptors.push(ColumnFamilyDescriptor::new(spec.cf.name(), opts));
                 }
                 match DBWithThreadMode::open_cf_descriptors(&db_opts, root, descriptors) {
                     Ok(db) => break db,
@@ -469,7 +216,7 @@ impl Storage {
                             std::thread::sleep(LOCK_RETRY_INTERVAL);
                             continue;
                         }
-                        return Err(Error::Storage(format!(
+                        return Err(StorageError::Storage(format!(
                             "open rocksdb at {}: {e}",
                             root.display()
                         )));
@@ -481,70 +228,55 @@ impl Storage {
         let storage = Arc::new(Self {
             db,
             cache,
-            subsystems,
-            #[cfg(test)]
+            families,
+            #[cfg(any(test, feature = "testing"))]
             fail_writes: std::sync::atomic::AtomicBool::new(false),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "testing"))]
             fail_fences: std::sync::atomic::AtomicBool::new(false),
         });
         Ok(storage)
     }
 
-    /// Open a storage root carrying **every** column family, for tests.
-    ///
-    /// A root's descriptor list must name every family it has ever held, so a
-    /// test helper that opened a subset would make the roots two test
-    /// constructors produce mutually incompatible. Naming all of them means any
-    /// test store can share a root with any other — which is what lets one
-    /// `Storage` back a stable log and a local store in one test.
-    #[cfg(test)]
-    pub(crate) fn open_for_test(root: &Path) -> Result<Arc<Self>, Error> {
-        let cfs: Vec<CfSpec> = [
-            Subsystem::ReplicaLog,
-            Subsystem::StableLog,
-            Subsystem::LocalStoreData,
-            Subsystem::LocalStoreCursors,
-            Subsystem::RaftLog,
-            Subsystem::RaftMeta,
-            Subsystem::NodeId,
-        ]
-        .into_iter()
-        .map(|subsystem| CfSpec {
-            subsystem,
-            compress: false,
-        })
-        .collect();
-        Self::open(root, StorageConfig::new(ByteSize::from_mib(64)), &cfs)
-    }
-
-    /// The raw handle, for the `get_pinned_cf` / `iterator_cf_opt` calls the
-    /// stores make directly. Wrapping those would only be a shorter spelling of
-    /// a call the caller can already make.
-    pub(crate) fn db(&self) -> &DBWithThreadMode<MultiThreaded> {
-        &self.db
-    }
-
     /// The column-family handle. Missing means the store was not named in the
     /// `CfSpec` list at open, which is a boot-wiring bug, not a runtime state.
-    pub(crate) fn cf(&self, s: Subsystem) -> Result<Arc<BoundColumnFamily<'_>>, Error> {
-        self.db.cf_handle(s.cf_name()).ok_or_else(|| {
-            Error::Storage(format!(
+    pub fn cf(&self, family: ColumnFamily) -> Result<Cf<'_>, StorageError> {
+        self.db.cf_handle(family.name()).map(Cf).ok_or_else(|| {
+            StorageError::Storage(format!(
                 "column family {} was not opened (not in the node's CfSpec list)",
-                s.cf_name()
+                family.name()
             ))
         })
     }
 
+    /// One point read. The returned value pins its block in the cache, so it
+    /// must not cross an `.await` or a batch commit.
+    pub fn get_pinned(
+        &self,
+        cf: &Cf<'_>,
+        key: impl AsRef<[u8]>,
+    ) -> Result<Option<Pinned<'_>>, StorageError> {
+        self.db
+            .get_pinned_cf(&cf.0, key)
+            .map(|found| found.map(Pinned))
+            .map_err(|e| StorageError::Storage(e.to_string()))
+    }
+
+    /// An ordered scan over one column family, unpositioned: seek before reading.
+    #[must_use]
+    pub fn scan(&self, cf: &Cf<'_>) -> Scan<'_> {
+        Scan(self.db.raw_iterator_cf(&cf.0))
+    }
+
     /// Atomic across the batch, and across column families. Not durable until
     /// [`fence`](Self::fence).
-    pub(crate) fn write(&self, batch: WriteBatch) -> Result<(), Error> {
-        #[cfg(test)]
+    pub fn write(&self, batch: Batch) -> Result<(), StorageError> {
+        #[cfg(any(test, feature = "testing"))]
         if self.fail_writes.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(Error::Storage("injected write failure".into()));
+            return Err(StorageError::Storage("injected write failure".into()));
         }
-        self.db
-            .write(&batch)
-            .map_err(|e| Error::Storage(format!("rocksdb write (batch of {}): {e}", batch.len())))
+        self.db.write(&batch.0).map_err(|e| {
+            StorageError::Storage(format!("rocksdb write (batch of {}): {e}", batch.len()))
+        })
     }
 
     /// The commit fence of CLAUDE.md §8: everything written before this returns
@@ -560,7 +292,7 @@ impl Storage {
     /// reverted (docs/ROCKSDB_MIGRATION.md §7.2) after measurement showed no
     /// benefit at the load it targeted and a worse one at higher load. This
     /// calls [`fence_now`](Self::fence_now) directly.
-    pub(crate) fn fence(&self) -> Result<(), Error> {
+    pub fn fence(&self) -> Result<(), StorageError> {
         self.fence_now()
     }
 
@@ -569,36 +301,36 @@ impl Storage {
     /// contract: the writes this covers committed long before it is called.
     /// Off the runtime worker (CLAUDE.md §19): the fsync runs on a blocking
     /// thread.
-    pub(crate) async fn fence_async(self: &Arc<Self>) -> Result<(), Error> {
+    pub async fn fence_async(self: &Arc<Self>) -> Result<(), StorageError> {
         let storage = Arc::clone(self);
         tokio::task::spawn_blocking(move || storage.fence_now())
             .await
-            .map_err(|e| Error::Storage(format!("fence join: {e}")))?
+            .map_err(|e| StorageError::Storage(format!("fence join: {e}")))?
     }
 
     /// The durability call: one `flush_wal(true)` per [`fence`](Self::fence).
-    pub(crate) fn fence_now(&self) -> Result<(), Error> {
-        #[cfg(test)]
+    pub fn fence_now(&self) -> Result<(), StorageError> {
+        #[cfg(any(test, feature = "testing"))]
         if self.fail_fences.load(std::sync::atomic::Ordering::SeqCst) {
-            return Err(Error::Storage("injected fence failure".into()));
+            return Err(StorageError::Storage("injected fence failure".into()));
         }
         self.db
             .flush_wal(true)
-            .map_err(|e| Error::Storage(format!("rocksdb flush_wal: {e}")))
+            .map_err(|e| StorageError::Storage(format!("rocksdb flush_wal: {e}")))
     }
 
     /// Make every subsequent [`write`](Self::write) fail. See
     /// [`fail_writes`](Self::fail_writes).
-    #[cfg(test)]
-    pub(crate) fn fail_writes_from_now_on(&self) {
+    #[cfg(any(test, feature = "testing"))]
+    pub fn fail_writes_from_now_on(&self) {
         self.fail_writes
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Make every subsequent [`fence_now`](Self::fence_now) fail. See
     /// [`fail_fences`](Self::fail_fences).
-    #[cfg(test)]
-    pub(crate) fn fail_fences_from_now_on(&self) {
+    #[cfg(any(test, feature = "testing"))]
+    pub fn fail_fences_from_now_on(&self) {
         self.fail_fences
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
@@ -609,7 +341,7 @@ impl Storage {
     /// for*, this is what is *held*. It reads one cache, this node's, because a
     /// node has exactly one — the process-wide registry sum it replaces could
     /// not tell six in-process loadgen nodes apart.
-    pub(crate) fn charged_bytes(&self) -> usize {
+    pub fn charged_bytes(&self) -> usize {
         self.cache.get_usage()
     }
 
@@ -619,16 +351,16 @@ impl Storage {
     /// Test-only for now: the number is a constant per node, so the gauge
     /// worth publishing is [`charged_bytes`](Self::charged_bytes) against it,
     /// and nothing in production reads the capacity on its own yet.
-    #[cfg(test)]
-    pub(crate) fn cache_capacity(&self) -> usize {
+    #[cfg(any(test, feature = "testing"))]
+    pub fn cache_capacity(&self) -> usize {
         self.cache.get_capacity()
     }
 
     /// Every column family this storage has open, read back off the list
     /// [`open`](Self::open) populated rather than re-deriving it, so a
     /// metrics loop cannot drift from what was actually opened.
-    pub(crate) fn column_families(&self) -> impl Iterator<Item = Subsystem> + '_ {
-        self.subsystems.iter().copied()
+    pub fn column_families(&self) -> impl Iterator<Item = ColumnFamily> + '_ {
+        self.families.iter().copied()
     }
 
     /// One RocksDB property for a single column family (e.g.
@@ -639,15 +371,15 @@ impl Storage {
     /// deliberately: a broken reading must not be published as a healthy
     /// zero, so the caller's job is to skip the gauge, never to substitute
     /// one.
-    pub(crate) fn property_u64(&self, s: Subsystem, name: &str) -> Option<u64> {
-        let cf = self.cf(s).ok()?;
-        self.db.property_int_value_cf(&cf, name).ok().flatten()
+    pub fn property_u64(&self, family: ColumnFamily, name: &str) -> Option<u64> {
+        let cf = self.cf(family).ok()?;
+        self.db.property_int_value_cf(&cf.0, name).ok().flatten()
     }
 
     /// One DB-wide RocksDB property (e.g. `rocksdb.actual-delayed-write-rate`),
     /// parsed as `u64`. Same "no fabricated zero" contract as
     /// [`property_u64`](Self::property_u64).
-    pub(crate) fn property_u64_db(&self, name: &str) -> Option<u64> {
+    pub fn property_u64_db(&self, name: &str) -> Option<u64> {
         self.db.property_int_value(name).ok().flatten()
     }
 
@@ -660,10 +392,11 @@ impl Storage {
     /// keys under it) out of the memtable and into an SST, which is a
     /// different code path from the all-in-memtable case a plain reopen
     /// exercises.
-    #[cfg(test)]
-    pub(crate) fn compact(&self, s: Subsystem) -> Result<(), Error> {
-        let cf = self.cf(s)?;
-        self.db.compact_range_cf(&cf, None::<&[u8]>, None::<&[u8]>);
+    #[cfg(any(test, feature = "testing"))]
+    pub fn compact(&self, family: ColumnFamily) -> Result<(), StorageError> {
+        let cf = self.cf(family)?;
+        self.db
+            .compact_range_cf(&cf.0, None::<&[u8]>, None::<&[u8]>);
         Ok(())
     }
 }
@@ -677,15 +410,19 @@ impl Storage {
 )]
 mod tests {
     use super::*;
+    use crate::config::{BACKGROUND_JOBS, MIN_WRITE_BUFFER_BYTES, RETIRE_SWEEP_DEFAULT};
+
+    const REPLICA_LOG: ColumnFamily = ColumnFamily::new("replica_log");
+    const STABLE_LOG: ColumnFamily = ColumnFamily::new("stable_log");
 
     fn specs() -> Vec<CfSpec> {
         vec![
             CfSpec {
-                subsystem: Subsystem::ReplicaLog,
+                cf: REPLICA_LOG,
                 compress: false,
             },
             CfSpec {
-                subsystem: Subsystem::StableLog,
+                cf: STABLE_LOG,
                 compress: true,
             },
         ]
@@ -774,14 +511,14 @@ mod tests {
         )
         .unwrap();
         let before = one.charged_bytes();
-        let mut batch = WriteBatch::default();
-        let cf = two.cf(Subsystem::ReplicaLog).unwrap();
+        let mut batch = Batch::new();
+        let cf = two.cf(REPLICA_LOG).unwrap();
         for i in 0u64..2_000 {
-            batch.put_cf(&cf, i.to_be_bytes(), vec![0u8; 4096]);
+            batch.put(&cf, i.to_be_bytes(), vec![0u8; 4096]);
         }
         two.write(batch).unwrap();
         two.fence().unwrap();
-        let _ = two.cf(Subsystem::ReplicaLog).unwrap();
+        let _ = two.cf(REPLICA_LOG).unwrap();
         assert_eq!(
             before,
             one.charged_bytes(),
@@ -955,28 +692,24 @@ mod tests {
     /// Write one batch of `keys` into the replica-log family and fence it, so
     /// it is committed and durable in the WAL before this returns.
     fn put_batch_and_fence(storage: &Storage, keys: &[&[u8]]) {
-        let cf = storage.cf(Subsystem::ReplicaLog).unwrap();
-        let mut batch = WriteBatch::default();
+        let cf = storage.cf(REPLICA_LOG).unwrap();
+        let mut batch = Batch::new();
         for key in keys {
-            batch.put_cf(&cf, key, vec![7u8; 128]);
+            batch.put(&cf, key, vec![7u8; 128]);
         }
         storage.write(batch).unwrap();
         storage.fence().unwrap();
     }
 
     fn has_key(storage: &Storage, key: &[u8]) -> bool {
-        let cf = storage.cf(Subsystem::ReplicaLog).unwrap();
-        storage
-            .db()
-            .get_pinned_cf(&cf, key)
-            .expect("read back")
-            .is_some()
+        let cf = storage.cf(REPLICA_LOG).unwrap();
+        storage.get_pinned(&cf, key).expect("read back").is_some()
     }
 
     /// Synchronous: no runtime means no background compaction task, so the
     /// last `Arc` really is the last one and dropping it releases the LOCK —
     /// which is what lets these tests reopen the root.
-    fn open_test_storage(root: &Path) -> Result<Arc<Storage>, Error> {
+    fn open_test_storage(root: &Path) -> Result<Arc<Storage>, StorageError> {
         Storage::open(root, StorageConfig::new(ByteSize::from_mib(64)), &specs())
     }
 

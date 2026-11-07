@@ -1,4 +1,4 @@
-//! The persistent node identity: one row in the [`Subsystem::NodeId`] column
+//! The persistent node identity: one row in the [`NODE_ID_CF`] column
 //! family of the node's one RocksDB.
 //!
 //! Write-once is a safety property, not tidiness. A `NodeId` is how the rest
@@ -12,13 +12,13 @@
 //! (CLAUDE.md §8): the row is durable — and safe to hand to a caller — only
 //! after [`Storage::fence`] returns, never before.
 
-use rust_rocksdb::WriteBatch;
+use rocksdb_kit::Batch;
+use rocksdb_kit::ColumnFamily;
 use uuid::Uuid;
 
-use super::Subsystem;
-use super::storage::Storage;
 use crate::error::ToStorage;
 use crate::{Error, NodeId};
+use rocksdb_kit::Storage;
 
 /// This column family's only row.
 const KEY: &[u8] = b"node_id";
@@ -26,12 +26,8 @@ const KEY: &[u8] = b"node_id";
 /// Idempotent across restarts, and durable before it returns — a caller that
 /// gets an id may act on it immediately.
 pub(crate) fn load_or_create_node_id(storage: &Storage) -> Result<NodeId, Error> {
-    let cf = storage.cf(Subsystem::NodeId)?;
-    if let Some(bytes) = storage
-        .db()
-        .get_pinned_cf(&cf, KEY)
-        .to_storage("node id read")?
-    {
+    let cf = storage.cf(NODE_ID_CF)?;
+    if let Some(bytes) = storage.get_pinned(&cf, KEY).to_storage("node id read")? {
         let raw: [u8; 16] = bytes
             .as_ref()
             .try_into()
@@ -40,12 +36,15 @@ pub(crate) fn load_or_create_node_id(storage: &Storage) -> Result<NodeId, Error>
     }
 
     let id = NodeId::new_v4();
-    let mut batch = WriteBatch::default();
-    batch.put_cf(&cf, KEY, id.0.as_bytes());
+    let mut batch = Batch::new();
+    batch.put(&cf, KEY, id.0.as_bytes());
     storage.write(batch)?;
     storage.fence()?;
     Ok(id)
 }
+
+/// The write-once node identity row.
+pub(crate) const NODE_ID_CF: ColumnFamily = ColumnFamily::new("node_id");
 
 #[cfg(test)]
 #[allow(
@@ -56,10 +55,10 @@ pub(crate) fn load_or_create_node_id(storage: &Storage) -> Result<NodeId, Error>
 )]
 mod tests {
     use super::*;
-    use crate::database::storage::Storage;
+    use rocksdb_kit::Storage;
 
     fn test_storage(root: &std::path::Path) -> std::sync::Arc<Storage> {
-        Storage::open_for_test(root).expect("open test storage")
+        crate::database::open_for_test(root).expect("open test storage")
     }
 
     #[tokio::test]
@@ -84,9 +83,9 @@ mod tests {
     async fn corrupt_row_refuses_to_load() {
         let dir = tempfile::tempdir().expect("tempdir");
         let storage = test_storage(dir.path());
-        let cf = storage.cf(Subsystem::NodeId).unwrap();
-        let mut batch = WriteBatch::default();
-        batch.put_cf(&cf, KEY, b"not a uuid");
+        let cf = storage.cf(NODE_ID_CF).unwrap();
+        let mut batch = Batch::new();
+        batch.put(&cf, KEY, b"not a uuid");
         storage.write(batch).unwrap();
         storage.fence().unwrap();
 

@@ -2866,6 +2866,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rocksdb-kit"
+version = "0.1.0"
+dependencies = [
+ "bytesize",
+ "rust-rocksdb",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
 name = "rpassword"
 version = "7.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4436,7 +4447,7 @@ dependencies = [
  "pprof",
  "proptest",
  "rand 0.10.3",
- "rust-rocksdb",
+ "rocksdb-kit",
  "serde",
  "serde_json",
  "shutdown",

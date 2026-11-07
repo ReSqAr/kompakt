@@ -35,14 +35,13 @@
 //! open rather than repairing itself by discarding; wipe and rejoin under a new
 //! `NodeId` is the operator procedure.
 
+use rocksdb_kit::ColumnFamily;
 use std::sync::{Arc, Weak};
 
-use rust_rocksdb::WriteBatch;
+use rocksdb_kit::Batch as RocksBatch;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
-use crate::database::Subsystem;
-use crate::database::storage::Storage;
 use crate::error::{Error, ToStorage};
 use crate::hlc::{Hlc, HlcGuard};
 use crate::ids::{DataId, LogIndex};
@@ -51,12 +50,16 @@ use crate::metrics::{self, FlushTrigger, LogType, OpState};
 use crossbeam_combinators::{
     Channel, Fanout, FanoutConfig, OverflowPolicy, Registry, Seam, Segment, broadcast,
 };
+use rocksdb_kit::Storage;
 
 /// Fallback sizing for [`ReplicaLogStore::open_with_flush`], the
 /// directory-shaped entry point used by the test constructors. Production goes
 /// through [`ReplicaLogStore::open`], which carries the operator-configured
 /// values from `ReplicaLogConfig`. Kept in step with `ReplicaLogConfig::for_test`
 /// by `open_engine_defaults_match_the_config_defaults`.
+/// This replica's dense local log.
+pub(crate) const REPLICA_LOG_CF: ColumnFamily = ColumnFamily::new("replica_log");
+
 #[cfg(test)]
 const DEFAULT_SUBSCRIBE_CHANNEL_CAPACITY: usize = 1024;
 #[cfg(test)]
@@ -182,8 +185,8 @@ fn truncated_value(key: &[u8], len: usize) -> Error {
 /// `max_hlc` because the secondary is a running maximum. One `seek_to_last`;
 /// the sweep this replaced (`max_live_secondary`) was O(live entries).
 fn newest_live_entry(storage: &Storage) -> Result<Option<(LogIndex, Hlc)>, Error> {
-    let cf = storage.cf(Subsystem::ReplicaLog)?;
-    let mut it = storage.db().raw_iterator_cf(&cf);
+    let cf = storage.cf(REPLICA_LOG_CF)?;
+    let mut it = storage.scan(&cf);
     it.seek_to_last();
     if let Some(key) = it.key() {
         // PINNING RULE: `key` borrows the iterator's current block and pins it.
@@ -203,8 +206,8 @@ fn newest_live_entry(storage: &Storage) -> Result<Option<(LogIndex, Hlc)>, Error
 /// on the first *live* key and this walk costs O(newly covered), not
 /// O(everything ever purged).
 fn purge_boundary(storage: &Storage, threshold: Hlc) -> Result<Option<LogIndex>, Error> {
-    let cf = storage.cf(Subsystem::ReplicaLog)?;
-    let mut it = storage.db().raw_iterator_cf(&cf);
+    let cf = storage.cf(REPLICA_LOG_CF)?;
+    let mut it = storage.scan(&cf);
     it.seek_to_first();
     let mut boundary = None;
     while let Some(key) = it.key() {
@@ -233,8 +236,8 @@ fn for_each_entry(
     to: LogIndex,
     sink: &mut EntrySink<'_>,
 ) -> Result<(), Error> {
-    let cf = storage.cf(Subsystem::ReplicaLog)?;
-    let mut it = storage.db().raw_iterator_cf(&cf);
+    let cf = storage.cf(REPLICA_LOG_CF)?;
+    let mut it = storage.scan(&cf);
     it.seek(encode_primary(from));
     while let Some(key) = it.key() {
         // PINNING RULE: `key` and `value` below both borrow the iterator's
@@ -478,10 +481,10 @@ impl Committer {
         staged: &[(LogIndex, Data, HlcGuard)],
         start_max: Option<Hlc>,
     ) -> Result<Option<Hlc>, Error> {
-        let cf = storage.cf(Subsystem::ReplicaLog)?;
+        let cf = storage.cf(REPLICA_LOG_CF)?;
         // No global write lock: batches commit atomically and are ordered at
         // the WAL, so opening one never blocks on another writer.
-        let mut batch = WriteBatch::default();
+        let mut batch = RocksBatch::new();
         let mut running = start_max;
         for (index, data, _) in staged {
             let hlc = data.data_id.hlc();
@@ -491,7 +494,7 @@ impl Committer {
             // Vectored so `data.blob` is copied into the batch buffer once,
             // exactly as a single put_cf would — no concatenation buffer.
             batch
-                .put_cf_vectored(
+                .put_vectored(
                     &cf,
                     &[std::io::IoSlice::new(&key)],
                     &[
@@ -609,7 +612,7 @@ impl ReplicaLogStore {
                 .write_channel_capacity
                 .get(),
         );
-        let storage = Storage::open_for_test(&dir)?;
+        let storage = crate::database::open_for_test(&dir)?;
         let store = Arc::new(
             Self::open_sized(
                 storage,
@@ -755,15 +758,15 @@ impl ReplicaLogStore {
         let Some(boundary) = purge_boundary(&self.storage, clamped)? else {
             return Ok(());
         };
-        let cf = self.storage.cf(Subsystem::ReplicaLog)?;
-        let mut batch = WriteBatch::default();
-        batch.delete_range_cf(
+        let cf = self.storage.cf(REPLICA_LOG_CF)?;
+        let mut batch = RocksBatch::new();
+        batch.delete_range(
             &cf,
             &encode_primary(LogIndex::ZERO)[..],
             &encode_primary(boundary)[..],
         );
         self.storage.write(batch)?;
-        self.storage.fence()
+        self.storage.fence().map_err(Into::into)
     }
 }
 
@@ -1134,8 +1137,8 @@ mod tests {
     /// Every stored key, decoded. Key-only: no value copies, and the secondary
     /// is what the monotonicity assertions are about.
     fn scan_keys(storage: &Storage) -> Result<Vec<(LogIndex, Hlc)>, Error> {
-        let cf = storage.cf(Subsystem::ReplicaLog)?;
-        let mut it = storage.db().raw_iterator_cf(&cf);
+        let cf = storage.cf(REPLICA_LOG_CF)?;
+        let mut it = storage.scan(&cf);
         it.seek_to_first();
         let mut out = Vec::new();
         while let Some(key) = it.key() {
@@ -1489,18 +1492,12 @@ mod tests {
                     .expect("append");
             }
             assert_eq!(store.max_hlc(), Some(Hlc(9000)));
-            store
-                .storage
-                .compact(Subsystem::ReplicaLog)
-                .expect("compact");
+            store.storage.compact(REPLICA_LOG_CF).expect("compact");
 
             // A threshold above every *low* entry. It covers nothing: entry 0's
             // running max is 9000, and so is every later entry's.
             store.set_purge_threshold(Hlc(400)).expect("purge");
-            store
-                .storage
-                .compact(Subsystem::ReplicaLog)
-                .expect("compact");
+            store.storage.compact(REPLICA_LOG_CF).expect("compact");
             drop(store);
             let _ = flush.await;
         }
@@ -1814,20 +1811,14 @@ mod tests {
         // Rewrite the SSTs so the purge below is exercised against files: a
         // DeleteRange tombstone written over keys already resident in an SST
         // is a different shape than one that only ever touches the memtable.
-        store
-            .storage
-            .compact(Subsystem::ReplicaLog)
-            .expect("compact");
+        store.storage.compact(REPLICA_LOG_CF).expect("compact");
 
         // Threshold covers entries 0..=3 (running max <= 300); the frontier's
         // max_hlc is 800, so the clamp leaves the threshold untouched. Purge
         // is a durable `DeleteRange`, fenced synchronously by this call — the
         // compact() above is only to exercise the SST-resident path.
         store.set_purge_threshold(Hlc(300)).expect("purge");
-        store
-            .storage
-            .compact(Subsystem::ReplicaLog)
-            .expect("compact");
+        store.storage.compact(REPLICA_LOG_CF).expect("compact");
         {
             // `subscribe_from(Some(LogIndex(3)))` → start = 4: entries 4..=8
             // survive (5). The live tail is infinite, so bound the drain.
@@ -1866,10 +1857,7 @@ mod tests {
         // A threshold past EVERY entry clamps to `max_hlc - 1`: the frontier
         // entry itself survives — including across a reopen.
         store.set_purge_threshold(Hlc(u64::MAX)).expect("purge");
-        store
-            .storage
-            .compact(Subsystem::ReplicaLog)
-            .expect("compact");
+        store.storage.compact(REPLICA_LOG_CF).expect("compact");
         assert_eq!(store.frontier(), Some(LogIndex(8)));
         {
             // start = 8 (next_after 7): only the frontier entry survives.
@@ -1912,7 +1900,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn max_hlc_folds_every_entry_of_one_batch() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let storage = Storage::open_for_test(&dir.path().join("replica-log")).expect("storage");
+        let storage =
+            crate::database::open_for_test(&dir.path().join("replica-log")).expect("storage");
         let (tx, rx) = crossbeam_channel::bounded(4);
         let store = Arc::new(
             ReplicaLogStore::open_sized(storage, tx.clone(), 16, 16)
@@ -1973,10 +1962,7 @@ mod tests {
             // Rewrite the purged prefix's tombstone into an SST before the
             // reopen below, so "stays gone" is checked against the
             // SST-resident shape, not only the WAL/memtable one.
-            store
-                .storage
-                .compact(Subsystem::ReplicaLog)
-                .expect("compact");
+            store.storage.compact(REPLICA_LOG_CF).expect("compact");
             assert_eq!(
                 first_live_index(&store.storage).expect("scan"),
                 Some(LogIndex(1)),
@@ -2027,7 +2013,7 @@ mod tests {
                 }
                 // Interleave a compaction pass so reopen recovers from
                 // rewritten SSTs, not only the WAL/memtable.
-                store.storage.compact(Subsystem::ReplicaLog).expect("compact");
+                store.storage.compact(REPLICA_LOG_CF).expect("compact");
                 drop(store);
                 let _ = flush.await;
             });

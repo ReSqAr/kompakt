@@ -18,6 +18,7 @@
 //! lost to a crash; the subscription is at-least-once and the rescan that
 //! follows a hang-up, not the live path, is its recovery.
 
+use rocksdb_kit::ColumnFamily;
 use std::collections::{HashMap, HashSet};
 use std::ops::Bound;
 use std::sync::Arc;
@@ -25,10 +26,8 @@ use std::sync::Weak;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use rust_rocksdb::WriteBatch;
+use rocksdb_kit::Batch;
 
-use crate::database::Subsystem;
-use crate::database::storage::Storage;
 use crate::learner::local_store::Dedup;
 use crate::learner::local_store::key::{
     DATA_PRIMARY_WIDTH, decode_data_key, encode_cursor_key, encode_data_key,
@@ -38,6 +37,7 @@ use crossbeam_combinators::{
     Channel, Closed, Fanout, FanoutConfig, Feed, Finite, Infinite, OverflowPolicy, Registry,
     broadcast,
 };
+use rocksdb_kit::Storage;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tracing::error;
@@ -59,9 +59,9 @@ pub(crate) struct LocalStore {
     /// store frees its handles. Set via `Arc::new_cyclic` in `create_local_store`.
     ///
     /// The node's one RocksDB. This store owns two of its column families:
-    /// [`Subsystem::LocalStoreData`] (the `DataId` key itself — it is
+    /// [`LOCAL_STORE_DATA_CF`] (the `DataId` key itself — it is
     /// HLC-major — retired at the purge threshold, value = the bare blob) and
-    /// [`Subsystem::LocalStoreCursors`] (primary `NodeId`, overwritten in
+    /// [`LOCAL_STORE_CURSORS_CF`] (primary `NodeId`, overwritten in
     /// place, never retired). One DB is what makes a batch spanning them
     /// atomic — see the module header.
     storage: Arc<Storage>,
@@ -109,8 +109,8 @@ pub(in crate::learner::local_store) async fn create_local_store(
     // `COLUMN_FAMILIES` list when the one DB opened. Probe them here anyway, so
     // a boot-wiring omission fails at store creation rather than at the first
     // write.
-    drop(storage.cf(Subsystem::LocalStoreData)?);
-    drop(storage.cf(Subsystem::LocalStoreCursors)?);
+    drop(storage.cf(LOCAL_STORE_DATA_CF)?);
+    drop(storage.cf(LOCAL_STORE_CURSORS_CF)?);
 
     let (integrate_tx, integrate_rx) =
         crossbeam_channel::bounded(config.integrate_channel_capacity.get());
@@ -227,7 +227,7 @@ impl LocalStore {
         root: std::path::PathBuf,
         config: &super::LocalStoreConfig,
     ) -> Result<(Arc<Self>, Arc<crate::learner::stable_log::StableLog>), Error> {
-        let storage = Storage::open_for_test(&root)?;
+        let storage = crate::database::open_for_test(&root)?;
         let stable_log =
             Arc::new(crate::learner::stable_log::StableLog::open_on(Arc::clone(&storage)).await?);
         let watermark_source: Arc<dyn StableLogSnapshot> = stable_log.clone();
@@ -360,7 +360,7 @@ impl crate::api::LocalStoreMut for LocalStore {
         // `hlc <= threshold` is a key-order prefix. A durable range delete says
         // exactly that — no compaction filter, no in-memory clamp, and nothing
         // to re-arm after a reopen.
-        let cf = self.storage.cf(Subsystem::LocalStoreData)?;
+        let cf = self.storage.cf(LOCAL_STORE_DATA_CF)?;
         // An 8-byte key sorts before every 32-byte key sharing its prefix, so
         // `threshold + 1` big-endian is the exclusive upper bound. checked_add:
         // a threshold of u64::MAX means "purge everything", and an all-0xFF key
@@ -369,10 +369,10 @@ impl crate::api::LocalStoreMut for LocalStore {
             Some(next) => next.to_be_bytes().to_vec(),
             None => vec![0xFFu8; DATA_PRIMARY_WIDTH.saturating_add(1)],
         };
-        let mut batch = WriteBatch::default();
+        let mut batch = Batch::new();
         // The start bound is an 8-byte HLC-width prefix of zeros, matching the
         // 8-byte end bound above — neither is a full (32-byte) key.
-        batch.delete_range_cf(&cf, &[0u8; 8][..], &end[..]);
+        batch.delete_range(&cf, &[0u8; 8][..], &end[..]);
         self.storage.write(batch)?;
         // `fence_async`, not `fence`: this is an async fn called directly from
         // the local-store purge worker's task, with no blocking body of its
@@ -647,10 +647,9 @@ impl BatchIntegrator {
 
 /// A point read of one upstream's cursor.
 fn read_cursor(storage: &Storage, upstream: NodeId) -> Result<Option<LogIndex>, Error> {
-    let cf = storage.cf(Subsystem::LocalStoreCursors)?;
+    let cf = storage.cf(LOCAL_STORE_CURSORS_CF)?;
     let Some(pinned) = storage
-        .db()
-        .get_pinned_cf(&cf, encode_cursor_key(upstream))
+        .get_pinned(&cf, encode_cursor_key(upstream))
         .map_err(|e| Error::Storage(format!("read local-store cursor for {upstream:?}: {e}")))?
     else {
         return Ok(None);
@@ -675,8 +674,8 @@ fn for_each_data(
     range: (Bound<DataId>, Bound<DataId>),
     sink: &mut DataSink<'_>,
 ) -> Result<(), Error> {
-    let cf = storage.cf(Subsystem::LocalStoreData)?;
-    let mut it = storage.db().raw_iterator_cf(&cf);
+    let cf = storage.cf(LOCAL_STORE_DATA_CF)?;
+    let mut it = storage.scan(&cf);
     let (start, end) = range;
     match start {
         Bound::Unbounded => it.seek_to_first(),
@@ -739,13 +738,13 @@ fn commit_batch(
     data_rows: &[(DataId, Bytes)],
     cursors: &HashMap<NodeId, LogIndex>,
 ) -> Result<(), Error> {
-    let data_cf = store.storage.cf(Subsystem::LocalStoreData)?;
-    let cursor_cf = store.storage.cf(Subsystem::LocalStoreCursors)?;
+    let data_cf = store.storage.cf(LOCAL_STORE_DATA_CF)?;
+    let cursor_cf = store.storage.cf(LOCAL_STORE_CURSORS_CF)?;
     // No global write lock: batches commit atomically and are ordered at the
     // WAL, so opening one never blocks on another writer.
-    let mut batch = WriteBatch::default();
+    let mut batch = Batch::new();
     for (data_id, blob) in data_rows {
-        batch.put_cf(&data_cf, encode_data_key(*data_id), blob);
+        batch.put(&data_cf, encode_data_key(*data_id), blob);
     }
     for (source, source_index) in cursors {
         // The cursor only ever moves forward (`max` against the stored value),
@@ -756,9 +755,9 @@ fn commit_batch(
             Some(prev) => LogIndex(prev.raw().max(source_index.raw())),
             None => *source_index,
         };
-        batch.put_cf(&cursor_cf, encode_cursor_key(*source), new.0.to_be_bytes());
+        batch.put(&cursor_cf, encode_cursor_key(*source), new.0.to_be_bytes());
     }
-    store.storage.write(batch)
+    store.storage.write(batch).map_err(Into::into)
 }
 
 /// The scan bound strictly above every entry at `hlc` (or the start).
@@ -847,11 +846,22 @@ async fn flush_if_dirty(store: &LocalStore) -> Result<(), Error> {
     // flush and deliberately not a per-batch one — every byte here is a copy
     // of quorum-durable replica data and the durable cursor re-delivers after
     // a crash (see the module header).
-    store.storage.fence_async().await.inspect_err(|e| {
-        error!(error = %e, "local-store flush failed; shutting the node down");
-        store.dirty.store(true, Ordering::Release);
-    })
+    store
+        .storage
+        .fence_async()
+        .await
+        .inspect_err(|e| {
+            error!(error = %e, "local-store flush failed; shutting the node down");
+            store.dirty.store(true, Ordering::Release);
+        })
+        .map_err(Into::into)
 }
+
+/// Local-store data rows, keyed by `DataId`.
+pub(crate) const LOCAL_STORE_DATA_CF: ColumnFamily = ColumnFamily::new("local_store_data");
+
+/// Local-store subscription cursors, keyed by upstream `NodeId`.
+pub(crate) const LOCAL_STORE_CURSORS_CF: ColumnFamily = ColumnFamily::new("local_store_cursors");
 
 #[cfg(test)]
 #[allow(
@@ -901,7 +911,7 @@ mod tests {
     /// One `Storage` backing both this store and the stable log it reads the
     /// watermark from — the production shape.
     async fn shared_storage(root: &Path) -> (Arc<Storage>, Arc<dyn StableLogSnapshot>) {
-        let storage = Storage::open_for_test(root).expect("open storage");
+        let storage = crate::database::open_for_test(root).expect("open storage");
         let stable_log: Arc<dyn StableLogSnapshot> = Arc::new(
             crate::learner::stable_log::StableLog::open_on(Arc::clone(&storage))
                 .await

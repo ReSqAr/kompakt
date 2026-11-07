@@ -67,6 +67,9 @@ impl StableLogConfig {
     }
 }
 
+/// The settled prefix of the log, keyed by global `LogIndex`.
+pub(crate) const STABLE_LOG_CF: ColumnFamily = ColumnFamily::new("stable_log");
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -107,15 +110,14 @@ pub(in crate::learner) use snapshot_loader::SnapshotLoader;
 #[cfg(test)]
 pub(crate) use snapshot_loader::integrate_manifest_for_test;
 
+use rocksdb_kit::ColumnFamily;
 use std::sync::Arc;
 
 use parking_lot::Mutex as SyncMutex;
-use rust_rocksdb::WriteBatch;
+use rocksdb_kit::Batch;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::Error;
-use crate::database::Subsystem;
-use crate::database::storage::Storage;
 use crate::error::{ToCodec, ToStorage};
 use crate::hlc::Hlc;
 use crate::ids::LogIndex;
@@ -125,6 +127,7 @@ use crossbeam_combinators::{
     Channel, Fanout, FanoutConfig, Finite, Infinite, Level, LevelSetter, OverflowPolicy, Registry,
     broadcast,
 };
+use rocksdb_kit::Storage;
 
 // ── key codec ───────────────────────────────────────────────────────────────
 //
@@ -209,8 +212,8 @@ fn missing_value(key: &[u8]) -> Error {
 /// The newest live entry — the facade's `max_key`, plus the secondary the same
 /// key already carries.
 fn newest_live_entry(storage: &Storage) -> Result<Option<(LogIndex, Hlc)>, Error> {
-    let cf = storage.cf(Subsystem::StableLog)?;
-    let mut it = storage.db().raw_iterator_cf(&cf);
+    let cf = storage.cf(STABLE_LOG_CF)?;
+    let mut it = storage.scan(&cf);
     it.seek_to_last();
     if let Some(key) = it.key() {
         // PINNING RULE: `key` borrows the iterator's current block, which stays
@@ -243,8 +246,8 @@ fn settled_below(hlc: Hlc) -> Option<Hlc> {
 /// first *live* key and this walk costs O(newly covered), not
 /// O(everything ever purged).
 fn purge_boundary(storage: &Storage, threshold: Hlc) -> Result<Option<LogIndex>, Error> {
-    let cf = storage.cf(Subsystem::StableLog)?;
-    let mut it = storage.db().raw_iterator_cf(&cf);
+    let cf = storage.cf(STABLE_LOG_CF)?;
+    let mut it = storage.scan(&cf);
     it.seek_to_first();
     let mut boundary = None;
     while let Some(key) = it.key() {
@@ -273,8 +276,8 @@ fn for_each_entry(
     until: LogIndex,
     sink: &mut EntrySink<'_>,
 ) -> Result<(), Error> {
-    let cf = storage.cf(Subsystem::StableLog)?;
-    let mut it = storage.db().raw_iterator_cf(&cf);
+    let cf = storage.cf(STABLE_LOG_CF)?;
+    let mut it = storage.scan(&cf);
     it.seek(encode_primary(from));
     while let Some(key) = it.key() {
         // PINNING RULE: `key` and `value` below both borrow the iterator's
@@ -396,7 +399,7 @@ impl StableLog {
     /// [`open`](Self::open) with the node's one [`Storage`].
     #[cfg(test)]
     pub(crate) async fn open_engine(stable_dir: std::path::PathBuf) -> Result<Self, Error> {
-        Self::open_on(Storage::open_for_test(&stable_dir)?).await
+        Self::open_on(crate::database::open_for_test(&stable_dir)?).await
     }
 
     /// The storage boundary: an injected [`Storage`] plus the broadcast depth.
@@ -578,11 +581,11 @@ impl BatchAppender {
             // between the fence and the post-commit work below (CLAUDE.md §8).
             // No global write lock: batches commit atomically and are ordered at
             // the WAL, so opening one never blocks on another writer.
-            let cf = self.storage.cf(Subsystem::StableLog)?;
-            let mut batch = WriteBatch::default();
+            let cf = self.storage.cf(STABLE_LOG_CF)?;
+            let mut batch = Batch::new();
             for (idx, data) in &committed {
                 let bytes = postcard::to_allocvec(&data).to_codec("encode stable entry")?;
-                batch.put_cf(&cf, encode_key(*idx, data.data_id.hlc()), &bytes);
+                batch.put(&cf, encode_key(*idx, data.data_id.hlc()), &bytes);
             }
             drop(cf);
             self.storage.write(batch)?; // atomic across the batch
@@ -775,15 +778,15 @@ impl crate::api::StableLogSnapshot for StableLog {
         let Some(boundary) = purge_boundary(&self.storage, effective)? else {
             return Ok(());
         };
-        let cf = self.storage.cf(Subsystem::StableLog)?;
-        let mut batch = WriteBatch::default();
-        batch.delete_range_cf(
+        let cf = self.storage.cf(STABLE_LOG_CF)?;
+        let mut batch = Batch::new();
+        batch.delete_range(
             &cf,
             &encode_primary(LogIndex::ZERO)[..],
             &encode_primary(boundary)[..],
         );
         self.storage.write(batch)?;
-        self.storage.fence()
+        self.storage.fence().map_err(Into::into)
     }
 }
 
@@ -1415,7 +1418,7 @@ mod tests {
     #[tokio::test]
     async fn a_watermark_never_covers_an_hlc_group_split_across_batches() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let storage = Storage::open_for_test(&dir.path().join("stable")).expect("storage");
+        let storage = crate::database::open_for_test(&dir.path().join("stable")).expect("storage");
         // Deep enough to hold every event of the load without a hang-up.
         let log = StableLog::open_sized(storage, bytesize::nonzero(1024))
             .await

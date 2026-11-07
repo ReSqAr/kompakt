@@ -156,7 +156,7 @@ const PROCESS_GAUGE_INTERVAL: Duration = Duration::from_secs(1);
 /// queues (the writer), and publishes nothing rather than a 0 that would read
 /// as "measured, and empty".
 pub(crate) async fn run_process_gauges(
-    storage: Option<std::sync::Arc<crate::database::storage::Storage>>,
+    storage: Option<std::sync::Arc<rocksdb_kit::Storage>>,
     queue_capacity_bytes: Option<u64>,
     cancel: CancellationToken,
 ) -> Result<(), Error> {
@@ -227,9 +227,9 @@ pub(crate) async fn run_process_gauges(
 ///
 /// A property that is missing or fails to parse as `u64` is skipped, never
 /// published as a fabricated 0 — see `Storage::property_u64`.
-fn emit_rocksdb_property_gauges(storage: &crate::database::storage::Storage) {
+fn emit_rocksdb_property_gauges(storage: &rocksdb_kit::Storage) {
     for subsystem in storage.column_families() {
-        let cf = subsystem.cf_name();
+        let cf = subsystem.name();
         if let Some(v) = storage.property_u64(subsystem, "rocksdb.num-immutable-mem-table") {
             metrics::storage_num_immutable_memtable(cf, v);
         }

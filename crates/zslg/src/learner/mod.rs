@@ -40,10 +40,12 @@ mod subscriber;
 pub(crate) use local_store::LocalStore;
 #[cfg(test)]
 pub(crate) use local_store::open_test_local_store;
+pub(crate) use local_store::{LOCAL_STORE_CURSORS_CF, LOCAL_STORE_DATA_CF};
 pub(crate) use quorum::ReplicaPoller;
 use quorum::{MultiReplicaQuorumCheck, QuorumReadDebouncer};
 use read::ReaderImpl;
 pub(crate) use read::{GatedReader, can_serve_clients};
+pub(crate) use stable_log::STABLE_LOG_CF;
 pub(crate) use stable_log::StableLogConfig;
 pub(crate) use stable_log::{StableLog, spawn_stable_store};
 
@@ -176,7 +178,7 @@ impl LearnerService {
 pub(crate) async fn spawn_learner(
     clock: Arc<HlcClock>,
     stable_log: Arc<dyn api::StableLogSnapshot>,
-    storage: Arc<crate::database::storage::Storage>,
+    storage: Arc<rocksdb_kit::Storage>,
     snapshot_store: Arc<dyn SnapshotStore>,
     raft_state: Arc<dyn RaftStateView>,
     router: Arc<dyn Router>,

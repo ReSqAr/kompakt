@@ -1,5 +1,6 @@
 use super::*;
 use crate::meta::SnapshotMetadata;
+use crate::raft::RAFT_META_CF;
 use crate::raft::RaftStateError;
 
 /// Test-only bridge: builds a `Raft` instance backed by RocksDB storage under
@@ -31,7 +32,7 @@ where
 /// superset of this store's two.
 #[cfg(test)]
 pub(crate) fn open_test_storage(dir: &std::path::Path) -> Result<Arc<Storage>, Error> {
-    Storage::open_for_test(dir)
+    crate::database::open_for_test(dir)
 }
 
 /// Test-only: overwrite the persisted membership + vote with a FOREIGN node id
@@ -49,12 +50,12 @@ pub(crate) async fn seed_foreign_membership_for_test(
     let stored = StoredMembership::new(None::<LogId<NodeId>>, membership);
     let vote = Vote::<NodeId>::new(1, other);
     let storage = open_test_storage(&storage_root)?;
-    let cf = storage.cf(Subsystem::RaftMeta)?;
-    let mut batch = WriteBatch::default();
+    let cf = storage.cf(RAFT_META_CF)?;
+    let mut batch = Batch::new();
     put_meta(&mut batch, &cf, RaftMetaSlot::LastMembership, &stored)?;
     put_meta(&mut batch, &cf, RaftMetaSlot::Vote, &vote)?;
     storage.write(batch)?;
-    storage.fence()
+    storage.fence().map_err(Into::into)
 }
 
 use crate::hlc::Hlc;
@@ -1051,8 +1052,8 @@ async fn invariant_corrupt_snapshot_blob_is_fatal_at_open() {
             },
             data: vec![0xFF, 0x00, 0xAB],
         };
-        let cf = storage.cf(Subsystem::RaftMeta).expect("cf");
-        let mut batch = WriteBatch::default();
+        let cf = storage.cf(RAFT_META_CF).expect("cf");
+        let mut batch = Batch::new();
         put_meta(&mut batch, &cf, RaftMetaSlot::SnapshotBlob, &stored).expect("record");
         storage.write(batch).expect("write");
         storage.fence().expect("fence");

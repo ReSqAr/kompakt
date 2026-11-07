@@ -1,0 +1,28 @@
+[package]
+name = "rocksdb-kit"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "One explicit RocksDB open per node: memory budget, column families, batches, scans, fence"
+publish = false
+
+[dependencies]
+bytesize = { workspace = true }
+rust-rocksdb = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[features]
+default = []
+testing = []
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "library"

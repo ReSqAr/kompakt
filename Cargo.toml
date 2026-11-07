@@ -63,6 +63,7 @@ framing = { path = "crates/framing" }
 metrics-kit = { path = "crates/metrics-kit" }
 nvzn = { path = "crates/nvzn" }
 objectstorage-cache = { path = "crates/objectstorage-cache" }
+rocksdb-kit = { path = "crates/rocksdb-kit" }
 shutdown = { path = "crates/shutdown" }
 warn-throttle = { path = "crates/warn-throttle" }
 zslg = { path = "crates/zslg" }

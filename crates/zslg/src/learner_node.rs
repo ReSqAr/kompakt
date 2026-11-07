@@ -11,6 +11,8 @@
 //! node's RocksDB. The learner has durable state in its local store and
 //! stable log, so the id must survive restarts.
 
+use crate::database::NODE_ID_CF;
+use crate::learner::{LOCAL_STORE_CURSORS_CF, LOCAL_STORE_DATA_CF, STABLE_LOG_CF};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,7 +24,6 @@ use std::num::NonZeroUsize;
 use crate::ByteSize;
 use crate::api::{self, RaftStateView, SnapshotStore};
 use crate::database;
-use crate::database::storage::{CfSpec, Storage, StorageConfig};
 use crate::error::Error;
 use crate::hlc::{HlcClock, run_clock_gauges};
 use crate::ids::NodeId;
@@ -33,6 +34,7 @@ use crate::network::setup_router;
 use crate::object_store::IntoArcObjectStore;
 use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use crate::raft::{RaftTrackerConfig, spawn_raft_tracker_streamer};
+use rocksdb_kit::{CfSpec, Storage, StorageConfig};
 use shutdown::Shutdown;
 
 /// Configuration for a free-standing learner node.
@@ -98,7 +100,7 @@ pub struct LearnerNodeConfig {
     /// 256 MiB unconfigurably.
     pub storage_memory: ByteSize,
     /// RocksDB overrides. `None` — the default — derives the term from
-    /// `storage_memory`; the derivations live in `database::storage` and are
+    /// `storage_memory`; the derivations live in `rocksdb_kit` and are
     /// the only place a value is written, so leaving a knob unset is exactly
     /// the pre-knob behaviour. Set one only with a measurement behind it.
     ///
@@ -245,22 +247,22 @@ impl LearnerNodeConfig {
     pub(crate) fn column_families(&self) -> [CfSpec; 4] {
         [
             CfSpec {
-                subsystem: database::Subsystem::StableLog,
+                cf: STABLE_LOG_CF,
                 compress: self.stable_log_compression,
             },
             CfSpec {
-                subsystem: database::Subsystem::LocalStoreData,
+                cf: LOCAL_STORE_DATA_CF,
                 compress: self.local_store_compression,
             },
             // Cursors follow the data family rather than carrying a second
             // knob: one overwritten slot per peer has no workload behind it.
             CfSpec {
-                subsystem: database::Subsystem::LocalStoreCursors,
+                cf: LOCAL_STORE_CURSORS_CF,
                 compress: self.local_store_compression,
             },
             // One tiny, never-compressed row: the write-once node identity.
             CfSpec {
-                subsystem: database::Subsystem::NodeId,
+                cf: NODE_ID_CF,
                 compress: false,
             },
         ]
@@ -285,7 +287,7 @@ impl LearnerNodeConfig {
 
     /// Validate all sub-configs and required timeouts.
     /// Produce the storage tuning: the budget plus the overrides, with every
-    /// unset one left to `database::storage`'s derivation from the budget.
+    /// unset one left to `rocksdb_kit`'s derivation from the budget.
     #[must_use]
     pub(crate) fn storage_config(&self) -> StorageConfig {
         StorageConfig {
@@ -354,7 +356,7 @@ impl LearnerNode {
 
         // ── Shutdown + durable identity ────────────────────────────────────
         let mut shutdown = Shutdown::new();
-        database::create_storage_root(&config.db_path).await?;
+        rocksdb_kit::create_storage_root(&config.db_path).await?;
 
         // The node's ONE RocksDB. `storage_memory` is a required argument, and
         // that is how this node type turned out never to have had the field: it
@@ -507,5 +509,38 @@ impl LearnerNode {
             storage,
         ));
         result
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, reason = "test code")]
+mod tests {
+    use super::*;
+
+    /// The list IS the schema: RocksDB refuses to open a root whose on-disk
+    /// family set is not fully named, and its length sizes every memtable. The
+    /// names are the on-disk layout, so a change here is a wipe.
+    #[test]
+    fn the_node_runs_exactly_these_column_families() {
+        let config = LearnerNodeConfig::new(
+            Vec::new(),
+            PathBuf::from("/tmp/unused"),
+            std::sync::Arc::new(object_store::memory::InMemory::new()),
+        )
+        .expect("config");
+        let names: Vec<&str> = config
+            .column_families()
+            .iter()
+            .map(|spec| spec.cf.name())
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                "stable_log",
+                "local_store_data",
+                "local_store_cursors",
+                "node_id"
+            ],
+        );
     }
 }

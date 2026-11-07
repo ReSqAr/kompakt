@@ -18,13 +18,13 @@ use std::sync::Arc;
 use openraft::storage::Adaptor;
 
 use crate::api::{MembershipGate, Router};
-use crate::database::storage::Storage;
 use crate::error::{Error, ToRaft};
 use crate::ids::{NodeId, PeerAddr};
 use crate::raft::raft_storage::RocksRaftStorage;
 use crate::raft::rpc::NetworkFactory;
 use crate::raft::rpc::PeerRegistrationWatcher;
 use crate::raft::state::RaftStatePublisher;
+use rocksdb_kit::Storage;
 use shutdown::Shutdown;
 
 mod membership;
@@ -58,6 +58,8 @@ pub(crate) use types::Raft;
 pub(crate) use raft_storage::build_raft_for_test;
 #[cfg(test)]
 pub(crate) use raft_storage::seed_foreign_membership_for_test;
+#[cfg(test)]
+pub(crate) use raft_storage::{RAFT_LOG_CF, RAFT_META_CF};
 pub(crate) use raft_storage::{
     raft_cf_specs, validate_cutoff_advance, validate_replicated_state, validate_transition,
 };

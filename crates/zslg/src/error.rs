@@ -406,6 +406,17 @@ impl Error {
     }
 }
 
+impl From<rocksdb_kit::StorageError> for Error {
+    fn from(e: rocksdb_kit::StorageError) -> Self {
+        match e {
+            rocksdb_kit::StorageError::InvalidConfiguration(msg) => {
+                Error::InvalidConfiguration(msg)
+            }
+            rocksdb_kit::StorageError::Storage(msg) => Error::Storage(msg),
+        }
+    }
+}
+
 impl From<shutdown::Stopped> for Error {
     fn from(_: shutdown::Stopped) -> Self {
         Error::Shutdown

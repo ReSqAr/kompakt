@@ -28,7 +28,7 @@ mod clock_skew_tests;
 #[cfg(test)]
 mod subscribe_status_tests;
 
-pub(crate) use log::ReplicaLogStore;
+pub(crate) use log::{REPLICA_LOG_CF, ReplicaLogStore};
 use purge::run_purge_worker;
 
 use futures::StreamExt as _;
@@ -420,7 +420,7 @@ pub(crate) async fn spawn_replica(
     raft_state: Arc<dyn RaftStateView>,
     hlc_clock: &Arc<HlcClock>,
     hlc_cutoff: &Arc<HlcGate>,
-    storage: Arc<crate::database::storage::Storage>,
+    storage: Arc<rocksdb_kit::Storage>,
     config: &ReplicaLogConfig,
     shutdown: &mut Shutdown<Error>,
     peers: Arc<dyn PeersWatcher>,
@@ -477,7 +477,7 @@ pub(crate) async fn spawn_replica(
 /// Replica log persistence and purge configuration.
 ///
 /// The store itself is a column family of the node's one
-/// [`Storage`](crate::database::storage::Storage), which [`spawn_replica`] is
+/// [`Storage`](rocksdb_kit::Storage), which [`spawn_replica`] is
 /// handed; what is left here is the queue sizing and the purge policy.
 #[derive(Debug, Clone)]
 pub(crate) struct ReplicaLogConfig {

@@ -31,15 +31,14 @@
 //! borrowed block-cache blocks rather than copies. That block stays pinned for
 //! as long as the borrow lives, so no pinned value may cross an `.await` or a
 //! batch commit — every such site states the rule where it is taken.
+use rocksdb_kit::ColumnFamily;
 use std::fmt::Debug;
 use std::io::Cursor;
 use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
 
-use rust_rocksdb::{BoundColumnFamily, WriteBatch};
+use rocksdb_kit::{Batch, Cf};
 
-use crate::database::Subsystem;
-use crate::database::storage::{CfSpec, Storage};
 use crate::raft::NodeInfo;
 use openraft::Entry;
 use openraft::EntryPayload;
@@ -58,6 +57,7 @@ use openraft::StoredMembership;
 use openraft::Vote;
 use openraft::storage::Adaptor;
 use parking_lot::Mutex as SyncMutex;
+use rocksdb_kit::{CfSpec, Storage};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -68,6 +68,12 @@ use crate::meta::ReplicaMembership;
 use crate::metrics::{self, LogType};
 use crate::raft::RaftStateHandle;
 use crate::raft::{RaftLogIndex, RaftResponse, TypeConfig};
+
+/// The raft log.
+pub(crate) const RAFT_LOG_CF: ColumnFamily = ColumnFamily::new("raft_log");
+
+/// The raft meta singletons.
+pub(crate) const RAFT_META_CF: ColumnFamily = ColumnFamily::new("raft_meta");
 
 #[cfg(test)]
 #[allow(
@@ -94,11 +100,11 @@ pub(crate) use self::validators::{
 pub(crate) fn raft_cf_specs() -> [CfSpec; 2] {
     [
         CfSpec {
-            subsystem: Subsystem::RaftLog,
+            cf: RAFT_LOG_CF,
             compress: true,
         },
         CfSpec {
-            subsystem: Subsystem::RaftMeta,
+            cf: RAFT_META_CF,
             compress: true,
         },
     ]
@@ -506,15 +512,12 @@ impl RaftStorage<TypeConfig> for RocksRaftStorage {
         tokio::task::spawn_blocking(move || {
             let _probe = metrics::raft_log_append_probe();
             let inner = inner.lock();
-            let cf = inner
-                .storage
-                .cf(Subsystem::RaftLog)
-                .map_err(storage_io_write)?;
-            let mut batch = WriteBatch::default();
+            let cf = inner.storage.cf(RAFT_LOG_CF).map_err(storage_io_write)?;
+            let mut batch = Batch::new();
             for entry in &entries {
                 let idx = RaftLogIndex::from(entry.log_id.index);
                 let bytes = postcard::to_allocvec(&entry).map_err(storage_io_write)?;
-                batch.put_cf(&cf, encode_log_key(idx, idx), &bytes);
+                batch.put(&cf, encode_log_key(idx, idx), &bytes);
             }
             // One atomic batch + fsync — the ACK fence. A re-append over a
             // truncated suffix overwrites the same key.
@@ -554,13 +557,10 @@ impl RaftStorage<TypeConfig> for RocksRaftStorage {
             if victims.is_empty() {
                 return Ok(());
             }
-            let cf = inner
-                .storage
-                .cf(Subsystem::RaftLog)
-                .map_err(storage_io_write)?;
-            let mut batch = WriteBatch::default();
+            let cf = inner.storage.cf(RAFT_LOG_CF).map_err(storage_io_write)?;
+            let mut batch = Batch::new();
             for idx in victims {
-                batch.delete_cf(&cf, encode_log_key(idx, idx));
+                batch.delete(&cf, encode_log_key(idx, idx));
             }
             inner.storage.write(batch).map_err(storage_io_write)?;
             inner.storage.fence().map_err(storage_io_write)?;
@@ -590,15 +590,9 @@ impl RaftStorage<TypeConfig> for RocksRaftStorage {
             // and a lowered floor would be a floor regression rather than a
             // no-op.
             if current.is_none_or(|p| p < log_id) {
-                let meta_cf = inner
-                    .storage
-                    .cf(Subsystem::RaftMeta)
-                    .map_err(storage_io_write)?;
-                let log_cf = inner
-                    .storage
-                    .cf(Subsystem::RaftLog)
-                    .map_err(storage_io_write)?;
-                let mut batch = WriteBatch::default();
+                let meta_cf = inner.storage.cf(RAFT_META_CF).map_err(storage_io_write)?;
+                let log_cf = inner.storage.cf(RAFT_LOG_CF).map_err(storage_io_write)?;
+                let mut batch = Batch::new();
                 put_meta(&mut batch, &meta_cf, RaftMetaSlot::LastPurged, &log_id)
                     .map_err(storage_io_write)?;
                 let purge_upto = RaftLogIndex::from(log_id.index);
@@ -613,7 +607,7 @@ impl RaftStorage<TypeConfig> for RocksRaftStorage {
                     Some(next) => encode_log_primary(next).to_vec(),
                     None => vec![0xFFu8; LOG_KEY_WIDTH.saturating_add(1)],
                 };
-                batch.delete_range_cf(&log_cf, &[0u8; LOG_PRIMARY_WIDTH][..], &end[..]);
+                batch.delete_range(&log_cf, &[0u8; LOG_PRIMARY_WIDTH][..], &end[..]);
                 inner.storage.write(batch).map_err(storage_io_write)?;
                 inner.storage.fence().map_err(storage_io_write)?;
             }
@@ -714,11 +708,8 @@ impl RaftStorage<TypeConfig> for RocksRaftStorage {
             // One atomic meta batch (the WAL commit marker): last_applied and
             // any membership land together or not at all — the openraft apply
             // atomicity requirement — then the fsync fence.
-            let cf = inner
-                .storage
-                .cf(Subsystem::RaftMeta)
-                .map_err(storage_io_write)?;
-            let mut batch = WriteBatch::default();
+            let cf = inner.storage.cf(RAFT_META_CF).map_err(storage_io_write)?;
+            let mut batch = Batch::new();
             if let Some(la) = last_applied {
                 put_meta(&mut batch, &cf, RaftMetaSlot::LastApplied, &la)
                     .map_err(storage_io_write)?;
@@ -775,11 +766,8 @@ impl RaftStorage<TypeConfig> for RocksRaftStorage {
 
             // One atomic meta batch: applied + membership + blob land together.
             let stored = StoredSnapshot { meta, data: bytes };
-            let cf = inner
-                .storage
-                .cf(Subsystem::RaftMeta)
-                .map_err(storage_io_write)?;
-            let mut batch = WriteBatch::default();
+            let cf = inner.storage.cf(RAFT_META_CF).map_err(storage_io_write)?;
+            let mut batch = Batch::new();
             put_meta(
                 &mut batch,
                 &cf,
@@ -885,11 +873,8 @@ impl RaftSnapshotBuilder<TypeConfig> for RocksRaftStorage {
             };
 
             // One atomic meta batch: index + blob land together, then the fence.
-            let cf = inner
-                .storage
-                .cf(Subsystem::RaftMeta)
-                .map_err(storage_io_write)?;
-            let mut batch = WriteBatch::default();
+            let cf = inner.storage.cf(RAFT_META_CF).map_err(storage_io_write)?;
+            let mut batch = Batch::new();
             put_meta(
                 &mut batch,
                 &cf,
@@ -976,11 +961,10 @@ fn read_meta<T: DeserializeOwned>(
     storage: &Storage,
     slot: RaftMetaSlot,
 ) -> Result<Option<T>, Error> {
-    let cf = storage.cf(Subsystem::RaftMeta)?;
+    let cf = storage.cf(RAFT_META_CF)?;
     let key = encode_meta_key(slot);
     let Some(pinned) = storage
-        .db()
-        .get_pinned_cf(&cf, key)
+        .get_pinned(&cf, key)
         .map_err(|e| Error::Storage(format!("read raft meta slot {slot:?}: {e}")))?
     else {
         return Ok(None);
@@ -997,13 +981,13 @@ fn read_meta<T: DeserializeOwned>(
 /// whole key, so a later write simply replaces it). The caller owns the batch
 /// because a multi-slot batch has to be one atomic write.
 fn put_meta<T: Serialize>(
-    batch: &mut WriteBatch,
-    cf: &Arc<BoundColumnFamily<'_>>,
+    batch: &mut Batch,
+    cf: &Cf<'_>,
     slot: RaftMetaSlot,
     value: &T,
 ) -> Result<(), Error> {
     let bytes = postcard::to_allocvec(value).to_codec("encode raft meta")?;
-    batch.put_cf(cf, encode_meta_key(slot), &bytes);
+    batch.put(cf, encode_meta_key(slot), &bytes);
     Ok(())
 }
 
@@ -1024,14 +1008,14 @@ fn for_each_log_entry(
     hi: Option<RaftLogIndex>,
     sink: &mut LogSink<'_>,
 ) -> Result<(), Error> {
-    let cf = storage.cf(Subsystem::RaftLog)?;
-    let mut it = storage.db().raw_iterator_cf(&cf);
+    let cf = storage.cf(RAFT_LOG_CF)?;
+    let mut it = storage.scan(&cf);
     it.seek(encode_log_primary(lo));
     while let Some(key) = it.key() {
         let Some((index, _rank)) = decode_log_key(key) else {
             return Err(Error::Storage(format!(
                 "undecodable key in {}",
-                Subsystem::RaftLog.cf_name()
+                RAFT_LOG_CF.name()
             )));
         };
         if hi.is_some_and(|end| index >= end) {
@@ -1043,7 +1027,7 @@ fn for_each_log_entry(
         let Some(value) = it.value() else {
             return Err(Error::Storage(format!(
                 "key with no value in {} ({} bytes)",
-                Subsystem::RaftLog.cf_name(),
+                RAFT_LOG_CF.name(),
                 key.len()
             )));
         };
@@ -1058,18 +1042,13 @@ fn for_each_log_entry(
 
 /// The newest live log index, or `None` if every stored entry is retired.
 fn newest_live_index(storage: &Storage) -> Result<Option<RaftLogIndex>, Error> {
-    let cf = storage.cf(Subsystem::RaftLog)?;
-    let mut it = storage.db().raw_iterator_cf(&cf);
+    let cf = storage.cf(RAFT_LOG_CF)?;
+    let mut it = storage.scan(&cf);
     it.seek_to_last();
     if let Some(key) = it.key() {
         return decode_log_key(key)
             .map(|(index, _)| Some(index))
-            .ok_or_else(|| {
-                Error::Storage(format!(
-                    "undecodable key in {}",
-                    Subsystem::RaftLog.cf_name()
-                ))
-            });
+            .ok_or_else(|| Error::Storage(format!("undecodable key in {}", RAFT_LOG_CF.name())));
     }
     it.status()
         .map_err(|e| Error::Storage(format!("scan raft log: {e}")))?;
@@ -1089,10 +1068,9 @@ fn newest_live_entry(
     if floor.is_some_and(|f| index <= f) {
         return Ok(None);
     }
-    let cf = storage.cf(Subsystem::RaftLog)?;
+    let cf = storage.cf(RAFT_LOG_CF)?;
     let Some(pinned) = storage
-        .db()
-        .get_pinned_cf(&cf, encode_log_key(index, index))
+        .get_pinned(&cf, encode_log_key(index, index))
         .map_err(|e| Error::Storage(format!("read raft log entry {index}: {e}")))?
     else {
         return Ok(None);
@@ -1111,11 +1089,11 @@ fn write_meta_durable<T: Serialize>(
     slot: RaftMetaSlot,
     value: &T,
 ) -> Result<(), Error> {
-    let cf = storage.cf(Subsystem::RaftMeta)?;
-    let mut batch = WriteBatch::default();
+    let cf = storage.cf(RAFT_META_CF)?;
+    let mut batch = Batch::new();
     put_meta(&mut batch, &cf, slot, value)?;
     storage.write(batch)?;
-    storage.fence()
+    storage.fence().map_err(Into::into)
 }
 
 fn bounds_to_pair<RB: RangeBounds<u64>>(range: &RB) -> (RaftLogIndex, RaftLogIndex) {

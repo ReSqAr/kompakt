@@ -40,12 +40,12 @@ use std::time::Duration;
 
 use crate::Error;
 use crate::api::StableLogSnapshot;
-use crate::database::storage::Storage;
 use crate::learner::local_store::purge::spawn_local_store_purge_worker;
+use rocksdb_kit::Storage;
 use shutdown::Shutdown;
 
 pub(in crate::learner::local_store) use recent_ids::Dedup;
-pub(crate) use store::LocalStore;
+pub(crate) use store::{LOCAL_STORE_CURSORS_CF, LOCAL_STORE_DATA_CF, LocalStore};
 
 /// Everything the local-store subsystem needs, produced by
 /// [`LearnerConfig::local_store_config`](crate::learner::LearnerConfig::local_store_config).
@@ -145,7 +145,7 @@ impl LocalStoreConfig {
 pub(crate) async fn open_test_local_store(
     root: &std::path::Path,
 ) -> Result<(Arc<LocalStore>, TestWorker), Error> {
-    let storage = Storage::open_for_test(root)?;
+    let storage = crate::database::open_for_test(root)?;
     let stable_log: Arc<dyn StableLogSnapshot> =
         Arc::new(crate::learner::stable_log::StableLog::open_on(Arc::clone(&storage)).await?);
     let cancel = tokio_util::sync::CancellationToken::new();
