@@ -32,10 +32,10 @@ use tracing::{debug, info, warn};
 
 use crate::error::Error;
 use crate::leader::jobs::membership::{MembershipDriver, MembershipObserver, TickOutcome};
-use crate::quorum::{FanOutResponse, fan_out_quorum};
 use zslg_consensus_types::RaftGeneration;
 use zslg_consensus_types::{Exit, ReplicaMembership};
 use zslg_node_types::NodeId;
+use zslg_quorum_read::{FanOutResponse, fan_out_quorum};
 use zslg_time_types::Hlc;
 
 pub(in crate::leader) trait LivenessQuery: Send + Sync + 'static {
@@ -129,7 +129,7 @@ impl MembershipChangeManager {
         initial.generation = minimum_generation;
         initial.replica = ReplicaMembership::joint(old.clone(), next.clone());
 
-        fan_out_quorum(initial, {
+        fan_out_quorum::<_, _, Error>(initial, {
             let observer = self.inputs.observer.clone();
             move |peer| {
                 let observer = observer.clone();
@@ -167,7 +167,7 @@ impl MembershipChangeManager {
         sample_initial.replica = ReplicaMembership::single(old.clone());
 
         let sampled: Arc<Mutex<Option<Hlc>>> = Arc::new(Mutex::new(None));
-        let outcome = fan_out_quorum(sample_initial, {
+        let outcome = fan_out_quorum::<_, _, Error>(sample_initial, {
             let observer = self.inputs.observer.clone();
             let sampled = sampled.clone();
             move |peer| {

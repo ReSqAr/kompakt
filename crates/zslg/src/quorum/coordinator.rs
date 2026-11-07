@@ -44,13 +44,14 @@ use dashmap::mapref::entry::Entry as MapEntry;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
 use crate::error::Error;
-use crate::metrics::{self, FanoutResponseState, WriteRpcOutcome};
+use crate::metrics::{self, WriteRpcOutcome};
 use crossbeam_combinators::Channel;
 use zslg_consensus_types::{all_targets, is_quorum};
 use zslg_log::{StampedWrite, WriteOutcome};
 use zslg_log_types::Data;
 use zslg_log_types::DataId;
 use zslg_node_types::NodeId;
+use zslg_quorum_read::metrics::FanoutResponseState;
 
 /// Global in-flight cap. A permit is held for a write's whole life, so this
 /// bounds `pending` and every per-stream channel with it (a `DataId` is 32 bytes;
@@ -228,7 +229,7 @@ fn run_replica(weak: Weak<Coordinator>, node: NodeId, mut ids_rx: Receiver<DataI
             backoff = REOPEN_BACKOFF;
             let data_id = outcome.data_id();
 
-            metrics::write_fanout_response(fanout_state(&outcome));
+            zslg_quorum_read::metrics::write_fanout_response(fanout_state(&outcome));
             if let Some(elapsed) = this.pending.elapsed_since_enqueued(&data_id) {
                 metrics::replica_write_rpc(node, rpc_outcome(&outcome), elapsed);
             }

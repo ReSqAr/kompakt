@@ -22,7 +22,5 @@
 //! widens the target set instead of invalidating the attempt.
 
 mod coordinator;
-mod fanout;
 
 pub(crate) use coordinator::Coordinator;
-pub(crate) use fanout::{FanOutResponse, fan_out_quorum};

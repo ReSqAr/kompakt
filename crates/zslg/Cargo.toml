@@ -51,6 +51,7 @@ zslg-net = { workspace = true }
 zslg-net-wire = { workspace = true }
 zslg-net-types = { workspace = true }
 zslg-node-types = { workspace = true }
+zslg-quorum-read = { workspace = true }
 zslg-raft = { workspace = true }
 zslg-raft-types = { workspace = true }
 zslg-snapshot = { workspace = true }

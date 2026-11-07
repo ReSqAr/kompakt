@@ -45,7 +45,6 @@ use super::rejoin::{
 };
 
 use crate::error::{Error, ToRaft};
-use crate::quorum::{FanOutResponse, fan_out_quorum};
 use crate::raft::{RaftNode, membership_map};
 use shutdown::Shutdown;
 use zslg_consensus_types::EvictionStatus;
@@ -54,6 +53,7 @@ use zslg_consensus_types::ReplicatedRaftState;
 use zslg_consensus_types::{RaftState, ReplicaMembership};
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
+use zslg_quorum_read::{FanOutResponse, fan_out_quorum};
 use zslg_raft_types::FencedStateWrite;
 
 const JOIN_INITIAL_BACKOFF: Duration = Duration::from_millis(50);

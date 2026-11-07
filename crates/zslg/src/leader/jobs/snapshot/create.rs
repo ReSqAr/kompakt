@@ -34,13 +34,13 @@ use zslg_snapshot::SnapshotStore;
 
 use crate::error::ToStorage;
 use crate::error::{Error, Home};
-use crate::learner::ReplicaPoller;
 use crate::metrics::{self, SnapshotState, SnapshotStep};
-use crate::quorum::{FanOutResponse, fan_out_quorum};
 use crossbeam_combinators::{Channel, Finite};
 use zslg_log::{LocalStoreView, StableLogSnapshot};
 use zslg_log_types::LogIndex;
 use zslg_log_types::SnapshotEntry;
+use zslg_quorum_read::ReplicaPoller;
+use zslg_quorum_read::{FanOutResponse, fan_out_quorum};
 use zslg_snapshot_types::CompressionLevel;
 use zslg_snapshot_types::SnapshotId;
 use zslg_snapshot_types::SnapshotMetadata;
@@ -365,7 +365,7 @@ async fn await_quorum_ready(inputs: &SnapshotInputs<'_>, new_cutoff: Hlc) -> Res
                 match ReplicaPoller::check(transport, local_store, peer).await {
                     Ok(Some(state)) => Ok(FanOutResponse::Ready(state)),
                     Ok(None) => Ok(FanOutResponse::Failed),
-                    Err(e) => Err(e),
+                    Err(e) => Err(e.into()),
                 }
             }
         }),

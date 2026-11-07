@@ -327,10 +327,6 @@ pub(crate) fn node_live(node_id: zslg_node_types::NodeId, live: bool) {
 // ── write path (writer side) ────────────────────────────────────────────────
 
 metrics!("zslg_", write_path_writer; {
-    custom  write_fanout_response  WRITE_FANOUT_RESPONSES_TOTAL
-        "write_fanout_responses_total" Counter None
-        "Per-replica fan-out responses (ack / rejected / unreachable). \
-         Persistent unreachable share = degraded replica set.";
     custom  writes_in_flight_guard  WRITES_IN_FLIGHT  "writes_in_flight"
         Gauge Count "Writes between fan-out start and quorum resolution.";
     custom  writer_inflight_permits_set  WRITER_INFLIGHT_PERMITS
@@ -359,14 +355,6 @@ metrics!("zslg_", write_path_writer; {
 
 // ── write path (writer side): hand-written emission helpers ─────────────────
 // (custom rows above; each fn below emits the metrics named in its row)
-
-pub(crate) fn write_fanout_response(state: FanoutResponseState) {
-    metrics::counter!(
-        WRITE_FANOUT_RESPONSES_TOTAL,
-        LABEL_STATE => state.as_str(),
-    )
-    .increment(1);
-}
 
 /// RAII guard for the `writes_in_flight` gauge: `+1` on construction, `-1` on
 /// `Drop`. A guard (not bare inc/dec calls) keeps the gauge correct even when the
@@ -1204,12 +1192,6 @@ label_enum!(#[doc = "`state` label of [`REPLICA_WRITE_REQUESTS_TOTAL`]."] Replic
     FailStorage => "fail_storage",
 });
 
-label_enum!(#[doc = "`state` label of [`WRITE_FANOUT_RESPONSES_TOTAL`]."] FanoutResponseState {
-    Ack => "ack",
-    Rejected => "rejected",
-    Unreachable => "unreachable",
-});
-
 label_enum!(#[doc = "`state` label of [`HLC_CUTOFF_SETS_TOTAL`]. `rejected_backwards` is \
 *expected* after a leader change (design doc gotcha: a new leader's first proposed cutoff \
 may precede its predecessor's); alert on sustained rate, not occurrence."] CutoffSetState {
@@ -1590,6 +1572,8 @@ impl Drop for RpcServerGuard {
 // ---------------------------------------------------------------------------
 
 const ALL_METRICS: &[&[MetricDef]] = &[
+    // --- quorum fan-out (zslg-quorum-read) ---
+    zslg_quorum_read::metrics::METRICS,
     // --- RPC wire (zslg-net-wire) ---
     zslg_net_wire::metrics::METRICS,
     // --- storage memory budget (namespaced) ---

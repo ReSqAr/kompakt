@@ -41,7 +41,6 @@ pub(crate) use local_store::LocalStore;
 #[cfg(test)]
 pub(crate) use local_store::open_test_local_store;
 pub(crate) use local_store::{LOCAL_STORE_CURSORS_CF, LOCAL_STORE_DATA_CF};
-pub(crate) use quorum::ReplicaPoller;
 use quorum::{MultiReplicaQuorumCheck, QuorumReadDebouncer};
 use read::ReaderImpl;
 pub(crate) use read::{GatedReader, can_serve_clients};

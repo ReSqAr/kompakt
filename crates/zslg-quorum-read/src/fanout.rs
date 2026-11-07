@@ -21,21 +21,20 @@ use std::collections::BTreeSet;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::task::JoinSet;
-use zslg_consensus_types::ConsensusError;
+use zslg_consensus::ConsensusError;
 
-use crate::error::Error;
 use crate::metrics::{self, FanoutResponseState};
-use zslg_consensus_types::RaftState;
-use zslg_node_types::NodeId;
+use zslg_consensus::NodeId;
+use zslg_consensus::RaftState;
 
-use zslg_consensus_types::{all_targets, is_quorum};
+use zslg_consensus::{all_targets, is_quorum};
 
 /// How one peer answered. Distinct from the `Err` of the enclosing `Result`,
 /// which aborts the whole fan-out: `Err` is for a **node-local** failure (the
 /// local store, say) that would hit every peer's check identically, so trying
 /// the rest cannot help. Anything per-peer — unreachable, refused, timed out —
 /// is a `Failed` here, and the remaining peers can still form a quorum.
-pub(crate) enum FanOutResponse {
+pub enum FanOutResponse {
     /// Counts toward quorum; may carry a newer generation.
     Ready(RaftState),
     Failed,
@@ -44,20 +43,21 @@ pub(crate) enum FanOutResponse {
 /// Returns the state quorum was reached against and the peers that acked, or
 /// `Err(QuorumUnreachable)` once every dispatched task has completed without
 /// one. A panicking `op` is logged and counted as a failed peer.
-pub(crate) async fn fan_out_quorum<F, Fut>(
+pub async fn fan_out_quorum<F, Fut, E>(
     initial_state: RaftState,
     op: F,
-) -> Result<(RaftState, BTreeSet<NodeId>), Error>
+) -> Result<(RaftState, BTreeSet<NodeId>), E>
 where
+    E: From<ConsensusError> + Send + 'static,
     F: Fn(NodeId) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = Result<FanOutResponse, Error>> + Send + 'static,
+    Fut: Future<Output = Result<FanOutResponse, E>> + Send + 'static,
 {
     if initial_state.replica.current().is_empty() {
-        return Err(Error::Consensus(ConsensusError::QuorumUnreachable));
+        return Err(E::from(ConsensusError::QuorumUnreachable));
     }
 
     let op = Arc::new(op);
-    let mut join_set: JoinSet<(NodeId, Result<FanOutResponse, Error>)> = JoinSet::new();
+    let mut join_set: JoinSet<(NodeId, Result<FanOutResponse, E>)> = JoinSet::new();
 
     let mut current_state = initial_state;
     let mut sent: BTreeSet<NodeId> = BTreeSet::new();
@@ -76,7 +76,7 @@ where
         }
 
         let Some(joined) = join_set.join_next().await else {
-            return Err(Error::Consensus(ConsensusError::QuorumUnreachable));
+            return Err(E::from(ConsensusError::QuorumUnreachable));
         };
 
         let (node_id, result) = match joined {
@@ -118,14 +118,15 @@ where
     }
 }
 
-fn dispatch_to_new<F, Fut>(
+fn dispatch_to_new<F, Fut, E>(
     targets: &BTreeSet<NodeId>,
     sent: &mut BTreeSet<NodeId>,
     op: &Arc<F>,
-    join_set: &mut JoinSet<(NodeId, Result<FanOutResponse, Error>)>,
+    join_set: &mut JoinSet<(NodeId, Result<FanOutResponse, E>)>,
 ) where
     F: Fn(NodeId) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = Result<FanOutResponse, Error>> + Send + 'static,
+    Fut: Future<Output = Result<FanOutResponse, E>> + Send + 'static,
+    E: Send + 'static,
 {
     for &target in targets {
         if sent.insert(target) {
@@ -150,12 +151,19 @@ mod tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::sync::Mutex;
-    use zslg_net_types::NetError;
+    use zslg_net::NetError;
 
     use super::*;
-    use crate::tests::nid;
-    use zslg_consensus_types::RaftGeneration;
-    use zslg_consensus_types::{RaftManifestState, RaftState, ReplicaMembership};
+    use crate::Error;
+    fn nid(seed: u8) -> NodeId {
+        {
+            let mut bytes = [0u8; 16];
+            bytes[15] = seed;
+            NodeId::from_uuid(uuid::Uuid::from_bytes(bytes))
+        }
+    }
+    use zslg_consensus::RaftGeneration;
+    use zslg_consensus::{RaftManifestState, RaftState, ReplicaMembership};
 
     fn ids(seeds: &[u8]) -> BTreeSet<NodeId> {
         seeds.iter().map(|&s| nid(s)).collect()

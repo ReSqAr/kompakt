@@ -4472,6 +4472,7 @@ dependencies = [
  "zslg-net-types",
  "zslg-net-wire",
  "zslg-node-types",
+ "zslg-quorum-read",
  "zslg-raft",
  "zslg-raft-types",
  "zslg-snapshot",
@@ -4615,6 +4616,24 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "uuid",
+]
+
+[[package]]
+name = "zslg-quorum-read"
+version = "0.1.0"
+dependencies = [
+ "error-union",
+ "metrics-kit",
+ "tokio",
+ "tracing",
+ "uuid",
+ "zslg-consensus",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
 ]
 
 [[package]]
