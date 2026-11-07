@@ -4387,6 +4387,7 @@ dependencies = [
  "rand 0.10.3",
  "rust-rocksdb",
  "serde",
+ "serde_json",
  "socket2",
  "tempfile",
  "thiserror 2.0.21",

@@ -46,6 +46,8 @@ pub(crate) mod follower_node;
 pub(crate) mod framing;
 pub(crate) mod hlc;
 pub(crate) mod ids;
+#[cfg(test)]
+mod layering;
 pub(crate) mod leader;
 pub(crate) mod learner;
 pub(crate) mod learner_node;

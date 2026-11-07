@@ -10,6 +10,13 @@
 //! `Cargo.toml`; names suggest it, they do not decide it. See
 //! `docs/logs/2026-11-07_design_crate_split.md` §2.1 and §8.3.
 
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "test code"
+)]
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::process::Command;
@@ -283,12 +290,11 @@ fn workspace_libraries_do_not_share_a_name_with_a_registry_package() {
     for line in lock.lines() {
         if let Some(n) = line.strip_prefix("name = \"") {
             name = Some(n.trim_end_matches('"').to_string());
-        } else if line.starts_with("source = \"registry+") {
-            if let Some(n) = &name {
-                if libs.contains(n.as_str()) {
-                    clashes.push(n.clone());
-                }
-            }
+        } else if line.starts_with("source = \"registry+")
+            && let Some(n) = &name
+            && libs.contains(n.as_str())
+        {
+            clashes.push(n.clone());
         }
     }
     assert!(
