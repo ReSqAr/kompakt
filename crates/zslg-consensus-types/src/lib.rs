@@ -5,6 +5,7 @@ mod error;
 mod handle;
 mod intent;
 mod meta;
+pub mod metrics;
 mod types;
 mod validators;
 

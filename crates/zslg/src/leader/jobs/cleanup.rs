@@ -21,7 +21,8 @@ use tracing::{debug, info, warn};
 
 use crate::error::Error;
 use crate::leader::jobs::{LeaderHandles, is_local_leader};
-use crate::metrics::{self, LeaderJob};
+
+use zslg_consensus_types::metrics::{LeaderJob, leader_job_ran};
 use zslg_node_types::NodeId;
 use zslg_snapshot_types::SnapshotId;
 
@@ -60,7 +61,7 @@ impl CleanupJob {
                 _ = ticker.tick() => {
                     let started = tokio::time::Instant::now();
                     self.tick().await;
-                    metrics::leader_job_ran(LeaderJob::Cleanup, started.elapsed());
+                    leader_job_ran(LeaderJob::Cleanup, started.elapsed());
                 }
             }
         }

@@ -22,8 +22,8 @@ use tracing::{debug, info, warn};
 use crate::error::Error;
 use crate::leader::jobs::compaction::merge::compact;
 use crate::leader::jobs::{LeaderHandles, is_local_leader};
-use crate::metrics::{self, LeaderJob};
 use zslg_consensus::IntentSubmitter;
+use zslg_consensus_types::metrics::{LeaderJob, leader_job_ran};
 use zslg_node_types::NodeId;
 use zslg_snapshot_types::CompactionTier;
 use zslg_snapshot_types::CompressionLevel;
@@ -68,7 +68,7 @@ impl CompactionJob {
                 _ = ticker.tick() => {
                     let started = tokio::time::Instant::now();
                     self.tick().await;
-                    metrics::leader_job_ran(LeaderJob::Compaction, started.elapsed());
+                    leader_job_ran(LeaderJob::Compaction, started.elapsed());
                 }
             }
         }

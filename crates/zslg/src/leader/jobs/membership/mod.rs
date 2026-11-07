@@ -30,9 +30,10 @@ use tracing::{debug, info, warn};
 use crate::error::Error;
 use crate::leader::jobs::is_local_leader;
 use crate::leader::jobs::membership::liveness::LivenessState;
-use crate::metrics::{self, LeaderJob, OpState};
+use crate::metrics::{self, OpState};
 use pace_kit::Pace;
 use zslg_consensus_types::RaftGeneration;
+use zslg_consensus_types::metrics::{LeaderJob, leader_job_ran};
 use zslg_consensus_types::{RaftState, ReplicaMembership, ReplicaStatus};
 use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
@@ -215,7 +216,7 @@ impl MembershipJob {
                 }
                 let started = tokio::time::Instant::now();
                 self.step().await;
-                metrics::leader_job_ran(LeaderJob::Membership, started.elapsed());
+                leader_job_ran(LeaderJob::Membership, started.elapsed());
             }
         }
         info!("leader:membership: shutdown");

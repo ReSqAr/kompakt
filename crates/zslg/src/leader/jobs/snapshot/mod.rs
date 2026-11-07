@@ -25,10 +25,11 @@ use tracing::{debug, info, warn};
 use crate::error::Error;
 use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
 use crate::leader::jobs::{LeaderHandles, is_local_leader};
-use crate::metrics::{self, LeaderJob, SnapshotStep};
+use crate::metrics::{self, SnapshotStep};
 use pace_kit::Pace;
 use warn_throttle::ThrottledWarn;
 use zslg_consensus::{IntentOutcome, IntentSubmitter};
+use zslg_consensus_types::metrics::{LeaderJob, leader_job_ran};
 use zslg_node_types::NodeId;
 use zslg_snapshot_types::CompactionTier;
 use zslg_snapshot_types::CompressionLevel;
@@ -105,7 +106,7 @@ impl SnapshotJob {
                         // This `continue` drives the next chunk; see
                         // `SNAPSHOT_LOOP_FLOOR` before changing it.
                         self.build_and_publish(cutoff).await;
-                        metrics::leader_job_ran(LeaderJob::Snapshot, started.elapsed());
+                        leader_job_ran(LeaderJob::Snapshot, started.elapsed());
                     } => continue,
                 }
             }

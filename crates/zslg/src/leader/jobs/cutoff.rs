@@ -26,8 +26,9 @@ use tracing::{debug, info, warn};
 
 use crate::error::Error;
 use crate::leader::jobs::is_local_leader;
-use crate::metrics::{self, LeaderJob, SnapshotState, SnapshotStep};
+use crate::metrics::{self, SnapshotState, SnapshotStep};
 use zslg_consensus::{IntentOutcome, IntentSubmitter, RaftIntent};
+use zslg_consensus_types::metrics::{LeaderJob, leader_job_ran};
 use zslg_node_types::NodeId;
 use zslg_time::Clock;
 use zslg_time_types::Hlc;
@@ -74,7 +75,7 @@ impl CutoffJob {
                 _ = ticker.tick() => {
                     let started = Instant::now();
                     self.tick().await;
-                    metrics::leader_job_ran(LeaderJob::Cutoff, started.elapsed());
+                    leader_job_ran(LeaderJob::Cutoff, started.elapsed());
                 }
             }
         }

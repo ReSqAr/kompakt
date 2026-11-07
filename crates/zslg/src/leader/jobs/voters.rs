@@ -29,7 +29,8 @@ use tracing::{info, warn};
 use crate::error::Error;
 use crate::leader::jobs::is_local_leader;
 use crate::leader::jobs::membership::MembershipObserver;
-use crate::metrics::{self, LeaderJob};
+
+use zslg_consensus_types::metrics::{LeaderJob, leader_job_ran};
 use zslg_net_types::ServerName;
 use zslg_node_types::NodeId;
 
@@ -83,7 +84,7 @@ impl VoterEvictionJob {
                 _ = ticker.tick() => {
                     let started = tokio::time::Instant::now();
                     self.tick(&mut absent_since, &mut self_absent_since).await;
-                    metrics::leader_job_ran(LeaderJob::Voters, started.elapsed());
+                    leader_job_ran(LeaderJob::Voters, started.elapsed());
                 }
             }
         }

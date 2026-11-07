@@ -4557,6 +4557,7 @@ dependencies = [
 name = "zslg-consensus-types"
 version = "0.1.0"
 dependencies = [
+ "metrics-kit",
  "postcard",
  "proptest",
  "rand 0.10.3",

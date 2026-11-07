@@ -73,12 +73,6 @@ const LABEL_STEP: &str = "step";
 /// Peer identity (`NodeId::to_string()`). High-cardinality but bounded by cluster
 /// size; the enum-valued-label rule targets bounded vocabularies, not node ids.
 const LABEL_NODE_ID: &str = "node_id";
-/// Which leader background job a `leader_job_*` metric describes (see
-/// [`LeaderJob`]). Deliberately **not** `job`: Prometheus attaches its own
-/// `job=<job_name>` label at scrape time and, without `honor_labels: true`,
-/// renames any exposed `job` to `exported_job` — which would silently break
-/// every per-job breakdown.
-const LABEL_JOB: &str = "leader_job";
 /// Which RocksDB column family a per-CF storage gauge describes. Value comes
 /// from `Subsystem::cf_name()` (CLAUDE.md §7: label values from an enum,
 /// never ad-hoc strings) — a node has one DB, so `cf` is the axis that
@@ -89,14 +83,7 @@ const LABEL_CF: &str = "cf";
 /// that `no_label_key_collides_with_prometheus_scrape_labels` keeps checking
 /// the whole set rather than whichever subset was current when it was written.
 #[cfg(test)]
-const ALL_LABEL_KEYS: &[&str] = &[
-    LABEL_STATE,
-    LABEL_STEP,
-    LABEL_NODE_ID,
-    LABEL_JOB,
-    LABEL_CF,
-    LABEL_NONE,
-];
+const ALL_LABEL_KEYS: &[&str] = &[LABEL_STATE, LABEL_STEP, LABEL_NODE_ID, LABEL_CF, LABEL_NONE];
 
 // ---------------------------------------------------------------------------
 // Metrics: each name constant is immediately followed by its emission
@@ -116,17 +103,6 @@ metrics!("zslg_", raft; {
          and discards the step-2 generation quorum, so a sustained rate means \
          the change is restarting, not progressing.";
 
-    custom  leader_job_ran  LEADER_JOB_LAST_RUN_TIMESTAMP_SECONDS
-        "leader_job_last_run_timestamp_seconds" Gauge Seconds
-        "Unix-epoch seconds when each leader job last completed an iteration. \
-         Grafana shows staleness as time() - this; a job that is wedged stops \
-         advancing it. Only meaningful on the leader.";
-    custom  leader_job_ran  LEADER_JOB_RUNS_TOTAL "leader_job_runs_total" Counter None
-        "Completed iterations per leader job.";
-    custom  leader_job_ran  LEADER_JOB_DURATION_SECONDS "leader_job_duration_seconds"
-        Histogram Seconds "How long each leader-job iteration took. The snapshot \
-        and compaction jobs are the long ones; they run concurrently, so a long \
-        tail here does not imply other jobs are blocked.";
     custom  leader_intent   LEADER_INTENTS_TOTAL "leader_intents_total" Counter None
         "Raft-state intents resolved by the leader integrator, by outcome \
          (applied/already_satisfied/superseded/failed).";
@@ -144,23 +120,6 @@ metrics!("zslg_", raft; {
 
 // ── raft / consensus: hand-written emission helpers ────────────────────────
 // (custom rows above; each fn below emits the metrics named in its row)
-
-/// One leader job's iteration finished: stamp the wall clock, count the run, and
-/// record how long it took.
-///
-/// The stamp is the liveness signal for the leader's background work. Each job is
-/// a single serial task, so "it has not run recently" is the only way a wedged
-/// job shows up — there is no queue to inspect. Grafana derives staleness as
-/// `time() - leader_job_last_run_timestamp_seconds`, which keeps climbing even if
-/// the job (and therefore the emitter) is stuck, unlike a duration histogram that
-/// simply stops receiving samples.
-pub(crate) fn leader_job_ran(job: LeaderJob, elapsed: std::time::Duration) {
-    metrics::gauge!(LEADER_JOB_LAST_RUN_TIMESTAMP_SECONDS, LABEL_JOB => job.as_str())
-        .set(lossy_f64(unix_now_secs()));
-    metrics::counter!(LEADER_JOB_RUNS_TOTAL, LABEL_JOB => job.as_str()).increment(1);
-    metrics::histogram!(LEADER_JOB_DURATION_SECONDS, LABEL_JOB => job.as_str())
-        .record(elapsed.as_secs_f64());
-}
 
 /// One intent resolved by the integrator, by outcome.
 pub(crate) fn leader_intent(outcome: IntentState) {
@@ -406,23 +365,6 @@ pub(crate) fn storage_actual_delayed_write_rate(value: u64) {
 // Label-value vocabularies
 // ---------------------------------------------------------------------------
 
-label_enum!(#[doc = "`job` label of the `leader_job_*` metrics — one value per leader task (`crate::leader::jobs`). Label values come from this enum, never ad-hoc strings (CLAUDE.md §7)."] LeaderJob {
-    /// Publishes the HLC cutoff (snapshot protocol step 1).
-    Cutoff => "cutoff",
-    /// Builds and publishes snapshots (steps 2-5).
-    Snapshot => "snapshot",
-    /// Merges snapshot objects and splices the manifest.
-    Compaction => "compaction",
-    /// Deletes unreferenced snapshot objects.
-    Cleanup => "cleanup",
-    /// Drives replica-set membership changes.
-    Membership => "membership",
-    /// Evicts Raft voters absent from `config.peers`.
-    Voters => "voters",
-    /// Integrates every leader intent into Raft — the single writer.
-    Integrator => "integrator",
-});
-
 label_enum!(#[doc = "`state` label of [`SNAPSHOT_CREATION_TOTAL`]."] SnapshotState {
     Success => "success",
     /// The (watermark, cutoff] window was empty — nothing to snapshot.
@@ -608,6 +550,8 @@ pub(crate) fn jemalloc_stats(s: &JemallocStats) {
 // ---------------------------------------------------------------------------
 
 const ALL_METRICS: &[&[MetricDef]] = &[
+    // --- leader job heartbeat (zslg-consensus-types) ---
+    zslg_consensus_types::metrics::METRICS,
     // --- writer (zslg-writer) ---
     zslg_writer::metrics::METRICS,
     // --- replica log and service (zslg-replica-log, zslg-replica-service) ---

@@ -135,8 +135,8 @@ impl Integrator {
             }
             let started = tokio::time::Instant::now();
             self.integrate_batch(batch).await;
-            crate::metrics::leader_job_ran(
-                crate::metrics::LeaderJob::Integrator,
+            zslg_consensus_types::metrics::leader_job_ran(
+                zslg_consensus_types::metrics::LeaderJob::Integrator,
                 started.elapsed(),
             );
         }
