@@ -4,7 +4,7 @@ Working document for the IAIC interview. Current model only.
 
 ## Where we are
 
-Q1-Q7 settled (D1-D7). Asked Q8 (ports-only between implementation crates). Then the implementation layer cut (database, object-store, quorum, clock impl, net, raft, learner, leader, replica, facade). No design doc yet.
+Q1-Q8 settled (D1-D8). Asked Q9 (test support). Still to cover: nvzn split, public API / nlnr compatibility, migration order, then design doc. Then the implementation layer cut (database, object-store, quorum, clock impl, net, raft, learner, leader, replica, facade). No design doc yet.
 
 ## Model of the problem
 

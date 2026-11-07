@@ -109,7 +109,19 @@ RaftStateError, RaftLogIndex, RaftResponse, FencedStateWrite) and, for
 group) material. `RaftNode` already implements three ports (`RaftConsensus`,
 `RaftLeadership`, `StateReplicator`).
 
+### D8. Implementation crates depend only on foundation ports
+
+Layering is two levels: foundation (types + ports per group, errors, metrics
+kit, primitives) -> implementation crates (siblings, no edges between them) ->
+`zslg` facade, the composition root and the only crate that names concrete
+types from several implementation crates. Ports grow where a consumer needs
+them (e.g. `RaftNode::proposals`/`snapshot`, used by leader). Rejected:
+implementations depending on each other's concrete types (deep chains, any raft
+change rebuilds leader/learner/replica, layering only enforced at the
+foundation).
+
 ## Open
 
-- Q8: do implementation crates depend only on ports (concrete types meet only
-  in the composition root), or may they depend on each other's concrete types?
+- Q9: test support — 11 `_for_test` fault-injection fns and 33
+  `cfg(test) pub(crate)` items are used across modules, plus ~5k lines of
+  integration tests and a cluster harness. Where do shared fakes and hooks live?
