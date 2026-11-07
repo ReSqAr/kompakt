@@ -4,7 +4,7 @@ Working document for the IAIC interview. Current model only.
 
 ## Where we are
 
-Q1-Q14 settled (D1-D14). Asked Q15 (naming/layout). After Q15: design doc. Prediction track record so far: wrong on Q6 (user wants more crates), Q7 (finer), Q11 (facade only), Q13 (one PR). Right on the rest — so the user leans towards more crates, smaller steps, layering hidden from consumers. Then the implementation layer cut (database, object-store, quorum, clock impl, net, raft, learner, leader, replica, facade). No design doc yet.
+Interview closed (D1-D15). Design doc written; waiting for sign-off. Prediction track record so far: wrong on Q6 (user wants more crates), Q7 (finer), Q11 (facade only), Q13 (one PR). Right on the rest — so the user leans towards more crates, smaller steps, layering hidden from consumers. Then the implementation layer cut (database, object-store, quorum, clock impl, net, raft, learner, leader, replica, facade). No design doc yet.
 
 ## Model of the problem
 
@@ -28,3 +28,12 @@ candidate  foundation = several domain crates, each types+traits (time, log, con
 | Q4 | Where do the 8k lines of integration tests live | facade crate, unchanged |
 | Q5 | Land as one PR per crate, or one big PR | one per crate, cycles first |
 | Q6 | nvzn | stays one crate |
+
+## What I expect at sign-off
+
+- Likeliest comments: crate granularity in §4.1 (too fine or not fine enough),
+  `nvzn-metrics` being central, the nested `Error` match.
+- Possible pushback: the libraries-may-be-used-by-implementations refinement of
+  D8 (§2.1), and whether `zslg-net-wire` is really a library.
+- Biggest implementation risk: the `ClusterBootstrap` port not covering
+  everything `startup` does, and fault hooks that need new ports.

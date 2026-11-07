@@ -240,6 +240,16 @@ object_store framing/snapshot_store) and proposes every cut whose pieces share
 no private state. First impression from a rough import scan: files inside the
 big subfolders are mostly independent of each other.
 
-## Open
+### D15. Flat `crates/`, role readable from the name
 
-- Q15: crate naming and directory layout for ~40 crates.
+`zslg` (facade), `zslg-<group>`, `zslg-<group>-fake`, `zslg-<implementation>`;
+`nvzn`, `nvzn-<what>` likewise. `members = ["crates/*"]` is unchanged. A
+`crates/README.md` carries the layer diagram as an index (not a public
+contract). Rejected: nested directories by family (shows layering as a tree,
+contradicts D11; moves the facade path) and one workspace per family.
+
+## Interview closed
+
+Remaining decisions have no wide-reaching consequences; the open items are
+listed in the design doc §8.4 for sign-off. Design doc:
+`2026-11-07_design_crate_split.md`.
