@@ -580,7 +580,7 @@ impl ReplicaLogStore {
 
         let (live, live_registry) = broadcast(
             "replica live tail",
-            FanoutConfig::with_sub_cap(crate::unit::nonzero(subscribe_channel_capacity)),
+            FanoutConfig::with_sub_cap(bytesize::nonzero(subscribe_channel_capacity)),
             OverflowPolicy::Shed,
         );
         Ok(Self {

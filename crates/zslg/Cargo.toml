@@ -15,6 +15,7 @@ workspace = true
 
 [dependencies]
 async-trait = { workspace = true }
+bytesize = { workspace = true }
 bytes = { workspace = true }
 console-subscriber = { workspace = true, optional = true }
 crc32fast = { workspace = true }

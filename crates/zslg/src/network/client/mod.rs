@@ -620,7 +620,7 @@ mod tests {
             max_unary_conns_per_peer: 32,
             max_idle_unary_conns_per_peer: 8,
             pool_channel_capacity: 4096,
-            subscribe_channel_capacity: crate::unit::nonzero(1024),
+            subscribe_channel_capacity: bytesize::nonzero(1024),
         }
     }
 

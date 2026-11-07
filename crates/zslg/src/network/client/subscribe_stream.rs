@@ -317,7 +317,7 @@ mod tests {
                 server_name: "localhost".into(),
             }),
             None,
-            crate::unit::nonzero(8),
+            bytesize::nonzero(8),
             cancel.clone(),
         );
 
@@ -359,7 +359,7 @@ mod tests {
             max_unary_conns_per_peer: 4,
             max_idle_unary_conns_per_peer: 2,
             pool_channel_capacity: 64,
-            subscribe_channel_capacity: crate::unit::nonzero(8),
+            subscribe_channel_capacity: bytesize::nonzero(8),
         }
     }
 }

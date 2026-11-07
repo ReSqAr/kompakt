@@ -170,7 +170,7 @@ impl RocksDBStore {
 }
 
 fn db_options(config: &StoreConfig) -> Result<(Options, Cache), Error> {
-    let cache = Cache::new_lru_cache(config.memory.as_usize()?);
+    let cache = Cache::new_lru_cache(config.memory.as_usize().map_err(zslg::Error::from)?);
     let wbm = WriteBufferManager::new_write_buffer_manager_with_cache(
         usize::try_from(config.memtable_budget()).unwrap_or(usize::MAX),
         true,

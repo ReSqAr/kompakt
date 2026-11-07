@@ -36,7 +36,7 @@ pub(crate) struct StableLogConfig {
 impl StableLogConfig {
     /// Default depth of each subscriber's queue — see the field.
     pub(crate) const DEFAULT_SUBSCRIBER_QUEUE_CAPACITY: std::num::NonZeroUsize =
-        crate::unit::nonzero(256);
+        bytesize::nonzero(256);
 
     /// Default sizing. Test-only — production builds the config from the
     /// owning node config's flat fields. The store's location and compression
@@ -80,7 +80,7 @@ mod config_tests {
     #[test]
     fn subscriber_queue_shallower_than_a_load_batch_is_rejected() {
         let mut cfg = StableLogConfig::for_test();
-        cfg.subscriber_queue_capacity = crate::unit::nonzero(STABLE_LOAD_BATCH - 1);
+        cfg.subscriber_queue_capacity = bytesize::nonzero(STABLE_LOAD_BATCH - 1);
         let err = cfg
             .validate()
             .expect_err("one batch would overrun the queue");
@@ -1417,7 +1417,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let storage = Storage::open_for_test(&dir.path().join("stable")).expect("storage");
         // Deep enough to hold every event of the load without a hang-up.
-        let log = StableLog::open_sized(storage, crate::unit::nonzero(1024))
+        let log = StableLog::open_sized(storage, bytesize::nonzero(1024))
             .await
             .expect("open");
         let mut events = log.subscribe_events();

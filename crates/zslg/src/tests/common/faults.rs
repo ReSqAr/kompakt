@@ -609,7 +609,7 @@ impl ReplicaServiceHarness {
             clock.clone(),
             Arc::new(raft_state.clone()),
             rx,
-            crate::unit::nonzero(2048),
+            bytesize::nonzero(2048),
             crate::network::static_peers(peer_addrs),
         ));
         Ok(Self {

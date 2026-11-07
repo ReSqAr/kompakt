@@ -189,7 +189,7 @@ fn spawn_loop(
         clock.clone(),
         Arc::new(sys.raft_state.clone()),
         drained_cutoff_rx.clone(),
-        crate::unit::nonzero(2048),
+        bytesize::nonzero(2048),
         crate::network::static_peers(Vec::new()),
     ));
     let mut server_shutdown = Shutdown::new();

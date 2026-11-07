@@ -80,7 +80,7 @@ pub(crate) const QUEUE_REFERENCE_PAYLOAD_BYTES: u64 = 2 * 1024;
 /// Default for [`LocalStoreConfig::unstable_subscriber_queue_capacity`]: two
 /// full integrate batches.
 pub(in crate::learner) const DEFAULT_UNSTABLE_SUBSCRIBER_QUEUE_CAPACITY: NonZeroUsize =
-    crate::unit::nonzero(2 * store::MAX_BATCH);
+    bytesize::nonzero(2 * store::MAX_BATCH);
 
 impl LocalStoreConfig {
     /// Test-only constructor carrying the production defaults. Production
@@ -93,7 +93,7 @@ impl LocalStoreConfig {
             flush_interval: Duration::from_secs(1),
             purge_grace_period: Duration::from_secs(5 * 60),
             dedup_ring: NonZeroUsize::new(16_384),
-            integrate_channel_capacity: crate::unit::nonzero(2048),
+            integrate_channel_capacity: bytesize::nonzero(2048),
             unstable_subscriber_queue_capacity: DEFAULT_UNSTABLE_SUBSCRIBER_QUEUE_CAPACITY,
         }
     }

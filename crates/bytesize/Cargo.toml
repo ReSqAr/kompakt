@@ -1,0 +1,17 @@
+[package]
+name = "bytesize"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Byte-size and non-zero quantity newtypes for configuration"
+publish = false
+
+[dependencies]
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "library"

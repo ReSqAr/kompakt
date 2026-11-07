@@ -406,6 +406,12 @@ impl Error {
     }
 }
 
+impl From<bytesize::OutOfRange> for Error {
+    fn from(e: bytesize::OutOfRange) -> Self {
+        Error::InvalidConfiguration(e.to_string())
+    }
+}
+
 pub(crate) trait ToRpc<T> {
     fn to_rpc(self, context: &str) -> Result<T, Error>;
 }

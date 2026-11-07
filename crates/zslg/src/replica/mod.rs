@@ -528,10 +528,10 @@ impl ReplicaLogConfig {
         Self {
             purge_grace_period: Duration::from_secs(5 * 60),
             fetch_sweep_interval: Duration::from_secs(2),
-            subscribe_channel_capacity: crate::unit::nonzero(1024),
-            write_channel_capacity: crate::unit::nonzero(4096),
-            write_out_capacity: crate::unit::nonzero(2048),
-            max_flush_batch: crate::unit::nonzero(1024),
+            subscribe_channel_capacity: bytesize::nonzero(1024),
+            write_channel_capacity: bytesize::nonzero(4096),
+            write_out_capacity: bytesize::nonzero(2048),
+            max_flush_batch: bytesize::nonzero(1024),
             effective_node_id,
         }
     }
@@ -627,8 +627,8 @@ mod tests {
     #[test]
     fn queue_capacity_bytes_is_reported() {
         let mut cfg = ReplicaLogConfig::for_test(nid(1));
-        cfg.write_channel_capacity = crate::unit::nonzero(4096);
-        cfg.subscribe_channel_capacity = crate::unit::nonzero(1024);
+        cfg.write_channel_capacity = bytesize::nonzero(4096);
+        cfg.subscribe_channel_capacity = bytesize::nonzero(1024);
         // (4096 + 1024) slots x 2 KiB reference payload = 10 MiB.
         assert_eq!(cfg.queue_capacity_bytes(), 10_485_760);
     }
@@ -681,7 +681,7 @@ mod tests {
             clock,
             Arc::new(raft_state.clone()),
             rx,
-            crate::unit::nonzero(2048),
+            bytesize::nonzero(2048),
             crate::network::static_peers(Vec::new()),
         ));
         (node, raft_state, dir, flush)

@@ -1,8 +1,14 @@
 //! Small quantity newtypes for config ergonomics, in the spirit of
-//! [`std::time::Duration`]'s `from_secs` / `from_millis`. Re-exported at the
-//! crate root as [`crate::ByteSize`].
+//! [`std::time::Duration`]'s `from_secs` / `from_millis`.
 
-use crate::error::Error;
+/// A [`ByteSize`] that does not fit the integer a boundary API takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum OutOfRange {
+    #[error("byte size {0} exceeds u32::MAX")]
+    U32(u64),
+    #[error("byte size {0} does not fit in usize")]
+    Usize(u64),
+}
 
 /// A byte size. Binary units: 1 KiB = 1024 B, 1 MiB = 1024² B, 1 GiB = 1024³ B.
 /// Wraps a `u64`; construct with [`ByteSize::from_bytes`] / [`ByteSize::from_kib`]
@@ -47,10 +53,8 @@ impl ByteSize {
 
     /// The raw byte count as `u32` for socket-buffer APIs; errors if it does not
     /// fit (fallible at runtime, so a `Result` rather than an `expect`).
-    pub fn as_u32(self) -> Result<u32, Error> {
-        u32::try_from(self.0).map_err(|_| {
-            Error::InvalidConfiguration(format!("byte size {} exceeds u32::MAX", self.0))
-        })
+    pub fn as_u32(self) -> Result<u32, OutOfRange> {
+        u32::try_from(self.0).map_err(|_| OutOfRange::U32(self.0))
     }
 
     /// Bytes as a `usize`, for the RocksDB setters that take one.
@@ -60,10 +64,8 @@ impl ByteSize {
     /// rather than saturate, because a silently-truncated memory budget is a
     /// sizing bug that surfaces as a stall much later.
     #[must_use = "the conversion can fail; discarding it discards the failure"]
-    pub fn as_usize(self) -> Result<usize, Error> {
-        usize::try_from(self.0).map_err(|_| {
-            Error::InvalidConfiguration(format!("byte size {} does not fit in usize", self.0))
-        })
+    pub fn as_usize(self) -> Result<usize, OutOfRange> {
+        usize::try_from(self.0).map_err(|_| OutOfRange::Usize(self.0))
     }
 }
 
@@ -74,7 +76,7 @@ impl ByteSize {
 /// `unwrap` (both denied in production code, CLAUDE.md §2). Every call site
 /// here passes a non-zero literal, so the saturating branch is unreachable.
 #[must_use]
-pub(crate) const fn nonzero(n: usize) -> std::num::NonZeroUsize {
+pub const fn nonzero(n: usize) -> std::num::NonZeroUsize {
     std::num::NonZeroUsize::MIN.saturating_add(n.saturating_sub(1))
 }
 

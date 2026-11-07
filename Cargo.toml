@@ -56,6 +56,7 @@ uuid = { version = "1", features = ["v4"] }
 zstd = { version = "0", default-features = false }
 
 btrb = { path = "crates/btrb" }
+bytesize = { path = "crates/bytesize" }
 crossbeam-combinators = { path = "crates/crossbeam-combinators" }
 error-union = { path = "crates/error-union" }
 nvzn = { path = "crates/nvzn" }

@@ -66,7 +66,6 @@ pub(crate) mod shutdown;
 pub(crate) mod test_stream;
 #[cfg(test)]
 mod tests;
-mod unit;
 pub(crate) mod writer;
 pub(crate) mod writer_node;
 
@@ -89,8 +88,8 @@ pub use crate::observability::configure_prometheus;
 pub use crate::observability::{METRIC_NAMESPACE, describe_metrics, histogram_buckets};
 pub use crate::raft::{RaftStateHandle, SpareSelectionStrategy};
 pub use crate::replica_node::{InitialisingReplicaNode, ReplicaNode, ReplicaNodeConfig};
-pub use crate::unit::ByteSize;
 pub use crate::writer_node::{WriterNode, WriterNodeConfig};
+pub use bytesize::ByteSize;
 
 pub(crate) fn jitter(d: std::time::Duration) -> std::time::Duration {
     let ms = u64::try_from(d.as_millis()).unwrap_or(u64::MAX);

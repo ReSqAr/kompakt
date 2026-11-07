@@ -44,7 +44,7 @@ use rust_rocksdb::{
 use super::Subsystem;
 use crate::Error;
 use crate::error::ToStorage;
-use crate::unit::ByteSize;
+use bytesize::ByteSize;
 
 /// Background compaction + flush threads. Small machine: 2.
 ///

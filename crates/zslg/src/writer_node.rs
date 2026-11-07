@@ -202,7 +202,7 @@ impl WriterNodeConfig {
             unary_timeout: Duration::from_secs(10),
             connect_timeout: Duration::from_secs(10),
             pool_channel_capacity: 4096,
-            subscribe_channel_capacity: crate::unit::nonzero(1024),
+            subscribe_channel_capacity: bytesize::nonzero(1024),
             write_timeout: Duration::from_secs(10),
             startup_timeout: Duration::from_secs(15),
             drain_timeout: Duration::from_secs(30),
