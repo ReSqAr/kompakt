@@ -14,13 +14,14 @@ use std::time::Duration;
 /// subscriber retries): the `parking_lot::Mutex` is held only across the
 /// synchronous timestamp compare inside [`WarnThrottle::should_warn`] — never
 /// across an `.await` (CLAUDE.md §4).
-pub(crate) struct WarnThrottle {
+pub struct WarnThrottle {
     last: Mutex<Option<tokio::time::Instant>>,
     interval: Duration,
 }
 
 impl WarnThrottle {
-    pub(crate) fn new(interval: Duration) -> Self {
+    #[must_use]
+    pub fn new(interval: Duration) -> Self {
         Self {
             last: Mutex::new(None),
             interval,
@@ -29,7 +30,7 @@ impl WarnThrottle {
 
     /// Returns `true` at most once per `interval` (and always on the first
     /// call), stamping the current time when it does.
-    pub(crate) fn should_warn(&self) -> bool {
+    pub fn should_warn(&self) -> bool {
         let mut last = self.last.lock();
         match *last {
             Some(t) if t.elapsed() < self.interval => false,
@@ -47,13 +48,14 @@ impl WarnThrottle {
 /// one-line summary. Exact per-event counts stay in metrics; this bounds the
 /// log volume for churn loops (replication subscriber retries, snapshot build
 /// retries).
-pub(crate) struct ThrottledWarn {
+pub struct ThrottledWarn {
     gate: WarnThrottle,
     suppressed: u64,
 }
 
 impl ThrottledWarn {
-    pub(crate) fn new(interval: Duration) -> Self {
+    #[must_use]
+    pub fn new(interval: Duration) -> Self {
         Self {
             gate: WarnThrottle::new(interval),
             suppressed: 0,
@@ -65,7 +67,7 @@ impl ThrottledWarn {
     /// call, and whenever nothing was suppressed). Returns `None` when the call
     /// is throttled; the caller counts it and it will surface in a later
     /// summary.
-    pub(crate) fn gate(&mut self) -> Option<u64> {
+    pub fn gate(&mut self) -> Option<u64> {
         if self.gate.should_warn() {
             let n = self.suppressed;
             self.suppressed = 0;
@@ -78,7 +80,7 @@ impl ThrottledWarn {
 }
 
 #[cfg(test)]
-mod warn_throttle_tests {
+mod tests {
     use super::{ThrottledWarn, WarnThrottle};
 
     #[tokio::test(start_paused = true)]

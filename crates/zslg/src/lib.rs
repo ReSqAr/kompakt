@@ -67,7 +67,6 @@ pub(crate) mod test_stream;
 #[cfg(test)]
 mod tests;
 mod unit;
-pub(crate) mod warn_throttle;
 pub(crate) mod writer;
 pub(crate) mod writer_node;
 

@@ -48,8 +48,8 @@ use crate::meta::{Data, ReplicaStatus};
 use crate::metrics::{self, ReplicaWriteState};
 use crate::replica::log::flush_loop;
 use crate::shutdown::Shutdown;
-use crate::warn_throttle::WarnThrottle;
 use crossbeam_combinators::Channel;
+use warn_throttle::WarnThrottle;
 
 /// Minimum spacing between replica-write-rejection `warn!`s. Rejections recur at
 /// the write rate (tens/sec) under a persistent failure, so they are throttled

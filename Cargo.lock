@@ -3946,6 +3946,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "warn-throttle"
+version = "0.1.0"
+dependencies = [
+ "parking_lot 0.13.0",
+ "tokio",
+]
+
+[[package]]
 name = "wasi"
 version = "0.11.1+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4407,6 +4415,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "warn-throttle",
  "zstd",
 ]
 

@@ -448,7 +448,7 @@ fn spawn_always_failing_snapshot_job() -> SnapshotHarness {
         quorum_wait_timeout: Duration::from_secs(30),
         compression: CompressionLevel::fast(),
         max_snapshot_entries: std::num::NonZeroUsize::MAX,
-        build_warn: crate::warn_throttle::ThrottledWarn::new(std::time::Duration::from_secs(5)),
+        build_warn: warn_throttle::ThrottledWarn::new(std::time::Duration::from_secs(5)),
     };
     let cancel = CancellationToken::new();
     tokio::spawn(job.run(cancel.clone()));

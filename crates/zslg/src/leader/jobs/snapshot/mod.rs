@@ -30,7 +30,7 @@ use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
 use crate::leader::jobs::{LeaderHandles, is_local_leader};
 use crate::metrics::{self, LeaderJob, SnapshotStep};
 use crate::object_store::CompressionLevel;
-use crate::warn_throttle::ThrottledWarn;
+use warn_throttle::ThrottledWarn;
 
 pub(in crate::leader) mod create;
 
