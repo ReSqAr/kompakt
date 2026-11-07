@@ -902,7 +902,7 @@ pub(crate) const LOCAL_STORE_CURSORS_CF: ColumnFamily = ColumnFamily::new("local
     reason = "test code"
 )]
 mod tests {
-    use crate::test_stream::ChannelTestExt as _;
+    use crossbeam_combinators::testing::ChannelTestExt as _;
     use std::path::Path;
     use std::sync::Arc;
 

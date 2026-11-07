@@ -25,16 +25,16 @@
 
 use std::io;
 use std::io::Read as _;
-use zslg_log_types::LogError;
-use zslg_snapshot_types::SnapshotError;
+use zslg_log::LogError;
+use zslg_snapshot::SnapshotError;
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::error::Error;
+use crate::Error;
 use framing::{append_crc32, verify_frame_crc32};
-use zslg_log_types::ToCodec;
-use zslg_snapshot_types::CompressionLevel;
+use zslg_log::ToCodec;
+use zslg_snapshot::CompressionLevel;
 
 const MAGIC: [u8; 4] = *b"SNZC";
 
@@ -99,7 +99,7 @@ fn encode_frames<T: Serialize, W: io::Write>(
 /// encoder consumed it before failing, or `finish()` itself errored — and the
 /// caller falls back to the object-store cleanup pass.
 #[must_use = "recover the writer to finish() or abort() the multipart upload, and check the encode Result"]
-pub(in crate::object_store) fn encode_framed_records_streaming<T: Serialize, W: io::Write>(
+pub(crate) fn encode_framed_records_streaming<T: Serialize, W: io::Write>(
     mut writer: W,
     compression: CompressionLevel,
     next: impl FnMut() -> Option<Result<T, Error>>,
@@ -172,7 +172,7 @@ fn read_full_or_eof<R: io::Read>(reader: &mut R, buf: &mut [u8]) -> Result<bool,
 /// `sink` is the backpressure point: while it blocks, the decode is paused and
 /// no further frame is read. That is what bounds memory, so a `sink` that
 /// buffers instead of blocking removes the bound.
-pub(in crate::object_store) fn decode_framed_records_streaming<T: DeserializeOwned, R: io::Read>(
+pub(crate) fn decode_framed_records_streaming<T: DeserializeOwned, R: io::Read>(
     mut reader: R,
     mut sink: impl FnMut(T) -> Result<(), Error>,
 ) -> Result<(), Error> {
@@ -225,9 +225,9 @@ pub(in crate::object_store) fn decode_framed_records_streaming<T: DeserializeOwn
 mod tests {
     use super::*;
 
-    use super::super::test_entry as entry;
-    use zslg_log_types::SnapshotEntry;
-    use zslg_snapshot_types::CompressionLevel;
+    use crate::test_entry as entry;
+    use zslg_log::SnapshotEntry;
+    use zslg_snapshot::CompressionLevel;
 
     /// Encode `records` into an in-memory buffer with `encode_framed_records_streaming`
     /// (pulling from a `Vec::into_iter`), then decode the buffer back with the sync

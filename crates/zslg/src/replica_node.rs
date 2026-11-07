@@ -46,7 +46,6 @@ use crate::network::PeersMembershipGate;
 use crate::network::{
     LocalReplicaClient, PeerRouter, RpcClientConfig, RpcServerConfig, SocketOpts, setup_router,
 };
-use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use crate::raft::{MembershipConfig, RaftConfig};
 use crate::raft::{NoOpRaftViewer, RaftNode, run_raft_startup, setup_raft};
 use crate::replica::ReplicaLogConfig;
@@ -62,6 +61,7 @@ use zslg_consensus_types::{EvictionStatus, RaftStateHandle};
 use zslg_net_types::ServerName;
 use zslg_net_types::{HostPort, PeerAddr};
 use zslg_node_types::NodeId;
+use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use zslg_object_store_config::IntoArcObjectStore;
 use zslg_snapshot_types::CompactionTier;
 use zslg_snapshot_types::CompressionLevel;

@@ -15,7 +15,7 @@
     reason = "test code"
 )]
 use crate::error::Home as _;
-use crate::test_stream::ChannelTestExt as _;
+use crossbeam_combinators::testing::ChannelTestExt as _;
 /// Leadership churn against an in-flight snapshot (EXPERT_REVIEW Appendix
 /// B.4): a real 3-node raft cluster, a snapshot pipeline stalled between
 /// its base-generation capture and its final fenced manifest commit, and a
@@ -55,7 +55,6 @@ use crate::leader::{SnapshotInputs, build_snapshot};
 use crate::learner::LocalStore;
 use crate::learner::StableLog;
 use crate::learner::integrate_manifest_for_test;
-use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use crate::raft::RaftNode;
 use crate::tests::fast_raft_config as raft_config;
 use crate::tests::make_data;
@@ -67,6 +66,7 @@ use zslg_log::{LocalStoreMut, LocalStoreView, Replica, StableLogSnapshot};
 use zslg_log_types::Data;
 use zslg_log_types::LogIndex;
 use zslg_node_types::NodeId;
+use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use zslg_time_types::{Hlc, HlcParts};
 
 async fn integrate_batch(

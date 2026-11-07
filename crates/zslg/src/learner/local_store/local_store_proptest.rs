@@ -15,7 +15,7 @@
     reason = "test code"
 )]
 use crate::error::Home as _;
-use crate::test_stream::ChannelTestExt as _;
+use crossbeam_combinators::testing::ChannelTestExt as _;
 use std::collections::{BTreeMap, BTreeSet};
 
 use bytes::Bytes;

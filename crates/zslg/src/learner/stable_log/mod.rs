@@ -826,8 +826,8 @@ impl zslg_log::StableLogSnapshot for StableLog {
 )]
 mod tests {
     use super::*;
-    use crate::test_stream::ChannelTestExt as _;
     use crate::tests::make_data;
+    use crossbeam_combinators::testing::ChannelTestExt as _;
     use zslg_log::StableLogSnapshot;
 
     /// Build a closed `Channel` pre-loaded with `items` — test convenience
@@ -1084,8 +1084,8 @@ mod tests {
         // End-to-end of the production load path: write a snapshot through the
         // public SnapshotStore API, then `read_snapshot` (off-reactor decode →
         // bounded channel) straight into `append` — no byte/framing detail here.
-        let store = crate::object_store::RemoteSnapshotStore::new(
-            crate::object_store::SnapshotStoreConfig {
+        let store = zslg_object_store::RemoteSnapshotStore::new(
+            zslg_object_store::SnapshotStoreConfig {
                 object_store: Arc::new(object_store::memory::InMemory::new()),
             },
             tokio_util::sync::CancellationToken::new(),

@@ -728,6 +728,7 @@ name = "crossbeam-combinators"
 version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
+ "futures",
  "parking_lot 0.13.0",
  "proptest",
  "tokio",
@@ -4473,6 +4474,7 @@ dependencies = [
  "zslg-net-wire",
  "zslg-node-id",
  "zslg-node-types",
+ "zslg-object-store",
  "zslg-object-store-config",
  "zslg-quorum-read",
  "zslg-raft",
@@ -4481,7 +4483,6 @@ dependencies = [
  "zslg-snapshot-types",
  "zslg-time",
  "zslg-time-types",
- "zstd",
 ]
 
 [[package]]
@@ -4633,6 +4634,30 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "uuid",
+]
+
+[[package]]
+name = "zslg-object-store"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "framing",
+ "futures",
+ "metrics-kit",
+ "object_store",
+ "postcard",
+ "serde",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-log",
+ "zslg-snapshot",
+ "zslg-time",
+ "zstd",
 ]
 
 [[package]]

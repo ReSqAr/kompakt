@@ -50,14 +50,12 @@ pub(crate) mod learner;
 pub(crate) mod learner_node;
 pub(crate) mod metrics;
 pub(crate) mod network;
-pub(crate) mod object_store;
 pub(crate) mod observability;
 pub(crate) mod quorum;
 pub(crate) mod raft;
 pub(crate) mod replica;
 pub(crate) mod replica_node;
 #[cfg(test)]
-pub(crate) mod test_stream;
 #[cfg(test)]
 mod tests;
 pub(crate) mod writer;

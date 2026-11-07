@@ -37,8 +37,8 @@
 )]
 
 use metrics_kit::{
-    LABEL_STATE, MetricDef, Probe, Unit, label_enum, lossy_f64, lossy_f64_signed, metrics,
-    set_gauge, unix_now_secs,
+    LABEL_STATE, MetricDef, Unit, label_enum, lossy_f64, lossy_f64_signed, metrics, set_gauge,
+    unix_now_secs,
 };
 use std::time::Duration;
 
@@ -46,7 +46,6 @@ pub(crate) use metrics_kit::OpState;
 #[cfg(test)]
 use metrics_kit::{LABEL_NONE, MetricKind, set_flag};
 
-use zslg_snapshot_types::ObjectStoreReason;
 use zslg_time_types::Hlc;
 
 /// HLC gauges export the physical-millisecond part: the raw `u64` exceeds f64's
@@ -81,7 +80,6 @@ pub(crate) const METRIC_PREFIX: &str = "zslg_";
 
 const LABEL_LOG_TYPE: &str = "log_type";
 const LABEL_STEP: &str = "step";
-const LABEL_OP: &str = "op";
 const LABEL_METHOD: &str = "method";
 const LABEL_SOURCE: &str = "source";
 const LABEL_REASON: &str = "reason";
@@ -112,7 +110,6 @@ const ALL_LABEL_KEYS: &[&str] = &[
     LABEL_STATE,
     LABEL_LOG_TYPE,
     LABEL_STEP,
-    LABEL_OP,
     LABEL_METHOD,
     LABEL_SOURCE,
     LABEL_REASON,
@@ -577,18 +574,11 @@ metrics!("zslg_", snapshots; {
         "snapshot_creation_duration_seconds" Histogram Seconds
         "Snapshot creation latency per step (set_cutoff, await_quorum, \
          write_object, commit) plus total.";
-    gauge   snapshot_size SNAPSHOT_SIZE_BYTES "snapshot_size_bytes" Bytes
-        "Size of the last successful snapshot object." (bytes: u64);
     gauge_usize snapshot_entries SNAPSHOT_ENTRIES_COUNT "snapshot_entries_count" Count
         "Entries in the last successful snapshot." (n: usize);
     gauge   manifest_entries_count MANIFEST_ENTRIES_COUNT "manifest_entries_count" Count
         "Snapshot files in the applied manifest. Steady growth without \
          compaction = compaction wedged." (count: u64);
-    custom  snapshot_compression_ratio SNAPSHOT_COMPRESSION_RATIO
-        "snapshot_compression_ratio" Gauge None
-        "Compression ratio of the last written snapshot \
-         (uncompressed_bytes / compressed_bytes). >1 means compression \
-         saved space; 1 means incompressible data.";
     labeled_counter compaction_run COMPACTION_RUNS_TOTAL "compaction_runs_total"
         "Manifest compaction runs by outcome."
         (state: OpState) [LABEL_STATE => state.as_str()];
@@ -618,46 +608,6 @@ pub(crate) fn snapshot_creation_step(step: SnapshotStep, elapsed: Duration) {
         LABEL_STEP => step.as_str(),
     )
     .record(elapsed);
-}
-
-pub(crate) fn snapshot_compression_ratio(uncompressed: u64, compressed: u64) {
-    if compressed == 0 || uncompressed == 0 {
-        return;
-    }
-    let pct = uncompressed
-        .saturating_mul(100)
-        .checked_div(compressed)
-        .unwrap_or(u64::MAX);
-    metrics::gauge!(SNAPSHOT_COMPRESSION_RATIO).set(lossy_f64(pct));
-}
-
-// ── object store ────────────────────────────────────────────────────────────
-
-metrics!("zslg_", object_store; {
-    custom  object_store_transfer_bytes OBJECT_STORE_TRANSFER_BYTES_TOTAL
-        "object_store_transfer_bytes_total" Counter Bytes
-        "Bytes moved to/from the object store, by operation and by *why* the \
-         transfer happened. The `reason` split is the one that matters: reads \
-         run at a multiple of writes (26.7 GB GET against 12.3 GB PUT on one \
-         harness run), and `op` alone cannot say whether that is compaction \
-         re-reading what it just wrote or learners re-fetching a purged prefix \
-         — which have opposite fixes.";
-});
-
-// ── object store: hand-written emission helpers ─────────────────────────────
-// (custom rows above; each fn below emits the metrics named in its row)
-
-pub(crate) fn object_store_transfer_bytes(
-    op: ObjectStoreOp,
-    reason: ObjectStoreReason,
-    bytes: u64,
-) {
-    metrics::counter!(
-        OBJECT_STORE_TRANSFER_BYTES_TOTAL,
-        LABEL_OP => op.as_str(),
-        LABEL_REASON => reason.as_str(),
-    )
-    .increment(bytes);
 }
 
 // ── HLC / clock ──────────────────────────────────────────────────────────────
@@ -1231,12 +1181,6 @@ label_enum!(#[doc = "`step` label of [`SNAPSHOT_CREATION_DURATION_SECONDS`]."] S
     Total => "total",
 });
 
-label_enum!(#[doc = "`op` label of the object-store metrics."] ObjectStoreOp {
-    Get => "get",
-    Put => "put",
-    Head => "head",
-});
-
 label_enum!(#[doc = "`source` label of [`READS_TOTAL`]."] ReadSource {
     Stable => "stable",
     /// The one-shot `unstable_tail` scan.
@@ -1483,10 +1427,6 @@ metrics!("zslg_", probes; {
         "local_store_integrate_duration_seconds"
         "LocalStore::integrate_batch latency by outcome. _count is the \
          integrate throughput.";
-    custom  object_store_request_probe OBJECT_STORE_REQUEST_DURATION_SECONDS
-        "object_store_request_duration_seconds" Histogram Seconds
-        "Object-store request latency by operation and outcome. Count \
-         per (op, state) doubles as the request counter.";
     custom  rpc_conn_reuse RPC_CONN_REUSE_TOTAL "rpc_conn_reuse_total" Counter None
         "Unary connection-pool checkouts by outcome. Label `state`: `hit` \
          reused an idle connection, `miss` required a fresh dial. A low hit \
@@ -1496,17 +1436,6 @@ metrics!("zslg_", probes; {
 
 // ── probes: hand-written emission helpers ──────────────────────────────────
 // (custom rows above; each fn below emits the metrics named in its row)
-
-/// Probe for [`OBJECT_STORE_REQUEST_DURATION_SECONDS`] with the given
-/// operation baked into an extra `op` label.
-pub(crate) fn object_store_request_probe(op: ObjectStoreOp) -> Probe<OpState> {
-    Probe::start_with_extra(
-        OBJECT_STORE_REQUEST_DURATION_SECONDS,
-        LABEL_STATE,
-        (LABEL_OP, op.as_str()),
-        OpState::Failure,
-    )
-}
 
 /// Count a unary connection-pool checkout as a reuse hit (`true`) or a miss
 /// that required a fresh dial (`false`).
@@ -1572,6 +1501,8 @@ impl Drop for RpcServerGuard {
 // ---------------------------------------------------------------------------
 
 const ALL_METRICS: &[&[MetricDef]] = &[
+    // --- object store (zslg-object-store) ---
+    zslg_object_store::metrics::METRICS,
     // --- quorum fan-out (zslg-quorum-read) ---
     zslg_quorum_read::metrics::METRICS,
     // --- RPC wire (zslg-net-wire) ---
@@ -1595,7 +1526,6 @@ const ALL_METRICS: &[&[MetricDef]] = &[
     // --- snapshots / leader background tasks ---
     &snapshots!(),
     // --- object store ---
-    &object_store!(),
     // --- HLC / clock ---
     &hlc!(),
     // --- read path / learner stores ---

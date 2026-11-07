@@ -1075,7 +1075,7 @@ fn flush_one_batch_blocking(
 )]
 mod tests {
     use crate::error::Home as _;
-    use crate::test_stream::ChannelTestExt as _;
+    use crossbeam_combinators::testing::ChannelTestExt as _;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 

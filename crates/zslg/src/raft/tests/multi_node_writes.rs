@@ -17,7 +17,7 @@
     clippy::result_large_err,
     reason = "test code"
 )]
-use crate::test_stream::ChannelTestExt as _;
+use crossbeam_combinators::testing::ChannelTestExt as _;
 use std::sync::Arc;
 use std::time::Duration;
 

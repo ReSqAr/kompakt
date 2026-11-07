@@ -25,7 +25,7 @@
 //! `validate_replicated_state`: that runs on a proposal, so it cannot catch a
 //! bug on the apply path itself.
 
-use crate::test_stream::ChannelTestExt as _;
+use crossbeam_combinators::testing::ChannelTestExt as _;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 

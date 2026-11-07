@@ -53,15 +53,16 @@ zslg-node-types = { workspace = true }
 zslg-quorum-read = { workspace = true }
 zslg-object-store-config = { workspace = true }
 zslg-node-id = { workspace = true }
+zslg-object-store = { workspace = true }
 zslg-raft = { workspace = true }
 zslg-raft-types = { workspace = true }
 zslg-snapshot = { workspace = true }
 zslg-snapshot-types = { workspace = true }
 zslg-time = { workspace = true }
 zslg-time-types = { workspace = true }
-zstd = { workspace = true }
 
 [dev-dependencies]
+crossbeam-combinators = { workspace = true, features = ["testing"] }
 uuid = { workspace = true, features = ["serde"] }
 zslg-net-wire = { workspace = true, features = ["testing"] }
 rocksdb-kit = { workspace = true, features = ["testing"] }

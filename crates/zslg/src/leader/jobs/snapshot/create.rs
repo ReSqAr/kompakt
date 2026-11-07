@@ -403,7 +403,7 @@ async fn await_quorum_ready(inputs: &SnapshotInputs<'_>, new_cutoff: Hlc) -> Res
 )]
 mod tests {
     use super::*;
-    use crate::test_stream::ChannelTestExt as _;
+    use crossbeam_combinators::testing::ChannelTestExt as _;
 
     use bytes::Bytes;
     use proptest::prelude::*;

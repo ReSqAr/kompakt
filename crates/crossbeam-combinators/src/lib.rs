@@ -54,6 +54,8 @@ mod level;
 mod ordered;
 mod resume;
 mod seam;
+#[cfg(feature = "testing")]
+pub mod testing;
 
 pub use channel::{AbortReason, CancelHandle, Cancellation, Channel, Closer, End, ReadyBatch};
 pub use fanout::{

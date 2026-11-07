@@ -198,8 +198,8 @@ impl SnapshotLoader {
     reason = "test code"
 )]
 mod tests {
-    use crate::test_stream::ChannelTestExt as _;
     use crossbeam_combinators::Channel;
+    use crossbeam_combinators::testing::ChannelTestExt as _;
     use std::collections::{BTreeSet, HashMap};
     use std::sync::Mutex;
     use std::time::Duration;

@@ -1,4 +1,4 @@
-//! Test-only reads of a channel, for tests that only look at items.
+//! Test-only reads (feature `testing`) of a channel, for tests that only look at items.
 //!
 //! The crate has no lossy reads (no `IntoIterator`, no async `Stream` bridge):
 //! production code reads with `recv`/`ready_batch`, which return the verdict.
@@ -7,11 +7,11 @@
 //! stream owns — so dropping a stream on a quiet infinite channel cannot leave a
 //! blocking thread parked in `recv` and hang runtime shutdown.
 
-use crossbeam_combinators::{CancelHandle, Channel, Key, Kind, OrderPolicy, OrderedChannel};
+use crate::{CancelHandle, Channel, Key, Kind, OrderPolicy, OrderedChannel};
 use futures::StreamExt;
 use futures::stream::BoxStream;
 
-pub(crate) trait ChannelTestExt<T> {
+pub trait ChannelTestExt<T> {
     /// The items until the stream ends, verdict ignored. Lazy, so a bounded
     /// prefix of an infinite stream (`.take(n)`) does not block.
     fn items(self) -> impl Iterator<Item = T> + Send;

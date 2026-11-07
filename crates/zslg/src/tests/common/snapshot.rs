@@ -8,13 +8,13 @@ use crate::hlc::HlcGate;
 use crate::leader::SnapshotResult;
 use crate::learner::LocalStore;
 use crate::learner::StableLog;
-use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use object_store::ObjectStore;
 use object_store::memory::InMemory;
 use openraft::Config;
 use zslg_consensus_types::RaftStateHandle;
 use zslg_consensus_types::ReplicatedRaftState;
 use zslg_node_types::NodeId;
+use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use zslg_raft_types::Raft;
 
 pub(crate) struct SnapshotHarness {

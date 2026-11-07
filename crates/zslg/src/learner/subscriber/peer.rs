@@ -172,7 +172,7 @@ impl ReplicationSubscriber {
     reason = "test code"
 )]
 mod tests {
-    use crate::test_stream::ChannelTestExt as _;
+    use crossbeam_combinators::testing::ChannelTestExt as _;
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::time::Duration;

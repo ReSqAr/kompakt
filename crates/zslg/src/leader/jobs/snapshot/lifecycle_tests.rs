@@ -15,7 +15,7 @@
     reason = "test code"
 )]
 use crate::error::Home as _;
-use crate::test_stream::ChannelTestExt as _;
+use crossbeam_combinators::testing::ChannelTestExt as _;
 use std::sync::Arc;
 use std::time::Duration;
 use zslg_consensus::RaftLeadership;
@@ -32,7 +32,6 @@ use crate::leader::jobs::snapshot::create::{
 use crate::learner::LocalStore;
 use crate::learner::StableLog;
 use crate::learner::integrate_manifest_for_test;
-use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use crate::raft::RaftNode;
 use zslg_consensus_types::RaftStateHandle;
 use zslg_consensus_types::ReplicaMembership;
@@ -42,6 +41,7 @@ use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
+use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use zslg_raft_types::Raft;
 use zslg_snapshot_types::CompressionLevel;
 use zslg_time_types::Hlc;

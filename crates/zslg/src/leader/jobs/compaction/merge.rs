@@ -258,7 +258,7 @@ async fn merge_group(
 mod tests {
     use super::*;
     use crate::error::Home as _;
-    use crate::test_stream::ChannelTestExt as _;
+    use crossbeam_combinators::testing::ChannelTestExt as _;
     use zslg_log_types::LogIndex;
     use zslg_node_types::NodeId;
     use zslg_time_types::Hlc;
@@ -448,9 +448,9 @@ mod tests {
     use crate::learner::LocalStore;
     use crate::learner::StableLog;
     use crate::learner::integrate_manifest_for_test;
-    use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
     use zslg_log_types::Data;
     use zslg_log_types::DataId;
+    use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
     use zslg_snapshot_types::CompressionLevel;
 
     use crate::tests::commit_snapshot_result;
