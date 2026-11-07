@@ -982,7 +982,7 @@ impl ReplicaNode {
         // gauge reads this node's `Storage`, so the tick has to know it.
         shutdown.spawn(
             "process_gauges",
-            crate::observability::run_process_gauges(
+            zslg_observability::run_process_gauges(
                 Some(storage.clone()),
                 // A replica node runs both pipelines: the replica-side write
                 // queue and live-tail rings, and the learner-side integrate

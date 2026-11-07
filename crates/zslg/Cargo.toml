@@ -21,8 +21,6 @@ crossbeam-combinators = { workspace = true, features = ["tokio"] }
 error-union = { workspace = true }
 framing = { workspace = true }
 futures = { workspace = true }
-metrics = { workspace = true }
-metrics-kit = { workspace = true }
 metrics-exporter-prometheus = { workspace = true, optional = true }
 object_store = { workspace = true }
 rocksdb-kit = { workspace = true }
@@ -53,12 +51,12 @@ zslg-net-server = { workspace = true }
 zslg-net-router = { workspace = true }
 zslg-raft-storage = { workspace = true }
 zslg-peers = { workspace = true }
-zslg-raft-state = { workspace = true }
 zslg-raft-tracker = { workspace = true }
 zslg-raft-node = { workspace = true }
 zslg-raft-setup = { workspace = true, features = ["testing"] }
 zslg-raft-startup = { workspace = true }
 zslg-leader = { workspace = true }
+zslg-observability = { workspace = true }
 zslg-learner = { workspace = true, features = ["testing"] }
 zslg-local-store = { workspace = true }
 zslg-stable-log = { workspace = true }
@@ -79,6 +77,7 @@ zslg-time = { workspace = true }
 zslg-time-types = { workspace = true }
 
 [dev-dependencies]
+metrics = { workspace = true }
 raft-kit = { workspace = true }
 zslg-raft-rpc = { workspace = true }
 async-trait = { workspace = true }
@@ -117,9 +116,9 @@ tokio-metrics = { workspace = true }
 [features]
 default = []
 s3 = ["zslg-object-store-config/s3"]
-prometheus = ["dep:metrics-exporter-prometheus"]
+prometheus = ["dep:metrics-exporter-prometheus", "zslg-observability/prometheus"]
 tokio-console = ["dep:console-subscriber"]
-jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
+jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl", "zslg-observability/jemalloc"]
 heap-profiling = ["jemalloc", "tikv-jemallocator/profiling"]
 
 [[example]]

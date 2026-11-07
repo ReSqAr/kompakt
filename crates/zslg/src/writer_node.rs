@@ -65,7 +65,7 @@ impl WriterNode {
             // No durable state and none of the pipeline queues: a writer
             // publishes neither reading rather than a pair of zeroes that would
             // read as "measured, and empty".
-            crate::observability::run_process_gauges(None, None, shutdown.token()),
+            zslg_observability::run_process_gauges(None, None, shutdown.token()),
         );
 
         // Outbound-only: keep the router, discard the server config (a writer

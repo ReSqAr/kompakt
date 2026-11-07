@@ -19,8 +19,9 @@ use ::metrics::Unit;
 
 use tokio_util::sync::CancellationToken;
 
-use crate::Error;
-use crate::metrics;
+mod metrics;
+
+#[cfg(feature = "prometheus")]
 use zslg_lifecycle_types::ConfigError;
 
 /// The namespace every metric this crate owns is exported under.
@@ -99,21 +100,6 @@ pub fn histogram_buckets() -> impl Iterator<Item = (&'static str, &'static [f64]
 /// call. Composes with any other crate that offers the same, and touches
 /// nothing global: each histogram gets an exact `Matcher::Full`, so a bucket
 /// choice here can never reach another crate's metrics.
-///
-/// ```no_run
-/// # fn main() -> Result<(), zslg::Error> {
-/// use metrics_exporter_prometheus::PrometheusBuilder;
-///
-/// let builder = PrometheusBuilder::new().with_http_listener(([0, 0, 0, 0], 9090));
-/// let builder = zslg::configure_prometheus(builder)?;
-/// builder.install().expect("install recorder");
-///
-/// // After the recorder exists: descriptions sent to the no-op recorder are
-/// // dropped, not replayed.
-/// zslg::describe_metrics();
-/// # Ok(())
-/// # }
-/// ```
 #[cfg(feature = "prometheus")]
 pub fn configure_prometheus(
     mut builder: metrics_exporter_prometheus::PrometheusBuilder,
@@ -160,11 +146,11 @@ const PROCESS_GAUGE_INTERVAL: Duration = Duration::from_secs(1);
 /// recomputed on a scheduling tick. `None` means this node type owns no such
 /// queues (the writer), and publishes nothing rather than a 0 that would read
 /// as "measured, and empty".
-pub(crate) async fn run_process_gauges(
+pub async fn run_process_gauges<E>(
     storage: Option<std::sync::Arc<rocksdb_kit::Storage>>,
     queue_capacity_bytes: Option<u64>,
     cancel: CancellationToken,
-) -> Result<(), Error> {
+) -> Result<(), E> {
     let mut ticker = tokio::time::interval(PROCESS_GAUGE_INTERVAL);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
@@ -527,5 +513,19 @@ Swap:                  0 kB
     #[test]
     fn parse_smaps_rollup_missing_field_is_none() {
         assert!(super::parse_smaps_rollup_split("Rss: 10 kB\n").is_none());
+    }
+}
+
+error_union::error_union! {
+    /// What the observability assembly can fail with.
+    #[derive(Debug, Clone, PartialEq)]
+    pub Error {
+        Lifecycle(zslg_lifecycle_types::LifecycleError),
+        Config(zslg_lifecycle_types::ConfigError),
+        Clock(zslg_time::ClockError),
+        Log(zslg_log::LogError),
+        Snapshot(zslg_snapshot::SnapshotError),
+        Net(zslg_net::NetError),
+        Consensus(zslg_consensus::ConsensusError),
     }
 }

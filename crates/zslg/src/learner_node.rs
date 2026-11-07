@@ -376,7 +376,7 @@ impl LearnerNode {
         info!(node_id = ?node_id, "learner node starting");
         shutdown.spawn(
             "process_gauges",
-            crate::observability::run_process_gauges(
+            zslg_observability::run_process_gauges(
                 Some(storage.clone()),
                 Some(config.learner_config().queue_capacity_bytes()),
                 shutdown.token(),

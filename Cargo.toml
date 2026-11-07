@@ -71,6 +71,7 @@ zslg-leader-integrator = { path = "crates/zslg-leader-integrator" }
 zslg-raft-setup = { path = "crates/zslg-raft-setup" }
 zslg-learner = { path = "crates/zslg-learner" }
 zslg-leader = { path = "crates/zslg-leader" }
+zslg-observability = { path = "crates/zslg-observability" }
 zslg-writer = { path = "crates/zslg-writer" }
 zslg-replica-service = { path = "crates/zslg-replica-service" }
 zslg-replica-log = { path = "crates/zslg-replica-log" }

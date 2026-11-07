@@ -1,0 +1,59 @@
+[package]
+name = "zslg-observability"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Observability assembly: the metric registry, histogram buckets, process gauges"
+publish = false
+
+[dependencies]
+error-union = { workspace = true }
+metrics = { workspace = true }
+metrics-kit = { workspace = true }
+metrics-exporter-prometheus = { workspace = true, optional = true }
+rocksdb-kit = { workspace = true }
+tikv-jemalloc-ctl = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["time", "macros"] }
+tokio-util = { workspace = true }
+zslg-consensus = { workspace = true }
+zslg-hlc-clock = { workspace = true }
+zslg-hlc-gate = { workspace = true }
+zslg-leader-compaction = { workspace = true }
+zslg-leader-integrator = { workspace = true }
+zslg-leader-membership = { workspace = true }
+zslg-leader-snapshot = { workspace = true }
+zslg-lifecycle-types = { workspace = true }
+zslg-local-store = { workspace = true }
+zslg-log = { workspace = true }
+zslg-net = { workspace = true }
+zslg-net-client = { workspace = true }
+zslg-net-server = { workspace = true }
+zslg-net-wire = { workspace = true }
+zslg-object-store = { workspace = true }
+zslg-quorum-read = { workspace = true }
+zslg-raft-node = { workspace = true }
+zslg-raft-startup = { workspace = true }
+zslg-raft-state = { workspace = true }
+zslg-raft-storage = { workspace = true }
+zslg-reader = { workspace = true }
+zslg-replica-log = { workspace = true }
+zslg-replica-service = { workspace = true }
+zslg-snapshot = { workspace = true }
+zslg-stable-log = { workspace = true }
+zslg-subscriber = { workspace = true }
+zslg-time = { workspace = true }
+zslg-writer = { workspace = true }
+
+[dev-dependencies]
+metrics-util = { workspace = true }
+
+[features]
+prometheus = ["dep:metrics-exporter-prometheus"]
+jemalloc = ["dep:tikv-jemalloc-ctl"]
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "assembly"

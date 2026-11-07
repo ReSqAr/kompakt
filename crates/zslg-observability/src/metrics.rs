@@ -419,7 +419,7 @@ pub(crate) fn jemalloc_stats(s: &JemallocStats) {
 
 const ALL_METRICS: &[&[MetricDef]] = &[
     // --- leader job heartbeat (zslg-consensus-types) ---
-    zslg_consensus_types::metrics::METRICS,
+    zslg_consensus::metrics::METRICS,
     // --- leader membership jobs (zslg-leader-membership) ---
     zslg_leader_membership::metrics::METRICS,
     // --- leader snapshot jobs (zslg-leader-snapshot) ---
