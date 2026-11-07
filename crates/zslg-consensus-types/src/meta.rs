@@ -16,7 +16,7 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::RaftGeneration;
+use crate::RaftGeneration;
 use zslg_log_types::LogIndex;
 use zslg_net_types::ServerName;
 use zslg_node_types::NodeId;
@@ -98,12 +98,12 @@ impl Default for ReplicaMembership {
 
 impl ReplicaMembership {
     #[must_use]
-    pub(crate) fn single(replicas: BTreeSet<NodeId>) -> Self {
+    pub fn single(replicas: BTreeSet<NodeId>) -> Self {
         Self::Single { replicas }
     }
 
     #[must_use]
-    pub(crate) fn joint(old: BTreeSet<NodeId>, next: BTreeSet<NodeId>) -> Self {
+    pub fn joint(old: BTreeSet<NodeId>, next: BTreeSet<NodeId>) -> Self {
         Self::Joint { old, next }
     }
 
@@ -183,7 +183,7 @@ impl ReplicaMembership {
 /// Raft write point, so neither a leader bug nor a stale in-flight proposal can
 /// drop nodes holding the only copy of acknowledged writes.
 #[must_use]
-pub(crate) fn drain_satisfied(watermark: Option<Hlc>, exit: Exit) -> bool {
+pub fn drain_satisfied(watermark: Option<Hlc>, exit: Exit) -> bool {
     match exit {
         Exit::AnyTime => true,
         Exit::WatermarkAbove(bound) => watermark.is_some_and(|w| w >= bound),
@@ -235,7 +235,7 @@ pub struct RaftState {
 
 impl RaftState {
     #[must_use]
-    pub(crate) fn empty() -> Self {
+    pub fn empty() -> Self {
         Self {
             leader: None,
             raft_term: 0,
@@ -253,19 +253,19 @@ impl RaftState {
 /// (membership drain bound). All are cheap in-memory reads; bundling them keeps
 /// the trait + RPC surface narrow.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct ReplicaStatus {
-    pub(crate) node_id: NodeId,
-    pub(crate) frontier: Option<LogIndex>,
-    pub(crate) raft_state: RaftState,
-    pub(crate) effective_cutoff: Option<Hlc>,
-    pub(crate) max_hlc: Option<Hlc>,
+pub struct ReplicaStatus {
+    pub node_id: NodeId,
+    pub frontier: Option<LogIndex>,
+    pub raft_state: RaftState,
+    pub effective_cutoff: Option<Hlc>,
+    pub max_hlc: Option<Hlc>,
     /// The responder's own `config.peers`, by server name.
     ///
     /// The full list rather than a computed "do you list me" boolean: it is
     /// self-describing, and a disagreement between nodes is then visible in a
     /// log instead of having to be inferred. At 3-7 short strings per
     /// membership poll the cost is irrelevant.
-    pub(crate) peer_names: Vec<ServerName>,
+    pub peer_names: Vec<ServerName>,
 }
 
 #[cfg(test)]
@@ -280,7 +280,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::ids::RaftGeneration;
+    use crate::RaftGeneration;
     use zslg_snapshot_types::SnapshotId;
 
     /// `Exit::AnyTime` is satisfied with no snapshot at all.

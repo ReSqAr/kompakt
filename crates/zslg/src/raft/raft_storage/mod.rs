@@ -36,6 +36,9 @@ use std::fmt::Debug;
 use std::io::Cursor;
 use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
+use zslg_consensus_types::{
+    validate_cutoff_advance, validate_replicated_state, validate_transition,
+};
 use zslg_log_types::LogError;
 
 use rocksdb_kit::{Batch, Cf};
@@ -63,11 +66,12 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, ToCodec, ToStorage};
-use crate::ids::RaftGeneration;
-use crate::meta::ReplicaMembership;
 use crate::metrics::{self, LogType};
-use crate::raft::RaftStateHandle;
-use crate::raft::{RaftLogIndex, RaftResponse, TypeConfig};
+use crate::raft::{RaftResponse, TypeConfig};
+use zslg_consensus_types::RaftGeneration;
+use zslg_consensus_types::RaftLogIndex;
+use zslg_consensus_types::RaftStateHandle;
+use zslg_consensus_types::ReplicaMembership;
 use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 
@@ -86,14 +90,10 @@ pub(crate) const RAFT_META_CF: ColumnFamily = ColumnFamily::new("raft_meta");
     reason = "test code"
 )]
 mod tests;
-mod validators;
 
 #[cfg(test)]
 pub(crate) use self::tests::{
     build_raft_for_test, open_test_storage, seed_foreign_membership_for_test,
-};
-pub(crate) use self::validators::{
-    validate_cutoff_advance, validate_replicated_state, validate_transition,
 };
 
 /// The two column families this store owns. Both are committed raft state at
@@ -697,7 +697,8 @@ impl RaftStorage<TypeConfig> for RocksRaftStorage {
             // entry N is validated against entry N-1's state, not the stale
             // applied one.
             let mut next_cutoff = applied.manifest_state.hlc_cutoff;
-            let mut staged: Vec<(crate::api::ReplicatedRaftState, RaftGeneration)> = Vec::new();
+            let mut staged: Vec<(zslg_consensus_types::ReplicatedRaftState, RaftGeneration)> =
+                Vec::new();
             let mut last_applied: Option<LogId<NodeId>> = None;
             let mut last_membership: Option<StoredMembership<NodeId, NodeInfo>> = None;
             for entry in &entries {

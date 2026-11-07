@@ -18,7 +18,7 @@ use crate::api::{
     ArchiveBounds, ArchiveUpperBound, RaftStateView, StableArchiveReader, StableLogSnapshot,
 };
 use crate::error::Error;
-use crate::meta::RaftManifestState;
+use zslg_consensus_types::RaftManifestState;
 use zslg_log_types::LogIndex;
 
 pub(in crate::learner) async fn integrate_manifest(
@@ -100,8 +100,8 @@ pub(crate) async fn integrate_manifest_for_test(
 /// reader reads its covering snapshots from here.
 #[cfg(test)]
 fn seed_raft_state(manifest_state: &RaftManifestState) -> Arc<dyn RaftStateView> {
-    let handle = crate::raft::RaftStateHandle::default();
-    let mut rs = crate::meta::RaftState::empty();
+    let handle = zslg_consensus_types::RaftStateHandle::default();
+    let mut rs = zslg_consensus_types::RaftState::empty();
     rs.manifest_state = manifest_state.clone();
     handle.replace(rs);
     Arc::new(handle)

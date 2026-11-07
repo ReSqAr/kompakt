@@ -74,4 +74,4 @@ pub(crate) use stable_archive::{
     ArchiveBounds, ArchiveStream, ArchiveUpperBound, StableArchiveReader,
 };
 pub(crate) use stable_log::StableLogSnapshot;
-pub(crate) use state_replicator::{ReplicatedRaftState, StateReplicator};
+pub(crate) use state_replicator::StateReplicator;

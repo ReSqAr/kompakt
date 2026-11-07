@@ -22,18 +22,19 @@ use zslg_log_types::LogError;
 use bytes::Bytes;
 use uuid::Uuid;
 
-use crate::api::{LocalStoreMut, ReplicatedRaftState, StableLogSnapshot};
+use crate::api::{LocalStoreMut, StableLogSnapshot};
 use crate::leader::jobs::snapshot::create::{
     SnapshotEntryInputs, SnapshotResult, create_snapshot_entry,
 };
 use crate::learner::LocalStore;
 use crate::learner::StableLog;
 use crate::learner::integrate_manifest_for_test;
-use crate::meta::ReplicaMembership;
 use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use crate::raft::Raft;
 use crate::raft::RaftNode;
-use crate::raft::RaftStateHandle;
+use zslg_consensus_types::RaftStateHandle;
+use zslg_consensus_types::ReplicaMembership;
+use zslg_consensus_types::ReplicatedRaftState;
 use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};
 use zslg_net_types::PeerAddr;
@@ -509,8 +510,8 @@ async fn invariant_stable_order_is_hlc_order() {
 
 #[tokio::test]
 async fn fenced_write_rejected_on_stale_generation() {
-    use crate::ids::RaftGeneration;
     use crate::raft::{FencedStateWrite, RaftResponse};
+    use zslg_consensus_types::RaftGeneration;
 
     let h = boot().await;
     let _ = h.leader_id;
@@ -580,8 +581,8 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
     use crate::api::Replica;
     use crate::api::{LocalStoreView, Router};
     use crate::error::Error;
-    use crate::ids::RaftGeneration;
     use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
+    use zslg_consensus_types::RaftGeneration;
     use zslg_log_types::LogIndex;
     use zslg_node_types::NodeId;
     use zslg_snapshot_types::SnapshotId;

@@ -19,7 +19,6 @@ use crate::api::{
     WriteOutcome,
 };
 use crate::error::Error;
-use crate::meta::ReplicaStatus;
 use crate::network::client::{RpcClient, Target};
 use crate::network::messages::{
     RpcFrame, RpcRaftFrame, RpcRaftRequest, RpcReplicaFrame, RpcReplicaRequest, RpcRequest,
@@ -34,6 +33,7 @@ use openraft::raft::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
     VoteRequest, VoteResponse,
 };
+use zslg_consensus_types::ReplicaStatus;
 use zslg_log_types::LogIndex;
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;

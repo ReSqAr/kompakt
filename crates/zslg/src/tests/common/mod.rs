@@ -40,8 +40,6 @@ use crate::api::{
     StampedWrite, WriteOutcome,
 };
 use crate::learner::LocalStore;
-use crate::meta::{RaftState, ReplicaStatus};
-use crate::raft::RaftStateHandle;
 use crate::raft::build_raft_for_test;
 use crate::raft::{NodeInfo, Raft, TypeConfig};
 use crossbeam_combinators::{Channel, Finite, Infinite};
@@ -56,6 +54,8 @@ use openraft::raft::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
     VoteRequest, VoteResponse,
 };
+use zslg_consensus_types::RaftStateHandle;
+use zslg_consensus_types::{RaftState, ReplicaStatus};
 use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};
 use zslg_net_types::PeerAddr;
@@ -374,7 +374,7 @@ pub(crate) async fn replica_write<R: Replica + ?Sized>(
 pub(crate) async fn write_state_fenced(
     raft: &Raft,
     raft_state: &RaftStateHandle,
-    state: crate::api::ReplicatedRaftState,
+    state: zslg_consensus_types::ReplicatedRaftState,
 ) -> Result<(), String> {
     use crate::raft::{FencedStateWrite, RaftResponse};
     // The transient outcomes keep different clocks, and only one of them is
@@ -453,7 +453,7 @@ pub(crate) async fn write_state_fenced(
 /// or immediately on a non-transient one.
 pub(crate) async fn write_state_fenced_via_leader(
     nodes: &BTreeMap<NodeId, TestNode>,
-    state: crate::api::ReplicatedRaftState,
+    state: zslg_consensus_types::ReplicatedRaftState,
 ) -> Result<(), String> {
     let deadline = tokio::time::Instant::now()
         .checked_add(std::time::Duration::from_secs(30))

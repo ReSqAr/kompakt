@@ -25,7 +25,6 @@
 //! See `docs/LIVENESS_REVIEW.md` §2.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -38,6 +37,7 @@ use crate::api::PeersWatcher;
 use crate::api::Router;
 use crate::error::Error;
 use crate::raft::RaftNode;
+use zslg_consensus_types::EvictionStatus;
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 
@@ -48,52 +48,6 @@ pub(in crate::raft) const REJOIN_RECONCILE_INTERVAL: Duration = Duration::from_s
 /// own voter set) before the monitor starts re-joining by address. Comfortably
 /// larger than an election round so normal churn does not trigger it.
 pub(in crate::raft) const REJOIN_LEADERLESS_GRACE: Duration = Duration::from_secs(15);
-
-/// Whether a reachable peer has **affirmatively refused** this node's rejoin
-/// attempt (`JoinAttempt::Denied`) — i.e. this node has been removed from the
-/// group's `config.peers`.
-///
-/// Published by [`RejoinMonitor`], consulted by
-/// `learner::read::can_serve_clients`. Deliberately narrower than "not
-/// settled": a partition yields `JoinAttempt::Retry` (nothing answered), never
-/// `Denied`, and must NOT set this — affirmative evidence only, silence is not
-/// evidence (the same principle the design doc applies to leader
-/// self-eviction). A node that cannot reach anyone keeps serving reads; a node
-/// a reachable peer has explicitly turned away does not.
-///
-/// Cheap to clone (one `Arc`); reads/writes are `Relaxed` — this gates a
-/// coarse "can this node serve clients" check, not a linearizable fact, and
-/// every writer/reader is on the same field with no other invariant to
-/// preserve ordering against.
-#[derive(Clone)]
-pub(crate) struct EvictionStatus(Arc<AtomicBool>);
-
-impl EvictionStatus {
-    #[must_use]
-    pub(crate) fn new() -> Self {
-        Self(Arc::new(AtomicBool::new(false)))
-    }
-
-    /// True once a reachable peer has denied this node's rejoin attempt.
-    #[must_use]
-    pub(crate) fn is_denied(&self) -> bool {
-        self.0.load(Ordering::Relaxed)
-    }
-
-    /// A status a peer has already denied — the evicted node, for read-gate
-    /// tests outside this module.
-    #[cfg(test)]
-    #[must_use]
-    pub(crate) fn denied_for_test() -> Self {
-        let status = Self::new();
-        status.set(true);
-        status
-    }
-
-    fn set(&self, denied: bool) {
-        self.0.store(denied, Ordering::Relaxed);
-    }
-}
 
 /// "Is the node currently settled into a working cluster?" — has a leader and is
 /// a voter in its own membership view. Abstracted for testability.

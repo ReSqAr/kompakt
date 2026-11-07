@@ -46,10 +46,8 @@ use crate::network::{
 };
 use crate::object_store::IntoArcObjectStore;
 use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
-use crate::raft::{
-    EvictionStatus, NoOpRaftViewer, RaftNode, RaftStateHandle, run_raft_startup, setup_raft,
-};
-use crate::raft::{MembershipConfig, RaftConfig, SpareSelectionStrategy};
+use crate::raft::{MembershipConfig, RaftConfig};
+use crate::raft::{NoOpRaftViewer, RaftNode, run_raft_startup, setup_raft};
 use crate::replica::ReplicaLogConfig;
 use crate::replica::{ReplicaService, spawn_replica};
 use crate::writer::WriterService;
@@ -58,6 +56,8 @@ use crate::{api, database, network};
 use rocksdb_kit::ColumnFamily;
 use rocksdb_kit::{CfSpec, Storage, StorageConfig};
 use shutdown::Shutdown;
+use zslg_consensus_types::SpareSelectionStrategy;
+use zslg_consensus_types::{EvictionStatus, RaftStateHandle};
 use zslg_net_types::ServerName;
 use zslg_net_types::{HostPort, PeerAddr};
 use zslg_node_types::NodeId;

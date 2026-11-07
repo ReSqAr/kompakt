@@ -17,23 +17,25 @@
     clippy::result_large_err,
     reason = "test code"
 )]
-use crate::meta::ReplicaMembership;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_consensus_types::ReplicaMembership;
 
 use openraft::Config;
 use openraft::storage::Adaptor;
 
-use crate::api::{ReplicatedRaftState, Router};
+use crate::api::Router;
 use crate::hlc::HlcClock;
 use crate::network::{LocalReplicaClient, RemoteRouter, RpcServerConfig, SocketOpts};
 use crate::raft::rpc::NetworkFactory;
-use crate::raft::{Raft, RaftNode, RaftStateHandle, membership_map};
+use crate::raft::{Raft, RaftNode, membership_map};
 use crate::tests::ReadyReplica;
 use crate::tests::fast_raft_config as raft_config;
 use shutdown::Shutdown;
+use zslg_consensus_types::RaftStateHandle;
+use zslg_consensus_types::ReplicatedRaftState;
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 

@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use tokio::sync::watch;
 
-use crate::meta::RaftState;
+use zslg_consensus_types::{RaftState, RaftStateHandle};
 
 pub trait RaftStateView: Send + Sync + 'static {
     #[must_use]
@@ -36,4 +36,14 @@ pub trait RaftStateView: Send + Sync + 'static {
 
 pub(crate) trait RaftStateTracker: RaftStateView {
     fn integrate(&self, observed: &RaftState);
+}
+
+impl RaftStateView for RaftStateHandle {
+    fn snapshot(&self) -> Arc<RaftState> {
+        self.snapshot()
+    }
+
+    fn subscribe(&self) -> watch::Receiver<Arc<RaftState>> {
+        self.subscribe()
+    }
 }

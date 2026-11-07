@@ -19,12 +19,12 @@
     clippy::result_large_err,
     reason = "test code"
 )]
-use crate::meta::ReplicaMembership;
 use std::collections::BTreeSet;
 use std::time::Duration;
+use zslg_consensus_types::ReplicaMembership;
 
-use crate::api::ReplicatedRaftState;
 use crate::tests::fast_raft_config as raft_config;
+use zslg_consensus_types::ReplicatedRaftState;
 use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 

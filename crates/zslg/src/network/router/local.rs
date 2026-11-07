@@ -19,7 +19,6 @@ use crate::Error;
 use crate::api::{
     LivenessProbe, RaftConsensus, RaftStateView, Replica, StampedWrite, WriteOutcome,
 };
-use crate::meta::{RaftState, ReplicaStatus};
 use crate::raft::TypeConfig;
 use crossbeam_combinators::Channel;
 use futures::stream::BoxStream;
@@ -28,6 +27,7 @@ use openraft::raft::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
     VoteRequest, VoteResponse,
 };
+use zslg_consensus_types::{RaftState, ReplicaStatus};
 use zslg_log_types::LogIndex;
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;

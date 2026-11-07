@@ -31,10 +31,10 @@
 //! the connection onto dedicated blocking threads, since it is the only hot
 //! path. Subscribes stay async.
 
-use crate::error::ConsensusError;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
+use zslg_consensus_types::ConsensusError;
 use zslg_lifecycle_types::ConfigError;
 use zslg_net_types::NetError;
 

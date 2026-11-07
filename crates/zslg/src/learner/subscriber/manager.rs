@@ -1,7 +1,7 @@
-use crate::error::ConsensusError;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_consensus_types::ConsensusError;
 
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -59,7 +59,7 @@ impl ReplicationManager {
     pub(in crate::learner) async fn run(self, cancel: CancellationToken) -> Result<(), Error> {
         info!("replication manager: starting");
         fn effective_replicas(
-            state: &crate::meta::RaftState,
+            state: &zslg_consensus_types::RaftState,
         ) -> std::collections::BTreeSet<NodeId> {
             let mut peers = state.replica.current().clone();
             if let Some(next) = state.replica.next() {

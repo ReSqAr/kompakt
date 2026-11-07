@@ -26,6 +26,7 @@ use crate::raft::rpc::PeerRegistrationWatcher;
 use crate::raft::state::RaftStatePublisher;
 use rocksdb_kit::Storage;
 use shutdown::Shutdown;
+use zslg_consensus_types::RaftStateHandle;
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 
@@ -42,29 +43,23 @@ mod types;
 mod tests;
 
 pub(crate) use membership::MembershipConfig;
-pub use membership::SpareSelectionStrategy;
 pub(crate) use node::RaftNode;
-pub(crate) use startup::{EvictionStatus, RaftStartupConfig, run_raft_startup};
-pub use state::RaftStateHandle;
+pub(crate) use startup::{RaftStartupConfig, run_raft_startup};
 pub(crate) use tracker::{
     NoOpRaftViewer, RaftTracker, RaftTrackerConfig, spawn_raft_tracker_streamer,
 };
-pub(crate) use types::{
-    FencedStateWrite, NodeInfo, RaftLogIndex, RaftResponse, RaftStateError, TypeConfig,
-};
+pub(crate) use types::{FencedStateWrite, NodeInfo, RaftResponse, TypeConfig};
 
 #[cfg(test)]
 pub(crate) use types::Raft;
 
 #[cfg(test)]
 pub(crate) use raft_storage::build_raft_for_test;
+pub(crate) use raft_storage::raft_cf_specs;
 #[cfg(test)]
 pub(crate) use raft_storage::seed_foreign_membership_for_test;
 #[cfg(test)]
 pub(crate) use raft_storage::{RAFT_LOG_CF, RAFT_META_CF};
-pub(crate) use raft_storage::{
-    raft_cf_specs, validate_cutoff_advance, validate_replicated_state, validate_transition,
-};
 
 #[must_use]
 fn membership_map<I>(members: I) -> BTreeMap<NodeId, NodeInfo>

@@ -17,11 +17,11 @@ use tokio::sync::watch;
 use crate::api::{Clock, Replica, Router, StampedWrite, WriteOutcome};
 use crate::error::Error;
 use crate::hlc::{HlcClock, HlcGate};
-use crate::meta::{RaftState, ReplicaMembership, ReplicaStatus};
-use crate::raft::RaftStateHandle;
 use crate::replica::ReplicaLogStore;
 use crate::replica::ReplicaService;
 use crossbeam_combinators::{Channel, Finite, Infinite};
+use zslg_consensus_types::RaftStateHandle;
+use zslg_consensus_types::{RaftState, ReplicaMembership, ReplicaStatus};
 use zslg_log_types::{DataId, LogIndex};
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
@@ -660,11 +660,11 @@ mod tests {
         [NodeId::new_v4(), NodeId::new_v4(), NodeId::new_v4()]
     }
 
-    fn dummy_raft_state() -> crate::raft::RaftStateHandle {
-        let h = crate::raft::RaftStateHandle::new();
-        h.replace(crate::meta::RaftState {
-            replica: crate::meta::ReplicaMembership::single(Default::default()),
-            ..crate::meta::RaftState::empty()
+    fn dummy_raft_state() -> zslg_consensus_types::RaftStateHandle {
+        let h = zslg_consensus_types::RaftStateHandle::new();
+        h.replace(zslg_consensus_types::RaftState {
+            replica: zslg_consensus_types::ReplicaMembership::single(Default::default()),
+            ..zslg_consensus_types::RaftState::empty()
         });
         h
     }

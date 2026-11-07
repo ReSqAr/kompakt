@@ -4,7 +4,7 @@
 //! replica log, yet both need the current replica set + generation — the writer
 //! to route `fan_out_quorum` writes, the learner to gate quorum reads.
 //! [`RaftTracker`] is the non-Raft counterpart to the replica's
-//! [`RaftStateHandle`](crate::raft::RaftStateHandle): instead of being fed by
+//! [`RaftStateHandle`](zslg_consensus_types::RaftStateHandle): instead of being fed by
 //! consensus apply, it is fed by the per-peer stream workers
 //! ([`super::streamer`]) and by write ACKs, integrating the highest generation
 //! seen. The "integrate an observed state" logic lives here, next to the
@@ -19,9 +19,9 @@ use zslg_net_types::NetError;
 use tokio::sync::watch;
 use tracing::debug;
 
+use crate::Error;
 use crate::api::{PeersWatcher, RaftStateView};
-use crate::meta::RaftState;
-use crate::{Error, quorum};
+use zslg_consensus_types::RaftState;
 use zslg_node_types::NodeId;
 
 /// Everything [`spawn_raft_tracker_streamer`](crate::raft::spawn_raft_tracker_streamer)
@@ -110,11 +110,11 @@ impl RaftTracker {
     #[must_use]
     fn is_ready(&self) -> bool {
         let snap = self.snapshot();
-        if quorum::all_targets(&snap.replica).is_empty() {
+        if zslg_consensus_types::all_targets(&snap.replica).is_empty() {
             return false;
         }
         let discovered = self.discovered_tx.borrow();
-        quorum::is_quorum(&snap.replica, &discovered)
+        zslg_consensus_types::is_quorum(&snap.replica, &discovered)
     }
 
     /// Wait until the tracker reports ready (quorum of targets discovered), or
@@ -190,9 +190,9 @@ impl crate::api::RaftStateTracker for RaftTracker {
 mod tests {
     use super::*;
     use crate::api::RaftStateTracker;
-    use crate::ids::RaftGeneration;
-    use crate::meta::{RaftManifestState, ReplicaMembership};
     use crate::tests::nid;
+    use zslg_consensus_types::RaftGeneration;
+    use zslg_consensus_types::{RaftManifestState, ReplicaMembership};
 
     fn state(generation: u64, replicas: &[NodeId]) -> RaftState {
         RaftState {

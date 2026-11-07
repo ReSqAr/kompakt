@@ -44,13 +44,11 @@ mod database;
 pub(crate) mod error;
 pub(crate) mod follower_node;
 pub(crate) mod hlc;
-pub(crate) mod ids;
 #[cfg(test)]
 mod layering;
 pub(crate) mod leader;
 pub(crate) mod learner;
 pub(crate) mod learner_node;
-pub(crate) mod meta;
 pub(crate) mod metrics;
 pub(crate) mod network;
 pub(crate) mod object_store;
@@ -67,32 +65,28 @@ pub(crate) mod writer;
 pub(crate) mod writer_node;
 
 pub use crate::api::{RaftStateView, Reader, StableStream, Writer};
-pub use crate::error::{ConsensusError, Error};
+pub use crate::error::Error;
 pub use crate::follower_node::{FollowerNode, FollowerNodeConfig};
 pub use crate::hlc::HlcClock;
-pub use crate::ids::RaftGeneration;
 pub use crate::learner_node::{LearnerNode, LearnerNodeConfig};
-pub use crate::meta::{Exit, RaftManifestState, RaftState, ReplicaMembership};
 pub use crate::object_store::{IntoArcObjectStore, ObjectStoreConfig};
 #[cfg(feature = "prometheus")]
 pub use crate::observability::configure_prometheus;
 pub use crate::observability::{METRIC_NAMESPACE, describe_metrics, histogram_buckets};
-pub use crate::raft::{RaftStateHandle, SpareSelectionStrategy};
 pub use crate::replica_node::{InitialisingReplicaNode, ReplicaNode, ReplicaNodeConfig};
 pub use crate::writer_node::{WriterNode, WriterNodeConfig};
 pub use bytesize::ByteSize;
+pub use zslg_consensus_types::{
+    ConsensusError, Exit, RaftGeneration, RaftManifestState, RaftState, RaftStateHandle,
+    ReplicaMembership, SpareSelectionStrategy,
+};
 pub use zslg_lifecycle_types::{ConfigError, LifecycleError};
-pub use zslg_log_types::LogError;
-pub use zslg_log_types::{Data, StableLogEvent, UnstableEvent};
-pub use zslg_log_types::{DataId, LogIndex};
-pub use zslg_net_types::NetError;
-pub use zslg_net_types::{HostPort, PeerAddr, ServerName};
+pub use zslg_log_types::{Data, DataId, LogError, LogIndex, StableLogEvent, UnstableEvent};
+pub use zslg_net_types::{HostPort, NetError, PeerAddr, ServerName};
 pub use zslg_node_types::NodeId;
-pub use zslg_snapshot_types::CompactionTier;
-pub use zslg_snapshot_types::CompressionLevel;
-pub use zslg_snapshot_types::SnapshotError;
-pub use zslg_snapshot_types::SnapshotId;
-pub use zslg_snapshot_types::SnapshotMetadata;
+pub use zslg_snapshot_types::{
+    CompactionTier, CompressionLevel, SnapshotError, SnapshotId, SnapshotMetadata,
+};
 pub use zslg_time_types::{ClockError, Hlc};
 
 pub(crate) fn jitter(d: std::time::Duration) -> std::time::Duration {

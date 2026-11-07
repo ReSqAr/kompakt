@@ -1,6 +1,6 @@
 use super::*;
 use crate::raft::RAFT_META_CF;
-use crate::raft::RaftStateError;
+use zslg_consensus_types::RaftStateError;
 use zslg_snapshot_types::SnapshotMetadata;
 
 /// Test-only bridge: builds a `Raft` instance backed by RocksDB storage under
@@ -59,9 +59,9 @@ pub(crate) async fn seed_foreign_membership_for_test(
     storage.fence().map_err(Into::into)
 }
 
-use crate::meta::Exit;
 use crate::tests::nid;
 use openraft::CommittedLeaderId;
+use zslg_consensus_types::Exit;
 use zslg_log_types::LogIndex;
 use zslg_snapshot_types::SnapshotId;
 use zslg_time_types::Hlc;
@@ -272,7 +272,7 @@ fn fenced_entry(
         log_id: LogId::new(leader, idx),
         payload: EntryPayload::Normal(crate::raft::FencedStateWrite {
             expected_generation,
-            state: crate::api::ReplicatedRaftState {
+            state: zslg_consensus_types::ReplicatedRaftState {
                 replica: ReplicaMembership::single(replicas.iter().copied().collect()),
                 manifest: Vec::new(),
                 manifest_watermark: None,
@@ -308,7 +308,7 @@ fn malformed_manifest_entry(
         log_id: LogId::new(leader, idx),
         payload: EntryPayload::Normal(crate::raft::FencedStateWrite {
             expected_generation,
-            state: crate::api::ReplicatedRaftState {
+            state: zslg_consensus_types::ReplicatedRaftState {
                 replica: ReplicaMembership::single([nid(1)].into_iter().collect()),
                 manifest: vec![snapshot_meta(5, 9)],
                 manifest_watermark: Some(Hlc(9)),
@@ -365,8 +365,8 @@ fn replicated(
     manifest: Vec<SnapshotMetadata>,
     watermark: Option<Hlc>,
     cutoff: Option<Hlc>,
-) -> crate::api::ReplicatedRaftState {
-    crate::api::ReplicatedRaftState {
+) -> zslg_consensus_types::ReplicatedRaftState {
+    zslg_consensus_types::ReplicatedRaftState {
         replica: ReplicaMembership::single([nid(1)].into_iter().collect()),
         manifest,
         manifest_watermark: watermark,
@@ -387,8 +387,8 @@ fn set(seeds: &[u8]) -> std::collections::BTreeSet<NodeId> {
 fn with_membership(
     replica: ReplicaMembership,
     watermark: Option<Hlc>,
-) -> crate::api::ReplicatedRaftState {
-    crate::api::ReplicatedRaftState {
+) -> zslg_consensus_types::ReplicatedRaftState {
+    zslg_consensus_types::ReplicatedRaftState {
         replica,
         manifest: Vec::new(),
         manifest_watermark: watermark,
@@ -534,8 +534,8 @@ fn joint_exit_bound_may_not_regress() {
     assert!(matches!(
         rearm(499),
         Err(RaftStateError::ExitHlcRegressed {
-            previous: crate::meta::Exit::WatermarkAbove(Hlc(500)),
-            proposed: crate::meta::Exit::WatermarkAbove(Hlc(499))
+            previous: zslg_consensus_types::Exit::WatermarkAbove(Hlc(500)),
+            proposed: zslg_consensus_types::Exit::WatermarkAbove(Hlc(499))
         })
     ));
 }
@@ -673,7 +673,7 @@ fn evaluate_fence_rejects_early_joint_exit_as_value() {
 
 #[test]
 fn drain_satisfied_boundaries() {
-    use crate::meta::{Exit, drain_satisfied};
+    use zslg_consensus_types::{Exit, drain_satisfied};
     // "Nothing to drain" is satisfied even before any snapshot.
     assert!(drain_satisfied(None, Exit::AnyTime));
     assert!(drain_satisfied(Some(Hlc(1)), Exit::AnyTime));

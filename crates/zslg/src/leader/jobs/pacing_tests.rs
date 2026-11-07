@@ -35,9 +35,9 @@ use crate::leader::jobs::membership::liveness::LivenessState;
 use crate::leader::jobs::membership::{MEMBERSHIP_STEP_FLOOR, MembershipJob};
 use crate::leader::jobs::membership::{MembershipDriver, TickOutcome};
 use crate::leader::jobs::snapshot::{SNAPSHOT_LOOP_FLOOR, SnapshotJob};
-use crate::meta::{RaftManifestState, RaftState, ReplicaMembership};
-use crate::raft::RaftStateHandle;
 use crossbeam_combinators::Channel;
+use zslg_consensus_types::RaftStateHandle;
+use zslg_consensus_types::{RaftManifestState, RaftState, ReplicaMembership};
 use zslg_log_types::Data;
 use zslg_log_types::LogIndex;
 use zslg_net_types::ServerName;
@@ -480,8 +480,8 @@ struct NoopReplicator;
 impl crate::api::StateReplicator for NoopReplicator {
     async fn replicate_state(
         &self,
-        _state: crate::api::ReplicatedRaftState,
-        _expected_generation: crate::ids::RaftGeneration,
+        _state: zslg_consensus_types::ReplicatedRaftState,
+        _expected_generation: zslg_consensus_types::RaftGeneration,
         _context: &'static str,
     ) -> Result<(), Error> {
         unimplemented!("pacing tests never reach a proposal")

@@ -14,6 +14,10 @@
     clippy::result_large_err,
     reason = "test code"
 )]
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
 /// End-to-end coverage for the leader's `config.peers` admission gate
 /// (docs/LIVENESS_REVIEW.md §2). A real `AddMember` arriving by address for a
 /// `server_name` that is not in `config.peers` must come back as the
@@ -21,11 +25,7 @@
 /// monitor logs (throttled) and survives rather than treats as fatal
 /// (`raft::startup::rejoin`; group removal is the group's decision, ending the
 /// process is the orchestrator's).
-use crate::error::ConsensusError;
-use std::net::SocketAddr;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration;
+use zslg_consensus_types::ConsensusError;
 
 use crate::api::{AddMemberOutcome, Router};
 use crate::hlc::HlcClock;

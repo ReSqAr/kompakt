@@ -25,8 +25,8 @@
 //! storage failure has no state to report (CLAUDE.md §9).
 
 use crate::Error;
-use crate::meta::{RaftState, ReplicaStatus};
 use crossbeam_combinators::{Channel, Infinite, OrderedChannel, StrictlyIncreasing};
+use zslg_consensus_types::{RaftState, ReplicaStatus};
 use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};
 

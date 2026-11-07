@@ -4,9 +4,9 @@
 //! provides the concrete [`StaticPeers`] implementation and the
 //! [`static_peers`] convenience constructor.
 
-use crate::error::ConsensusError;
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use zslg_consensus_types::ConsensusError;
 
 use tokio::sync::watch;
 

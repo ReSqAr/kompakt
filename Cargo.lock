@@ -4454,7 +4454,6 @@ dependencies = [
  "shutdown",
  "socket2",
  "tempfile",
- "thiserror 2.0.21",
  "tikv-jemalloc-ctl",
  "tikv-jemallocator",
  "time",
@@ -4465,6 +4464,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "warn-throttle",
+ "zslg-consensus-types",
  "zslg-lifecycle-types",
  "zslg-log-types",
  "zslg-net-types",
@@ -4472,6 +4472,24 @@ dependencies = [
  "zslg-snapshot-types",
  "zslg-time-types",
  "zstd",
+]
+
+[[package]]
+name = "zslg-consensus-types"
+version = "0.1.0"
+dependencies = [
+ "postcard",
+ "proptest",
+ "serde",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "uuid",
+ "zslg-log-types",
+ "zslg-net-types",
+ "zslg-node-types",
+ "zslg-snapshot-types",
+ "zslg-time-types",
 ]
 
 [[package]]

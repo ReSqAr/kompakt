@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::watch;
 
 use crate::api::{RaftStateTracker, RaftStateView};
-use crate::meta::RaftState;
+use zslg_consensus_types::RaftState;
 
 pub(crate) struct NoOpRaftViewer(Arc<dyn RaftStateView>);
 

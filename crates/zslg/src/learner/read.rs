@@ -54,12 +54,12 @@ use crate::api::{
 };
 use crate::learner::QuorumReadDebouncer;
 use crate::metrics::{self, ReadEntrySource, ReadSource};
-use crate::raft::EvictionStatus;
 use crossbeam_combinators::{
     Cancellation, Channel, Contiguous, Finite, Gap, Infinite, NonDecreasing, Opening, Resumable,
     Seam, StrictlyIncreasing, resync,
 };
 use std::sync::Arc;
+use zslg_consensus_types::EvictionStatus;
 use zslg_lifecycle_types::LifecycleError;
 use zslg_log_types::LogIndex;
 use zslg_log_types::{Data, StableLogEvent, UnstableEvent};
@@ -694,7 +694,7 @@ mod tests {
 
     use super::ReaderImpl;
     use crate::learner::stable_archive::ObjectStoreArchiveReader;
-    use crate::raft::RaftStateHandle;
+    use zslg_consensus_types::RaftStateHandle;
 
     struct NoOpCheck;
 
@@ -1020,7 +1020,7 @@ mod tests {
     /// scan yields, not by reading a separate purge-floor value.
     #[tokio::test]
     async fn stable_tail_serves_purged_prefix_from_object_store() {
-        use crate::meta::RaftManifestState;
+        use zslg_consensus_types::RaftManifestState;
         use zslg_log_types::SnapshotEntry;
         use zslg_snapshot_types::SnapshotId;
         use zslg_snapshot_types::SnapshotMetadata;
@@ -1070,7 +1070,7 @@ mod tests {
                 .collect(),
         );
         let handle = Arc::new(RaftStateHandle::default());
-        let mut rs = crate::meta::RaftState::empty();
+        let mut rs = zslg_consensus_types::RaftState::empty();
         rs.manifest_state = RaftManifestState {
             manifest: vec![SnapshotMetadata {
                 start_hlc: Hlc(100),
@@ -1471,11 +1471,11 @@ mod tests {
     fn covering_manifest(
         snap_id: zslg_snapshot_types::SnapshotId,
         end: u64,
-    ) -> crate::meta::RaftState {
-        use crate::meta::RaftManifestState;
+    ) -> zslg_consensus_types::RaftState {
+        use zslg_consensus_types::RaftManifestState;
         use zslg_snapshot_types::SnapshotMetadata;
         let end_hlc = Hlc(end.saturating_add(100));
-        let mut rs = crate::meta::RaftState::empty();
+        let mut rs = zslg_consensus_types::RaftState::empty();
         rs.manifest_state = RaftManifestState {
             manifest: vec![SnapshotMetadata {
                 start_hlc: Hlc(100),
@@ -1870,7 +1870,7 @@ mod tests {
             unstable_rig(16, Hlc(50), Cancellation::never()).await;
         let gated = super::GatedReader::new(
             Arc::new(reader),
-            crate::raft::EvictionStatus::denied_for_test(),
+            zslg_consensus_types::EvictionStatus::denied_for_test(),
             upstream(9),
         );
         let mut stream = gated.subscribe_unstable_tail();

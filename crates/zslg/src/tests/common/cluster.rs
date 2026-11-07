@@ -29,13 +29,13 @@
     reason = "test code"
 )]
 
-use crate::error::ConsensusError;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_consensus_types::ConsensusError;
 
 use object_store::ObjectStore;
 use object_store::memory::InMemory;

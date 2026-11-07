@@ -27,28 +27,28 @@
 //! `Rejoin` and `JoinExisting` both end at the same gate ([`wait_for_raft_recent`]):
 //! the node is not "started" until it has reached a quorum and caught up to
 //! that quorum's applied generation.
-use crate::error::ConsensusError;
 use futures::FutureExt as _;
 use std::collections::BTreeSet;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
+use zslg_consensus_types::ConsensusError;
 use zslg_lifecycle_types::LifecycleError;
 
 use super::rejoin::{
-    EvictionStatus, REJOIN_LEADERLESS_GRACE, REJOIN_RECONCILE_INTERVAL, RejoinMonitor,
-    RejoinMonitorInputs, RejoinProbe, RpcRejoinProbe,
+    REJOIN_LEADERLESS_GRACE, REJOIN_RECONCILE_INTERVAL, RejoinMonitor, RejoinMonitorInputs,
+    RejoinProbe, RpcRejoinProbe,
 };
-use crate::api::{
-    AddMemberOutcome, PeersWatcher, RaftStateView, ReplicatedRaftState, Router, SnapshotStore,
-};
+use crate::api::{AddMemberOutcome, PeersWatcher, RaftStateView, Router, SnapshotStore};
 use crate::error::{Error, ToRaft};
-use crate::ids::RaftGeneration;
-use crate::meta::{RaftState, ReplicaMembership};
 use crate::quorum::{FanOutResponse, fan_out_quorum};
 use crate::raft::{FencedStateWrite, RaftNode, membership_map};
 use shutdown::Shutdown;
+use zslg_consensus_types::EvictionStatus;
+use zslg_consensus_types::RaftGeneration;
+use zslg_consensus_types::ReplicatedRaftState;
+use zslg_consensus_types::{RaftState, ReplicaMembership};
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 
@@ -568,7 +568,7 @@ async fn bootstrap_single_node_cluster(
         let initial: BTreeSet<NodeId> = [node_id].into_iter().collect();
         raft.inner()
             .client_write(FencedStateWrite {
-                expected_generation: crate::ids::RaftGeneration::ZERO,
+                expected_generation: zslg_consensus_types::RaftGeneration::ZERO,
                 state: ReplicatedRaftState {
                     replica: ReplicaMembership::single(initial),
                     manifest: Vec::new(),

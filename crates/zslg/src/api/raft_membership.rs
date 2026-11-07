@@ -15,8 +15,8 @@
 //! [`RaftTransport`](crate::api::RaftTransport) (steady-state Raft RPCs) and
 //! [`RaftConsensus`](crate::api::RaftConsensus) (the server applying the change).
 
-use crate::error::ConsensusError;
-use crate::meta::RaftState;
+use zslg_consensus_types::ConsensusError;
+use zslg_consensus_types::RaftState;
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 

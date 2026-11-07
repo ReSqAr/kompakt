@@ -116,8 +116,8 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::*;
-    use crate::meta::{RaftManifestState, RaftState};
-    use crate::raft::RaftStateHandle;
+    use zslg_consensus_types::RaftStateHandle;
+    use zslg_consensus_types::{RaftManifestState, RaftState};
 
     fn state_with(cutoff: Option<Hlc>, watermark: Option<Hlc>) -> RaftState {
         RaftState {

@@ -67,6 +67,7 @@ rocksdb-kit = { path = "crates/rocksdb-kit" }
 shutdown = { path = "crates/shutdown" }
 warn-throttle = { path = "crates/warn-throttle" }
 zslg = { path = "crates/zslg" }
+zslg-consensus-types = { path = "crates/zslg-consensus-types" }
 zslg-lifecycle-types = { path = "crates/zslg-lifecycle-types" }
 zslg-log-types = { path = "crates/zslg-log-types" }
 zslg-net-types = { path = "crates/zslg-net-types" }

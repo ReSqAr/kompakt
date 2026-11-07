@@ -30,11 +30,11 @@ use tracing::{debug, info, warn};
 
 use crate::api::{CandidateInfo, RaftLeadership, RaftStateView, SpareSelector};
 use crate::error::Error;
-use crate::ids::RaftGeneration;
 use crate::leader::jobs::membership::{MembershipDriver, MembershipObserver, TickOutcome};
-use crate::meta::{Exit, ReplicaMembership};
 use crate::quorum::{FanOutResponse, fan_out_quorum};
-use crate::raft::SpareSelectionStrategy;
+use zslg_consensus_types::RaftGeneration;
+use zslg_consensus_types::SpareSelectionStrategy;
+use zslg_consensus_types::{Exit, ReplicaMembership};
 use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 
@@ -120,7 +120,7 @@ impl MembershipChangeManager {
     /// no further write can be acked without `next` — step 2b's precondition.
     async fn generation_quorum(
         &self,
-        state: &crate::meta::RaftState,
+        state: &zslg_consensus_types::RaftState,
         old: &BTreeSet<NodeId>,
         next: &BTreeSet<NodeId>,
         minimum_generation: RaftGeneration,
@@ -404,7 +404,10 @@ impl MembershipDriver for MembershipChangeManager {
                 // quorum of `next` is bounded by `exit`, so the stable prefix
                 // must cover it before those nodes are dropped. Re-checked
                 // independently at the Raft write point.
-                if !crate::meta::drain_satisfied(state.manifest_state.manifest_watermark, *exit) {
+                if !zslg_consensus_types::drain_satisfied(
+                    state.manifest_state.manifest_watermark,
+                    *exit,
+                ) {
                     debug!(
                         current_watermark = ?state.manifest_state.manifest_watermark,
                         ?exit,

@@ -57,10 +57,10 @@ use std::sync::{Arc, Mutex};
 use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 
-use crate::meta::RaftState;
-use crate::raft::RaftStateHandle;
 use crate::tests::common::Cluster;
 use crate::tests::common::invariants::assert_membership_well_formed;
+use zslg_consensus_types::RaftState;
+use zslg_consensus_types::RaftStateHandle;
 use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 
@@ -371,7 +371,7 @@ mod tests {
     /// this is where that assertion earns its keep.
     #[tokio::test(flavor = "multi_thread")]
     async fn joint_states_are_counted_and_checked_live() {
-        use crate::meta::ReplicaMembership;
+        use zslg_consensus_types::ReplicaMembership;
 
         let node_id = crate::tests::nid(1);
         let handle = RaftStateHandle::new();

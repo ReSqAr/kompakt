@@ -28,9 +28,9 @@ mod clock_skew_tests;
 #[cfg(test)]
 mod subscribe_status_tests;
 
-use crate::error::ConsensusError;
 pub(crate) use log::{REPLICA_LOG_CF, ReplicaLogStore};
 use purge::run_purge_worker;
+use zslg_consensus_types::ConsensusError;
 use zslg_lifecycle_types::{ConfigError, LifecycleError};
 use zslg_time_types::ClockError;
 
@@ -46,12 +46,12 @@ use tracing::{info, warn};
 use crate::api::{Clock as _, PeersWatcher, RaftStateView, Replica, StampedWrite, WriteOutcome};
 use crate::error::Error;
 use crate::hlc::{CutoffApplier, HlcClock, HlcGate, HlcGuard};
-use crate::meta::ReplicaStatus;
 use crate::metrics::{self, ReplicaWriteState};
 use crate::replica::log::flush_loop;
 use crossbeam_combinators::Channel;
 use shutdown::Shutdown;
 use warn_throttle::WarnThrottle;
+use zslg_consensus_types::ReplicaStatus;
 use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};
 use zslg_node_types::NodeId;
@@ -605,9 +605,9 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::*;
-    use crate::meta::{RaftState, ReplicaMembership};
-    use crate::raft::RaftStateHandle;
     use crate::tests::{make_data, nid};
+    use zslg_consensus_types::RaftStateHandle;
+    use zslg_consensus_types::{RaftState, ReplicaMembership};
 
     /// Build a ReplicaService wired to a temp dense-log store, a fixed
     /// clock, and a RaftStateHandle whose replica set is `replicas`. Returns

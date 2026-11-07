@@ -17,18 +17,18 @@
 //! Contrast [`super::Coordinator`], which does the same job for writes over
 //! long-lived streams. This one owns its tasks and ends with the operation.
 
-use crate::error::ConsensusError;
 use std::collections::BTreeSet;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::task::JoinSet;
+use zslg_consensus_types::ConsensusError;
 
 use crate::error::Error;
-use crate::meta::RaftState;
 use crate::metrics::{self, FanoutResponseState};
+use zslg_consensus_types::RaftState;
 use zslg_node_types::NodeId;
 
-use super::{all_targets, is_quorum};
+use zslg_consensus_types::{all_targets, is_quorum};
 
 /// How one peer answered. Distinct from the `Err` of the enclosing `Result`,
 /// which aborts the whole fan-out: `Err` is for a **node-local** failure (the
@@ -153,9 +153,9 @@ mod tests {
     use zslg_net_types::NetError;
 
     use super::*;
-    use crate::ids::RaftGeneration;
-    use crate::meta::{RaftManifestState, RaftState, ReplicaMembership};
     use crate::tests::nid;
+    use zslg_consensus_types::RaftGeneration;
+    use zslg_consensus_types::{RaftManifestState, RaftState, ReplicaMembership};
 
     fn ids(seeds: &[u8]) -> BTreeSet<NodeId> {
         seeds.iter().map(|&s| nid(s)).collect()

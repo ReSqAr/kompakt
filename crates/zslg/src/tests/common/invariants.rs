@@ -32,8 +32,8 @@ use std::time::Duration;
 use bytes::Bytes;
 use futures::StreamExt;
 
-use crate::meta::{RaftState, ReplicaMembership};
 use crate::tests::common::Cluster;
+use zslg_consensus_types::{RaftState, ReplicaMembership};
 use zslg_log_types::DataId;
 use zslg_log_types::StableLogEvent;
 use zslg_node_types::NodeId;
@@ -298,7 +298,7 @@ pub(crate) fn assert_membership_well_formed(id: zslg_node_types::NodeId, state: 
 fn assert_no_satisfied_drain_left_armed(id: zslg_node_types::NodeId, state: &RaftState) {
     if let ReplicaMembership::JointDraining { exit, .. } = &state.replica {
         assert!(
-            !crate::meta::drain_satisfied(state.manifest_state.manifest_watermark, *exit),
+            !zslg_consensus_types::drain_satisfied(state.manifest_state.manifest_watermark, *exit),
             "node {id}: drain satisfied but config still joint — collapse is not firing"
         );
     }

@@ -40,8 +40,8 @@ use openraft::raft::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::meta::{RaftState, ReplicaStatus};
 use crate::raft::TypeConfig;
+use zslg_consensus_types::{RaftState, ReplicaStatus};
 use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};
 use zslg_net_types::PeerAddr;

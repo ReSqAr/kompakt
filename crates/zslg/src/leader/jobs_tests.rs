@@ -26,7 +26,6 @@ use object_store::memory::InMemory;
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
-use crate::api::ReplicatedRaftState;
 use crate::api::{
     LivenessProbe, LocalStoreMut, RaftLeadership, Router, SnapshotStore, StableLogSnapshot,
     StateReplicator,
@@ -39,16 +38,17 @@ use crate::leader::{LeaderLoopConfig, SnapshotConfig, spawn_leader_loop};
 use crate::learner::LocalStore;
 use crate::learner::StableLog;
 use crate::learner::integrate_manifest_for_test;
-use crate::meta::ReplicaMembership;
 use crate::network::static_peers;
 use crate::network::{LocalReplicaClient, PeerRouter, RemoteRouter};
 use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use crate::raft::MembershipConfig;
 use crate::raft::RaftNode;
-use crate::raft::SpareSelectionStrategy;
 use crate::replica::ReplicaLogStore;
 use crate::replica::ReplicaService;
 use shutdown::Shutdown;
+use zslg_consensus_types::ReplicaMembership;
+use zslg_consensus_types::ReplicatedRaftState;
+use zslg_consensus_types::SpareSelectionStrategy;
 use zslg_log_types::LogIndex;
 use zslg_log_types::SnapshotEntry;
 use zslg_net_types::PeerAddr;

@@ -1,5 +1,5 @@
 use crate::meta::ReplicaMembership;
-use crate::raft::{RaftLogIndex, RaftStateError};
+use crate::{RaftLogIndex, RaftStateError};
 use zslg_time_types::Hlc;
 
 /// The structural-validity check for a proposed raft state, judged **on its
@@ -20,9 +20,7 @@ use zslg_time_types::Hlc;
 ///   `(watermark, cutoff]` and every future window starts strictly above the
 ///   watermark, so a committed cutoff below the watermark would admit writes no
 ///   snapshot can ever cover.
-pub(crate) fn validate_replicated_state(
-    state: &crate::api::ReplicatedRaftState,
-) -> Result<(), RaftStateError> {
+pub fn validate_replicated_state(state: &crate::ReplicatedRaftState) -> Result<(), RaftStateError> {
     let mut expected_start = RaftLogIndex::ZERO;
     for meta in &state.manifest {
         if RaftLogIndex::from(meta.start_index.raw()) != expected_start {
@@ -74,9 +72,9 @@ pub(crate) fn validate_replicated_state(
 /// expected (CLAUDE.md §12): it is skipped before proposal when it would open an
 /// empty window, and absorbed as a no-op by each replica's `HlcGate` otherwise.
 /// This rule is about the committed value, which only ever advances.
-pub(crate) fn validate_cutoff_advance(
+pub fn validate_cutoff_advance(
     previous: Option<Hlc>,
-    proposed: &crate::api::ReplicatedRaftState,
+    proposed: &crate::ReplicatedRaftState,
 ) -> Result<(), RaftStateError> {
     if let (Some(previous), Some(proposed)) = (previous, proposed.hlc_cutoff)
         && proposed < previous
@@ -97,9 +95,9 @@ pub(crate) fn validate_cutoff_advance(
 /// for a specific `(old, next)` pair, so neither set may change while armed,
 /// and the bound may never regress.
 #[tracing::instrument(level = "debug", skip_all, name = "raft_validate_transition")]
-pub(crate) fn validate_transition(
+pub fn validate_transition(
     previous: &ReplicaMembership,
-    proposed: &crate::api::ReplicatedRaftState,
+    proposed: &crate::ReplicatedRaftState,
 ) -> Result<(), RaftStateError> {
     use crate::meta::ReplicaMembership as M;
 

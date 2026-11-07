@@ -20,7 +20,6 @@ use crate::api::{
     AddMemberOutcome, LivenessProbe, RaftMembership, RaftTransport, Replica, ReplicaClient, Router,
     StampedWrite, WriteOutcome,
 };
-use crate::meta::ReplicaStatus;
 use crate::raft::TypeConfig;
 use crossbeam_combinators::Channel;
 use futures::stream::BoxStream;
@@ -30,6 +29,7 @@ use openraft::raft::{
     VoteRequest, VoteResponse,
 };
 use std::sync::{Arc, Weak};
+use zslg_consensus_types::ReplicaStatus;
 use zslg_lifecycle_types::LifecycleError;
 use zslg_log_types::LogIndex;
 use zslg_net_types::PeerAddr;

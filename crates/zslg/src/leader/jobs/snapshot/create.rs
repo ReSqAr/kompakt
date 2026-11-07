@@ -23,10 +23,10 @@
 //! Ordering is crash-safety-critical: the cutoff appears in both the opening
 //! proposal and the committing one, so a crash between them is safe.
 
-use crate::error::ConsensusError;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, warn};
+use zslg_consensus_types::ConsensusError;
 use zslg_log_types::LogError;
 
 use crate::api::{LocalStoreView, RaftStateView, Router, SnapshotStore, StableLogSnapshot};

@@ -22,9 +22,9 @@
 //! the coordinator learns to reap the entry and free its permit — so every
 //! per-write resource here is released by `Drop`, not by the success path.
 
-use crate::error::ConsensusError;
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_consensus_types::ConsensusError;
 use zslg_lifecycle_types::ConfigError;
 use zslg_log_types::LogError;
 

@@ -276,12 +276,12 @@ label_enum!(#[doc = "`state` label of [`LEADER_INTENTS_TOTAL`]."] IntentState {
 /// outgoing replica set to be snapshotted (designdoc §"Membership Change" step
 /// 3). A bound that stays above the watermark for many snapshot intervals means
 /// snapshot creation is stalled, not that membership is stuck.
-pub(crate) fn membership_joint_exit_hlc_physical_ms(exit: Option<crate::meta::Exit>) {
+pub(crate) fn membership_joint_exit_hlc_physical_ms(exit: Option<zslg_consensus_types::Exit>) {
     // `AnyTime` reports 0, same as "not draining": both mean the collapse is
     // not waiting on a snapshot, which is what the gauge is read for.
     let exit_hlc = match exit {
-        Some(crate::meta::Exit::WatermarkAbove(h)) => Some(h),
-        Some(crate::meta::Exit::AnyTime) | None => None,
+        Some(zslg_consensus_types::Exit::WatermarkAbove(h)) => Some(h),
+        Some(zslg_consensus_types::Exit::AnyTime) | None => None,
     };
     match exit_hlc {
         Some(hlc) => set_gauge(MEMBERSHIP_JOINT_EXIT_HLC_PHYSICAL_MS, hlc_physical_ms(hlc)),

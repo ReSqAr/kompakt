@@ -274,12 +274,12 @@ impl SelfEvictionProbe {
         // `is_quorum` takes a `ReplicaMembership`, not a bare set, so wrap the
         // voter set in a `Single`. Reusing it rather than hand-rolling a
         // majority keeps one definition of "quorum" in the crate.
-        let membership = crate::meta::ReplicaMembership::single(self.voters.clone());
-        if crate::quorum::is_quorum(&membership, &self.rejecting) {
+        let membership = zslg_consensus_types::ReplicaMembership::single(self.voters.clone());
+        if zslg_consensus_types::is_quorum(&membership, &self.rejecting) {
             return Some(true);
         }
         let max_possible: BTreeSet<NodeId> = self.rejecting.union(&self.pending).copied().collect();
-        if !crate::quorum::is_quorum(&membership, &max_possible) {
+        if !zslg_consensus_types::is_quorum(&membership, &max_possible) {
             return Some(false);
         }
         None

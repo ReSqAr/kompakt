@@ -25,10 +25,10 @@
 //! answered with an `Error` frame before closing, so the caller learns why
 //! instead of seeing a bare disconnect.
 
-use crate::error::ConsensusError;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use zslg_consensus_types::ConsensusError;
 use zslg_time_types::ClockError;
 
 use tokio::net::TcpListener;

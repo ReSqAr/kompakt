@@ -9,7 +9,7 @@
 //! (a value rejection) and again pre-flight at the leader's propose site
 //! (`raft_storage::validate_replicated_state`). [`apply_replicated`] only
 //! guards the generation, which must never regress.
-use crate::error::ConsensusError;
+use crate::ConsensusError;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use tracing::debug;
 
-use crate::api::ReplicatedRaftState;
-use crate::ids::RaftGeneration;
+use crate::RaftGeneration;
+use crate::ReplicatedRaftState;
 use crate::meta::{RaftManifestState, RaftState};
 use zslg_node_types::NodeId;
 
@@ -48,7 +48,7 @@ impl Default for RaftStateHandle {
 
 impl RaftStateHandle {
     #[must_use]
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         let (tx, _) = watch::channel(Arc::new(RaftState::empty()));
         Self { tx: Arc::new(tx) }
     }
@@ -77,12 +77,12 @@ impl RaftStateHandle {
     /// halt the state machine. Structural validation is fenced pre-commit
     /// (header); only the generation guard remains here: a backwards
     /// generation is an invariant violation and is rejected with
-    /// [`crate::Error::StateRegression`] instead of panicking the host.
-    pub(crate) fn apply_replicated(
+    /// [`ConsensusError::StateRegression`] instead of panicking the host.
+    pub fn apply_replicated(
         &self,
         state: ReplicatedRaftState,
         generation: RaftGeneration,
-    ) -> Result<(), crate::Error> {
+    ) -> Result<(), ConsensusError> {
         // One critical section, the watch's own: the read-modify-write and the
         // publish are the same operation, so the separate write lock this used
         // to need is gone.
@@ -95,12 +95,10 @@ impl RaftStateHandle {
                     attempted_generation = ?generation,
                     "raft state generation went backwards; rejecting apply",
                 );
-                outcome = Err(crate::error::Error::Consensus(
-                    ConsensusError::StateRegression {
-                        current: prev.generation,
-                        attempted: generation,
-                    },
-                ));
+                outcome = Err(ConsensusError::StateRegression {
+                    current: prev.generation,
+                    attempted: generation,
+                });
                 return false;
             }
             *slot = Arc::new(RaftState {
@@ -132,7 +130,7 @@ impl RaftStateHandle {
     /// voter-set change whenever the leader and term happened to be unchanged
     /// — which is the common case, since membership changes do not move the
     /// leader.
-    pub(in crate::raft) fn blend_raft_metrics(
+    pub fn blend_raft_metrics(
         &self,
         leader: Option<NodeId>,
         raft_term: u64,
@@ -153,7 +151,7 @@ impl RaftStateHandle {
         });
     }
 
-    pub(crate) fn replace(&self, new_state: RaftState) {
+    pub fn replace(&self, new_state: RaftState) {
         self.tx.send_if_modified(|slot| {
             *slot = Arc::new(new_state);
             log_update(slot);
@@ -173,16 +171,6 @@ fn log_update(new_state: &RaftState) {
         hlc_cutoff = ?new_state.manifest_state.hlc_cutoff,
         "RaftState updated"
     );
-}
-
-impl crate::api::RaftStateView for RaftStateHandle {
-    fn snapshot(&self) -> Arc<RaftState> {
-        self.snapshot()
-    }
-
-    fn subscribe(&self) -> watch::Receiver<Arc<RaftState>> {
-        self.subscribe()
-    }
 }
 
 impl Serialize for RaftStateHandle {
@@ -448,10 +436,10 @@ mod tests {
             .expect_err("backwards must be rejected");
         assert!(matches!(
             err,
-            crate::Error::Consensus(ConsensusError::StateRegression {
+            ConsensusError::StateRegression {
                 current: RaftGeneration(5),
                 attempted: RaftGeneration(4),
-            })
+            }
         ));
         assert_eq!(s.snapshot().generation, make_gen(5), "state unchanged");
     }

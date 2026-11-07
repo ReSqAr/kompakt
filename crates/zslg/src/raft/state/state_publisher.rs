@@ -12,7 +12,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::error::Error;
 use crate::metrics;
-use crate::raft::RaftStateHandle;
+use zslg_consensus_types::RaftStateHandle;
 use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 

@@ -12,19 +12,8 @@
 //! into one proposal — and `raft::RaftNode` the only implementor, which
 //! validates again at apply (CLAUDE.md §12).
 
-use crate::ids::RaftGeneration;
-use crate::meta::ReplicaMembership;
-use serde::{Deserialize, Serialize};
-use zslg_snapshot_types::SnapshotMetadata;
-use zslg_time_types::Hlc;
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub(crate) struct ReplicatedRaftState {
-    pub(crate) replica: ReplicaMembership,
-    pub(crate) manifest: Vec<SnapshotMetadata>,
-    pub(crate) manifest_watermark: Option<Hlc>,
-    pub(crate) hlc_cutoff: Option<Hlc>,
-}
+use zslg_consensus_types::RaftGeneration;
+use zslg_consensus_types::ReplicatedRaftState;
 
 #[async_trait::async_trait]
 pub(crate) trait StateReplicator: Send + Sync + 'static {

@@ -14,11 +14,11 @@
     clippy::result_large_err,
     reason = "test code"
 )]
-use crate::error::ConsensusError;
-use crate::meta::{ReplicaMembership, ReplicaStatus};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_consensus_types::ConsensusError;
+use zslg_consensus_types::{ReplicaMembership, ReplicaStatus};
 use zslg_log_types::Data;
 
 use async_trait::async_trait;
@@ -27,7 +27,6 @@ use parking_lot::Mutex as SyncMutex;
 use tempfile::TempDir;
 
 use crate::api::LocalStoreMut;
-use crate::api::ReplicatedRaftState;
 use crate::error::Error;
 use crate::hlc::HlcGate;
 use crate::leader::jobs::membership::change::{
@@ -41,12 +40,13 @@ use crate::learner::LocalStore;
 use crate::learner::StableLog;
 use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use crate::raft::RaftNode;
-use crate::raft::RaftStateHandle;
-use crate::raft::SpareSelectionStrategy;
 use crate::tests::fast_raft_config as raft_config;
 use crate::tests::make_data;
 use crate::tests::upstream;
 use crate::tests::wait_for_leader;
+use zslg_consensus_types::RaftStateHandle;
+use zslg_consensus_types::ReplicatedRaftState;
+use zslg_consensus_types::SpareSelectionStrategy;
 use zslg_log_types::LogIndex;
 use zslg_node_types::NodeId;
 use zslg_snapshot_types::CompressionLevel;

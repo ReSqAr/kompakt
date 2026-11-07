@@ -26,20 +26,21 @@
 //! Premises are per intent, not per batch: one rejected intent does not sink the
 //! others drained with it.
 
-use crate::error::ConsensusError;
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use zslg_consensus_types::ConsensusError;
 use zslg_lifecycle_types::LifecycleError;
 
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::api::{RaftStateView, ReplicatedRaftState, StateReplicator};
+use crate::api::{RaftStateView, StateReplicator};
 use crate::error::Error;
-use crate::ids::RaftGeneration;
-use crate::meta::{RaftState, ReplicaMembership};
 use crate::metrics::IntentState;
+use zslg_consensus_types::RaftGeneration;
+use zslg_consensus_types::ReplicatedRaftState;
+use zslg_consensus_types::{RaftState, ReplicaMembership};
 use zslg_log_types::LogIndex;
 use zslg_snapshot_types::SnapshotId;
 use zslg_snapshot_types::SnapshotMetadata;
@@ -320,14 +321,14 @@ fn fold_checked(
     match apply_intent(proposed, intent) {
         Ok(Applied::NoOp) => Ok(Applied::NoOp),
         Ok(Applied::Changed) => {
-            let verdict = crate::raft::validate_replicated_state(proposed)
+            let verdict = zslg_consensus_types::validate_replicated_state(proposed)
                 .map_err(|e| e.to_string())
                 .and_then(|()| {
-                    crate::raft::validate_transition(&before_fold.replica, proposed)
+                    zslg_consensus_types::validate_transition(&before_fold.replica, proposed)
                         .map_err(|e| e.to_string())
                 })
                 .and_then(|()| {
-                    crate::raft::validate_cutoff_advance(before_fold.hlc_cutoff, proposed)
+                    zslg_consensus_types::validate_cutoff_advance(before_fold.hlc_cutoff, proposed)
                         .map_err(|e| e.to_string())
                 });
             match verdict {
@@ -462,12 +463,12 @@ fn apply_intent(
     reason = "test code"
 )]
 mod tests {
-    use crate::meta::Exit;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use zslg_consensus_types::Exit;
 
     use super::*;
-    use crate::raft::RaftStateHandle;
     use crate::tests::nid;
+    use zslg_consensus_types::RaftStateHandle;
     use zslg_node_types::NodeId;
 
     // ── harness ──────────────────────────────────────────────────────────
@@ -556,15 +557,18 @@ mod tests {
             // The integrator must never propose a state the fence would reject;
             // asserting that here turns any such bug into a test failure rather
             // than a silent value-rejection in production.
-            crate::raft::validate_replicated_state(&state)
+            zslg_consensus_types::validate_replicated_state(&state)
                 .expect("integrator proposed a structurally invalid state");
-            crate::raft::validate_transition(&current.replica, &state)
+            zslg_consensus_types::validate_transition(&current.replica, &state)
                 .expect("integrator proposed an illegal membership transition");
-            crate::raft::validate_cutoff_advance(current.manifest_state.hlc_cutoff, &state)
-                .expect("integrator proposed a regressing hlc cutoff");
+            zslg_consensus_types::validate_cutoff_advance(
+                current.manifest_state.hlc_cutoff,
+                &state,
+            )
+            .expect("integrator proposed a regressing hlc cutoff");
             self.proposals.fetch_add(1, Ordering::Relaxed);
             let next = RaftGeneration(current.generation.raw().saturating_add(1));
-            self.state.apply_replicated(state, next)
+            self.state.apply_replicated(state, next).map_err(Into::into)
         }
     }
 

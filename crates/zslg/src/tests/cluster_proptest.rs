@@ -145,7 +145,7 @@
 //! without) — so this is not a break that failed to land.
 //!
 //! The reason is visible in the trace: every exit condition these scripts arm
-//! is [`crate::meta::Exit::AnyTime`], never `WatermarkAbove` (9 of 9 in a
+//! is [`zslg_consensus_types::Exit::AnyTime`], never `WatermarkAbove` (9 of 9 in a
 //! traced run). `AnyTime` means every replica in the sampled quorum of `old`
 //! reported an *empty* log, so nothing can be stranded and
 //! `meta::drain_satisfied` is unconditionally true. A gate that is always
@@ -1751,7 +1751,7 @@ async fn full_replacement_transfers_membership_and_data() {
     crate::tests::init_logging();
     let mut base = config_for(30_000, 600, 32, 256);
     // Deterministic spare choice, so `next` is not a coin flip across runs.
-    base.membership_spare_selection = crate::raft::SpareSelectionStrategy::LowestLatency;
+    base.membership_spare_selection = zslg_consensus_types::SpareSelectionStrategy::LowestLatency;
     let mut cluster = Cluster::new(ClusterConfig {
         count: 7,
         distinct_names: false,
@@ -1842,7 +1842,7 @@ async fn full_replacement_transfers_membership_and_data() {
     // Step 2b is done when the leader arms the bound. It must be a REAL
     // bound: `AnyTime` would mean every responder reported an empty log, so
     // nothing could be stranded and the gate would be doing no work.
-    let mut armed: Option<crate::meta::Exit> = None;
+    let mut armed: Option<zslg_consensus_types::Exit> = None;
     crate::tests::wait_until_sync("drain bound armed", Duration::from_secs(30), || {
         cluster
             .nodes()
@@ -1857,7 +1857,7 @@ async fn full_replacement_transfers_membership_and_data() {
     .await;
     let t_armed = std::time::Instant::now();
     assert!(
-        matches!(armed, Some(crate::meta::Exit::WatermarkAbove(_))),
+        matches!(armed, Some(zslg_consensus_types::Exit::WatermarkAbove(_))),
         "the drain bound must be a real watermark, not AnyTime — an AnyTime arm \
          means the old logs were empty and the gate did no work: {armed:?}"
     );

@@ -20,7 +20,7 @@ pub(crate) struct CandidateInfo {
 }
 
 /// Orders spare (live, non-member) nodes for promotion. The impl is
-/// [`SpareSelectionStrategy`](crate::raft::SpareSelectionStrategy), chosen via
+/// [`SpareSelectionStrategy`](zslg_consensus_types::SpareSelectionStrategy), chosen via
 /// `MembershipConfig`.
 pub(crate) trait SpareSelector: Send + Sync {
     /// A permutation of `candidates` — best first.

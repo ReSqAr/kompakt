@@ -30,11 +30,11 @@
 //! [`crate::writer::WriterService`] drops, `fans` drops with the coordinator,
 //! each replica input disconnects, and the loops cascade out.
 
-use crate::error::ConsensusError;
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
+use zslg_consensus_types::ConsensusError;
 
 use crossbeam_channel::{Receiver, Sender};
 use dashmap::DashMap;
@@ -44,8 +44,8 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 use crate::api::{RaftStateTracker, Router, StampedWrite, WriteOutcome};
 use crate::error::Error;
 use crate::metrics::{self, FanoutResponseState, WriteRpcOutcome};
-use crate::quorum::{all_targets, is_quorum};
 use crossbeam_combinators::Channel;
+use zslg_consensus_types::{all_targets, is_quorum};
 use zslg_log_types::Data;
 use zslg_log_types::DataId;
 use zslg_node_types::NodeId;
@@ -504,9 +504,9 @@ mod tests {
 
     use super::*;
     use crate::api::{RaftStateTracker, Replica, ReplicaClient};
-    use crate::ids::RaftGeneration;
-    use crate::meta::{RaftManifestState, RaftState, ReplicaMembership, ReplicaStatus};
     use crate::tests::{make_data, nid, replica_only};
+    use zslg_consensus_types::RaftGeneration;
+    use zslg_consensus_types::{RaftManifestState, RaftState, ReplicaMembership, ReplicaStatus};
     use zslg_log_types::LogIndex;
 
     fn state(generation: u64, replicas: &[NodeId]) -> RaftState {

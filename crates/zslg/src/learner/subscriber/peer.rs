@@ -172,11 +172,11 @@ impl ReplicationSubscriber {
     reason = "test code"
 )]
 mod tests {
-    use crate::error::ConsensusError;
     use crate::test_stream::ChannelTestExt as _;
     use std::sync::Arc;
     use std::sync::Mutex;
     use std::time::Duration;
+    use zslg_consensus_types::ConsensusError;
 
     use async_trait::async_trait;
     use bytes::Bytes;
@@ -186,9 +186,9 @@ mod tests {
     use super::*;
     use crate::api::{LocalStoreView, Replica, StampedWrite, WriteOutcome};
     use crate::hlc::HlcClock;
-    use crate::meta::ReplicaStatus;
     use crate::tests::{fresh_local, make_meta, upstream as upstream_id};
     use crossbeam_combinators::{Channel, Finite, Infinite};
+    use zslg_consensus_types::ReplicaStatus;
     use zslg_log_types::Data;
     use zslg_log_types::LogIndex;
 

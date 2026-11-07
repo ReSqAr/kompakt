@@ -6,40 +6,8 @@ use std::time::Duration;
 use zslg_lifecycle_types::ConfigError;
 
 use crate::api::{CandidateInfo, SpareSelector};
+use zslg_consensus_types::SpareSelectionStrategy;
 use zslg_node_types::NodeId;
-
-/// Strategy for choosing which spare (live, non-member) nodes are promoted to
-/// fill a replica-set deficit during a membership change. Implements
-/// [`SpareSelector`](crate::api::SpareSelector). Future signal-aware strategies
-/// (most-caught-up, lowest-latency, failure-domain) add variants here.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SpareSelectionStrategy {
-    /// Pick uniformly at random among the available live spares.
-    #[default]
-    Random,
-    /// Prefer the spare with the lowest probe RTT to this (leader) node;
-    /// not-yet-probed spares (`rtt == None`) sort last.
-    LowestLatency,
-}
-
-impl SpareSelector for SpareSelectionStrategy {
-    fn rank(&self, candidates: &[CandidateInfo]) -> Vec<NodeId> {
-        match self {
-            Self::Random => {
-                let mut v: Vec<NodeId> = candidates.iter().map(|c| c.node_id).collect();
-                rand::seq::SliceRandom::shuffle(v.as_mut_slice(), &mut rand::rng());
-                v
-            }
-            Self::LowestLatency => {
-                let mut v = candidates.to_vec();
-                // None RTT sorts last (Duration::MAX); NodeId breaks ties for a
-                // total order.
-                v.sort_by_key(|c| (c.rtt.unwrap_or(Duration::MAX), c.node_id));
-                v.into_iter().map(|c| c.node_id).collect()
-            }
-        }
-    }
-}
 
 /// Membership and replica node management configuration.
 #[derive(Debug, Clone)]
@@ -76,6 +44,25 @@ impl MembershipConfig {
             ));
         }
         Ok(())
+    }
+}
+
+impl SpareSelector for SpareSelectionStrategy {
+    fn rank(&self, candidates: &[CandidateInfo]) -> Vec<NodeId> {
+        match self {
+            Self::Random => {
+                let mut v: Vec<NodeId> = candidates.iter().map(|c| c.node_id).collect();
+                rand::seq::SliceRandom::shuffle(v.as_mut_slice(), &mut rand::rng());
+                v
+            }
+            Self::LowestLatency => {
+                let mut v = candidates.to_vec();
+                // None RTT sorts last (Duration::MAX); NodeId breaks ties for a
+                // total order.
+                v.sort_by_key(|c| (c.rtt.unwrap_or(Duration::MAX), c.node_id));
+                v.into_iter().map(|c| c.node_id).collect()
+            }
+        }
     }
 }
 

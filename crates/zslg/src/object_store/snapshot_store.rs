@@ -50,11 +50,11 @@ use tracing::{debug, info, warn};
 use crate::Error;
 use crate::api::{CleanupReport, EntryMeta, SnapshotStore, SnapshotWrite};
 use crate::error::ToStorage as _;
-#[cfg(test)]
-use crate::meta::ReplicaMembership;
 use crate::metrics::{self, ObjectStoreOp, OpState};
 use crate::object_store::framing;
 use crossbeam_combinators::Channel;
+#[cfg(test)]
+use zslg_consensus_types::ReplicaMembership;
 use zslg_log_types::SnapshotEntry;
 use zslg_snapshot_types::CompressionLevel;
 use zslg_snapshot_types::SnapshotId;
@@ -491,7 +491,7 @@ mod tests {
     use object_store::memory::InMemory;
 
     use super::*;
-    use crate::raft::RaftStateHandle;
+    use zslg_consensus_types::RaftStateHandle;
     use zslg_log_types::LogIndex;
     use zslg_snapshot_types::CompressionLevel;
     use zslg_snapshot_types::SnapshotMetadata;
@@ -793,7 +793,7 @@ mod tests {
     fn set_live_manifest(apply: &RaftStateHandle, snapshot_id: SnapshotId) {
         apply
             .apply_replicated(
-                crate::api::ReplicatedRaftState {
+                zslg_consensus_types::ReplicatedRaftState {
                     replica: ReplicaMembership::single(std::collections::BTreeSet::new()),
                     manifest: vec![SnapshotMetadata {
                         start_hlc: Hlc(0),
@@ -805,7 +805,7 @@ mod tests {
                     manifest_watermark: Some(Hlc(10)),
                     hlc_cutoff: Some(Hlc(10)),
                 },
-                crate::ids::RaftGeneration(1),
+                zslg_consensus_types::RaftGeneration(1),
             )
             .expect("apply");
     }

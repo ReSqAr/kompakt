@@ -6,10 +6,10 @@
 //! (`MembershipGate`), removes DNS-colliding node ids at the same address
 //! atomically with the add, and retries the membership change across a lost
 //! leadership mid-change.
-use crate::error::ConsensusError;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_consensus_types::ConsensusError;
 use zslg_net_types::NetError;
 
 use futures::FutureExt as _;
@@ -21,13 +21,12 @@ use openraft::raft::{
 };
 use tracing::info;
 
-use crate::api::{
-    MembershipGate, RaftConsensus, RaftLeadership, ReplicatedRaftState, StateReplicator,
-};
+use crate::api::{MembershipGate, RaftConsensus, RaftLeadership, StateReplicator};
 use crate::error::{Error, ToRaft};
-use crate::ids::RaftGeneration;
 use crate::metrics;
 use crate::raft::{FencedStateWrite, NodeInfo, RaftResponse};
+use zslg_consensus_types::RaftGeneration;
+use zslg_consensus_types::ReplicatedRaftState;
 use zslg_net_types::{PeerAddr, ServerName};
 use zslg_node_types::NodeId;
 
@@ -268,7 +267,7 @@ impl StateReplicator for RaftNode {
         context: &'static str,
     ) -> Result<(), Error> {
         // See `StateReplicator::replicate_state` for the pre-flight contract.
-        crate::raft::raft_storage::validate_replicated_state(&state)
+        zslg_consensus_types::validate_replicated_state(&state)
             .map_err(|source| Error::invalid_raft_state(context, source))?;
         // openraft's call has no deadline, and the integrator is a single
         // serial task — one wedged wait would stall every leader job

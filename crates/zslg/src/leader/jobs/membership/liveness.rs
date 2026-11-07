@@ -1,7 +1,7 @@
-use crate::error::ConsensusError;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_consensus_types::ConsensusError;
 use zslg_lifecycle_types::ConfigError;
 use zslg_net_types::NetError;
 
@@ -155,7 +155,7 @@ impl LivenessWorker {
 
             let snapshot = self.raft_state.snapshot();
             let voter_ids = self.leadership.voter_ids();
-            let peers: BTreeSet<NodeId> = crate::quorum::all_targets(&snapshot.replica)
+            let peers: BTreeSet<NodeId> = zslg_consensus_types::all_targets(&snapshot.replica)
                 .into_iter()
                 .chain(voter_ids)
                 .filter(|&id| id != self.self_node_id)
@@ -223,7 +223,7 @@ impl LivenessWorker {
                         debug!(?peer, ?rtt, "liveness probe ok");
                     }
                     Err(Error::Consensus(ConsensusError::UnexpectedNodeId(ids))) => {
-                        let crate::error::UnexpectedNodeId { expected, actual } = *ids;
+                        let zslg_consensus_types::UnexpectedNodeId { expected, actual } = *ids;
                         debug!(
                             ?peer,
                             ?expected,
@@ -307,10 +307,10 @@ mod tests {
 
     use super::*;
     use crate::api::LivenessProbe;
-    use crate::meta::{RaftState, ReplicaMembership};
-    use crate::raft::RaftStateHandle;
     use async_trait::async_trait;
     use shutdown::Shutdown;
+    use zslg_consensus_types::RaftStateHandle;
+    use zslg_consensus_types::{RaftState, ReplicaMembership};
     use zslg_net_types::ServerName;
 
     struct NoVoters;

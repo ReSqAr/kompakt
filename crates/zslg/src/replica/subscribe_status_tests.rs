@@ -20,9 +20,9 @@ use std::time::Duration;
 use futures::StreamExt;
 
 use crate::api::Replica;
-use crate::ids::RaftGeneration;
 use crate::tests::nid;
 use crate::tests::{self as faults, ReplicaServiceHarness};
+use zslg_consensus_types::RaftGeneration;
 use zslg_net_types::{HostPort, PeerAddr};
 use zslg_time_types::Hlc;
 

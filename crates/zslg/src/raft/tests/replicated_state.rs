@@ -20,9 +20,9 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use crate::api::ReplicatedRaftState;
-use crate::meta::ReplicaMembership;
 use crate::tests::fast_raft_config as raft_config;
+use zslg_consensus_types::ReplicaMembership;
+use zslg_consensus_types::ReplicatedRaftState;
 use zslg_log_types::LogIndex;
 use zslg_node_types::NodeId;
 use zslg_snapshot_types::SnapshotId;
@@ -73,7 +73,7 @@ async fn three_node_initialize_and_apply_command() {
     }
 
     async fn wait_for_set(
-        rx: &mut tokio::sync::watch::Receiver<std::sync::Arc<crate::meta::RaftState>>,
+        rx: &mut tokio::sync::watch::Receiver<std::sync::Arc<zslg_consensus_types::RaftState>>,
         target: &BTreeSet<NodeId>,
     ) {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);

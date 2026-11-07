@@ -14,27 +14,29 @@
     clippy::result_large_err,
     reason = "test code"
 )]
-use crate::error::ConsensusError;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_consensus_types::ConsensusError;
 
 use async_trait::async_trait;
 use parking_lot::Mutex as SyncMutex;
 use tokio_util::sync::CancellationToken;
 
 use crate::Error;
-use crate::api::{RaftLeadership, ReplicatedRaftState};
+use crate::api::RaftLeadership;
 use crate::leader::jobs::membership::change::{
     LivenessQuery, MembershipChangeInputs, MembershipChangeManager, needs_retarget,
 };
 use crate::leader::jobs::membership::{MembershipDriver, MembershipObserver, TickOutcome};
-use crate::meta::{Exit, ReplicaMembership, ReplicaStatus};
-use crate::raft::SpareSelectionStrategy;
-use crate::raft::{RaftNode, RaftStateHandle};
+use crate::raft::RaftNode;
 use crate::tests::{
     fast_raft_config as raft_config, wait_for_any_leader, wait_for_leader, wait_until,
 };
+use zslg_consensus_types::RaftStateHandle;
+use zslg_consensus_types::ReplicatedRaftState;
+use zslg_consensus_types::SpareSelectionStrategy;
+use zslg_consensus_types::{Exit, ReplicaMembership, ReplicaStatus};
 use zslg_net_types::ServerName;
 use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
