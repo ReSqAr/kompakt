@@ -414,3 +414,28 @@ Consistency pass over D1–D20. Fixes (pending sign-off with the rest of the doc
   name (unprefixed names like `bytesize` could clash later).
 
 Crate count: ~75.
+
+### D21. The facade never depends on an implementation
+
+Raised by the user on pass 3 ("the facade may depend on implementations"
+did not sound right). Decisions:
+
+- `CompactionTier` (public, in `ReplicaNodeConfig`) is snapshot vocabulary and
+  moves to `zslg-snapshot-types`.
+- Public adapter configuration gets its own crates (new role *config*,
+  `zslg-<what>-config`, may depend on types and libraries):
+  `zslg-object-store-config` holds `ObjectStoreConfig`, `IntoArcObjectStore` and
+  the backend builder (trait, impl and type together by the orphan rule) and
+  owns the `s3` feature, whose only `cfg` sites are in that builder.
+  `zslg-object-store` keeps the `SnapshotStore` over `Arc<dyn ObjectStore>`.
+- `HlcClock` leaves the public API (no consumer uses it; no public signature
+  returns it). Rule: implementations are never public; if a consumer needs one,
+  the API hands out the port as `Arc<dyn Port>`.
+- `TestLog`: option (b). It lives in `zslg-log-fake`; the facade publishes it as
+  `zslg::testing::TestLog` behind a `testing` feature (optional dependency);
+  `nvzn::testing` re-exports it, so nlnr's four uses keep their path.
+- Facade may depend on: assemblies, config, ports, types, libraries; fakes only
+  behind `testing`; never an implementation. The layering test checks it.
+
+Rejected: facade re-exporting from implementations, directly or through the
+assemblies; keeping a duplicate `TestLog` in nvzn.
