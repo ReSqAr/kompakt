@@ -92,8 +92,24 @@ the `consensus` group; `leader/jobs/snapshot` vs `learner/stable_log/
 snapshot_loader` share snapshot-format knowledge that belongs to the `snapshot`
 group.
 
+### D7. Implementation granularity: per subfolder, finer where a concern is found
+
+Between "one crate per subfolder that implements a port" and "also split inside
+local_store / stable_log / membership": start from the subfolder cut and factor
+out any smaller concern the design doc finds. Tiny glue stays with its owner.
+User on raft: coupling that forces `startup`/`state`/`tracker` to stay together
+is a smell in itself, to be investigated rather than accepted.
+
+## Finding: raft's coupling is a hub of vocabulary, not tangling
+
+`raft_storage`, `rpc`, `startup`, `state`, `tracker` do not import each other.
+Each imports the same hub: `raft/types.rs` (TypeConfig, NodeInfo,
+RaftStateError, RaftLogIndex, RaftResponse, FencedStateWrite) and, for
+`startup`, the concrete `RaftNode`. The hub types are foundation (`consensus`
+group) material. `RaftNode` already implements three ports (`RaftConsensus`,
+`RaftLeadership`, `StateReplicator`).
+
 ## Open
 
-- Q7: granularity of the implementation layer (learner 8.8k, leader 10.7k,
-  raft 6.9k, network 4.3k, replica 3.4k lines): per top-level module or per
-  subfolder?
+- Q8: do implementation crates depend only on ports (concrete types meet only
+  in the composition root), or may they depend on each other's concrete types?
