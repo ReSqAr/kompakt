@@ -30,7 +30,6 @@ use crate::leader::jobs::snapshot::create::{
     SnapshotEntryInputs, SnapshotResult, create_snapshot_entry,
 };
 use crate::learner::LocalStore;
-use crate::learner::StableLog;
 use crate::learner::integrate_manifest_for_test;
 use crate::raft::RaftNode;
 use zslg_consensus_types::RaftStateHandle;
@@ -368,7 +367,7 @@ async fn second_snapshot_extends_stable_log_via_load() {
     let manifest_state_after_second = h.raft_state.snapshot().manifest_state.clone();
     let learner_dir = tempfile::tempdir().expect("tempdir");
     let learner_path = learner_dir.path().join("stable.db");
-    let learner_stable = StableLog::open_engine(learner_path.with_extension("stable"))
+    let learner_stable = crate::tests::stable_log_engine(learner_path.with_extension("stable"))
         .await
         .expect("open stable log");
     integrate_manifest_for_test(
@@ -417,7 +416,7 @@ async fn integrate_manifest_is_idempotent() {
 
     let learner_dir = tempfile::tempdir().expect("tempdir");
     let learner_path = learner_dir.path().join("stable.db");
-    let learner_stable = StableLog::open_engine(learner_path.with_extension("stable"))
+    let learner_stable = crate::tests::stable_log_engine(learner_path.with_extension("stable"))
         .await
         .expect("from_db");
 
@@ -486,7 +485,7 @@ async fn invariant_stable_order_is_hlc_order() {
 
     // Load into a fresh learner and verify the stable order.
     let learner_dir = tempfile::tempdir().expect("tempdir");
-    let learner_stable = StableLog::open_engine(learner_dir.path().join("stable.stable"))
+    let learner_stable = crate::tests::stable_log_engine(learner_dir.path().join("stable.stable"))
         .await
         .expect("from_db");
     integrate_manifest_for_test(

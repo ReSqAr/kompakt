@@ -1,82 +1,12 @@
-//! Loads object-store snapshots (referenced by the raft manifest) into the
-//! learner's `stable_log`. Consumed by `spawn_learner` — a learner concern, not
-//! a leader one (snapshot *creation* lives in `crate::leader::snapshot`).
-//!
-//! Snapshot *selection* lives entirely behind [`StableArchiveReader`]: this
-//! loader only names an index window (`from` the current stable end, unbounded
-//! above) and drains the one resulting stream into the stable log. It keeps the
-//! manifest solely for its own bookkeeping — the completeness check and the
-//! watermark advance — never to pick snapshots.
+//! The snapshot loader against the real archive reader and a scripted snapshot
+//! store: the integration of `zslg-stable-log` and the archive implementation.
 
 use std::sync::Arc;
-use zslg_consensus::RaftStateView;
-use zslg_log_types::LogError;
+use zslg_consensus::{RaftManifestState, RaftStateView};
+use zslg_log::StableLogSnapshot;
+use zslg_stable_log::integrate_manifest;
 
-use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
-
-use crate::error::Error;
-use zslg_consensus_types::RaftManifestState;
-use zslg_log::{ArchiveBounds, ArchiveUpperBound, StableArchiveReader, StableLogSnapshot};
-use zslg_log_types::LogIndex;
-
-pub(in crate::learner) async fn integrate_manifest(
-    archive: &dyn StableArchiveReader,
-    stable_log: &dyn StableLogSnapshot,
-    manifest_state: &RaftManifestState,
-) -> Result<(), Error> {
-    // Stream from just past the current stable end — or the earliest snapshot
-    // when the log is empty. Snapshots below the lower bound are never opened.
-    // `append` is the single gap fence: it runs the encode/commit/fsync loop on
-    // its own blocking thread (CLAUDE.md §8), commits contiguous batches, and
-    // refuses an input that jumps past `end + 1`, so a missing or partial
-    // snapshot cannot land as a durable gap (docs/STABLE_LOG_GAP_FIX.md).
-    // Debug, not info: this runs on every raft-state change, which on an idle
-    // cluster is every cutoff tick.
-    debug!(
-        manifest_entries = manifest_state.manifest.len(),
-        "integrating stable-log manifest from object store",
-    );
-    let rx = archive.stream(ArchiveBounds {
-        after: stable_log.end_index(),
-        until: ArchiveUpperBound::Unbounded,
-    });
-    stable_log.append(rx.into_channel()).await?;
-
-    // Completeness (belt to `append`'s gap fence): `append` returning Ok proves
-    // the stream ended, not that it covered the manifest. A snapshot that
-    // short-loaded its tail (e.g. a stream ending early without an error item)
-    // leaves the stable end below the manifest's covered end — abort so the
-    // watermark advance below never claims coverage past a never-loaded tail.
-    // The load stays resumable: committed batches persist and the next attempt
-    // re-streams from the new end.
-    let manifest_end = manifest_state.manifest.iter().map(|m| m.end_index).max();
-    if let Some(target) = manifest_end {
-        let loaded = stable_log.end_index();
-        if loaded.is_none_or(|end| end < target) {
-            return Err(Error::Log(LogError::Storage(format!(
-                "stable-log manifest integration incomplete: loaded end_index {:?} < manifest \
-                 end_index {} — a snapshot stream ended early or a snapshot is missing; \
-                 aborting manifest integration (resumable on the next attempt)",
-                loaded.map(LogIndex::raw),
-                target.raw(),
-            ))));
-        }
-    }
-
-    if let Some(manifest_wm) = manifest_state.manifest_watermark
-        && stable_log.end_hlc().is_none_or(|l| manifest_wm > l)
-    {
-        // After integrating a manifest, `end_hlc` always becomes its
-        // watermark — even a watermark-only advance with no snapshot files. The
-        // loaded index is just `end_index`, already advanced by the appends
-        // above. This keeps the load path mechanical (no empty-manifest special
-        // case) so downstream waiters can simply track `end_hlc`.
-        stable_log.record_end_hlc(manifest_wm).await?;
-    }
-
-    Ok(())
-}
+use crate::Error;
 
 /// Test-only ergonomic wrapper: build an [`ObjectStoreArchiveReader`] over a
 /// handle seeded with `manifest_state` (the archive reader selects snapshots
@@ -92,100 +22,20 @@ pub(crate) async fn integrate_manifest_for_test(
         snapshot_store,
         seed_raft_state(manifest_state),
     );
-    integrate_manifest(&archive, stable_log, manifest_state).await
+    integrate_manifest(&archive, stable_log, manifest_state)
+        .await
+        .map_err(Error::from)
 }
 
 /// A `RaftStateView` handle whose manifest is `manifest_state` — the archive
 /// reader reads its covering snapshots from here.
 #[cfg(test)]
 fn seed_raft_state(manifest_state: &RaftManifestState) -> Arc<dyn RaftStateView> {
-    let handle = zslg_consensus_types::RaftStateHandle::default();
-    let mut rs = zslg_consensus_types::RaftState::empty();
+    let handle = zslg_consensus::RaftStateHandle::default();
+    let mut rs = zslg_consensus::RaftState::empty();
     rs.manifest_state = manifest_state.clone();
     handle.replace(rs);
     Arc::new(handle)
-}
-
-pub(in crate::learner) struct SnapshotLoader {
-    archive: Arc<dyn StableArchiveReader>,
-    stable_log: Arc<dyn StableLogSnapshot>,
-    raft_state: Arc<dyn RaftStateView>,
-    cancel: CancellationToken,
-}
-
-impl SnapshotLoader {
-    #[must_use]
-    pub(in crate::learner) fn new(
-        archive: Arc<dyn StableArchiveReader>,
-        stable_log: Arc<dyn StableLogSnapshot>,
-        raft_state: Arc<dyn RaftStateView>,
-        cancel: CancellationToken,
-    ) -> Self {
-        Self {
-            archive,
-            stable_log,
-            raft_state,
-            cancel,
-        }
-    }
-
-    /// Load the current manifest once, awaited at startup *before* the live
-    /// subscription starts (`spawn_learner`). This establishes `end_hlc` so the
-    /// local-store integrate gate skips the whole already-stable prefix instead
-    /// of writing then purging it. Best-effort: `maybe_integrate` logs-and-
-    /// continues on error, so a transient object-store failure just means the
-    /// gate skips less and [`run`](Self::run) retries on the next manifest change.
-    pub(in crate::learner) async fn load_initial(&self) {
-        let initial = self.raft_state.snapshot();
-        info!(
-            manifest_entries = initial.manifest_state.manifest.len(),
-            "snapshot loader: initial load before subscription",
-        );
-        self.maybe_integrate(&initial.manifest_state).await;
-    }
-
-    pub(in crate::learner) async fn run(self) -> Result<(), Error> {
-        let mut rx = self.raft_state.subscribe();
-
-        // Re-integrate the current state after subscribing to close the gap
-        // between `load_initial` (at startup) and this subscription — idempotent
-        // (already-loaded snapshots are skipped, `end_hlc` is monotonic).
-        let initial = self.raft_state.snapshot();
-        info!(
-            manifest_entries = initial.manifest_state.manifest.len(),
-            "snapshot loader: starting with initial manifest",
-        );
-        self.maybe_integrate(&initial.manifest_state).await;
-
-        loop {
-            let state = tokio::select! {
-                () = self.cancel.cancelled() => {
-                    info!("snapshot loader: shutdown");
-                    return Ok(());
-                }
-                changed = rx.changed() => match changed {
-                    Ok(()) => rx.borrow_and_update().clone(),
-                    Err(_) => {
-                        info!("snapshot loader: raft state channel closed");
-                        return Ok(());
-                    }
-                },
-            };
-            self.maybe_integrate(&state.manifest_state).await;
-        }
-    }
-
-    async fn maybe_integrate(&self, manifest_state: &RaftManifestState) {
-        if let Err(e) = integrate_manifest(
-            self.archive.as_ref(),
-            self.stable_log.as_ref(),
-            manifest_state,
-        )
-        .await
-        {
-            warn!(error = %e, "snapshot load failed");
-        }
-    }
 }
 
 #[cfg(test)]
@@ -203,23 +53,28 @@ mod tests {
     use std::collections::{BTreeSet, HashMap};
     use std::sync::Mutex;
     use std::time::Duration;
+    use zslg_snapshot::SnapshotError;
     use zslg_snapshot::{CleanupReport, SnapshotStore, SnapshotWrite};
-    use zslg_snapshot_types::SnapshotError;
 
     use async_trait::async_trait;
 
-    use super::*;
+    use super::seed_raft_state;
+    use tokio_util::sync::CancellationToken;
+    use zslg_consensus::RaftManifestState;
+    use zslg_log::{LogError, StableLogEvent, StableLogSnapshot};
+    use zslg_stable_log::Error;
+    use zslg_stable_log::integrate_manifest;
 
     use crate::learner::StableLog;
     use crate::learner::stable_archive::ObjectStoreArchiveReader;
     use crate::tests::make_data;
     use std::sync::Arc;
-    use zslg_log_types::LogIndex;
-    use zslg_log_types::SnapshotEntry;
-    use zslg_snapshot_types::CompressionLevel;
-    use zslg_snapshot_types::SnapshotId;
-    use zslg_snapshot_types::SnapshotMetadata;
-    use zslg_time_types::Hlc;
+    use zslg_log::LogIndex;
+    use zslg_log::SnapshotEntry;
+    use zslg_snapshot::CompressionLevel;
+    use zslg_snapshot::SnapshotId;
+    use zslg_snapshot::SnapshotMetadata;
+    use zslg_time::Hlc;
 
     /// Build the production archive reader over a scripted store, seeded with
     /// `manifest_state` so its snapshot selection sees the same manifest the
@@ -277,7 +132,7 @@ mod tests {
                 crossbeam_combinators::Finite,
             >,
             _compression: CompressionLevel,
-            _reason: zslg_snapshot_types::ObjectStoreReason,
+            _reason: zslg_snapshot::ObjectStoreReason,
         ) -> Result<zslg_snapshot::SnapshotWrite, Error> {
             unimplemented!("loader tests never write snapshots")
         }
@@ -285,7 +140,7 @@ mod tests {
         pub(crate) async fn read_snapshot_in(
             &self,
             id: SnapshotId,
-            _reason: zslg_snapshot_types::ObjectStoreReason,
+            _reason: zslg_snapshot::ObjectStoreReason,
         ) -> Result<
             crossbeam_combinators::Channel<
                 Result<SnapshotEntry, Error>,
@@ -338,7 +193,7 @@ mod tests {
                 crossbeam_combinators::Finite,
             >,
             compression: CompressionLevel,
-            reason: zslg_snapshot_types::ObjectStoreReason,
+            reason: zslg_snapshot::ObjectStoreReason,
         ) -> Result<SnapshotWrite, zslg_snapshot::Error> {
             self.write_snapshot_in(id, entries.err_into(), compression, reason)
                 .await
@@ -347,7 +202,7 @@ mod tests {
         async fn read_snapshot(
             &self,
             id: SnapshotId,
-            reason: zslg_snapshot_types::ObjectStoreReason,
+            reason: zslg_snapshot::ObjectStoreReason,
         ) -> Result<
             Channel<Result<SnapshotEntry, zslg_snapshot::Error>, crossbeam_combinators::Finite>,
             zslg_snapshot::Error,
@@ -399,7 +254,7 @@ mod tests {
 
     async fn fresh_stable_log() -> (tempfile::TempDir, StableLog) {
         let dir = tempfile::tempdir().expect("tempdir");
-        let log = StableLog::open_engine(dir.path().join("stable.stable"))
+        let log = crate::tests::stable_log_engine(dir.path().join("stable.stable"))
             .await
             .expect("from_db");
         (dir, log)
@@ -668,6 +523,71 @@ mod tests {
             store.reads(),
             vec![id_n, id_m],
             "no snapshot re-read once fully loaded",
+        );
+    }
+
+    #[tokio::test]
+    async fn read_snapshot_then_append_matches() {
+        use zslg_log::SnapshotEntry;
+        use zslg_snapshot::CompressionLevel;
+        use zslg_snapshot::SnapshotId;
+        use zslg_snapshot::SnapshotStore as _;
+
+        // End-to-end of the production load path: write a snapshot through the
+        // public SnapshotStore API, then `read_snapshot` (off-reactor decode →
+        // bounded channel) straight into `append` — no byte/framing detail here.
+        let store = zslg_object_store::RemoteSnapshotStore::new(
+            zslg_object_store::SnapshotStoreConfig {
+                object_store: Arc::new(object_store::memory::InMemory::new()),
+            },
+            tokio_util::sync::CancellationToken::new(),
+        );
+        let id = SnapshotId::open(LogIndex(0));
+        let entries: Vec<SnapshotEntry> = (0..5u64)
+            .map(|i| SnapshotEntry {
+                global_index: LogIndex(i),
+                data: crate::tests::make_data(1, 100 + i, b"x"),
+            })
+            .collect();
+        store
+            .write_snapshot(
+                id,
+                Channel::from_vec(entries.into_iter().map(Ok).collect()),
+                CompressionLevel::standard(),
+                zslg_snapshot::ObjectStoreReason::SnapshotCreate,
+            )
+            .await
+            .expect("write_snapshot");
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log = crate::tests::stable_log_engine(dir.path().join("s.stable"))
+            .await
+            .expect("open");
+        let mut rx = log.subscribe_events();
+
+        let entries_rx = store
+            .read_snapshot(id, zslg_snapshot::ObjectStoreReason::ArchiveRead)
+            .await
+            .expect("read_snapshot");
+        let n = log
+            .append(entries_rx.err_into::<crate::Error>().err_into())
+            .await
+            .expect("append");
+        assert_eq!(n, 5);
+        assert_eq!(log.end_index(), Some(LogIndex(4)));
+        assert_eq!(
+            log.end_hlc(),
+            Some(Hlc(103)),
+            "end_hlc settles just below the max appended HLC, whose group may be partial"
+        );
+
+        // Causal order: the first event is the first Appended entry.
+        let ev = rx
+            .recv()
+            .expect("the awaited append above queued this event");
+        assert!(
+            matches!(ev, StableLogEvent::Appended { index, .. } if index == LogIndex(0)),
+            "first event must be Appended(0), got {ev:?}"
         );
     }
 }

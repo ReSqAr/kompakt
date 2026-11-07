@@ -4459,7 +4459,6 @@ dependencies = [
  "metrics-util",
  "object_store",
  "parking_lot 0.13.0",
- "postcard",
  "pprof",
  "proptest",
  "raft-kit",
@@ -4510,6 +4509,7 @@ dependencies = [
  "zslg-raft-tracker",
  "zslg-snapshot",
  "zslg-snapshot-types",
+ "zslg-stable-log",
  "zslg-time",
  "zslg-time-types",
 ]
@@ -5052,6 +5052,34 @@ dependencies = [
  "zslg-lifecycle-types",
  "zslg-log-types",
  "zslg-time-types",
+]
+
+[[package]]
+name = "zslg-stable-log"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytesize",
+ "crossbeam-combinators",
+ "error-union",
+ "metrics-kit",
+ "parking_lot 0.13.0",
+ "postcard",
+ "proptest",
+ "rocksdb-kit",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-log-fake",
+ "zslg-net",
+ "zslg-quorum-read",
+ "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
 ]
 
 [[package]]

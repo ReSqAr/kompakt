@@ -474,7 +474,7 @@ async fn commit_foreign_snapshot(sys: &TestNode) {
 /// Load the committed manifest into a fresh stable log and count the entries.
 async fn covered_entries(c: &Churn, via: NodeId) -> usize {
     let dir = tempfile::tempdir().expect("tempdir");
-    let verify = StableLog::open_engine(dir.path().join("verify.stable"))
+    let verify = crate::tests::stable_log_engine(dir.path().join("verify.stable"))
         .await
         .expect("open stable log");
     let manifest_state = c

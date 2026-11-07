@@ -48,6 +48,7 @@ error_union! {
     from zslg_quorum_read::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_object_store_config::Error { Snapshot }
     from zslg_node_id::Error { Config, Log }
+    from zslg_stable_log::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_local_store::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_raft_startup::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_raft_node::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }

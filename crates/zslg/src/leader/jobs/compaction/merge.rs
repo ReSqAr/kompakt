@@ -446,7 +446,6 @@ mod tests {
         SnapshotEntryInputs, SnapshotResult, create_snapshot_entry,
     };
     use crate::learner::LocalStore;
-    use crate::learner::StableLog;
     use crate::learner::integrate_manifest_for_test;
     use zslg_log_types::Data;
     use zslg_log_types::DataId;
@@ -569,9 +568,10 @@ mod tests {
         let pre_state = leader.raft_state.snapshot();
         let pre_manifest_state = pre_state.manifest_state.clone();
         let learner_pre_dir = tempfile::tempdir().expect("tempdir");
-        let learner_pre = StableLog::open_engine(learner_pre_dir.path().join("stable.stable"))
-            .await
-            .expect("open stable log");
+        let learner_pre =
+            crate::tests::stable_log_engine(learner_pre_dir.path().join("stable.stable"))
+                .await
+                .expect("open stable log");
         integrate_manifest_for_test(ss.clone(), &learner_pre, &pre_manifest_state)
             .await
             .expect("load pre");
@@ -647,9 +647,10 @@ mod tests {
         );
 
         let learner_post_dir = tempfile::tempdir().expect("tempdir");
-        let learner_post = StableLog::open_engine(learner_post_dir.path().join("stable.stable"))
-            .await
-            .expect("from_db");
+        let learner_post =
+            crate::tests::stable_log_engine(learner_post_dir.path().join("stable.stable"))
+                .await
+                .expect("from_db");
         integrate_manifest_for_test(ss.clone(), &learner_post, &post_manifest_state)
             .await
             .expect("load post");

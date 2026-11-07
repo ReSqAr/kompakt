@@ -45,14 +45,6 @@ pub(crate) use metrics_kit::OpState;
 #[cfg(test)]
 use metrics_kit::{LABEL_NONE, MetricKind, set_flag};
 
-use zslg_time_types::Hlc;
-
-/// HLC gauges export the physical-millisecond part: the raw `u64` exceeds f64's
-/// exact-integer range.
-fn hlc_physical_ms(hlc: Hlc) -> u64 {
-    hlc.physical_ms()
-}
-
 // ---------------------------------------------------------------------------
 // Registry types
 // ---------------------------------------------------------------------------
@@ -556,25 +548,6 @@ etc.)."] WriteRpcOutcome {
 // `log_index_frontier{log_type}`. Engine-level behavior is on the storage_* series.
 
 metrics!("zslg_", storage; {
-    gauge_via     stable_log_end_hlc_physical_ms STABLE_LOG_END_HLC_PHYSICAL_MS
-        "stable_log_end_hlc_physical_ms" Milliseconds
-        "Physical-millisecond part of the stable log's end HLC (highest \
-         stabilized HLC). Distance to hlc_now_physical_ms = stabilization lag."
-        (end_hlc: Hlc => hlc_physical_ms);
-    gauge_via     stable_log_purge_threshold_physical_ms STABLE_LOG_PURGE_THRESHOLD_PHYSICAL_MS
-        "stable_log_purge_threshold_physical_ms" Milliseconds
-        "Physical-millisecond part of the HLC the stable log is being purged \
-         up to (manifest_watermark − purge_ttl, before the frontier clamp). \
-         Only moves when TTL purge is enabled; 0/absent means purge off or \
-         nothing aged out yet. Gap to stable_log_end_hlc_physical_ms = the \
-         live retention window still held locally (design doc §794)."
-        (threshold: Hlc => hlc_physical_ms);
-    custom  stable_log_end_advanced STABLE_LOG_END_HLC_ADVANCED_TIMESTAMP_SECONDS
-        "stable_log_end_hlc_advanced_timestamp_seconds" Gauge Seconds
-        "Unix-epoch seconds of the last stable-log upper-watermark (HLC end) \
-         advance on this node (new data going quorum-stable). Paired with the \
-         manifest stamp it separates 'idle' (both flat) from 'snapshot stalled' \
-         (this advancing, manifest flat).";
     custom  read_entry  READ_ENTRIES_TOTAL  "read_entries_total"  Counter None
         "Entries streamed to readers, by the storage tier that served each \
          (source=local_store|stable_log|object_store). Per-entry, unlike \
@@ -690,16 +663,6 @@ metrics!("zslg_", storage; {
 
 // ── storage write paths: hand-written emission helpers ───────────────────────
 // (custom rows above; each fn below emits the metrics named in its row)
-
-/// Wall-clock stamp (Unix epoch seconds) of the last time this node's stable-log
-/// upper watermark (HLC end) advanced — new data going quorum-stable, via append
-/// or empty-window promotion. Grafana: `time() - stable_log_end_hlc_advanced_timestamp_seconds`.
-pub(crate) fn stable_log_end_advanced() {
-    set_gauge(
-        STABLE_LOG_END_HLC_ADVANCED_TIMESTAMP_SECONDS,
-        unix_now_secs(),
-    );
-}
 
 /// One entry streamed to a reader, labeled by the storage tier that served it:
 /// `local_store` (unstable tail), `stable_log` (local stable range), or
@@ -998,11 +961,6 @@ pub(crate) fn jemalloc_stats(s: &JemallocStats) {
 // (`object_store_request_probe`, `rpc_conn_reuse`) are hand-written below.
 
 metrics!("zslg_", probes; {
-    probe_unlabeled stable_log_commit_probe STABLE_LOG_COMMIT_SECONDS
-        "stable_log_commit_seconds"
-        "Segment-WAL append + fsync latency inside StableLog::append \
-         batches (the stable log's own durability fence).  High values = \
-         slow WAL fsyncs during snapshot load.";
     probe_unlabeled replica_append_postcommit_probe REPLICA_APPEND_POSTCOMMIT_SECONDS
         "replica_append_postcommit_seconds"
         "Post-fsync work per replica-log flush: frontier update, broadcast, \
@@ -1013,10 +971,6 @@ metrics!("zslg_", probes; {
     probe   read_token_wait_probe READ_TOKEN_WAIT_DURATION_SECONDS
         "read_token_wait_duration_seconds"
         "Time read-your-writes tokens waited for the store to catch up.";
-    probe   stable_log_append_probe STABLE_LOG_APPEND_DURATION_SECONDS
-        "stable_log_append_duration_seconds"
-        "StableLog::append latency by outcome. _count is the append \
-         throughput; _bucket the latency distribution.";
     probe   replica_log_append_probe REPLICA_LOG_APPEND_DURATION_SECONDS
         "replica_log_append_duration_seconds"
         "ReplicaLogStore::append latency by outcome (enqueue to durable + \
@@ -1031,6 +985,8 @@ metrics!("zslg_", probes; {
 // ---------------------------------------------------------------------------
 
 const ALL_METRICS: &[&[MetricDef]] = &[
+    // --- stable log (zslg-stable-log) ---
+    zslg_stable_log::metrics::METRICS,
     // --- local store (zslg-local-store) ---
     zslg_local_store::metrics::METRICS,
     // --- startup (zslg-raft-startup) ---
@@ -1411,12 +1367,12 @@ mod tests {
         let recorder = metrics_util::debugging::DebuggingRecorder::new();
         let snapshotter = recorder.snapshotter();
         metrics::with_local_recorder(&recorder, || {
-            stable_log_append_probe().finish(OpState::Success);
+            zslg_stable_log::metrics::stable_log_append_probe().finish(OpState::Success);
         });
         let snap = snapshotter.snapshot();
         let map = snap.into_hashmap();
         let found = map.keys().any(|ck| {
-            ck.key().name() == STABLE_LOG_APPEND_DURATION_SECONDS
+            ck.key().name() == zslg_stable_log::metrics::STABLE_LOG_APPEND_DURATION_SECONDS
                 && ck
                     .key()
                     .labels()
@@ -1430,13 +1386,13 @@ mod tests {
         let recorder = metrics_util::debugging::DebuggingRecorder::new();
         let snapshotter = recorder.snapshotter();
         metrics::with_local_recorder(&recorder, || {
-            let _probe = stable_log_append_probe();
+            let _probe = zslg_stable_log::metrics::stable_log_append_probe();
             // dropped at end of scope without finish -> default outcome (Failure).
         });
         let snap = snapshotter.snapshot();
         let map = snap.into_hashmap();
         let found = map.keys().any(|ck| {
-            ck.key().name() == STABLE_LOG_APPEND_DURATION_SECONDS
+            ck.key().name() == zslg_stable_log::metrics::STABLE_LOG_APPEND_DURATION_SECONDS
                 && ck
                     .key()
                     .labels()
@@ -1454,7 +1410,7 @@ mod tests {
         let snapshotter = recorder.snapshotter();
         metrics::with_local_recorder(&recorder, || {
             zslg_raft_state::metrics::manifest_watermark_advanced();
-            stable_log_end_advanced();
+            zslg_stable_log::metrics::stable_log_end_advanced();
         });
         let map = snapshotter.snapshot().into_hashmap();
         // Each stamp must be a wall-clock epoch value. A near-zero reading
@@ -1474,7 +1430,7 @@ mod tests {
             "manifest_watermark_advanced should emit a Unix-epoch timestamp"
         );
         assert!(
-            is_epoch(STABLE_LOG_END_HLC_ADVANCED_TIMESTAMP_SECONDS),
+            is_epoch(zslg_stable_log::metrics::STABLE_LOG_END_HLC_ADVANCED_TIMESTAMP_SECONDS),
             "stable_log_end_advanced should emit a Unix-epoch timestamp"
         );
     }

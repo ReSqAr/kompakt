@@ -12,15 +12,25 @@
 //! startup, so it can never claim more coverage than the entries this node
 //! actually holds.
 
+use error_union::{error_bridge, error_union};
+use zslg_consensus::ConsensusError;
+use zslg_lifecycle_types::LifecycleError;
+use zslg_net::NetError;
+use zslg_snapshot::SnapshotError;
+use zslg_time::ClockError;
+
+pub mod metrics;
 mod purge;
 mod snapshot_loader;
+#[cfg(test)]
+mod testutil;
 
 /// Public configuration of the stable log: where it lives, how its runs are
 /// stored, and how deep the append broadcast is. Arrivals are index-ordered
 /// (time-like), so the log grows without retirement by default — it is the CQRS
 /// replay source.
 #[derive(Debug, Clone)]
-pub(crate) struct StableLogConfig {
+pub struct StableLogConfig {
     /// Depth of each stable-log subscriber's own event queue — how far behind
     /// a consumer may fall before the fan-out hangs up on it and it has to
     /// replay from its cursor (the fan-out).
@@ -30,13 +40,12 @@ pub(crate) struct StableLogConfig {
     /// trade, never a correctness one — a hung-up consumer re-reads what it
     /// missed from the durable log, so a shallow queue costs re-scans
     /// (`zslg_stable_read_resyncs_total`), not data.
-    pub(crate) subscriber_queue_capacity: std::num::NonZeroUsize,
+    pub subscriber_queue_capacity: std::num::NonZeroUsize,
 }
 
 impl StableLogConfig {
     /// Default depth of each subscriber's queue — see the field.
-    pub(crate) const DEFAULT_SUBSCRIBER_QUEUE_CAPACITY: std::num::NonZeroUsize =
-        bytesize::nonzero(256);
+    pub const DEFAULT_SUBSCRIBER_QUEUE_CAPACITY: std::num::NonZeroUsize = bytesize::nonzero(256);
 
     /// Default sizing. Test-only — production builds the config from the
     /// owning node config's flat fields. The store's location and compression
@@ -44,13 +53,13 @@ impl StableLogConfig {
     /// node's one DB.
     #[cfg(test)]
     #[must_use]
-    pub(in crate::learner) fn for_test() -> Self {
+    pub fn for_test() -> Self {
         Self {
             subscriber_queue_capacity: Self::DEFAULT_SUBSCRIBER_QUEUE_CAPACITY,
         }
     }
 
-    pub(crate) fn validate(&self) -> Result<(), Error> {
+    pub fn validate(&self) -> Result<(), Error> {
         // A single load batch fans out one `Appended` per entry. A queue
         // shallower than the batch is overrun by one batch on its own, so every
         // subscriber resyncs for reasons unrelated to how fast it drains.
@@ -68,7 +77,7 @@ impl StableLogConfig {
 }
 
 /// The settled prefix of the log, keyed by global `LogIndex`.
-pub(crate) const STABLE_LOG_CF: ColumnFamily = ColumnFamily::new("stable_log");
+pub const STABLE_LOG_CF: ColumnFamily = ColumnFamily::new("stable_log");
 
 #[cfg(test)]
 #[allow(
@@ -102,36 +111,33 @@ mod config_tests {
 }
 
 // Consumed only by `spawn_learner`.
-pub(in crate::learner) use purge::run_stable_purge_worker;
-pub(in crate::learner) use snapshot_loader::SnapshotLoader;
+pub use purge::run_stable_purge_worker;
+pub use snapshot_loader::{SnapshotLoader, integrate_manifest};
 // Re-exported for leader-side snapshot round-trip tests; production callers live
 // inside `snapshot_loader` and call `integrate_manifest` directly through the
 // shared `StableArchiveReader`.
-#[cfg(test)]
-pub(crate) use snapshot_loader::integrate_manifest_for_test;
 
 use rocksdb_kit::ColumnFamily;
 use std::sync::Arc;
 use zslg_lifecycle_types::ConfigError;
-use zslg_log_types::LogError;
+use zslg_log::LogError;
 
 use parking_lot::Mutex as SyncMutex;
 use rocksdb_kit::Batch;
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::error::{Error, Home};
-use crate::metrics::{self, OpState};
 use crossbeam_combinators::{
     Channel, Fanout, FanoutConfig, Finite, Infinite, Level, LevelSetter, OverflowPolicy, Registry,
     broadcast,
 };
+use metrics_kit::OpState;
 use rocksdb_kit::Storage;
+use zslg_log::LogIndex;
+use zslg_log::ToCodec;
 use zslg_log::ToStorage;
 use zslg_log::metrics::LogType;
-use zslg_log_types::LogIndex;
-use zslg_log_types::ToCodec;
-use zslg_log_types::{Data, SnapshotEntry, StableLogEvent};
-use zslg_time_types::Hlc;
+use zslg_log::{Data, SnapshotEntry, StableLogEvent};
+use zslg_time::Hlc;
 
 // ── key codec ───────────────────────────────────────────────────────────────
 //
@@ -359,7 +365,7 @@ const STABLE_LOAD_BATCH: usize = 256;
 /// watermark. Readers blend `stable_tail` with `unstable_tail` at this
 /// boundary, so data below it disappears from the unstable view by the next
 /// snapshot — that is what makes nodes converge.
-pub(crate) struct StableLog {
+pub struct StableLog {
     storage: Arc<Storage>,
     write_lock: AsyncMutex<()>,
     end_index: Arc<SyncMutex<Option<LogIndex>>>,
@@ -390,26 +396,14 @@ impl StableLog {
     /// stored index (exact; this log never deletes) and just below its entry's
     /// HLC — local reality, nothing more. Production callers go through
     /// [`spawn_stable_store`].
-    pub(in crate::learner) async fn open(
-        config: &StableLogConfig,
-        storage: Arc<Storage>,
-    ) -> Result<Self, Error> {
+    pub async fn open(config: &StableLogConfig, storage: Arc<Storage>) -> Result<Self, Error> {
         Self::open_sized(storage, config.subscriber_queue_capacity).await
     }
 
     /// Open on an existing [`Storage`] at the default broadcast depth, for the
-    /// tests that share one DB between this log and the local store.
-    #[cfg(test)]
-    pub(crate) async fn open_on(storage: Arc<Storage>) -> Result<Self, Error> {
+    /// harnesses that share one DB between this log and other stores.
+    pub async fn open_on(storage: Arc<Storage>) -> Result<Self, Error> {
         Self::open_sized(storage, StableLogConfig::DEFAULT_SUBSCRIBER_QUEUE_CAPACITY).await
-    }
-
-    /// Open a store of this log's own at `dir` — the directory-shaped entry
-    /// point the test constructors use. Production goes through
-    /// [`open`](Self::open) with the node's one [`Storage`].
-    #[cfg(test)]
-    pub(crate) async fn open_engine(stable_dir: std::path::PathBuf) -> Result<Self, Error> {
-        Self::open_on(crate::database::open_for_test(&stable_dir)?).await
     }
 
     /// The storage boundary: an injected [`Storage`] plus the broadcast depth.
@@ -470,7 +464,7 @@ impl StableLog {
 /// One-stop node-startup constructor: open the stable log, recovery included.
 /// There is no background loop to cancel — RocksDB owns its own compaction
 /// threads and stops them when the DB drops.
-pub(crate) async fn spawn_stable_store(
+pub async fn spawn_stable_store(
     stable_log_cfg: &StableLogConfig,
     storage: Arc<Storage>,
 ) -> Result<Arc<StableLog>, Error> {
@@ -827,9 +821,9 @@ impl zslg_log::StableLogSnapshot for StableLog {
 )]
 mod tests {
     use super::*;
-    use crate::tests::make_data;
     use crossbeam_combinators::testing::ChannelTestExt as _;
     use zslg_log::StableLogSnapshot;
+    use zslg_log_fake::make_data;
 
     /// Build a closed `Channel` pre-loaded with `items` — test convenience
     /// for the channel-based [`StableLogSnapshot::append`] signature (mirrors how
@@ -1072,69 +1066,6 @@ mod tests {
             reopened.end_index(),
             Some(LogIndex(2)),
             "the frontier entry is never covered by a purge"
-        );
-    }
-
-    #[tokio::test]
-    async fn read_snapshot_then_append_matches() {
-        use zslg_log_types::SnapshotEntry;
-        use zslg_snapshot::SnapshotStore as _;
-        use zslg_snapshot_types::CompressionLevel;
-        use zslg_snapshot_types::SnapshotId;
-
-        // End-to-end of the production load path: write a snapshot through the
-        // public SnapshotStore API, then `read_snapshot` (off-reactor decode →
-        // bounded channel) straight into `append` — no byte/framing detail here.
-        let store = zslg_object_store::RemoteSnapshotStore::new(
-            zslg_object_store::SnapshotStoreConfig {
-                object_store: Arc::new(object_store::memory::InMemory::new()),
-            },
-            tokio_util::sync::CancellationToken::new(),
-        );
-        let id = SnapshotId::open(LogIndex(0));
-        let entries: Vec<SnapshotEntry> = (0..5u64)
-            .map(|i| SnapshotEntry {
-                global_index: LogIndex(i),
-                data: make_data(1, 100 + i, b"x"),
-            })
-            .collect();
-        store
-            .write_snapshot(
-                id,
-                Channel::from_vec(entries.into_iter().map(Ok).collect()),
-                CompressionLevel::standard(),
-                zslg_snapshot_types::ObjectStoreReason::SnapshotCreate,
-            )
-            .await
-            .expect("write_snapshot");
-
-        let dir = tempfile::tempdir().expect("tempdir");
-        let log = open_at(dir.path().join("s.stable")).await;
-        let mut rx = log.subscribe_events();
-
-        let entries_rx = store
-            .read_snapshot(id, zslg_snapshot_types::ObjectStoreReason::ArchiveRead)
-            .await
-            .expect("read_snapshot");
-        let n = log
-            .append(entries_rx.err_into::<crate::Error>().err_into())
-            .await
-            .expect("append");
-        assert_eq!(n, 5);
-        assert_eq!(log.end_index(), Some(LogIndex(4)));
-        assert_eq!(
-            log.end_hlc(),
-            Some(Hlc(103)),
-            "end_hlc settles just below the max appended HLC, whose group may be partial"
-        );
-
-        // Causal order: the first event is the first Appended entry.
-        let ev = rx
-            .recv()
-            .expect("the awaited append above queued this event");
-        assert!(
-            matches!(ev, StableLogEvent::Appended { index, .. } if index == LogIndex(0)),
-            "first event must be Appended(0), got {ev:?}"
         );
     }
 
@@ -1406,7 +1337,7 @@ mod tests {
             .await
             .expect("ok");
         }
-        let entries: Vec<(zslg_log_types::LogIndex, zslg_log_types::Data)> = log
+        let entries: Vec<(zslg_log::LogIndex, zslg_log::Data)> = log
             .range(None, LogIndex(5))
             .items()
             .filter_map(|r| r.ok())
@@ -1478,7 +1409,7 @@ mod tests {
     #[tokio::test]
     async fn a_watermark_never_covers_an_hlc_group_split_across_batches() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let storage = crate::database::open_for_test(&dir.path().join("stable")).expect("storage");
+        let storage = crate::testutil::open_for_test(&dir.path().join("stable")).expect("storage");
         // Deep enough to hold every event of the load without a hang-up.
         let log = StableLog::open_sized(storage, bytesize::nonzero(1024))
             .await
@@ -1547,5 +1478,40 @@ mod tests {
 
         log.record_end_hlc(Hlc(group_hlc)).await.expect("record");
         assert_eq!(log.end_hlc(), Some(Hlc(group_hlc)));
+    }
+}
+
+error_union! {
+    /// What the stable log can fail with.
+    #[derive(Debug, Clone, PartialEq)]
+    pub Error {
+        Lifecycle(LifecycleError),
+        Config(ConfigError),
+        Clock(ClockError),
+        Log(LogError),
+        Snapshot(SnapshotError),
+        Net(NetError),
+        Consensus(ConsensusError),
+    }
+    from zslg_time::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_log::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_snapshot::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_consensus::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_raft::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_net::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_quorum_read::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+}
+
+error_bridge!(Error => zslg_time::Error, zslg_log::Error, zslg_snapshot::Error, zslg_consensus::Error, zslg_raft::Error, zslg_net::Error, zslg_quorum_read::Error; Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus);
+error_union::error_home!(Error);
+
+impl From<rocksdb_kit::StorageError> for Error {
+    fn from(e: rocksdb_kit::StorageError) -> Self {
+        match e {
+            rocksdb_kit::StorageError::InvalidConfiguration(msg) => {
+                Self::Config(ConfigError::InvalidConfiguration(msg))
+            }
+            rocksdb_kit::StorageError::Storage(msg) => Self::Log(LogError::Storage(msg)),
+        }
     }
 }

@@ -915,7 +915,7 @@ pub(crate) async fn stable_log_at(
     store_path: &std::path::Path,
 ) -> std::sync::Arc<crate::learner::StableLog> {
     std::sync::Arc::new(
-        crate::learner::StableLog::open_engine(store_path.with_extension("stable"))
+        stable_log_engine(store_path.with_extension("stable"))
             .await
             .expect("open stable log"),
     )
@@ -1034,4 +1034,11 @@ pub(crate) async fn open_test_local_store(
         cancel.clone(),
     ));
     Ok((store, TestWorker { cancel, handle }))
+}
+
+/// A stable log on its own storage root carrying every column family.
+pub(crate) async fn stable_log_engine(
+    dir: std::path::PathBuf,
+) -> Result<crate::learner::StableLog, Error> {
+    Ok(crate::learner::StableLog::open_on(crate::database::open_for_test(&dir)?).await?)
 }

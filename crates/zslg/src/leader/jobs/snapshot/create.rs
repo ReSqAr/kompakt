@@ -500,7 +500,7 @@ mod tests {
     }
 
     async fn fresh_stable_log(dir: &std::path::Path, name: &str) -> StableLog {
-        StableLog::open_engine(dir.join(format!("{name}.stable")))
+        crate::tests::stable_log_engine(dir.join(format!("{name}.stable")))
             .await
             .expect("open stable log")
     }

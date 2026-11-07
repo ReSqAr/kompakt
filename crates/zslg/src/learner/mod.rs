@@ -33,24 +33,25 @@
 mod quorum;
 mod read;
 mod stable_archive;
-mod stable_log;
 mod subscriber;
 
 use quorum::{MultiReplicaQuorumCheck, QuorumReadDebouncer};
 use read::ReaderImpl;
 pub(crate) use read::{GatedReader, can_serve_clients};
-pub(crate) use stable_log::STABLE_LOG_CF;
-pub(crate) use stable_log::StableLogConfig;
-pub(crate) use stable_log::{StableLog, spawn_stable_store};
 use zslg_consensus::RaftStateView;
 use zslg_lifecycle_types::ConfigError;
 pub(crate) use zslg_local_store::LocalStore;
 pub(crate) use zslg_local_store::{LOCAL_STORE_CURSORS_CF, LOCAL_STORE_DATA_CF};
 use zslg_net::Router;
 use zslg_snapshot::SnapshotStore;
+pub(crate) use zslg_stable_log::STABLE_LOG_CF;
+pub(crate) use zslg_stable_log::StableLogConfig;
+pub(crate) use zslg_stable_log::{StableLog, spawn_stable_store};
 
 #[cfg(test)]
-pub(crate) use stable_log::integrate_manifest_for_test;
+pub(crate) use snapshot_loader_tests::integrate_manifest_for_test;
+#[cfg(test)]
+mod snapshot_loader_tests;
 
 #[derive(Debug, Clone)]
 pub(crate) struct LearnerConfig {
@@ -128,9 +129,9 @@ use tracing::info;
 
 use crate::{Error, Reader};
 use shutdown::Shutdown;
-use stable_log::SnapshotLoader;
 use zslg_hlc_clock::HlcClock;
 use zslg_log::LocalStoreMut;
+use zslg_stable_log::SnapshotLoader;
 
 #[derive(Clone)]
 pub(crate) struct LearnerService {
@@ -232,20 +233,19 @@ pub(crate) async fn spawn_learner(
         shutdown.token(),
     );
     snapshot_loader.load_initial().await;
-    shutdown.spawn("learner:snapshot_loader", snapshot_loader.run());
+    shutdown.spawn("learner:snapshot_loader", async move {
+        snapshot_loader.run().await.map_err(Error::from)
+    });
 
     // Optional stable-log TTL purge (off unless configured). A purged read is
     // transparently served from object store by the reader above.
     if let Some(ttl) = config.stable_purge_ttl {
-        shutdown.spawn(
-            "learner:stable_purge",
-            stable_log::run_stable_purge_worker(
-                raft_state.clone(),
-                stable_log.clone(),
-                ttl,
-                shutdown.token(),
-            ),
-        );
+        let (state, log, cancel) = (raft_state.clone(), stable_log.clone(), shutdown.token());
+        shutdown.spawn("learner:stable_purge", async move {
+            zslg_stable_log::run_stable_purge_worker(state, log, ttl, cancel)
+                .await
+                .map_err(Error::from)
+        });
     }
 
     shutdown.spawn(

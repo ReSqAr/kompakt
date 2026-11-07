@@ -30,7 +30,6 @@ metrics-exporter-prometheus = { workspace = true, optional = true }
 object_store = { workspace = true }
 raft-kit = { workspace = true }
 parking_lot = { workspace = true }
-postcard = { workspace = true, features = ["alloc", "use-std"] }
 rand = { workspace = true }
 rocksdb-kit = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
@@ -68,6 +67,7 @@ zslg-raft-tracker = { workspace = true }
 zslg-raft-node = { workspace = true }
 zslg-raft-startup = { workspace = true }
 zslg-local-store = { workspace = true }
+zslg-stable-log = { workspace = true }
 zslg-raft = { workspace = true }
 zslg-snapshot = { workspace = true }
 zslg-snapshot-types = { workspace = true }

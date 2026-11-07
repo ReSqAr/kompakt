@@ -15,10 +15,10 @@ use zslg_consensus::RaftStateView;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
-use crate::error::Error;
+use crate::Error;
 use crate::metrics;
 use zslg_log::StableLogSnapshot;
-use zslg_time_types::{Hlc, hlc_subtract};
+use zslg_time::{Hlc, hlc_subtract};
 
 /// Don't hand over a new purge threshold more than once per interval even if
 /// the watermark advances faster. The handoff is a scan to find the boundary
@@ -27,7 +27,7 @@ use zslg_time_types::{Hlc, hlc_subtract};
 /// every watermark event.
 const PURGE_MIN_INTERVAL: Duration = Duration::from_secs(30);
 
-pub(in crate::learner) async fn run_stable_purge_worker(
+pub async fn run_stable_purge_worker(
     raft_state: Arc<dyn RaftStateView>,
     stable_log: Arc<dyn StableLogSnapshot>,
     ttl: Duration,
@@ -137,7 +137,7 @@ fn purge_once_blocking(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zslg_time_types::HlcParts;
+    use zslg_time::HlcParts;
 
     fn hlc_ms(physical_ms: u64) -> Hlc {
         Hlc::from_parts(HlcParts {
