@@ -52,7 +52,19 @@ time <- log <- snapshot <- consensus <- net (consensus also needs time).
 `snapshot` stays separate from `log` (it carries CompressionLevel and the
 object-store concern). Names are working names.
 
+### D4. Per-group errors; `zslg::Error` composes them
+
+Each foundation group owns its error (`ClockError`, `LogError`,
+`SnapshotError`, `ConsensusError`, `NetError`); ports return their group's
+error; `zslg::Error` wraps them with `#[from]`. Rejected: one Error crate below
+all groups (cycle, or Strings instead of structured variants) and associated
+error types on every port (bounds everywhere). Cross-cutting errors
+(`Cancelled`, `Shutdown`) may get their own small crate — only if it turns out
+to make sense; decided with the cross-cutting utilities.
+Check before implementing: how many places in nlnr match on `zslg::Error`
+variants (the nesting is a visible API change).
+
 ## Open
 
-- Q4: the `Error` enum (33 variants, names Hlc, NodeId, RaftStateError) is
-  returned by the ports in every group — where does it live?
+- Q5: `metrics.rs` (2.7k lines, one central registry, referenced by every
+  module) — central crate or per-crate sections?
