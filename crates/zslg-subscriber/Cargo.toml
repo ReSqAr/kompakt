@@ -1,0 +1,43 @@
+[package]
+name = "zslg-subscriber"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Pulls replica logs into the local store"
+publish = false
+
+[dependencies]
+zslg-quorum-read = { workspace = true }
+warn-throttle = { workspace = true }
+backoff-kit = { workspace = true }
+crossbeam-combinators = { workspace = true }
+error-union = { workspace = true }
+metrics-kit = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "time", "macros"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+zslg-consensus = { workspace = true }
+zslg-lifecycle-types = { workspace = true }
+zslg-log = { workspace = true }
+zslg-net = { workspace = true }
+zslg-raft = { workspace = true }
+zslg-snapshot = { workspace = true }
+zslg-time = { workspace = true }
+
+[dev-dependencies]
+async-trait = { workspace = true }
+futures = { workspace = true }
+crossbeam-channel = { workspace = true }
+crossbeam-combinators = { workspace = true, features = ["tokio", "testing"] }
+bytes = { workspace = true }
+zslg-consensus-fake = { workspace = true }
+zslg-time-fake = { workspace = true }
+zslg-log-fake = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "implementation"

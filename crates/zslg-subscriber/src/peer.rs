@@ -18,12 +18,13 @@
 
 use crate::Error;
 use std::sync::Arc;
-use zslg_hlc_clock::HlcClock;
+use zslg_consensus::ConsensusError;
+use zslg_consensus::NodeId;
+use zslg_log::Data;
+use zslg_log::LogError;
+use zslg_log::LogIndex;
 use zslg_log::{LocalStoreMut, Replica};
-use zslg_log_types::Data;
-use zslg_log_types::LogError;
-use zslg_log_types::LogIndex;
-use zslg_node_types::NodeId;
+use zslg_time::Clock;
 
 /// Sample `zslg_hlc_skew_seconds` for roughly every Nth replicated item — a
 /// per-peer drift signal, not a per-item cost.
@@ -31,12 +32,12 @@ const SKEW_SAMPLE_STRIDE: usize = 8;
 
 /// What one subscription attempt did and why it stopped. See
 /// [`ReplicationSubscriber::run`].
-pub(in crate::learner) struct AttemptOutcome {
+pub(crate) struct AttemptOutcome {
     /// Records this attempt made **durable** — the advance of the peer's
     /// persisted subscription cursor. Zero means the attempt accomplished
     /// nothing, whatever the error says.
-    pub(in crate::learner) records_retired: u64,
-    pub(in crate::learner) result: Result<(), Error>,
+    pub records_retired: u64,
+    pub result: Result<(), Error>,
 }
 
 /// Internal: carries the resume cursor back out so the progress delta can be
@@ -56,18 +57,18 @@ fn cursor_delta(from: Option<LogIndex>, to: Option<LogIndex>) -> u64 {
     }
 }
 
-pub(in crate::learner) struct ReplicationSubscriber {
+pub(crate) struct ReplicationSubscriber {
     peer_id: NodeId,
-    clock: Arc<HlcClock>,
+    clock: Arc<dyn Clock>,
     upstream: Arc<dyn Replica>,
     local_store: Arc<dyn LocalStoreMut>,
 }
 
 impl ReplicationSubscriber {
     #[must_use]
-    pub(in crate::learner) fn new(
+    pub(crate) fn new(
         peer_id: NodeId,
-        clock: Arc<HlcClock>,
+        clock: Arc<dyn Clock>,
         upstream: Arc<dyn Replica>,
         local_store: Arc<dyn LocalStoreMut>,
     ) -> Self {
@@ -80,7 +81,7 @@ impl ReplicationSubscriber {
     }
 
     /// Run one subscription attempt to completion.
-    pub(in crate::learner) async fn run(self) -> AttemptOutcome {
+    pub(crate) async fn run(self) -> AttemptOutcome {
         let peer_id = self.peer_id;
         let local_store = Arc::clone(&self.local_store);
         let result = self.run_inner().await;
@@ -150,13 +151,14 @@ impl ReplicationSubscriber {
         // logs only on `Err`; returning `Ok` here re-subscribed every 250 ms
         // in silence, never climbing toward REPLICATION_MAX_BACKOFF.
         match self.local_store.integrate_loop(stream.into_finite()).await {
-            Ok(()) => Err(Error::subscription_ended(
+            Ok(()) => Err(ConsensusError::subscription_ended(
                 peer_id,
                 "upstream declared the stream complete, but a \
                  subscription cannot complete",
-            )),
+            )
+            .into()),
             Err(zslg_log::Error::Log(LogError::SubscriptionStreamEnded { reason })) => {
-                Err(Error::subscription_ended(peer_id, reason))
+                Err(ConsensusError::subscription_ended(peer_id, reason).into())
             }
             Err(other) => Err(other.into()),
         }
@@ -175,8 +177,7 @@ mod tests {
     use crossbeam_combinators::testing::ChannelTestExt as _;
     use std::sync::Arc;
     use std::sync::Mutex;
-    use std::time::Duration;
-    use zslg_consensus_types::ConsensusError;
+    use zslg_consensus::ConsensusError;
 
     use async_trait::async_trait;
     use bytes::Bytes;
@@ -184,13 +185,14 @@ mod tests {
     use futures::stream::BoxStream;
 
     use super::*;
-    use crate::tests::{fresh_local, make_meta, upstream as upstream_id};
     use crossbeam_combinators::{Channel, Finite, Infinite};
-    use zslg_consensus_types::ReplicaStatus;
-    use zslg_hlc_clock::HlcClock;
+    use zslg_consensus::ReplicaStatus;
+    use zslg_consensus_fake::upstream as upstream_id;
+    use zslg_log::Data;
+    use zslg_log::LogIndex;
     use zslg_log::{LocalStoreView, Replica, StampedWrite, WriteOutcome};
-    use zslg_log_types::Data;
-    use zslg_log_types::LogIndex;
+    use zslg_log_fake::{FakeLocalStore, make_meta};
+    use zslg_time_fake::CountingClock;
 
     /// Drive a subscriber whose fake upstream declares completion. Even a
     /// *declared* close is an error (a subscription cannot complete), so these
@@ -311,9 +313,9 @@ mod tests {
     /// `REPLICATION_MAX_BACKOFF`.
     #[tokio::test]
     async fn subscription_loss_is_an_error_so_backoff_can_escalate() {
-        let (_dir, local) = fresh_local().await;
+        let local = Arc::new(FakeLocalStore::new());
         let upstream: Arc<dyn Replica> = Arc::new(DyingUpstreamReplica);
-        let clock = Arc::new(HlcClock::new(Duration::from_millis(200)));
+        let clock = Arc::new(CountingClock::new());
         let sub = ReplicationSubscriber::new(upstream_id(9), clock, upstream, local);
 
         let err = sub
@@ -332,7 +334,7 @@ mod tests {
 
     #[tokio::test]
     async fn subscriber_integrates_inline_records() {
-        let (_dir, local) = fresh_local().await;
+        let local = Arc::new(FakeLocalStore::new());
 
         let m1 = make_meta(1, 300);
         let m2 = make_meta(2, 300);
@@ -354,13 +356,13 @@ mod tests {
         ];
         let peer = upstream_id(1);
         let upstream: Arc<dyn Replica> = Arc::new(FakeUpstreamReplica::new(items));
-        let clock = Arc::new(HlcClock::new(Duration::from_millis(200)));
+        let clock = Arc::new(CountingClock::new());
         let sub = ReplicationSubscriber::new(peer, clock, upstream, local.clone());
 
         run_expecting_end(sub).await;
 
         use futures::TryStreamExt as _;
-        let all: Vec<zslg_log_types::Data> = local
+        let all: Vec<zslg_log::Data> = local
             .stream_above_hlc(None)
             .into_test_stream()
             .try_collect::<Vec<_>>()
@@ -376,7 +378,7 @@ mod tests {
 
     #[tokio::test]
     async fn subscriber_integrates_full_data() {
-        let (_dir, local) = fresh_local().await;
+        let local = Arc::new(FakeLocalStore::new());
 
         let m = make_meta(7, 300);
         let body = Data {
@@ -386,7 +388,7 @@ mod tests {
         let items: Vec<(LogIndex, Data)> = vec![(LogIndex(0), body.clone())];
         let peer = upstream_id(2);
         let upstream: Arc<dyn Replica> = Arc::new(FakeUpstreamReplica::new(items));
-        let clock = Arc::new(HlcClock::new(Duration::from_millis(200)));
+        let clock = Arc::new(CountingClock::new());
         let sub = ReplicationSubscriber::new(peer, clock, upstream, local.clone());
         run_expecting_end(sub).await;
 
@@ -430,7 +432,7 @@ mod tests {
     /// advance the cursor past the gap — the gap is surfaced, not fatal.
     #[tokio::test]
     async fn subscriber_integrates_across_purge_gap_and_advances_cursor() {
-        let (_dir, local) = fresh_local().await;
+        let local = Arc::new(FakeLocalStore::new());
         let m5 = make_meta(5, 300);
         let m7 = make_meta(7, 300);
         let items: Vec<(LogIndex, Data)> = vec![
@@ -458,13 +460,13 @@ mod tests {
         ];
         let peer = upstream_id(1);
         let upstream: Arc<dyn Replica> = Arc::new(FakeUpstreamReplica::new(items));
-        let clock = Arc::new(HlcClock::new(Duration::from_millis(200)));
+        let clock = Arc::new(CountingClock::new());
         let sub = ReplicationSubscriber::new(peer, clock, upstream, local.clone());
 
         run_expecting_end(sub).await;
 
         use futures::TryStreamExt as _;
-        let data_ids: Vec<zslg_log_types::DataId> = local
+        let data_ids: Vec<zslg_log::DataId> = local
             .stream_above_hlc(None)
             .into_test_stream()
             .try_collect::<Vec<_>>()

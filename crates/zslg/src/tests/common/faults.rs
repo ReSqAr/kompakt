@@ -373,6 +373,9 @@ impl Clock for FixedClock {
     fn integrate(&self, peer: Hlc) -> Result<Hlc, zslg_time::Error> {
         Ok(peer)
     }
+    fn skew_against(&self, _peer: Hlc) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
 }
 
 /// Static per-node replica routing for tests; panics on unknown peers.

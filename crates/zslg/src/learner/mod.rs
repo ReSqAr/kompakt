@@ -32,7 +32,6 @@
 
 mod quorum;
 mod read;
-mod subscriber;
 
 use quorum::{MultiReplicaQuorumCheck, QuorumReadDebouncer};
 use read::ReaderImpl;
@@ -249,16 +248,16 @@ pub(crate) async fn spawn_learner(
         });
     }
 
-    shutdown.spawn(
-        "learner:replication",
-        subscriber::ReplicationManager::new(
-            clock,
-            raft_state.clone(),
-            learner.local_store.clone(),
-            router.clone(),
-        )
-        .run(shutdown.token()),
+    let manager = zslg_subscriber::ReplicationManager::new(
+        clock,
+        raft_state.clone(),
+        learner.local_store.clone(),
+        router.clone(),
     );
+    let cancel = shutdown.token();
+    shutdown.spawn("learner:replication", async move {
+        manager.run(cancel).await.map_err(Error::from)
+    });
 
     learner.reader.sync().await?;
 

@@ -130,6 +130,9 @@ mod tests {
         fn integrate(&self, peer: Hlc) -> Result<Hlc, zslg_time::Error> {
             Ok(peer)
         }
+        fn skew_against(&self, _peer: Hlc) -> std::time::Duration {
+            std::time::Duration::ZERO
+        }
     }
 
     fn clock() -> Arc<dyn Clock> {

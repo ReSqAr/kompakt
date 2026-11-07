@@ -16,4 +16,10 @@ pub trait Clock: Send + Sync + 'static {
     fn now(&self) -> Hlc;
 
     fn integrate(&self, peer: Hlc) -> Result<Hlc, crate::Error>;
+
+    /// Absolute physical-ms difference between this clock and a peer's HLC,
+    /// without advancing or mutating anything. Lets a caller watch a peer's
+    /// drift toward the rejection threshold before `integrate` refuses it.
+    #[must_use]
+    fn skew_against(&self, peer: Hlc) -> std::time::Duration;
 }

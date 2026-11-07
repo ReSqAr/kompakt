@@ -149,6 +149,7 @@ impl HlcClock {
     /// Absolute physical-ms difference between the local clock and a peer HLC,
     /// without advancing or mutating state. Used to watch a peer's HLC drift
     /// toward the rejection threshold before it triggers `integrate`'s error.
+    #[must_use]
     pub fn skew_against(&self, peer: Hlc) -> Duration {
         let pt_ms = self.read_physical_ms();
         Duration::from_millis(peer.parts().physical_ms.abs_diff(pt_ms))
@@ -167,6 +168,10 @@ impl zslg_time::Clock for HlcClock {
 
     fn integrate(&self, peer: Hlc) -> Result<Hlc, zslg_time::Error> {
         self.integrate(peer)
+    }
+
+    fn skew_against(&self, peer: Hlc) -> Duration {
+        self.skew_against(peer)
     }
 }
 

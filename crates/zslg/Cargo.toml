@@ -69,6 +69,7 @@ zslg-raft-startup = { workspace = true }
 zslg-local-store = { workspace = true }
 zslg-stable-log = { workspace = true }
 zslg-stable-archive = { workspace = true }
+zslg-subscriber = { workspace = true }
 zslg-raft = { workspace = true }
 zslg-snapshot = { workspace = true }
 zslg-snapshot-types = { workspace = true }

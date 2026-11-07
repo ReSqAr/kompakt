@@ -4511,6 +4511,7 @@ dependencies = [
  "zslg-snapshot-types",
  "zslg-stable-archive",
  "zslg-stable-log",
+ "zslg-subscriber",
  "zslg-time",
  "zslg-time-types",
 ]
@@ -4652,6 +4653,7 @@ dependencies = [
  "crossbeam-channel",
  "crossbeam-combinators",
  "parking_lot 0.13.0",
+ "tokio",
  "uuid",
  "zslg-consensus",
  "zslg-log",
@@ -5098,6 +5100,35 @@ dependencies = [
  "zslg-raft",
  "zslg-snapshot",
  "zslg-time",
+]
+
+[[package]]
+name = "zslg-subscriber"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "backoff-kit",
+ "bytes",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "error-union",
+ "futures",
+ "metrics-kit",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "warn-throttle",
+ "zslg-consensus",
+ "zslg-consensus-fake",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-log-fake",
+ "zslg-net",
+ "zslg-quorum-read",
+ "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
+ "zslg-time-fake",
 ]
 
 [[package]]

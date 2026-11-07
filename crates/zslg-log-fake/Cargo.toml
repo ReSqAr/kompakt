@@ -13,6 +13,7 @@ bytes = { workspace = true }
 crossbeam-channel = { workspace = true }
 crossbeam-combinators = { workspace = true }
 parking_lot = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
 uuid = { workspace = true }
 zslg-consensus = { workspace = true }
 zslg-log = { workspace = true }

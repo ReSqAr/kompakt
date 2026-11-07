@@ -19,8 +19,6 @@ use zslg_net_types::NetError;
 use zslg_snapshot_types::SnapshotError;
 use zslg_time_types::ClockError;
 
-use zslg_node_types::NodeId;
-
 error_union! {
     /// Crate-wide error type: one variant per leaf error, named after its group.
     ///
@@ -48,6 +46,7 @@ error_union! {
     from zslg_quorum_read::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_object_store_config::Error { Snapshot }
     from zslg_node_id::Error { Config, Log }
+    from zslg_subscriber::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_stable_archive::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_stable_log::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_local_store::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
@@ -110,13 +109,6 @@ port_error_bridge!(
 // Each struct carries the `Display` the variant used to carry, and the variant
 // is `#[error(transparent)]`, so error text is unchanged.
 
-impl Error {
-    /// Build [`ConsensusError::SubscriptionEnded`] as an `Error`.
-    #[must_use]
-    pub(crate) fn subscription_ended(peer_id: NodeId, reason: impl Into<String>) -> Self {
-        ConsensusError::subscription_ended(peer_id, reason).into()
-    }
-}
 impl Error {
     /// A stable, low-cardinality label naming the error variant — for metric
     /// labels (e.g. `loadgen_errors_total{kind=...}`) and structured logging.
@@ -224,6 +216,7 @@ impl From<bytesize::OutOfRange> for Error {
 )]
 mod tests {
     use super::*;
+    use zslg_consensus::NodeId;
     use zslg_consensus::ToRaft as _;
     use zslg_log::ToStorage as _;
     use zslg_net_types::ToRpc as _;

@@ -30,4 +30,9 @@ impl Clock for CountingClock {
         *last = (*last).max(peer.0) + 1;
         Ok(Hlc(*last))
     }
+
+    fn skew_against(&self, peer: Hlc) -> std::time::Duration {
+        let now = *self.last.lock();
+        std::time::Duration::from_millis(peer.0.abs_diff(now))
+    }
 }

@@ -6,7 +6,11 @@ use std::collections::BTreeMap;
 use async_trait::async_trait;
 use crossbeam_combinators::{Channel, Finite, Infinite, Level, LevelSetter};
 use parking_lot::Mutex;
-use zslg_log::{Data, LogIndex, SnapshotEntry, StableLogEvent, StableLogSnapshot};
+use zslg_consensus::NodeId;
+use zslg_log::{
+    Data, DataId, LocalStoreMut, LocalStoreStream, LocalStoreView, LogIndex, SnapshotEntry,
+    StableLogEvent, StableLogSnapshot,
+};
 use zslg_time::Hlc;
 
 #[derive(Default)]
@@ -160,5 +164,115 @@ pub fn make_data(seed: u8, hlc: u64, blob: &[u8]) -> Data {
     Data {
         data_id: make_meta(seed, hlc),
         blob: bytes::Bytes::copy_from_slice(blob),
+    }
+}
+
+#[derive(Default)]
+struct StoreState {
+    data: BTreeMap<DataId, Data>,
+    cursors: BTreeMap<NodeId, LogIndex>,
+}
+
+/// A `LocalStoreMut` held in memory: integrated records are kept by id, and the
+/// per-upstream cursor is the highest index integrated from that upstream.
+pub struct FakeLocalStore {
+    state: Mutex<StoreState>,
+    integrated: tokio::sync::watch::Sender<()>,
+}
+
+impl Default for FakeLocalStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FakeLocalStore {
+    #[must_use]
+    pub fn new() -> Self {
+        let (integrated, _) = tokio::sync::watch::channel(());
+        Self {
+            state: Mutex::new(StoreState::default()),
+            integrated,
+        }
+    }
+
+    /// Everything integrated so far, in id order.
+    #[must_use]
+    pub fn records(&self) -> Vec<Data> {
+        self.state.lock().data.values().cloned().collect()
+    }
+}
+
+#[async_trait]
+impl LocalStoreView for FakeLocalStore {
+    fn stream_above_hlc(&self, threshold: Option<Hlc>) -> LocalStoreStream {
+        let items = self
+            .state
+            .lock()
+            .data
+            .values()
+            .filter(|d| threshold.is_none_or(|t| d.data_id.hlc() > t))
+            .cloned()
+            .map(Ok)
+            .collect();
+        Channel::from_vec(items).ordered(None, "fake local store")
+    }
+
+    fn stream_window(&self, above: Option<Hlc>, upto: Hlc) -> LocalStoreStream {
+        let items = self
+            .state
+            .lock()
+            .data
+            .values()
+            .filter(|d| {
+                let h = d.data_id.hlc();
+                above.is_none_or(|a| h > a) && h <= upto
+            })
+            .cloned()
+            .map(Ok)
+            .collect();
+        Channel::from_vec(items).ordered(None, "fake local store window")
+    }
+
+    fn subscribe_integrated(&self) -> tokio::sync::watch::Receiver<()> {
+        self.integrated.subscribe()
+    }
+
+    fn subscribe_unstable(&self) -> Channel<Data, Infinite> {
+        let (_tx, rx) = crossbeam_channel::unbounded();
+        Channel::from_infinite(rx, "fake local store unstable")
+    }
+
+    async fn subscription_cursor(
+        &self,
+        upstream: NodeId,
+    ) -> Result<Option<LogIndex>, zslg_log::Error> {
+        Ok(self.state.lock().cursors.get(&upstream).copied())
+    }
+}
+
+#[async_trait]
+impl LocalStoreMut for FakeLocalStore {
+    async fn integrate_loop(
+        &self,
+        mut records: Channel<Result<(NodeId, LogIndex, Data), zslg_log::Error>, Finite>,
+    ) -> Result<(), zslg_log::Error> {
+        while let Ok(item) = records.recv() {
+            let (source, index, data) = item?;
+            let mut state = self.state.lock();
+            let cursor = state.cursors.entry(source).or_insert(index);
+            *cursor = (*cursor).max(index);
+            state.data.insert(data.data_id, data);
+        }
+        self.integrated.send_replace(());
+        Ok(())
+    }
+
+    async fn purge_below_hlc(&self, threshold: Hlc) -> Result<(), zslg_log::Error> {
+        self.state
+            .lock()
+            .data
+            .retain(|_, d| d.data_id.hlc() > threshold);
+        Ok(())
     }
 }

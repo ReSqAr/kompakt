@@ -64,6 +64,7 @@ metrics-kit = { path = "crates/metrics-kit" }
 nvzn = { path = "crates/nvzn" }
 objectstorage-cache = { path = "crates/objectstorage-cache" }
 rocksdb-kit = { path = "crates/rocksdb-kit" }
+zslg-subscriber = { path = "crates/zslg-subscriber" }
 zslg-stable-archive = { path = "crates/zslg-stable-archive" }
 zslg-stable-log = { path = "crates/zslg-stable-log" }
 zslg-local-store = { path = "crates/zslg-local-store" }

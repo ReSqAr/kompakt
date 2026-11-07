@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_consensus::ConsensusError;
 use zslg_consensus::RaftStateView;
-use zslg_consensus_types::ConsensusError;
 use zslg_net::Router;
 
 use tokio_util::sync::CancellationToken;
@@ -10,12 +10,11 @@ use tracing::info;
 
 use super::peer::ReplicationSubscriber;
 
-use crate::error::Error;
-use crate::learner::LocalStore;
+use crate::Error;
 use warn_throttle::ThrottledWarn;
-use zslg_hlc_clock::HlcClock;
+use zslg_consensus::NodeId;
 use zslg_log::LocalStoreMut;
-use zslg_node_types::NodeId;
+use zslg_time::Clock;
 
 const REPLICATION_INITIAL_BACKOFF: Duration = Duration::from_millis(250);
 const REPLICATION_MAX_BACKOFF: Duration = Duration::from_secs(10);
@@ -31,19 +30,19 @@ const STORE_GAUGE_TICK_INTERVAL: Duration = Duration::from_secs(1);
 /// as the replica set changes. Holds the concrete `LocalStore` rather than
 /// `dyn LocalStoreView` so store gauges can be emitted from here without
 /// widening the public trait — see [`Self::emit_store_gauges`].
-pub(in crate::learner) struct ReplicationManager {
-    clock: Arc<HlcClock>,
+pub struct ReplicationManager {
+    clock: Arc<dyn Clock>,
     raft_state: Arc<dyn RaftStateView>,
-    local_store: Arc<LocalStore>,
+    local_store: Arc<dyn LocalStoreMut>,
     router: Arc<dyn Router>,
 }
 
 impl ReplicationManager {
     #[must_use]
-    pub(in crate::learner) fn new(
-        clock: Arc<HlcClock>,
+    pub fn new(
+        clock: Arc<dyn Clock>,
         raft_state: Arc<dyn RaftStateView>,
-        local_store: Arc<LocalStore>,
+        local_store: Arc<dyn LocalStoreMut>,
         router: Arc<dyn Router>,
     ) -> Self {
         Self {
@@ -59,10 +58,10 @@ impl ReplicationManager {
     /// holding the concrete `LocalStore`.
     fn emit_store_gauges(&self) {}
 
-    pub(in crate::learner) async fn run(self, cancel: CancellationToken) -> Result<(), Error> {
+    pub async fn run(self, cancel: CancellationToken) -> Result<(), Error> {
         info!("replication manager: starting");
         fn effective_replicas(
-            state: &zslg_consensus_types::RaftState,
+            state: &zslg_consensus::RaftState,
         ) -> std::collections::BTreeSet<NodeId> {
             let mut peers = state.replica.current().clone();
             if let Some(next) = state.replica.next() {
@@ -188,7 +187,7 @@ fn end_reason(e: &Error) -> crate::metrics::SubscriptionEndReason {
 
 async fn subscriber_loop(
     peer_id: NodeId,
-    clock: Arc<HlcClock>,
+    clock: Arc<dyn Clock>,
     local_store: Arc<dyn LocalStoreMut>,
     router: Arc<dyn Router>,
     task_cancel: CancellationToken,
