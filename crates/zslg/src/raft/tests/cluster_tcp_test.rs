@@ -28,13 +28,14 @@ use openraft::storage::Adaptor;
 
 use crate::api::{ReplicatedRaftState, Router};
 use crate::hlc::HlcClock;
-use crate::ids::{NodeId, PeerAddr};
+use crate::ids::PeerAddr;
 use crate::network::{LocalReplicaClient, RemoteRouter, RpcServerConfig, SocketOpts};
 use crate::raft::rpc::NetworkFactory;
 use crate::raft::{Raft, RaftNode, RaftStateHandle, membership_map};
 use crate::tests::ReadyReplica;
 use crate::tests::fast_raft_config as raft_config;
 use shutdown::Shutdown;
+use zslg_node_types::NodeId;
 
 struct ClusterNode {
     node_id: NodeId,

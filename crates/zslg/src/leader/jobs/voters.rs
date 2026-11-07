@@ -26,10 +26,11 @@ use tracing::{info, warn};
 
 use crate::api::{PeersWatcher, RaftLeadership};
 use crate::error::Error;
-use crate::ids::{NodeId, ServerName};
+use crate::ids::ServerName;
 use crate::leader::jobs::is_local_leader;
 use crate::leader::jobs::membership::MembershipObserver;
 use crate::metrics::{self, LeaderJob};
+use zslg_node_types::NodeId;
 
 /// Spawn `leader:voters` on the shutdown tree. Touches openraft's own member
 /// list, writes no replicated state, and deliberately ignores liveness.

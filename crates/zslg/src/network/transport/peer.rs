@@ -19,7 +19,7 @@ use crate::api::{
     WriteOutcome,
 };
 use crate::error::Error;
-use crate::ids::{LogIndex, NodeId, PeerAddr};
+use crate::ids::{LogIndex, PeerAddr};
 use crate::meta::ReplicaStatus;
 use crate::network::client::{RpcClient, Target};
 use crate::network::messages::{
@@ -35,6 +35,7 @@ use openraft::raft::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
     VoteRequest, VoteResponse,
 };
+use zslg_node_types::NodeId;
 /// Per-peer typed transport over [`RpcClient`]. The peer is addressed either by
 /// a registered `NodeId` ([`TcpPeerClient::new`]) or directly by
 /// `(addr, server_name)` ([`TcpPeerClient::direct`]); both expose the full

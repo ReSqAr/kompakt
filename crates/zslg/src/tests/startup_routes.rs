@@ -24,7 +24,8 @@ use object_store::ObjectStore;
 use crate::api::SnapshotStore as _;
 use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use crate::replica_node::ReplicaNodeConfig;
-use crate::{Error, NodeId, PeerAddr, ReplicaNode};
+use crate::{Error, PeerAddr, ReplicaNode};
+use zslg_node_types::NodeId;
 
 fn single_node_config(object_store: Arc<dyn ObjectStore>, db_path: PathBuf) -> ReplicaNodeConfig {
     let peers = vec![PeerAddr {

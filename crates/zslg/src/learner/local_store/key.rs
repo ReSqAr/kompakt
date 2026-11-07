@@ -14,7 +14,8 @@
 //! alone already sorts in HLC order. (An older layout appended an `Hlc`
 //! secondary; it was redundant with the primary and is gone.)
 
-use crate::ids::{DataId, NodeId};
+use crate::ids::DataId;
+use zslg_node_types::NodeId;
 
 /// `DataId` is 32 raw bytes, already HLC-big-endian-major (`ids.rs`).
 pub(in crate::learner::local_store) const DATA_PRIMARY_WIDTH: usize = 32;

@@ -11,9 +11,9 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::Error;
-use crate::ids::NodeId;
 use crate::metrics;
 use crate::raft::RaftStateHandle;
+use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 
 /// The voter set as openraft's metrics report it.

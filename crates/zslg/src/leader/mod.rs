@@ -56,7 +56,7 @@ pub(super) struct LeaderLoopConfig {
     /// the peer list.
     pub(super) self_server_name: crate::ids::ServerName,
     /// The durable node id of the local node — filled by the producer.
-    pub(super) self_node_id: crate::ids::NodeId,
+    pub(super) self_node_id: zslg_node_types::NodeId,
 }
 
 /// Spawn every leader task on the shutdown tree.

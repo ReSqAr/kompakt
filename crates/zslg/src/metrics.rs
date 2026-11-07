@@ -308,14 +308,14 @@ pub(crate) fn node_rejoin() {
 /// Unix-epoch seconds when this node last received a successful liveness probe
 /// reply from `node_id`. Emitted from the liveness worker; Grafana derives
 /// "time since last seen" as `time() - node_last_seen_timestamp_seconds`.
-pub(crate) fn node_last_seen(node_id: crate::ids::NodeId) {
+pub(crate) fn node_last_seen(node_id: zslg_node_types::NodeId) {
     metrics::gauge!(NODE_LAST_SEEN_TIMESTAMP_SECONDS, LABEL_NODE_ID => node_id.to_string())
         .set(lossy_f64(unix_now_secs()));
 }
 
 /// 1 while this node considers `node_id` live (probes succeeding), 0 once it has
 /// been dropped from the live set (probe failures past threshold, or evicted).
-pub(crate) fn node_live(node_id: crate::ids::NodeId, live: bool) {
+pub(crate) fn node_live(node_id: zslg_node_types::NodeId, live: bool) {
     metrics::gauge!(NODE_LIVE, LABEL_NODE_ID => node_id.to_string()).set(if live {
         1.0
     } else {
@@ -941,7 +941,7 @@ metrics!("zslg_", rpc_client; {
 /// slow-to-ack replica from a fast-failing one, so a write-rate dip during churn
 /// can be attributed to a specific replica rather than the writer.
 pub(crate) fn replica_write_rpc(
-    peer_id: crate::ids::NodeId,
+    peer_id: zslg_node_types::NodeId,
     outcome: WriteRpcOutcome,
     latency: Duration,
 ) {
@@ -1200,7 +1200,7 @@ pub(crate) fn local_store_integrate_queue_depth(depth: usize) {
     metrics::gauge!(LOCAL_STORE_INTEGRATE_QUEUE_DEPTH).set(lossy_f64(v));
 }
 
-pub(crate) fn hlc_skew(peer_id: crate::ids::NodeId, skew_s: f64) {
+pub(crate) fn hlc_skew(peer_id: zslg_node_types::NodeId, skew_s: f64) {
     metrics::gauge!(HLC_SKEW_SECONDS, LABEL_PEER_ID => peer_id.to_string()).set(skew_s);
 }
 
@@ -2104,7 +2104,7 @@ mod tests {
 
     #[test]
     fn node_liveness_gauges_carry_node_id_label() {
-        let node = crate::ids::NodeId::new_v4();
+        let node = zslg_node_types::NodeId::new_v4();
         let recorder = metrics_util::debugging::DebuggingRecorder::new();
         let snapshotter = recorder.snapshotter();
         metrics::with_local_recorder(&recorder, || {
@@ -2138,7 +2138,7 @@ mod tests {
 
     #[test]
     fn node_live_reports_zero_when_dropped() {
-        let node = crate::ids::NodeId::new_v4();
+        let node = zslg_node_types::NodeId::new_v4();
         let recorder = metrics_util::debugging::DebuggingRecorder::new();
         let snapshotter = recorder.snapshotter();
         metrics::with_local_recorder(&recorder, || {

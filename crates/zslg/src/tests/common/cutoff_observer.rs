@@ -57,11 +57,11 @@ use std::sync::{Arc, Mutex};
 use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 
-use crate::ids::NodeId;
 use crate::meta::RaftState;
 use crate::raft::RaftStateHandle;
 use crate::tests::common::Cluster;
 use crate::tests::common::invariants::assert_membership_well_formed;
+use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 
 /// Every node's state handle, paired with its `NodeId`.

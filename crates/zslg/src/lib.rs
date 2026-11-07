@@ -72,7 +72,7 @@ pub use crate::error::{ConsensusError, Error, LogError, NetError, SnapshotError}
 pub use crate::follower_node::{FollowerNode, FollowerNodeConfig};
 pub use crate::hlc::HlcClock;
 pub use crate::ids::{
-    DataId, HostPort, LogIndex, NodeId, PeerAddr, RaftGeneration, ServerName, SnapshotId,
+    DataId, HostPort, LogIndex, PeerAddr, RaftGeneration, ServerName, SnapshotId,
 };
 pub use crate::leader::CompactionTier;
 pub use crate::learner_node::{LearnerNode, LearnerNodeConfig};
@@ -89,6 +89,7 @@ pub use crate::replica_node::{InitialisingReplicaNode, ReplicaNode, ReplicaNodeC
 pub use crate::writer_node::{WriterNode, WriterNodeConfig};
 pub use bytesize::ByteSize;
 pub use zslg_lifecycle_types::{ConfigError, LifecycleError};
+pub use zslg_node_types::NodeId;
 pub use zslg_time_types::{ClockError, Hlc};
 
 pub(crate) fn jitter(d: std::time::Duration) -> std::time::Duration {

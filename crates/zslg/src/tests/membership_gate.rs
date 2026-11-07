@@ -33,7 +33,8 @@ use crate::network::RemoteRouter;
 use crate::replica_node::ReplicaNodeConfig;
 use crate::tests::reserve_port;
 use crate::tests::wait_until_sync as wait_until;
-use crate::{Error, NodeId, PeerAddr, ReplicaNode};
+use crate::{Error, PeerAddr, ReplicaNode};
+use zslg_node_types::NodeId;
 
 const SERVER_NAME: &str = "localhost";
 

@@ -20,9 +20,9 @@ use tokio::sync::watch;
 use tracing::debug;
 
 use crate::api::{PeersWatcher, RaftStateView};
-use crate::ids::NodeId;
 use crate::meta::RaftState;
 use crate::{Error, quorum};
+use zslg_node_types::NodeId;
 
 /// Everything [`spawn_raft_tracker_streamer`](crate::raft::spawn_raft_tracker_streamer)
 /// needs beyond the ambient shutdown + router: the peer-set watcher plus the

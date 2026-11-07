@@ -17,9 +17,10 @@ use rocksdb_kit::Batch;
 use rocksdb_kit::ColumnFamily;
 use uuid::Uuid;
 
+use crate::Error;
 use crate::error::ToStorage;
-use crate::{Error, NodeId};
 use rocksdb_kit::Storage;
+use zslg_node_types::NodeId;
 
 /// This column family's only row.
 const KEY: &[u8] = b"node_id";

@@ -19,9 +19,10 @@ use tokio::sync::watch;
 
 use crate::error::Error;
 use crate::ids::DataId;
-use crate::ids::{LogIndex, NodeId};
+use crate::ids::LogIndex;
 use crate::meta::Data;
 use crossbeam_combinators::{Channel, Finite, OrderedChannel, StrictlyIncreasing};
+use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 
 /// A local-store scan (above an HLC, or a bounded window): strictly increasing

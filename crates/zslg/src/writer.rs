@@ -32,10 +32,10 @@ use tracing::warn;
 
 use crate::api::{Clock, RaftStateTracker, Router};
 use crate::error::Error;
-use crate::ids::NodeId;
 use crate::meta::Data;
 use crate::metrics::{self, OpState};
 use crate::quorum::Coordinator;
+use zslg_node_types::NodeId;
 
 pub(crate) struct WriterConfig {
     pub(crate) node_id: NodeId,
@@ -121,7 +121,7 @@ mod tests {
     #[test]
     fn writer_config_rejects_zero_write_timeout() {
         let c = WriterConfig {
-            node_id: crate::ids::NodeId::new_v4(),
+            node_id: zslg_node_types::NodeId::new_v4(),
             write_timeout: Duration::ZERO,
         };
         assert!(matches!(

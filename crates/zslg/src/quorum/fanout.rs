@@ -24,9 +24,9 @@ use std::sync::Arc;
 use tokio::task::JoinSet;
 
 use crate::error::Error;
-use crate::ids::NodeId;
 use crate::meta::RaftState;
 use crate::metrics::{self, FanoutResponseState};
+use zslg_node_types::NodeId;
 
 use super::{all_targets, is_quorum};
 

@@ -20,13 +20,14 @@ use openraft::storage::Adaptor;
 
 use crate::api::{MembershipGate, Router};
 use crate::error::{Error, ToRaft};
-use crate::ids::{NodeId, PeerAddr};
+use crate::ids::PeerAddr;
 use crate::raft::raft_storage::RocksRaftStorage;
 use crate::raft::rpc::NetworkFactory;
 use crate::raft::rpc::PeerRegistrationWatcher;
 use crate::raft::state::RaftStatePublisher;
 use rocksdb_kit::Storage;
 use shutdown::Shutdown;
+use zslg_node_types::NodeId;
 
 mod membership;
 mod node;
@@ -276,7 +277,7 @@ mod config_tests {
     use std::time::Duration;
 
     fn ok_raft_config() -> RaftConfig {
-        RaftConfig::for_node(crate::ids::NodeId::new_v4())
+        RaftConfig::for_node(zslg_node_types::NodeId::new_v4())
     }
 
     #[test]
@@ -342,7 +343,7 @@ mod config_tests {
     #[test]
     fn default_startup_phase_timeout_is_ten_seconds() {
         assert_eq!(
-            RaftConfig::for_node(crate::ids::NodeId::new_v4()).startup_phase_timeout,
+            RaftConfig::for_node(zslg_node_types::NodeId::new_v4()).startup_phase_timeout,
             Duration::from_secs(10)
         );
     }
@@ -375,14 +376,14 @@ mod config_tests {
 
     #[test]
     fn default_truncation_cadence() {
-        let c = RaftConfig::for_node(crate::ids::NodeId::new_v4());
+        let c = RaftConfig::for_node(zslg_node_types::NodeId::new_v4());
         assert_eq!(c.snapshot_logs_since_last, 100);
         assert_eq!(c.max_in_snapshot_log_to_keep, 10);
     }
 
     #[test]
     fn to_openraft_sets_snapshot_policy_and_keep() {
-        let raft_cfg = RaftConfig::for_node(crate::ids::NodeId::new_v4())
+        let raft_cfg = RaftConfig::for_node(zslg_node_types::NodeId::new_v4())
             .to_openraft()
             .expect("raft config");
         assert!(matches!(

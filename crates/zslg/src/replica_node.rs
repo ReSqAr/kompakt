@@ -37,7 +37,7 @@ use crate::api::{RaftStateView, SnapshotStore};
 use crate::error::Error;
 use crate::hlc::{HlcClock, HlcGate, run_clock_gauges};
 use crate::ids::ServerName;
-use crate::ids::{HostPort, NodeId, PeerAddr};
+use crate::ids::{HostPort, PeerAddr};
 use crate::leader::spawn_leader_loop;
 use crate::leader::{CompactionTier, LivenessConfig, SnapshotConfig};
 use crate::learner::LearnerConfig;
@@ -61,6 +61,7 @@ use crate::{api, database, network};
 use rocksdb_kit::ColumnFamily;
 use rocksdb_kit::{CfSpec, Storage, StorageConfig};
 use shutdown::Shutdown;
+use zslg_node_types::NodeId;
 
 #[derive(Debug, Clone)]
 pub struct ReplicaNodeConfig {

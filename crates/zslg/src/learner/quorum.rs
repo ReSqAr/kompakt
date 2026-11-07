@@ -39,10 +39,10 @@ use tokio::sync::oneshot;
 use crate::api::QuorumCheck;
 use crate::api::{LocalStoreView, RaftStateView, Replica, Router, StableLogSnapshot};
 use crate::error::Error;
-use crate::ids::NodeId;
 use crate::meta::{RaftManifestState, RaftState};
 use crate::metrics::OpState;
 use crate::quorum::{FanOutResponse, fan_out_quorum};
+use zslg_node_types::NodeId;
 
 // ── Multi-replica quorum check ──────────────────────────────────────────────
 
@@ -403,8 +403,9 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use crate::ids::{LogIndex, NodeId};
+    use crate::ids::LogIndex;
     use crate::tests::upstream;
+    use zslg_node_types::NodeId;
     use zslg_time_types::Hlc;
 
     use super::*;

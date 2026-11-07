@@ -463,9 +463,9 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
-    use crate::ids::NodeId;
     use crate::raft::RaftStateHandle;
     use crate::tests::nid;
+    use zslg_node_types::NodeId;
 
     // ── harness ──────────────────────────────────────────────────────────
     //

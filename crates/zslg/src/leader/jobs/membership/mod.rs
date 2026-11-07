@@ -27,12 +27,13 @@ use tracing::{debug, info, warn};
 
 use crate::api::{RaftStateView, Router};
 use crate::error::Error;
-use crate::ids::{NodeId, RaftGeneration};
+use crate::ids::RaftGeneration;
 use crate::leader::jobs::Pace;
 use crate::leader::jobs::is_local_leader;
 use crate::leader::jobs::membership::liveness::LivenessState;
 use crate::meta::{RaftState, ReplicaMembership, ReplicaStatus};
 use crate::metrics::{self, LeaderJob, OpState};
+use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 
 pub(in crate::leader) mod change;

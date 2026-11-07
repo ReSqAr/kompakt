@@ -33,9 +33,10 @@ use bytes::Bytes;
 use futures::StreamExt;
 
 use crate::StableLogEvent;
-use crate::ids::{DataId, NodeId};
+use crate::ids::DataId;
 use crate::meta::{RaftState, ReplicaMembership};
 use crate::tests::common::Cluster;
+use zslg_node_types::NodeId;
 
 /// Assert every global invariant that holds of a quiesced cluster.
 ///
@@ -234,7 +235,7 @@ pub(crate) async fn assert_unstable_above_watermark(cluster: &Cluster) -> bool {
 
 /// CLAUDE.md §8: the manifest tiles the index space from 0 with no gap and no
 /// overlap. A consumer (`learner`'s seamless append) relies on this.
-fn assert_manifest_contiguous(id: crate::ids::NodeId, state: &RaftState) {
+fn assert_manifest_contiguous(id: zslg_node_types::NodeId, state: &RaftState) {
     let mut expected: u64 = 0;
     for meta in &state.manifest_state.manifest {
         assert_eq!(
@@ -258,7 +259,7 @@ fn assert_manifest_contiguous(id: crate::ids::NodeId, state: &RaftState) {
 
 /// CLAUDE.md §12: a committed `manifest_watermark > hlc_cutoff` would admit
 /// writes no snapshot can ever cover.
-fn assert_watermark_below_cutoff(id: crate::ids::NodeId, state: &RaftState) {
+fn assert_watermark_below_cutoff(id: zslg_node_types::NodeId, state: &RaftState) {
     if let (Some(w), Some(c)) = (
         state.manifest_state.manifest_watermark,
         state.manifest_state.hlc_cutoff,
@@ -272,7 +273,7 @@ fn assert_watermark_below_cutoff(id: crate::ids::NodeId, state: &RaftState) {
 
 /// A joint config's two sets must differ — otherwise the transition is a no-op
 /// that can never make progress toward collapse.
-pub(crate) fn assert_membership_well_formed(id: crate::ids::NodeId, state: &RaftState) {
+pub(crate) fn assert_membership_well_formed(id: zslg_node_types::NodeId, state: &RaftState) {
     match &state.replica {
         ReplicaMembership::Single { .. } => {}
         ReplicaMembership::Joint { old, next }
@@ -294,7 +295,7 @@ pub(crate) fn assert_membership_well_formed(id: crate::ids::NodeId, state: &Raft
 /// collapsed. Observing one still armed at quiesce means the leader's step 3
 /// is not firing — the drain bound is doing its job, but nothing is consuming
 /// it, which stalls membership change indefinitely.
-fn assert_no_satisfied_drain_left_armed(id: crate::ids::NodeId, state: &RaftState) {
+fn assert_no_satisfied_drain_left_armed(id: zslg_node_types::NodeId, state: &RaftState) {
     if let ReplicaMembership::JointDraining { exit, .. } = &state.replica {
         assert!(
             !crate::meta::drain_satisfied(state.manifest_state.manifest_watermark, *exit),

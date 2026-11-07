@@ -19,12 +19,12 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use crate::error::Error;
-use crate::ids::NodeId;
 use crate::leader::integrator::IntentSubmitter;
 use crate::leader::jobs::compaction::merge::{CompactionTier, compact};
 use crate::leader::jobs::{LeaderHandles, is_local_leader};
 use crate::metrics::{self, LeaderJob};
 use crate::object_store::CompressionLevel;
+use zslg_node_types::NodeId;
 
 pub(in crate::leader) mod merge;
 

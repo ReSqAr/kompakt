@@ -18,8 +18,9 @@ use tokio::sync::watch;
 use tracing::debug;
 
 use crate::api::ReplicatedRaftState;
-use crate::ids::{NodeId, RaftGeneration};
+use crate::ids::RaftGeneration;
 use crate::meta::{RaftManifestState, RaftState};
+use zslg_node_types::NodeId;
 
 /// The published Raft state: one value, one change notification.
 ///
@@ -220,8 +221,9 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
-    use crate::ids::{LogIndex, NodeId, SnapshotId};
+    use crate::ids::{LogIndex, SnapshotId};
     use crate::meta::{ReplicaMembership, SnapshotMetadata};
+    use zslg_node_types::NodeId;
     use zslg_time_types::Hlc;
 
     fn make_gen(n: u64) -> RaftGeneration {

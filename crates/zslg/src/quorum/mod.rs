@@ -24,8 +24,8 @@
 use std::collections::BTreeSet;
 use std::num::NonZeroUsize;
 
-use crate::ids::NodeId;
 use crate::meta::ReplicaMembership;
+use zslg_node_types::NodeId;
 
 mod coordinator;
 mod fanout;

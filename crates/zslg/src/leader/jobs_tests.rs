@@ -34,7 +34,7 @@ use crate::api::{
 use crate::hlc::CutoffApplier;
 use crate::hlc::HlcClock;
 use crate::hlc::HlcGate;
-use crate::ids::{LogIndex, NodeId, PeerAddr, SnapshotId};
+use crate::ids::{LogIndex, PeerAddr, SnapshotId};
 use crate::leader::jobs::membership::liveness::LivenessConfig;
 use crate::leader::{CompactionTier, LeaderLoopConfig, SnapshotConfig, spawn_leader_loop};
 use crate::learner::LocalStore;
@@ -50,6 +50,7 @@ use crate::raft::SpareSelectionStrategy;
 use crate::replica::ReplicaLogStore;
 use crate::replica::ReplicaService;
 use shutdown::Shutdown;
+use zslg_node_types::NodeId;
 use zslg_time_types::{Hlc, HlcParts};
 
 use crate::tests::fast_raft_config as raft_config;

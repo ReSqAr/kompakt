@@ -12,7 +12,8 @@
 
 use std::collections::BTreeSet;
 
-use crate::ids::{NodeId, ServerName};
+use crate::ids::ServerName;
+use zslg_node_types::NodeId;
 
 #[async_trait::async_trait]
 pub(crate) trait RaftLeadership: Send + Sync + 'static {

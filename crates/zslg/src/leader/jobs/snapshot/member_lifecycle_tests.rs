@@ -29,7 +29,7 @@ use crate::api::LocalStoreMut;
 use crate::api::ReplicatedRaftState;
 use crate::error::Error;
 use crate::hlc::HlcGate;
-use crate::ids::{LogIndex, NodeId};
+use crate::ids::LogIndex;
 use crate::leader::jobs::membership::change::{
     LivenessQuery, MembershipChangeInputs, MembershipChangeManager,
 };
@@ -48,6 +48,7 @@ use crate::tests::fast_raft_config as raft_config;
 use crate::tests::make_data;
 use crate::tests::upstream;
 use crate::tests::wait_for_leader;
+use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 
 async fn integrate_batch(

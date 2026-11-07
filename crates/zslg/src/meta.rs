@@ -17,7 +17,8 @@ use std::collections::BTreeSet;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{DataId, LogIndex, NodeId, RaftGeneration, ServerName, SnapshotId};
+use crate::ids::{DataId, LogIndex, RaftGeneration, ServerName, SnapshotId};
+use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 
 /// Self-describing data id + opaque user blob. The id carries the creation HLC

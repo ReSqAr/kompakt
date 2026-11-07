@@ -25,10 +25,10 @@ use std::time::Duration;
 
 use object_store::memory::InMemory;
 
-use crate::ids::NodeId;
 use crate::tests::{
     Cluster, ClusterConfig, assert_cluster_invariants, default_fast_config, wait_until_sync,
 };
+use zslg_node_types::NodeId;
 
 /// Removing one member from every other node's `config.peers` evicts it from
 /// the voter set; the leader then shrinks the replicated set `{A,B,C}` →

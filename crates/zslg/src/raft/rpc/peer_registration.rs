@@ -9,8 +9,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::api::Router;
 use crate::error::Error;
-use crate::ids::NodeId;
 use crate::raft::NodeInfo;
+use zslg_node_types::NodeId;
 
 /// Cadence for re-checking (and `warn!`ing about) empty raft membership. The
 /// first tick lands one interval in, giving a natural startup grace before the

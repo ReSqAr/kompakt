@@ -6,7 +6,7 @@ use std::time::Duration;
 use zslg_lifecycle_types::ConfigError;
 
 use crate::api::{CandidateInfo, SpareSelector};
-use crate::ids::NodeId;
+use zslg_node_types::NodeId;
 
 /// Strategy for choosing which spare (live, non-member) nodes are promoted to
 /// fill a replica-set deficit during a membership change. Implements

@@ -17,9 +17,10 @@
 //! an attempt's progress would under-report it.
 
 use crate::api::LocalStoreView;
-use crate::ids::{LogIndex, NodeId};
+use crate::ids::LogIndex;
 use crate::meta::Data;
 use crossbeam_combinators::Channel;
+use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 
 #[async_trait::async_trait]

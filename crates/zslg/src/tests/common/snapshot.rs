@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use crate::api::ReplicatedRaftState;
 use crate::hlc::HlcGate;
-use crate::ids::NodeId;
 use crate::leader::SnapshotResult;
 use crate::learner::LocalStore;
 use crate::learner::StableLog;
@@ -16,6 +15,7 @@ use crate::raft::RaftStateHandle;
 use object_store::ObjectStore;
 use object_store::memory::InMemory;
 use openraft::Config;
+use zslg_node_types::NodeId;
 
 pub(crate) struct SnapshotHarness {
     pub(crate) _dir: tempfile::TempDir,

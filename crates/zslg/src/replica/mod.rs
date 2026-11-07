@@ -46,13 +46,14 @@ use tracing::{info, warn};
 use crate::api::{Clock as _, PeersWatcher, RaftStateView, Replica, StampedWrite, WriteOutcome};
 use crate::error::Error;
 use crate::hlc::{CutoffApplier, HlcClock, HlcGate, HlcGuard};
-use crate::ids::{DataId, LogIndex, NodeId};
+use crate::ids::{DataId, LogIndex};
 use crate::meta::{Data, ReplicaStatus};
 use crate::metrics::{self, ReplicaWriteState};
 use crate::replica::log::flush_loop;
 use crossbeam_combinators::Channel;
 use shutdown::Shutdown;
 use warn_throttle::WarnThrottle;
+use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 
 /// Minimum spacing between replica-write-rejection `warn!`s. Rejections recur at

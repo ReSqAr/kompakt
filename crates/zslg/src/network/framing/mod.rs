@@ -93,9 +93,9 @@ mod tests {
 
     use crate::api::Clock;
     use crate::error::Error;
-    use crate::ids::NodeId;
     use crate::network::messages::RpcEnvelope;
     use framing::verify_frame_crc32;
+    use zslg_node_types::NodeId;
     use zslg_time_types::Hlc;
 
     #[test]

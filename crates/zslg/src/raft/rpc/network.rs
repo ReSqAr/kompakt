@@ -20,8 +20,8 @@ use openraft::raft::VoteRequest;
 use openraft::raft::VoteResponse;
 
 use crate::api::{RaftTransport, Router};
-use crate::ids::NodeId;
 use crate::raft::{NodeInfo, TypeConfig};
+use zslg_node_types::NodeId;
 
 #[derive(Debug)]
 struct UnreachableMsg(String);

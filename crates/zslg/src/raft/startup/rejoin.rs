@@ -37,8 +37,9 @@ use super::bootstrap::{JoinAttempt, attempt_join_once};
 use crate::api::PeersWatcher;
 use crate::api::Router;
 use crate::error::Error;
-use crate::ids::{NodeId, PeerAddr};
+use crate::ids::PeerAddr;
 use crate::raft::RaftNode;
+use zslg_node_types::NodeId;
 
 /// How often the monitor re-evaluates whether it needs to probe.
 pub(in crate::raft) const REJOIN_RECONCILE_INTERVAL: Duration = Duration::from_secs(5);

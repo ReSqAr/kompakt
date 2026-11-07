@@ -10,7 +10,7 @@
 
 use std::time::Duration;
 
-use crate::ids::NodeId;
+use zslg_node_types::NodeId;
 
 /// Per-candidate signals gathered for spare selection.
 #[derive(Debug, Clone)]

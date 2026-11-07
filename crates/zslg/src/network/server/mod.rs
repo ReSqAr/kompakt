@@ -39,11 +39,11 @@ use tracing::{debug, info, trace, warn};
 
 use crate::api::Clock;
 use crate::error::{Error, ToRpc};
-use crate::ids::NodeId;
 use crate::metrics::{self};
 use crate::network::framing::{AsyncFrameSink, AsyncFrameStream};
 use crate::network::messages::{RpcFrame, RpcRequest};
 use crate::network::tcp::{self, SocketOpts};
+use zslg_node_types::NodeId;
 
 mod handlers;
 mod stream_handler;

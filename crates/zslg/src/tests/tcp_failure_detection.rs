@@ -35,8 +35,8 @@ use bytes::Bytes;
 use futures::StreamExt;
 use object_store::memory::InMemory;
 
-use crate::ids::NodeId;
 use crate::tests::{Cluster, ClusterConfig, assert_cluster_invariants};
+use zslg_node_types::NodeId;
 
 /// Find the id of the current leader (panics if there is none).
 fn leader_of(cluster: &Cluster) -> NodeId {

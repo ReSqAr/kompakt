@@ -21,9 +21,9 @@ use tokio::io::{AsyncWrite, AsyncWriteExt as _};
 
 use crate::api::Clock;
 use crate::error::{Error, ToCodec, ToRpc};
-use crate::ids::NodeId;
 use crate::network::messages::RpcEnvelope;
 use framing::append_crc32_from;
+use zslg_node_types::NodeId;
 
 use super::{BACKPRESSURE_BOUNDARY, LEN_PREFIX, MAX_FRAME_LEN, shrink_drained};
 

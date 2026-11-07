@@ -45,9 +45,10 @@ use tracing::error;
 
 use crate::api::StableLogSnapshot;
 use crate::error::{Error, ToStorage};
-use crate::ids::{DataId, LogIndex, NodeId};
+use crate::ids::{DataId, LogIndex};
 use crate::meta::Data;
 use crate::metrics::{self, LocalWriteKind, LogType, OpState};
+use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 
 const STREAM_CHANNEL_CAPACITY: usize = 32;
@@ -894,7 +895,8 @@ mod tests {
     use super::*;
     use crate::api::{LocalStoreMut, LocalStoreView};
 
-    use crate::ids::{DataId, NodeId};
+    use crate::ids::DataId;
+    use zslg_node_types::NodeId;
     use zslg_time_types::Hlc;
 
     use crate::tests::make_data;

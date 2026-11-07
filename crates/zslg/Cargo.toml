@@ -45,6 +45,7 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["serde"] }
 warn-throttle = { workspace = true }
 zslg-lifecycle-types = { workspace = true }
+zslg-node-types = { workspace = true }
 zslg-time-types = { workspace = true }
 zstd = { workspace = true }
 

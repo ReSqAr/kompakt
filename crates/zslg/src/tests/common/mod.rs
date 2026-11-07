@@ -39,7 +39,7 @@ use crate::api::{
     AddMemberOutcome, LivenessProbe, RaftMembership, RaftTransport, Replica, ReplicaClient, Router,
     StampedWrite, WriteOutcome,
 };
-use crate::ids::{DataId, LogIndex, NodeId, PeerAddr};
+use crate::ids::{DataId, LogIndex, PeerAddr};
 use crate::learner::LocalStore;
 use crate::meta::{Data, RaftState, ReplicaStatus};
 use crate::raft::RaftStateHandle;
@@ -57,6 +57,7 @@ use openraft::raft::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
     VoteRequest, VoteResponse,
 };
+use zslg_node_types::NodeId;
 // ── fault injection: pairwise partitions ─────────────────────────────
 
 /// Shared handle that cuts and heals in-process network links. Cloned into
@@ -714,10 +715,10 @@ pub(crate) fn reserve_port() -> std::net::SocketAddr {
 }
 
 /// Build a deterministic [`NodeId`] from a single byte seed.
-pub(crate) fn nid(byte: u8) -> crate::NodeId {
+pub(crate) fn nid(byte: u8) -> zslg_node_types::NodeId {
     let mut bytes = [0u8; 16];
     bytes[15] = byte;
-    crate::NodeId::from_uuid(uuid::Uuid::from_bytes(bytes))
+    zslg_node_types::NodeId::from_uuid(uuid::Uuid::from_bytes(bytes))
 }
 
 /// Convenience wrapper around [`wait_until`] for sync `FnMut() -> bool`

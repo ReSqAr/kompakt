@@ -20,9 +20,10 @@ use crate::Error;
 use crate::api::{LocalStoreMut, Replica};
 use crate::error::LogError;
 use crate::hlc::HlcClock;
-use crate::ids::{LogIndex, NodeId};
+use crate::ids::LogIndex;
 use crate::meta::Data;
 use std::sync::Arc;
+use zslg_node_types::NodeId;
 
 /// Sample `zslg_hlc_skew_seconds` for roughly every Nth replicated item — a
 /// per-peer drift signal, not a per-item cost.

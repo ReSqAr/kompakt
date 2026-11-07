@@ -23,7 +23,7 @@ use bytes::Bytes;
 use uuid::Uuid;
 
 use crate::api::{LocalStoreMut, ReplicatedRaftState, StableLogSnapshot};
-use crate::ids::{DataId, LogIndex, NodeId, PeerAddr};
+use crate::ids::{DataId, LogIndex, PeerAddr};
 use crate::leader::jobs::snapshot::create::{
     SnapshotEntryInputs, SnapshotResult, create_snapshot_entry,
 };
@@ -36,6 +36,7 @@ use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use crate::raft::Raft;
 use crate::raft::RaftNode;
 use crate::raft::RaftStateHandle;
+use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 
 use crate::tests::make_data;
@@ -577,9 +578,10 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
     use crate::api::Replica;
     use crate::api::{LocalStoreView, Router};
     use crate::error::Error;
-    use crate::ids::{LogIndex, NodeId, RaftGeneration, SnapshotId};
+    use crate::ids::{LogIndex, RaftGeneration, SnapshotId};
     use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
     use crate::meta::SnapshotMetadata;
+    use zslg_node_types::NodeId;
     use zslg_time_types::{Hlc, HlcParts};
 
     use crate::tests::{FixedClock, ReadyReplica};

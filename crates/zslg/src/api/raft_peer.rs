@@ -14,8 +14,8 @@ use openraft::raft::{
     VoteRequest, VoteResponse,
 };
 
-use crate::ids::NodeId;
 use crate::raft::TypeConfig;
+use zslg_node_types::NodeId;
 
 #[async_trait::async_trait]
 pub(crate) trait RaftTransport: Send + Sync + 'static {

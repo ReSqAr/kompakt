@@ -4466,6 +4466,7 @@ dependencies = [
  "uuid",
  "warn-throttle",
  "zslg-lifecycle-types",
+ "zslg-node-types",
  "zslg-time-types",
  "zstd",
 ]
@@ -4476,6 +4477,14 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "zslg-node-types"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "uuid",
 ]
 
 [[package]]

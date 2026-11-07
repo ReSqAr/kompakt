@@ -52,7 +52,7 @@ use crate::api::{
     ArchiveBounds, ArchiveUpperBound, Clock, LocalStoreView, Reader, StableArchiveReader,
     StableLogSnapshot,
 };
-use crate::ids::{LogIndex, NodeId};
+use crate::ids::LogIndex;
 use crate::learner::QuorumReadDebouncer;
 use crate::meta::{Data, StableLogEvent, UnstableEvent};
 use crate::metrics::{self, ReadEntrySource, ReadSource};
@@ -63,6 +63,7 @@ use crossbeam_combinators::{
 };
 use std::sync::Arc;
 use zslg_lifecycle_types::LifecycleError;
+use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 
 /// Whether this node may serve client reads and writes.
@@ -677,8 +678,9 @@ mod tests {
     use crate::{Reader, StableLogEvent};
     use crossbeam_combinators::{Cancellation, Channel, Finite, Infinite};
 
-    use crate::ids::{LogIndex, NodeId};
+    use crate::ids::LogIndex;
     use crate::learner::{LocalStore, QuorumReadDebouncer, StableLog};
+    use zslg_node_types::NodeId;
     use zslg_time_types::Hlc;
 
     /// A node clock for the reader under test.

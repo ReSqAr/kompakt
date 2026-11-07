@@ -623,7 +623,7 @@ impl ReplicaLogStore {
         cancel: CancellationToken,
     ) -> Result<(Arc<Self>, tokio::task::JoinHandle<Result<(), Error>>), Error> {
         let (write_tx, write_rx) = crossbeam_channel::bounded(
-            crate::replica::ReplicaLogConfig::for_test(crate::ids::NodeId::new_v4())
+            crate::replica::ReplicaLogConfig::for_test(zslg_node_types::NodeId::new_v4())
                 .write_channel_capacity
                 .get(),
         );
@@ -1083,8 +1083,9 @@ mod tests {
     use crate::api::{LocalStoreMut, LocalStoreView};
 
     use crate::hlc::HlcGate;
-    use crate::ids::{DataId, LogIndex, NodeId};
+    use crate::ids::{DataId, LogIndex};
     use crate::learner::LocalStore;
+    use zslg_node_types::NodeId;
     use zslg_time_types::Hlc;
 
     use tokio_util::sync::CancellationToken;
@@ -1749,7 +1750,7 @@ mod tests {
     /// they must not drift from the values operators actually get.
     #[test]
     fn open_engine_defaults_match_the_config_defaults() {
-        let cfg = crate::replica::ReplicaLogConfig::for_test(crate::ids::NodeId::new_v4());
+        let cfg = crate::replica::ReplicaLogConfig::for_test(zslg_node_types::NodeId::new_v4());
         assert_eq!(
             cfg.subscribe_channel_capacity.get(),
             DEFAULT_SUBSCRIBE_CHANNEL_CAPACITY

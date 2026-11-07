@@ -11,8 +11,8 @@ use tracing::{debug, info, warn};
 
 use crate::api::{CandidateInfo, RaftLeadership, RaftStateView, Router};
 use crate::error::Error;
-use crate::ids::NodeId;
 use crate::leader::jobs::membership::change::LivenessQuery;
+use zslg_node_types::NodeId;
 
 /// The live set and its change notification in one primitive.
 ///

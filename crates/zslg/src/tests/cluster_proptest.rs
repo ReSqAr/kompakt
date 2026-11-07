@@ -189,12 +189,13 @@ use object_store::memory::InMemory;
 use proptest::prelude::{Just, ProptestConfig, Strategy, prop_oneof, proptest};
 use proptest::{prop_assert, prop_assert_eq};
 
-use crate::ids::{DataId, NodeId};
+use crate::ids::DataId;
 use crate::replica_node::ReplicaNodeConfig;
 use crate::tests::{
     Cluster, ClusterConfig, CutoffObserver, NodePlacement, assert_cluster_invariants,
     assert_cluster_invariants_with_acks, assert_durability_chain_on,
 };
+use zslg_node_types::NodeId;
 
 /// Which regime a case runs in — a stratum over both the timescales
 /// ([`regime_ranges`]) and the channel capacities ([`capacity_ranges`]).

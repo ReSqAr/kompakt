@@ -16,7 +16,7 @@ use thiserror::Error;
 use zslg_lifecycle_types::{ConfigError, LifecycleError};
 use zslg_time_types::ClockError;
 
-use crate::ids::NodeId;
+use zslg_node_types::NodeId;
 
 /// The replicated and local logs and the storage under them: storage, codec, gaps, truncation, subscriptions.
 #[derive(Debug, Clone, PartialEq, Error, Serialize, Deserialize)]

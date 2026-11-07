@@ -28,7 +28,6 @@ use crate::api::{self, RaftStateView, SnapshotStore};
 use crate::database;
 use crate::error::Error;
 use crate::hlc::{HlcClock, run_clock_gauges};
-use crate::ids::NodeId;
 use crate::ids::PeerAddr;
 use crate::learner::LearnerConfig;
 use crate::learner::{LearnerService, StableLog, spawn_learner, spawn_stable_store};
@@ -38,6 +37,7 @@ use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use crate::raft::{RaftTrackerConfig, spawn_raft_tracker_streamer};
 use rocksdb_kit::{CfSpec, Storage, StorageConfig};
 use shutdown::Shutdown;
+use zslg_node_types::NodeId;
 
 /// Configuration for a free-standing learner node.
 ///

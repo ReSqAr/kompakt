@@ -20,7 +20,7 @@ use crate::api::{
     AddMemberOutcome, LivenessProbe, RaftMembership, RaftTransport, Replica, ReplicaClient, Router,
     StampedWrite, WriteOutcome,
 };
-use crate::ids::{LogIndex, NodeId, PeerAddr};
+use crate::ids::{LogIndex, PeerAddr};
 use crate::meta::ReplicaStatus;
 use crate::raft::TypeConfig;
 use crossbeam_combinators::Channel;
@@ -32,6 +32,7 @@ use openraft::raft::{
 };
 use std::sync::{Arc, Weak};
 use zslg_lifecycle_types::LifecycleError;
+use zslg_node_types::NodeId;
 
 /// A [`Router`] with an in-process fast-path for `self`: `remote(self_id)` returns
 /// the local composite client; every other node is delegated to an inner

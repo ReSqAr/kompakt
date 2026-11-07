@@ -24,9 +24,10 @@ use crate::api::{
     MembershipGate, RaftConsensus, RaftLeadership, ReplicatedRaftState, StateReplicator,
 };
 use crate::error::{Error, ToRaft};
-use crate::ids::{NodeId, PeerAddr, RaftGeneration, ServerName};
+use crate::ids::{PeerAddr, RaftGeneration, ServerName};
 use crate::metrics;
 use crate::raft::{FencedStateWrite, NodeInfo, RaftResponse};
+use zslg_node_types::NodeId;
 
 pub(crate) struct RaftNode {
     inner: openraft::Raft<crate::raft::TypeConfig>,

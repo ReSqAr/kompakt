@@ -381,7 +381,7 @@ async fn unwanted_leader_evicts_itself() {
     cluster.wait_for_leader(Duration::from_secs(30)).await;
     cluster.wait_for_convergence(Duration::from_secs(30)).await;
 
-    let replicated: std::collections::BTreeSet<crate::ids::NodeId> = cluster
+    let replicated: std::collections::BTreeSet<zslg_node_types::NodeId> = cluster
         .nodes()
         .next()
         .expect("node")

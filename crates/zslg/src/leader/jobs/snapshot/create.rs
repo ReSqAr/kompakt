@@ -240,7 +240,7 @@ pub(in crate::leader) struct SnapshotInputs<'a> {
     pub(in crate::leader) router: Arc<dyn Router>,
     /// For the re-check after the quorum wait — see [`build_snapshot`].
     pub(in crate::leader) leadership: Arc<dyn crate::api::RaftLeadership>,
-    pub(in crate::leader) self_node_id: crate::ids::NodeId,
+    pub(in crate::leader) self_node_id: zslg_node_types::NodeId,
     pub(in crate::leader) quorum_poll_interval: Duration,
     pub(in crate::leader) quorum_wait_timeout: Duration,
     pub(in crate::leader) compression: CompressionLevel,
@@ -326,7 +326,7 @@ pub(in crate::leader) async fn build_snapshot(
 /// how long the others get.
 async fn await_cutoff_drained(
     transport: &Arc<dyn crate::api::ReplicaClient>,
-    peer: crate::ids::NodeId,
+    peer: zslg_node_types::NodeId,
     cutoff: Hlc,
     poll: Duration,
 ) {
@@ -405,12 +405,13 @@ mod tests {
 
     use crate::api::{LocalStoreMut, StableLogSnapshot};
 
-    use crate::ids::{DataId, LogIndex, NodeId};
+    use crate::ids::{DataId, LogIndex};
     use crate::learner::LocalStore;
     use crate::learner::StableLog;
     use crate::learner::integrate_manifest_for_test;
     use crate::meta::Data;
     use crate::tests::{SnapshotHarness, boot_snapshot_harness, commit_snapshot_result};
+    use zslg_node_types::NodeId;
     use zslg_time_types::Hlc;
 
     async fn integrate_batch(

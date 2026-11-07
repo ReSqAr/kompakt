@@ -10,9 +10,9 @@ use super::peer::ReplicationSubscriber;
 use crate::api::{LocalStoreMut, RaftStateView, Router};
 use crate::error::Error;
 use crate::hlc::HlcClock;
-use crate::ids::NodeId;
 use crate::learner::LocalStore;
 use warn_throttle::ThrottledWarn;
+use zslg_node_types::NodeId;
 
 const REPLICATION_INITIAL_BACKOFF: Duration = Duration::from_millis(250);
 const REPLICATION_MAX_BACKOFF: Duration = Duration::from_secs(10);

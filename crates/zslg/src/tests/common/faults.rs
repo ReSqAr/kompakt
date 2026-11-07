@@ -16,12 +16,13 @@ use tokio::sync::watch;
 use crate::api::{Clock, Replica, Router, StampedWrite, WriteOutcome};
 use crate::error::Error;
 use crate::hlc::{HlcClock, HlcGate};
-use crate::ids::{DataId, LogIndex, NodeId, PeerAddr};
+use crate::ids::{DataId, LogIndex, PeerAddr};
 use crate::meta::{RaftState, ReplicaMembership, ReplicaStatus};
 use crate::raft::RaftStateHandle;
 use crate::replica::ReplicaLogStore;
 use crate::replica::ReplicaService;
 use crossbeam_combinators::{Channel, Finite, Infinite};
+use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 
 /// Control handle for a [`FaultyReplica`]. Clone freely; clones share state.
@@ -205,7 +206,7 @@ impl Replica for ReadyReplica {
     }
     async fn fetch_status(&self) -> Result<ReplicaStatus, crate::Error> {
         Ok(ReplicaStatus {
-            node_id: crate::ids::NodeId::default(),
+            node_id: zslg_node_types::NodeId::default(),
             frontier: None,
             raft_state: (*self.raft_state.snapshot()).clone(),
             effective_cutoff: Some(Hlc(u64::MAX)),
@@ -646,8 +647,9 @@ mod tests {
 
     use crate::api::Replica;
     use crate::api::Router;
-    use crate::ids::{DataId, NodeId};
+    use crate::ids::DataId;
     use crate::tests::nid;
+    use zslg_node_types::NodeId;
     use zslg_time_types::Hlc;
 
     use super::{DuplicateReplica, MapPeerRouter, ReadyReplica, ReplicaServiceHarness};

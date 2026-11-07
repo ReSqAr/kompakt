@@ -283,8 +283,9 @@ async fn merge_group(
 )]
 mod tests {
     use super::*;
-    use crate::ids::{LogIndex, NodeId};
+    use crate::ids::LogIndex;
     use crate::test_stream::ChannelTestExt as _;
+    use zslg_node_types::NodeId;
     use zslg_time_types::Hlc;
     use zslg_time_types::HlcParts;
 
