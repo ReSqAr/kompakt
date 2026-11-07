@@ -4,7 +4,7 @@ Working document for the IAIC interview. Current model only.
 
 ## Where we are
 
-Q1-Q9 settled (D1-D9). Asked Q10 (granularity of fake crates). Still to cover: nvzn split, public API / nlnr compatibility, migration order, then design doc. Then the implementation layer cut (database, object-store, quorum, clock impl, net, raft, learner, leader, replica, facade). No design doc yet.
+Q1-Q10 settled (D1-D10). Asked Q11 (consumer imports: groups vs facade). Still to cover: nvzn split, public API / nlnr compatibility, migration order, then design doc. Then the implementation layer cut (database, object-store, quorum, clock impl, net, raft, learner, leader, replica, facade). No design doc yet.
 
 ## Model of the problem
 

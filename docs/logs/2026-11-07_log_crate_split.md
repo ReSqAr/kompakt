@@ -135,7 +135,25 @@ Evidence for shared fakes: `RaftLeadership` is faked twice
 `StaticLiveness`), `Replica` twice, `StateReplicator` twice (`FakeRaft`,
 `NoopReplicator`), plus nvzn already ships `nvzn::testing`.
 
+### D10. One fake crate per foundation group
+
+`zslg-time-fake`, `zslg-log-fake`, `zslg-snapshot-fake`, `zslg-consensus-fake`,
+`zslg-net-fake`: each depends only on its own group and the groups below it, and
+is a dev-dependency of implementation crates (and of nvzn). Fault hooks that
+need an implementation's internals stay as a `testing` feature on the owning
+crate (D9). Rejected: one `zslg-testing` crate (every test pulls every group),
+one fake per port (fakes in a group cooperate, e.g. fake log + fake reader).
+
+## Finding: the consumer surface is small
+
+nlnr uses only `zslg::Hlc` and `zslg::ObjectStoreConfig` and never matches on
+`zslg::Error`. nvzn uses only ports and foundation types (`Reader` 28x, `Error`
+24x, `Writer`, `ByteSize`, `Hlc`, `DataId`, `StableStream`, `UnstableEvent`,
+`Data`, `LogIndex`, `PeerAddr`) plus `configure_prometheus`/`describe_metrics`/
+`ReplicaNode::start` in btrb. So after D8 nvzn can depend on the foundation
+groups alone, without RocksDB or raft; btrb is the composition root.
+
 ## Open
 
-- Q10: fakes as one `zslg-testing` crate, one fake crate per foundation group
-  (next to the group), or one per port?
+- Q11: do consumers import from the group crates directly (nvzn -> log/time),
+  or only through `zslg` facade re-exports?
