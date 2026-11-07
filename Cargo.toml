@@ -57,6 +57,7 @@ zstd = { version = "0", default-features = false }
 
 btrb = { path = "crates/btrb" }
 crossbeam-combinators = { path = "crates/crossbeam-combinators" }
+error-union = { path = "crates/error-union" }
 nvzn = { path = "crates/nvzn" }
 objectstorage-cache = { path = "crates/objectstorage-cache" }
 zslg = { path = "crates/zslg" }
