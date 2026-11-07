@@ -325,3 +325,18 @@ set from another crate fails with "Not a declared error set". `terrors` 0.3.3 â€
 works across crates, but type-level `OneOf<(..)>` sets replace `match` with
 `narrow::<T>()` at ~140 match sites and inside ten channel signatures.
 `thiserror`/`snafu`/`derive_more`/`error-stack` have no subset conversion.
+
+### D17. `metrics-kit` is a workspace-wide library; nvzn applies D5 too
+
+User's proposal: relax "nvzn cannot use zslg-metrics-kit" by making the kit not
+zslg's. `metrics-kit` (no prefix) sits beside `crossbeam-combinators` as a
+domain-free workspace library; D11 governs zslg's domain layering, not shared
+mechanism. Required to make it domain-free: the hard-coded `"zslg_"` prefix
+becomes a namespace argument (the internal `metrics_impl!` already takes one),
+and the `hlc` row form becomes a generic conversion row with the `Hlc`
+conversion in `zslg-time-types`. Evidence it helps beyond nvzn's split: nvzn
+already hand-writes a duplicate mechanism (`MetricKind`, `MetricDef`,
+`METRIC_PREFIX = "nvzn_"`, ~40 name constants). Consequence: the central
+`nvzn-metrics` crate is dropped; nvzn's vocabulary moves to its emitting
+crates; `StopReason` (public, shared) goes to `nvzn-types`; a golden test pins
+nvzn's metric names.

@@ -88,7 +88,7 @@ normal dependencies; dev-dependencies follow §7.3.
 
 | role | names | contents | may depend on |
 |---|---|---|---|
-| library | `zslg-bytesize`, `-warn-throttle`, `-lifecycle`, `-shutdown`, `-framing`, `-metrics-kit`, `-database`, `-error-union` | code that knows no zslg domain | other libraries |
+| library | `zslg-bytesize`, `-warn-throttle`, `-lifecycle`, `-shutdown`, `-framing`, `-database`, `-error-union`; workspace-wide: `metrics-kit` | code that knows no zslg domain | other libraries |
 | types | `zslg-<group>-types` | data, invariants over it, shared cells, the group's leaf error, label enums | libraries, lower types |
 | ports | `zslg-<group>` | traits, the crate's error union; re-exports its group's types | types, lower ports, libraries |
 | procedure | `zslg-quorum-read`, `zslg-net-wire` | shared logic over the foundation, implements no port | ports, types, libraries |
@@ -201,7 +201,7 @@ zslg-net-types         PeerAddr, HostPort, ServerName, RPC messages, NetError
 ```
 
 The chain is `time ← log ← snapshot ← consensus ← raft ← net`. Each types crate
-depends on `zslg-metrics-kit` for its label enums (§4.5).
+depends on `metrics-kit` for its label enums (§4.5).
 
 ### 4.2 Ports crates
 
@@ -270,7 +270,15 @@ match on `zslg::Error`; nvzn's uses are `Result<_, zslg::Error>`.
 ### 4.5 Metrics
 
 `metrics.rs` (2.7k) is cut at its `// ── section ──` markers (D5).
-`zslg-metrics-kit` keeps the mechanism. Label enums that appear in port
+`metrics-kit` keeps the mechanism (`MetricDef`, `MetricKind`, the registry
+macro, `label_enum!`, probes, `describe_all`). It is a workspace-wide library
+like `crossbeam-combinators`, not part of zslg's layering, so nvzn uses it too
+(D17). Two things make today's mechanism zslg-specific and are moved out when
+the kit is extracted: the hard-coded `"zslg_"` prefix becomes the macro's
+namespace argument (the internal `metrics_impl!` already takes one), and the
+`hlc` row form (`(arg: Hlc)` → `set_hlc_gauge`) becomes a generic
+"gauge from a conversion" row, with the `Hlc` → physical-ms conversion living
+in `zslg-time-types`. Label enums that appear in port
 signatures or are shared by two implementations live in the types crates;
 everything else lives with the crate that emits it, as a `METRICS` slice plus
 emission helpers. `zslg-observability` concatenates them in
@@ -474,7 +482,6 @@ types/ports split and no error crate.
 | `nvzn-store-rocksdb` | implementation | `store/rocksdb.rs` |
 | `nvzn-store-fake` | fake | `store/inmemory.rs` |
 | `nvzn-resultset` | implementation | `resultset/` |
-| `nvzn-metrics` | types | `metrics.rs` (central vocabulary, see below) |
 | `nvzn-dispatcher` | implementation | `dispatcher/` |
 | `nvzn-live` | implementation | `live.rs` |
 | `nvzn-reader` | assembly | `reader.rs` |
@@ -489,9 +496,13 @@ open point is `Subscriptions` (dispatcher's live-subscriber registry, read by
 implements. I'll decide it with you when the move gets there, not by
 improvising (§8.1).
 
-nvzn cannot use `zslg-metrics-kit` (D11: nvzn sees only the zslg facade), so
-its ~850 lines of vocabulary stay one `nvzn-metrics` crate, the one place D5 is
-not applied.
+Metrics follow D5 like zslg's (D17): nvzn today hand-writes its own
+`MetricKind`/`MetricDef`/`METRIC_PREFIX` and ~40 name constants; these move
+onto `metrics-kit` with namespace `"nvzn_"`, the vocabulary goes to the crate
+that emits it (dispatcher, live, reader, store-rocksdb), label enums shared by
+two crates (`StopReason`, which is also public) go to `nvzn-types`, and the
+`nvzn` facade concatenates the slices in `describe_metrics()`. A golden test
+pins nvzn's names as §8.2 does for zslg.
 
 ---
 
@@ -543,10 +554,12 @@ Changed in this pass:
 4. §3.5/§6: new role *assembly* (8 crates); the facade only re-exports.
 5. §7.3: no dev-dependencies between implementations; such tests move up.
 6. §9: nvzn's `reader` is an assembly; `Subscriptions` is an open point.
+7. §4.5/§9: `metrics-kit` is workspace-wide (D17); nvzn applies D5 and the
+   central `nvzn-metrics` crate is gone.
 
 Carried over: `ordered.rs` split by the orphan rule (§4.2); libraries usable
-by implementations, incl. `zslg-database` (§5.5); central `nvzn-metrics`
-(§9); the nested `Error` match (§4.4).
+by implementations, incl. `zslg-database` (§5.5); the nested `Error` match
+(§4.4).
 
 ---
 
@@ -557,7 +570,8 @@ first.
 
 ```text
  1  layering test (roles from names; passes trivially on today's two crates)
- 2  libraries: bytesize, warn-throttle, lifecycle, shutdown, framing, metrics-kit,
+ 2  libraries: metrics-kit (namespace argument, generic conversion row), bytesize,
+    warn-throttle, lifecycle, shutdown, framing,
     database, error-union
  3  types: time, log, snapshot, consensus, raft, net  (+ the four moves of §4.3)
  4  ports: time, log, snapshot, consensus (+ ClusterBootstrap), net
@@ -573,8 +587,9 @@ first.
  ── checkpoint: no implementation code left in zslg
 13  assemblies: raft-setup, learner, leader, observability, the four nodes
 14  facade reduced to pub use + integration tests + examples
-15  nvzn: types, metrics, store, store-overlay, store-rocksdb, store-fake,
-    resultset, dispatcher, live, reader, facade
+15  nvzn: metrics onto metrics-kit (names pinned by golden test), types, store,
+    store-overlay, store-rocksdb, store-fake, resultset, dispatcher, live,
+    reader, facade
 ```
 
 After step 15 a post document records the review, surprises and build-time
