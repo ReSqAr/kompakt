@@ -192,6 +192,35 @@ impl be separate" (yes):
   `Reader`/`Writer`: a fake of the `log` group (D10). It moves to
   `zslg-log-fake`; `nvzn::testing` keeps the store helpers and re-exports it.
 
+### D13. One PR, one commit per crate, strictly one crate at a time
+
+A single branch and PR; each commit extracts exactly one crate and is green
+(fmt, clippy `-D warnings`, tests). Large moves are fine, mixed moves are not:
+if a crate needs a prerequisite move (e.g. one of the four misplaced items), the
+prerequisite is its own commit before it. Order is bottom-up along the crate DAG.
+Rejected: a PR per layer (user is comfortable reviewing large mostly-move
+changes) and a PR per crate (many round trips for pieces that only make sense
+together).
+
+## Derived, not asked: feature flags
+
+`s3` (object_store/aws), `prometheus`, `tokio-console`, `jemalloc`,
+`heap-profiling` each have one or two `cfg` sites. Each feature lives with its
+owning crate (`s3` with the snapshot object-store implementation, the others
+with observability/process gauges) and the `zslg` facade forwards it, so
+consumers' feature names (`zslg/prometheus`, `zslg/s3`, `zslg/jemalloc`) do not
+change.
+
+## Finding: raft `startup` is coupled to the openraft handle, not to its siblings
+
+`startup/` calls `raft.inner().initialize / client_write / metrics / wait`: it
+drives an `openraft::Raft` through its lifecycle. `raft_storage` and `rpc` are
+openraft's own plug points (storage traits, network factory) and never touch
+`RaftNode`. openraft's traits are already the ports for those two, and
+`RaftNode::new` already takes a ready `Raft`; only `setup_raft` (adopts
+storage, wires router, spawns watchers) joins them, i.e. it is composition.
+
 ## Open
 
-- Q13: how does the change land — one PR, a PR per layer, or a PR per crate?
+- Q14: `startup` + `RaftNode` — one crate (honest coupling around the openraft
+  handle), or split the startup decision procedure from the openraft calls?
