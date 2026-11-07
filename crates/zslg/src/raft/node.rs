@@ -23,8 +23,9 @@ use openraft::raft::{
 };
 use tracing::info;
 
-use crate::error::{Error, ToRaft};
+use crate::error::Error;
 use crate::metrics;
+use zslg_consensus::ToRaft;
 use zslg_consensus_types::RaftGeneration;
 use zslg_consensus_types::ReplicatedRaftState;
 use zslg_net_types::{PeerAddr, ServerName};

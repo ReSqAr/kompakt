@@ -15,19 +15,19 @@
 use rocksdb_kit::Batch;
 use rocksdb_kit::ColumnFamily;
 use uuid::Uuid;
-use zslg_log_types::LogError;
+use zslg_log::LogError;
 
 use crate::Error;
-use crate::error::ToStorage;
 use rocksdb_kit::Storage;
-use zslg_node_types::NodeId;
+use zslg_consensus::NodeId;
+use zslg_log::ToStorage;
 
 /// This column family's only row.
 const KEY: &[u8] = b"node_id";
 
 /// Idempotent across restarts, and durable before it returns — a caller that
 /// gets an id may act on it immediately.
-pub(crate) fn load_or_create_node_id(storage: &Storage) -> Result<NodeId, Error> {
+pub fn load_or_create_node_id(storage: &Storage) -> Result<NodeId, Error> {
     let cf = storage.cf(NODE_ID_CF)?;
     if let Some(bytes) = storage.get_pinned(&cf, KEY).to_storage("node id read")? {
         let raw: [u8; 16] = bytes.as_ref().try_into().map_err(|_| {
@@ -35,19 +35,19 @@ pub(crate) fn load_or_create_node_id(storage: &Storage) -> Result<NodeId, Error>
                 "node id record corrupt: wrong length".to_owned(),
             ))
         })?;
-        return Ok(NodeId(Uuid::from_bytes(raw)));
+        return Ok(NodeId::from_uuid(Uuid::from_bytes(raw)));
     }
 
     let id = NodeId::new_v4();
     let mut batch = Batch::new();
-    batch.put(&cf, KEY, id.0.as_bytes());
+    batch.put(&cf, KEY, id.into_uuid().as_bytes());
     storage.write(batch)?;
     storage.fence()?;
     Ok(id)
 }
 
 /// The write-once node identity row.
-pub(crate) const NODE_ID_CF: ColumnFamily = ColumnFamily::new("node_id");
+pub const NODE_ID_CF: ColumnFamily = ColumnFamily::new("node_id");
 
 #[cfg(test)]
 #[allow(
@@ -58,10 +58,19 @@ pub(crate) const NODE_ID_CF: ColumnFamily = ColumnFamily::new("node_id");
 )]
 mod tests {
     use super::*;
-    use rocksdb_kit::Storage;
+    use bytesize::ByteSize;
+    use rocksdb_kit::{CfSpec, StorageConfig};
 
     fn test_storage(root: &std::path::Path) -> std::sync::Arc<Storage> {
-        crate::database::open_for_test(root).expect("open test storage")
+        Storage::open(
+            root,
+            StorageConfig::new(ByteSize::from_mib(16)),
+            &[CfSpec {
+                cf: NODE_ID_CF,
+                compress: false,
+            }],
+        )
+        .expect("open test storage")
     }
 
     #[tokio::test]

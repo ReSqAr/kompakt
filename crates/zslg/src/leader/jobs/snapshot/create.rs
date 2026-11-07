@@ -32,10 +32,10 @@ use zslg_log_types::LogError;
 use zslg_net::Router;
 use zslg_snapshot::SnapshotStore;
 
-use crate::error::ToStorage;
 use crate::error::{Error, Home};
 use crate::metrics::{self, SnapshotState, SnapshotStep};
 use crossbeam_combinators::{Channel, Finite};
+use zslg_log::ToStorage;
 use zslg_log::{LocalStoreView, StableLogSnapshot};
 use zslg_log_types::LogIndex;
 use zslg_log_types::SnapshotEntry;

@@ -18,7 +18,7 @@ pub(crate) async fn build_raft_for_test<NF>(
 where
     NF: openraft::RaftNetworkFactory<TypeConfig>,
 {
-    use crate::error::ToRaft as _;
+    use zslg_consensus::ToRaft as _;
     let (log_store, sm) = RocksRaftStorage::open(raft_state, open_test_storage(dir)?)
         .await?
         .into_adaptor();

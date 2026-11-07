@@ -20,13 +20,14 @@ use zslg_net::Router;
 
 use openraft::storage::Adaptor;
 
-use crate::error::{Error, ToRaft};
+use crate::error::Error;
 use crate::raft::raft_storage::RocksRaftStorage;
 use crate::raft::rpc::NetworkFactory;
 use crate::raft::rpc::PeerRegistrationWatcher;
 use crate::raft::state::RaftStatePublisher;
 use rocksdb_kit::Storage;
 use shutdown::Shutdown;
+use zslg_consensus::ToRaft;
 use zslg_consensus_types::RaftStateHandle;
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;

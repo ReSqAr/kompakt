@@ -1,0 +1,28 @@
+[package]
+name = "zslg-node-id"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "The write-once node identity"
+publish = false
+
+[dependencies]
+error-union = { workspace = true }
+rocksdb-kit = { workspace = true }
+uuid = { workspace = true }
+zslg-consensus = { workspace = true }
+zslg-lifecycle-types = { workspace = true }
+zslg-log = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+bytesize = { workspace = true }
+rocksdb-kit = { workspace = true, features = ["testing"] }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "implementation"

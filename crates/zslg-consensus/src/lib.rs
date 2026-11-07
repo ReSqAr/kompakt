@@ -25,7 +25,7 @@ pub use zslg_consensus_types::{
     CandidateInfo, ConsensusError, EvictionStatus, Exit, InvalidRaftState, RaftGeneration,
     RaftLogIndex, RaftManifestState, RaftState, RaftStateError, RaftStateHandle, ReplicaMembership,
     ReplicaStatus, ReplicatedRaftState, SpareSelectionStrategy, StaleStateWrite, SubscriptionEnded,
-    UnexpectedNodeId, all_targets, drain_satisfied, is_quorum, validate_cutoff_advance,
+    ToRaft, UnexpectedNodeId, all_targets, drain_satisfied, is_quorum, validate_cutoff_advance,
     validate_replicated_state, validate_transition,
 };
 pub use zslg_node_types::NodeId;

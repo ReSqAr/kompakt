@@ -44,9 +44,10 @@ use super::rejoin::{
     RejoinProbe, RpcRejoinProbe,
 };
 
-use crate::error::{Error, ToRaft};
+use crate::error::Error;
 use crate::raft::{RaftNode, membership_map};
 use shutdown::Shutdown;
+use zslg_consensus::ToRaft;
 use zslg_consensus_types::EvictionStatus;
 use zslg_consensus_types::RaftGeneration;
 use zslg_consensus_types::ReplicatedRaftState;

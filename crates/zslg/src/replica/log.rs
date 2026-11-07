@@ -44,13 +44,13 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
 use crate::error::Error;
-use crate::error::ToStorage;
 use crate::hlc::HlcGuard;
 use crate::metrics::{self, FlushTrigger, LogType, OpState};
 use crossbeam_combinators::{
     Channel, Fanout, FanoutConfig, OverflowPolicy, Registry, Seam, Segment, broadcast,
 };
 use rocksdb_kit::Storage;
+use zslg_log::ToStorage;
 use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};
 use zslg_time_types::Hlc;

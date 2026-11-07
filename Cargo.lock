@@ -4471,6 +4471,7 @@ dependencies = [
  "zslg-net",
  "zslg-net-types",
  "zslg-net-wire",
+ "zslg-node-id",
  "zslg-node-types",
  "zslg-object-store-config",
  "zslg-quorum-read",
@@ -4609,6 +4610,21 @@ dependencies = [
  "zslg-raft",
  "zslg-snapshot",
  "zslg-time",
+]
+
+[[package]]
+name = "zslg-node-id"
+version = "0.1.0"
+dependencies = [
+ "bytesize",
+ "error-union",
+ "rocksdb-kit",
+ "tempfile",
+ "tokio",
+ "uuid",
+ "zslg-consensus",
+ "zslg-lifecycle-types",
+ "zslg-log",
 ]
 
 [[package]]

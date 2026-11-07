@@ -40,7 +40,6 @@ tikv-jemallocator = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "fs", "signal", "net"] }
 tokio-util = { workspace = true, features = ["io-util"] }
 tracing = { workspace = true }
-uuid = { workspace = true, features = ["serde"] }
 warn-throttle = { workspace = true }
 zslg-consensus = { workspace = true }
 zslg-consensus-types = { workspace = true }
@@ -53,6 +52,7 @@ zslg-net-types = { workspace = true }
 zslg-node-types = { workspace = true }
 zslg-quorum-read = { workspace = true }
 zslg-object-store-config = { workspace = true }
+zslg-node-id = { workspace = true }
 zslg-raft = { workspace = true }
 zslg-raft-types = { workspace = true }
 zslg-snapshot = { workspace = true }
@@ -62,6 +62,7 @@ zslg-time-types = { workspace = true }
 zstd = { workspace = true }
 
 [dev-dependencies]
+uuid = { workspace = true, features = ["serde"] }
 zslg-net-wire = { workspace = true, features = ["testing"] }
 rocksdb-kit = { workspace = true, features = ["testing"] }
 clap = { workspace = true, features = ["env"] }

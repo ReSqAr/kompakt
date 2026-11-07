@@ -4,9 +4,7 @@
 //! its own column family (`STABLE_LOG_CF`, `REPLICA_LOG_CF`, ...); the node
 //! names the ones it wires when it opens the DB, and nothing else is created.
 
-mod node_id;
-
-pub(crate) use self::node_id::{NODE_ID_CF, load_or_create_node_id};
+pub(crate) use zslg_node_id::{NODE_ID_CF, load_or_create_node_id};
 
 #[cfg(test)]
 use std::path::Path;

@@ -65,12 +65,13 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use zslg_raft_types::NodeInfo;
 
-use crate::error::{Error, ToStorage};
+use crate::error::Error;
 use crate::metrics::{self, LogType};
 use zslg_consensus_types::RaftGeneration;
 use zslg_consensus_types::RaftLogIndex;
 use zslg_consensus_types::RaftStateHandle;
 use zslg_consensus_types::ReplicaMembership;
+use zslg_log::ToStorage;
 use zslg_log_types::ToCodec;
 use zslg_node_types::NodeId;
 use zslg_raft_types::{RaftResponse, TypeConfig};

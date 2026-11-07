@@ -484,3 +484,16 @@ impl<T, E: std::fmt::Display> ToCodec<T> for Result<T, E> {
         self.map_err(|e| LogError::Codec(format!("{context}: {e}")))
     }
 }
+
+/// Adapt any displayable error into [`LogError::Storage`], prefixed with what was being done.
+pub trait ToStorage<T> {
+    /// # Errors
+    /// The original error, rendered into a [`LogError::Storage`] with `context`.
+    fn to_storage(self, context: &str) -> Result<T, LogError>;
+}
+
+impl<T, E: std::fmt::Display> ToStorage<T> for Result<T, E> {
+    fn to_storage(self, context: &str) -> Result<T, LogError> {
+        self.map_err(|e| LogError::Storage(format!("{context}: {e}")))
+    }
+}

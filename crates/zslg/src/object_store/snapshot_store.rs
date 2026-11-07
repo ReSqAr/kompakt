@@ -50,12 +50,12 @@ use tracing::{debug, info, warn};
 
 use crate::Error;
 
-use crate::error::ToStorage as _;
 use crate::metrics::{self, ObjectStoreOp, OpState};
 use crate::object_store::framing;
 use crossbeam_combinators::Channel;
 #[cfg(test)]
 use zslg_consensus_types::ReplicaMembership;
+use zslg_log::ToStorage as _;
 use zslg_log_types::SnapshotEntry;
 use zslg_snapshot_types::CompressionLevel;
 use zslg_snapshot_types::SnapshotId;

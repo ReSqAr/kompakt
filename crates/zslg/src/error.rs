@@ -47,6 +47,7 @@ error_union! {
     from zslg_net_wire::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_quorum_read::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_object_store_config::Error { Snapshot }
+    from zslg_node_id::Error { Config, Log }
 }
 
 /// Bring a value that carries a port crate's error back to zslg's own `Error`:
@@ -283,26 +284,6 @@ impl From<bytesize::OutOfRange> for Error {
     }
 }
 
-pub(crate) trait ToStorage<T> {
-    fn to_storage(self, context: &str) -> Result<T, LogError>;
-}
-
-impl<T, E: std::fmt::Display> ToStorage<T> for Result<T, E> {
-    fn to_storage(self, context: &str) -> Result<T, LogError> {
-        self.map_err(|e| LogError::Storage(format!("{context}: {e}")))
-    }
-}
-
-pub(crate) trait ToRaft<T> {
-    fn to_raft(self, context: &str) -> Result<T, ConsensusError>;
-}
-
-impl<T, E: std::fmt::Display> ToRaft<T> for Result<T, E> {
-    fn to_raft(self, context: &str) -> Result<T, ConsensusError> {
-        self.map_err(|e| ConsensusError::Raft(format!("{context}: {e}")))
-    }
-}
-
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -313,6 +294,8 @@ impl<T, E: std::fmt::Display> ToRaft<T> for Result<T, E> {
 )]
 mod tests {
     use super::*;
+    use zslg_consensus::ToRaft as _;
+    use zslg_log::ToStorage as _;
     use zslg_net_types::ToRpc as _;
 
     /// `Error` rides in every streamed channel item — a `Channel<Result<T, Error>>`

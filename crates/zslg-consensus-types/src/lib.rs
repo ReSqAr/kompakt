@@ -19,3 +19,16 @@ pub use types::{
     ReplicatedRaftState, SpareSelectionStrategy, all_targets, is_quorum,
 };
 pub use validators::{validate_cutoff_advance, validate_replicated_state, validate_transition};
+
+/// Adapt any displayable error into [`ConsensusError::Raft`], prefixed with what was being done.
+pub trait ToRaft<T> {
+    /// # Errors
+    /// The original error, rendered into a [`ConsensusError::Raft`] with `context`.
+    fn to_raft(self, context: &str) -> Result<T, ConsensusError>;
+}
+
+impl<T, E: std::fmt::Display> ToRaft<T> for Result<T, E> {
+    fn to_raft(self, context: &str) -> Result<T, ConsensusError> {
+        self.map_err(|e| ConsensusError::Raft(format!("{context}: {e}")))
+    }
+}

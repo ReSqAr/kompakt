@@ -119,7 +119,6 @@ use parking_lot::Mutex as SyncMutex;
 use rocksdb_kit::Batch;
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::error::ToStorage;
 use crate::error::{Error, Home};
 use crate::metrics::{self, LogType, OpState};
 use crossbeam_combinators::{
@@ -127,6 +126,7 @@ use crossbeam_combinators::{
     broadcast,
 };
 use rocksdb_kit::Storage;
+use zslg_log::ToStorage;
 use zslg_log_types::LogIndex;
 use zslg_log_types::ToCodec;
 use zslg_log_types::{Data, SnapshotEntry, StableLogEvent};

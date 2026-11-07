@@ -43,10 +43,10 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tracing::error;
 
-use crate::error::ToStorage;
 use crate::error::{Error, Home};
 use crate::metrics::{self, LocalWriteKind, LogType, OpState};
 use zslg_log::StableLogSnapshot;
+use zslg_log::ToStorage;
 use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};
 use zslg_node_types::NodeId;

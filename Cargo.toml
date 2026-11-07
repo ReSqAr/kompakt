@@ -78,6 +78,7 @@ zslg-net-types = { path = "crates/zslg-net-types" }
 zslg-node-types = { path = "crates/zslg-node-types" }
 zslg-quorum-read = { path = "crates/zslg-quorum-read" }
 zslg-object-store-config = { path = "crates/zslg-object-store-config" }
+zslg-node-id = { path = "crates/zslg-node-id" }
 zslg-raft = { path = "crates/zslg-raft" }
 zslg-raft-types = { path = "crates/zslg-raft-types" }
 zslg-snapshot = { path = "crates/zslg-snapshot" }
