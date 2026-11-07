@@ -31,10 +31,10 @@
 //! shaped around.
 
 use crate::Error;
-use crate::hlc::Hlc;
 use crate::ids::LogIndex;
 use crate::meta::{Data, StableLogEvent, UnstableEvent};
 use crossbeam_combinators::{Channel, Contiguous, Infinite, OrderedChannel};
+use zslg_time_types::Hlc;
 
 /// The stable-log read: gapless indices, strictly after the caller's `after`.
 pub type StableStream =

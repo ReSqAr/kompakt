@@ -12,10 +12,10 @@
 //! into one proposal — and `raft::RaftNode` the only implementor, which
 //! validates again at apply (CLAUDE.md §12).
 
-use crate::Hlc;
 use crate::ids::RaftGeneration;
 use crate::meta::{ReplicaMembership, SnapshotMetadata};
 use serde::{Deserialize, Serialize};
+use zslg_time_types::Hlc;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub(crate) struct ReplicatedRaftState {

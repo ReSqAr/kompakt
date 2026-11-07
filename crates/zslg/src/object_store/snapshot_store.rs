@@ -490,11 +490,11 @@ mod tests {
     use object_store::memory::InMemory;
 
     use super::*;
-    use crate::hlc::Hlc;
     use crate::ids::LogIndex;
     use crate::meta::SnapshotMetadata;
     use crate::object_store::CompressionLevel;
     use crate::raft::RaftStateHandle;
+    use zslg_time_types::Hlc;
 
     /// Retention for the cleanup tests below. `cleanup_snapshots` takes it
     /// per-call rather than reading it off the store.

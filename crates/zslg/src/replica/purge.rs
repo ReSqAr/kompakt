@@ -30,8 +30,8 @@ use tracing::{debug, warn};
 
 use crate::api::RaftStateView;
 use crate::error::Error;
-use crate::hlc::{Hlc, hlc_subtract};
 use crate::replica::ReplicaLogStore;
+use zslg_time_types::{Hlc, hlc_subtract};
 
 /// Don't hand over a new purge threshold more than once per interval even if
 /// the watermark advances faster. The handoff walks the newly covered prefix
@@ -138,7 +138,7 @@ fn purge_once(
 )]
 mod tests {
     use super::*;
-    use crate::hlc::HlcParts;
+    use zslg_time_types::HlcParts;
 
     /// Build an HLC with the given physical milliseconds and a zero logical
     /// component — `hlc_subtract` always zeroes the logical part, so this makes

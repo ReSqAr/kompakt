@@ -68,9 +68,9 @@ pub(crate) mod writer;
 pub(crate) mod writer_node;
 
 pub use crate::api::{RaftStateView, Reader, StableStream, Writer};
-pub use crate::error::{ClockError, ConsensusError, Error, LogError, NetError, SnapshotError};
+pub use crate::error::{ConsensusError, Error, LogError, NetError, SnapshotError};
 pub use crate::follower_node::{FollowerNode, FollowerNodeConfig};
-pub use crate::hlc::{Hlc, HlcClock};
+pub use crate::hlc::HlcClock;
 pub use crate::ids::{
     DataId, HostPort, LogIndex, NodeId, PeerAddr, RaftGeneration, ServerName, SnapshotId,
 };
@@ -89,6 +89,7 @@ pub use crate::replica_node::{InitialisingReplicaNode, ReplicaNode, ReplicaNodeC
 pub use crate::writer_node::{WriterNode, WriterNodeConfig};
 pub use bytesize::ByteSize;
 pub use zslg_lifecycle_types::{ConfigError, LifecycleError};
+pub use zslg_time_types::{ClockError, Hlc};
 
 pub(crate) fn jitter(d: std::time::Duration) -> std::time::Duration {
     let ms = u64::try_from(d.as_millis()).unwrap_or(u64::MAX);

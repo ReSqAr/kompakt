@@ -16,7 +16,7 @@ use std::net::SocketAddr;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::hlc::Hlc;
+use zslg_time_types::Hlc;
 
 /// Unique node identifier (UUID-backed, persisted across restarts).
 #[derive(

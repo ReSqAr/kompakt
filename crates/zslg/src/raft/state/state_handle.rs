@@ -220,9 +220,9 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
-    use crate::hlc::Hlc;
     use crate::ids::{LogIndex, NodeId, SnapshotId};
     use crate::meta::{ReplicaMembership, SnapshotMetadata};
+    use zslg_time_types::Hlc;
 
     fn make_gen(n: u64) -> RaftGeneration {
         RaftGeneration(n)

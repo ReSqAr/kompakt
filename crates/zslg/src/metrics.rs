@@ -46,7 +46,7 @@ pub(crate) use metrics_kit::OpState;
 #[cfg(test)]
 use metrics_kit::{LABEL_NONE, MetricKind, set_flag};
 
-use crate::hlc::Hlc;
+use zslg_time_types::Hlc;
 
 /// HLC gauges export the physical-millisecond part: the raw `u64` exceeds f64's
 /// exact-integer range.

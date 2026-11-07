@@ -7,9 +7,9 @@
 use crossbeam_combinators::{Key, Successor};
 
 use crate::error::Error;
-use crate::hlc::Hlc;
 use crate::ids::{DataId, LogIndex};
 use crate::meta::{Data, SnapshotEntry, StableLogEvent};
+use zslg_time_types::Hlc;
 
 impl Successor for LogIndex {
     fn next_after(prev: Option<Self>) -> Self {
@@ -44,23 +44,14 @@ impl Key<Result<Data, Error>> for DataId {
     }
 }
 
-/// An archive entry's HLC: index order implies HLC order, guarded by `also`.
-impl Key<Result<SnapshotEntry, Error>> for Hlc {
-    fn key(item: &Result<SnapshotEntry, Error>) -> Option<Self> {
-        item.as_ref().ok().map(|entry| entry.data.data_id.hlc())
+impl zslg_time_types::HasHlc for Data {
+    fn hlc(&self) -> Option<Hlc> {
+        Some(self.data_id.hlc())
     }
 }
 
-/// A replayed stable-log entry's HLC, guarded the same way.
-impl Key<Result<(LogIndex, Data), Error>> for Hlc {
-    fn key(item: &Result<(LogIndex, Data), Error>) -> Option<Self> {
-        item.as_ref().ok().map(|(_, data)| data.data_id.hlc())
-    }
-}
-
-/// A local-store entry's HLC group: what a snapshot chunk must not split.
-impl Key<Result<Data, Error>> for Hlc {
-    fn key(item: &Result<Data, Error>) -> Option<Self> {
-        item.as_ref().ok().map(|data| data.data_id.hlc())
+impl zslg_time_types::HasHlc for SnapshotEntry {
+    fn hlc(&self) -> Option<Hlc> {
+        Some(self.data.data_id.hlc())
     }
 }

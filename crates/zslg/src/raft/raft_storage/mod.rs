@@ -63,12 +63,12 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, ToCodec, ToStorage};
-use crate::hlc::Hlc;
 use crate::ids::{NodeId, RaftGeneration};
 use crate::meta::ReplicaMembership;
 use crate::metrics::{self, LogType};
 use crate::raft::RaftStateHandle;
 use crate::raft::{RaftLogIndex, RaftResponse, TypeConfig};
+use zslg_time_types::Hlc;
 
 /// The raft log.
 pub(crate) const RAFT_LOG_CF: ColumnFamily = ColumnFamily::new("raft_log");

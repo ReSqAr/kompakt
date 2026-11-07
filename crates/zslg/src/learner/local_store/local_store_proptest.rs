@@ -70,7 +70,7 @@ use crate::tests::upstream as upstream_for;
 fn data_id_for(slot: u8) -> DataId {
     // Node-independent on purpose: dedup is keyed by the data id alone, so the
     // same slot integrated from different upstreams must collide.
-    DataId::test_id(crate::Hlc(0), u64::from(slot))
+    DataId::test_id(zslg_time_types::Hlc(0), u64::from(slot))
 }
 
 fn record_for(op: &Op) -> Data {

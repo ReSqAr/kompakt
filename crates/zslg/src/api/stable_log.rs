@@ -26,9 +26,9 @@
 
 use crossbeam_combinators::Channel;
 
-use crate::hlc::Hlc;
 use crate::ids::LogIndex;
 use crate::meta::{Data, SnapshotEntry, StableLogEvent};
+use zslg_time_types::Hlc;
 
 #[async_trait::async_trait]
 pub(crate) trait StableLogSnapshot: Send + Sync + 'static {

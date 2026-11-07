@@ -25,11 +25,11 @@ use tracing::{debug, info, warn};
 
 use crate::api::{Clock, RaftStateView};
 use crate::error::Error;
-use crate::hlc::Hlc;
 use crate::ids::NodeId;
 use crate::leader::integrator::{IntentOutcome, IntentSubmitter, RaftIntent};
 use crate::leader::jobs::is_local_leader;
 use crate::metrics::{self, LeaderJob, SnapshotState, SnapshotStep};
+use zslg_time_types::Hlc;
 
 /// Spawn `leader:cutoff` on the shutdown tree.
 pub(in crate::leader) fn spawn(
@@ -146,8 +146,8 @@ pub(in crate::leader) fn next_cutoff(
 #[must_use]
 pub(in crate::leader) fn compute_cutoff(clock: &dyn Clock, lag: Duration) -> Hlc {
     let parts = clock.now().parts();
-    let lag_ms = crate::hlc::duration_as_ms_clamped(lag);
-    Hlc::from_parts(crate::hlc::HlcParts {
+    let lag_ms = zslg_time_types::duration_as_ms_clamped(lag);
+    Hlc::from_parts(zslg_time_types::HlcParts {
         physical_ms: parts.physical_ms.saturating_sub(lag_ms),
         logical: 0,
     })

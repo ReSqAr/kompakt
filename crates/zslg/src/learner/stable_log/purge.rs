@@ -16,8 +16,8 @@ use tracing::{debug, warn};
 
 use crate::api::{RaftStateView, StableLogSnapshot};
 use crate::error::Error;
-use crate::hlc::{Hlc, hlc_subtract};
 use crate::metrics;
+use zslg_time_types::{Hlc, hlc_subtract};
 
 /// Don't hand over a new purge threshold more than once per interval even if
 /// the watermark advances faster. The handoff is a scan to find the boundary
@@ -136,7 +136,7 @@ fn purge_once_blocking(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hlc::HlcParts;
+    use zslg_time_types::HlcParts;
 
     fn hlc_ms(physical_ms: u64) -> Hlc {
         Hlc::from_parts(HlcParts {

@@ -121,7 +121,6 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use crate::Error;
 use crate::error::{ToCodec, ToStorage};
-use crate::hlc::Hlc;
 use crate::ids::LogIndex;
 use crate::meta::{Data, SnapshotEntry, StableLogEvent};
 use crate::metrics::{self, LogType, OpState};
@@ -130,6 +129,7 @@ use crossbeam_combinators::{
     broadcast,
 };
 use rocksdb_kit::Storage;
+use zslg_time_types::Hlc;
 
 // ── key codec ───────────────────────────────────────────────────────────────
 //

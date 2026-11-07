@@ -210,7 +210,6 @@ mod tests {
     use super::*;
     use crate::api::{CleanupReport, SnapshotStore};
 
-    use crate::hlc::Hlc;
     use crate::ids::{LogIndex, SnapshotId};
     use crate::learner::StableLog;
     use crate::learner::stable_archive::ObjectStoreArchiveReader;
@@ -218,6 +217,7 @@ mod tests {
     use crate::object_store::CompressionLevel;
     use crate::tests::make_data;
     use std::sync::Arc;
+    use zslg_time_types::Hlc;
 
     /// Build the production archive reader over a scripted store, seeded with
     /// `manifest_state` so its snapshot selection sees the same manifest the

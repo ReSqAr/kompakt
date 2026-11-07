@@ -29,8 +29,9 @@ use tracing::debug;
 
 use crate::api::RaftStateView;
 use crate::error::Error;
-use crate::hlc::{Hlc, HlcGate};
+use crate::hlc::HlcGate;
 use crate::metrics::{self, CutoffSetState};
+use zslg_time_types::Hlc;
 
 pub(crate) struct CutoffApplier {
     raft_state: Arc<dyn RaftStateView>,

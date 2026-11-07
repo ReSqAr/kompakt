@@ -14,8 +14,8 @@ use tracing::{debug, warn};
 
 use crate::api::{LocalStoreMut, StableLogSnapshot};
 use crate::error::Error;
-use crate::hlc::{Hlc, hlc_subtract};
 use shutdown::Shutdown;
+use zslg_time_types::{Hlc, hlc_subtract};
 
 /// Floor on the gap between two threshold advances, however fast `end_hlc`
 /// moves.

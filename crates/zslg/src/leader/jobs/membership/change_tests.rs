@@ -25,7 +25,6 @@ use tokio_util::sync::CancellationToken;
 
 use crate::Error;
 use crate::api::{RaftLeadership, ReplicatedRaftState};
-use crate::hlc::Hlc;
 use crate::ids::{NodeId, ServerName};
 use crate::leader::jobs::membership::change::{
     LivenessQuery, MembershipChangeInputs, MembershipChangeManager, needs_retarget,
@@ -37,6 +36,7 @@ use crate::raft::{RaftNode, RaftStateHandle};
 use crate::tests::{
     fast_raft_config as raft_config, wait_for_any_leader, wait_for_leader, wait_until,
 };
+use zslg_time_types::Hlc;
 
 struct LocalObserver {
     states: SyncMutex<BTreeMap<NodeId, RaftStateHandle>>,

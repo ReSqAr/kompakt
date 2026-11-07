@@ -49,7 +49,7 @@ pub struct CompactionTier(Duration);
 
 impl CompactionTier {
     pub(in crate::leader) fn as_millis(&self) -> u64 {
-        crate::hlc::duration_as_ms_clamped(self.0)
+        zslg_time_types::duration_as_ms_clamped(self.0)
     }
 
     pub(in crate::leader) fn as_duration(&self) -> Duration {
@@ -194,7 +194,7 @@ fn group_by_tiers(
     tiers: &[CompactionTier],
     now: Duration,
 ) -> BTreeMap<BucketKey, BTreeSet<SnapshotMetadata>> {
-    let now_ms = crate::hlc::duration_as_ms_clamped(now);
+    let now_ms = zslg_time_types::duration_as_ms_clamped(now);
 
     let mut buckets: BTreeMap<BucketKey, BTreeSet<SnapshotMetadata>> = BTreeMap::new();
     for meta in manifest {
@@ -283,10 +283,10 @@ async fn merge_group(
 )]
 mod tests {
     use super::*;
-    use crate::Hlc;
-    use crate::hlc::HlcParts;
     use crate::ids::{LogIndex, NodeId};
     use crate::test_stream::ChannelTestExt as _;
+    use zslg_time_types::Hlc;
+    use zslg_time_types::HlcParts;
 
     fn meta(start_ms: u64, end_ms: u64, id: u64) -> SnapshotMetadata {
         SnapshotMetadata {
@@ -387,7 +387,7 @@ mod tests {
             let mut index = 0u64;
             for (seed, gap) in gaps.into_iter().enumerate() {
                 hlc_ms = hlc_ms.saturating_add(gap);
-                let start = Hlc::from_parts(crate::hlc::HlcParts {
+                let start = Hlc::from_parts(zslg_time_types::HlcParts {
                     physical_ms: hlc_ms,
                     logical: 0,
                 });
@@ -505,7 +505,7 @@ mod tests {
     fn make_data(seed: u32, hlc_ms: u64, blob: &[u8]) -> Data {
         Data {
             data_id: DataId::from_parts(
-                Hlc::from_parts(crate::hlc::HlcParts {
+                Hlc::from_parts(zslg_time_types::HlcParts {
                     physical_ms: hlc_ms,
                     logical: 0,
                 }),

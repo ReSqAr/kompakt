@@ -15,13 +15,14 @@ use tokio::sync::watch;
 
 use crate::api::{Clock, Replica, Router, StampedWrite, WriteOutcome};
 use crate::error::Error;
-use crate::hlc::{Hlc, HlcClock, HlcGate};
+use crate::hlc::{HlcClock, HlcGate};
 use crate::ids::{DataId, LogIndex, NodeId, PeerAddr};
 use crate::meta::{RaftState, ReplicaMembership, ReplicaStatus};
 use crate::raft::RaftStateHandle;
 use crate::replica::ReplicaLogStore;
 use crate::replica::ReplicaService;
 use crossbeam_combinators::{Channel, Finite, Infinite};
+use zslg_time_types::Hlc;
 
 /// Control handle for a [`FaultyReplica`]. Clone freely; clones share state.
 #[derive(Clone)]
@@ -566,7 +567,7 @@ pub(crate) struct ReplicaServiceHarness {
     pub(crate) hlc_gate: Arc<HlcGate>,
     /// Publisher for the replica's effective-cutoff watch. Held so tests can
     /// drive cutoff advances (and so the watch isn't closed from the start).
-    pub(crate) cutoff_tx: tokio::sync::watch::Sender<Option<crate::hlc::Hlc>>,
+    pub(crate) cutoff_tx: tokio::sync::watch::Sender<Option<zslg_time_types::Hlc>>,
     _dir: tempfile::TempDir,
     _flush: tokio::task::JoinHandle<Result<(), Error>>,
 }
@@ -645,9 +646,9 @@ mod tests {
 
     use crate::api::Replica;
     use crate::api::Router;
-    use crate::hlc::Hlc;
     use crate::ids::{DataId, NodeId};
     use crate::tests::nid;
+    use zslg_time_types::Hlc;
 
     use super::{DuplicateReplica, MapPeerRouter, ReadyReplica, ReplicaServiceHarness};
 

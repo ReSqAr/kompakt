@@ -4466,6 +4466,7 @@ dependencies = [
  "uuid",
  "warn-throttle",
  "zslg-lifecycle-types",
+ "zslg-time-types",
  "zstd",
 ]
 
@@ -4473,6 +4474,17 @@ dependencies = [
 name = "zslg-lifecycle-types"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "zslg-time-types"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-combinators",
+ "postcard",
+ "proptest",
  "serde",
  "thiserror 2.0.21",
 ]

@@ -26,14 +26,13 @@
     reason = "HLC arithmetic invariants on bounded values (physical_ms ≤ 2^48)"
 )]
 
-use crate::error::ClockError;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use zslg_time_types::ClockError;
 
 use parking_lot::Mutex as SyncMutex;
 
 use crate::error::Error;
-use crate::hlc;
-use crate::hlc::{HLC_MAX_PHYSICAL_MS, Hlc, HlcParts};
+use zslg_time_types::{HLC_MAX_PHYSICAL_MS, Hlc, HlcParts, duration_as_ms_clamped};
 
 pub struct HlcClock {
     inner: SyncMutex<Inner>,
@@ -103,7 +102,7 @@ impl HlcClock {
 
         let drift_ms = peer_parts.physical_ms.abs_diff(pt_ms);
         crate::metrics::hlc_drift(Duration::from_millis(drift_ms));
-        let limit_ms = hlc::duration_as_ms_clamped(self.skew_limit);
+        let limit_ms = duration_as_ms_clamped(self.skew_limit);
         if drift_ms > limit_ms {
             // Direction disambiguates the common latency case (peer stamp older
             // than local → `behind`) from a genuinely fast peer clock (`ahead`).
@@ -219,7 +218,7 @@ fn wall_clock_ms_now() -> u64 {
     let dur = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
-    hlc::duration_as_ms_clamped(dur)
+    duration_as_ms_clamped(dur)
 }
 
 #[cfg(test)]

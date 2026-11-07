@@ -34,7 +34,6 @@ use crate::api::{
 use crate::hlc::CutoffApplier;
 use crate::hlc::HlcClock;
 use crate::hlc::HlcGate;
-use crate::hlc::{Hlc, HlcParts};
 use crate::ids::{LogIndex, NodeId, PeerAddr, SnapshotId};
 use crate::leader::jobs::membership::liveness::LivenessConfig;
 use crate::leader::{CompactionTier, LeaderLoopConfig, SnapshotConfig, spawn_leader_loop};
@@ -51,6 +50,7 @@ use crate::raft::SpareSelectionStrategy;
 use crate::replica::ReplicaLogStore;
 use crate::replica::ReplicaService;
 use shutdown::Shutdown;
+use zslg_time_types::{Hlc, HlcParts};
 
 use crate::tests::fast_raft_config as raft_config;
 use crate::tests::make_data;
@@ -174,7 +174,7 @@ fn spawn_loop(
     Arc<dyn crate::api::ReplicaClient>,
 ) {
     let (drained_cutoff_tx, drained_cutoff_rx) =
-        tokio::sync::watch::channel::<Option<crate::hlc::Hlc>>(None);
+        tokio::sync::watch::channel::<Option<zslg_time_types::Hlc>>(None);
     let applier_cancel = CancellationToken::new();
     tokio::spawn(
         CutoffApplier::new(

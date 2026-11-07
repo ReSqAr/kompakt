@@ -35,7 +35,7 @@ pub(crate) struct CleanupReport {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct EntryMeta {
     pub(crate) index: crate::ids::LogIndex,
-    pub(crate) hlc: crate::hlc::Hlc,
+    pub(crate) hlc: zslg_time_types::Hlc,
 }
 
 /// What a snapshot write produced: the entries and the object's sizes.

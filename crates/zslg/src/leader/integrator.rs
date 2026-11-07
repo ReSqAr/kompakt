@@ -37,10 +37,10 @@ use tracing::{debug, info, warn};
 
 use crate::api::{RaftStateView, ReplicatedRaftState, StateReplicator};
 use crate::error::Error;
-use crate::hlc::Hlc;
 use crate::ids::{LogIndex, RaftGeneration, SnapshotId};
 use crate::meta::{RaftState, ReplicaMembership, SnapshotMetadata};
 use crate::metrics::IntentState;
+use zslg_time_types::Hlc;
 
 /// Queue depth. Every submitter awaits its own reply, so this only has to
 /// absorb one drain's worth of concurrent jobs.

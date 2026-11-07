@@ -52,18 +52,18 @@ use crate::api::{
     ArchiveBounds, ArchiveUpperBound, Clock, LocalStoreView, Reader, StableArchiveReader,
     StableLogSnapshot,
 };
-use crate::hlc::Hlc;
 use crate::ids::{LogIndex, NodeId};
 use crate::learner::QuorumReadDebouncer;
 use crate::meta::{Data, StableLogEvent, UnstableEvent};
 use crate::metrics::{self, ReadEntrySource, ReadSource};
 use crate::raft::EvictionStatus;
 use crossbeam_combinators::{
-    Cancellation, Channel, Contiguous, Finite, Gap, Infinite, Key, NonDecreasing, Opening,
-    Resumable, Seam, StrictlyIncreasing, resync,
+    Cancellation, Channel, Contiguous, Finite, Gap, Infinite, NonDecreasing, Opening, Resumable,
+    Seam, StrictlyIncreasing, resync,
 };
 use std::sync::Arc;
 use zslg_lifecycle_types::LifecycleError;
+use zslg_time_types::Hlc;
 
 /// Whether this node may serve client reads and writes.
 ///
@@ -481,10 +481,10 @@ struct UnstableSeam {
 }
 
 /// `UnstableStep::Entry` sits at its entry's HLC; the other steps have none.
-impl Key<Result<UnstableStep, Error>> for Hlc {
-    fn key(item: &Result<UnstableStep, Error>) -> Option<Self> {
-        match item {
-            Ok(UnstableStep::Entry(data)) => Some(data.data_id.hlc()),
+impl zslg_time_types::HasHlc for UnstableStep {
+    fn hlc(&self) -> Option<Hlc> {
+        match self {
+            UnstableStep::Entry(data) => Some(data.data_id.hlc()),
             _ => None,
         }
     }
@@ -677,9 +677,9 @@ mod tests {
     use crate::{Reader, StableLogEvent};
     use crossbeam_combinators::{Cancellation, Channel, Finite, Infinite};
 
-    use crate::hlc::Hlc;
     use crate::ids::{LogIndex, NodeId};
     use crate::learner::{LocalStore, QuorumReadDebouncer, StableLog};
+    use zslg_time_types::Hlc;
 
     /// A node clock for the reader under test.
     fn test_clock() -> Arc<dyn crate::api::Clock> {

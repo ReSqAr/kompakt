@@ -24,9 +24,9 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 
 use crate::api::ReplicatedRaftState;
-use crate::hlc::Hlc;
 use crate::ids::NodeId;
 use crate::tests::fast_raft_config as raft_config;
+use zslg_time_types::Hlc;
 
 fn state_with_cutoff(replicas: &BTreeSet<NodeId>, cutoff: u64) -> ReplicatedRaftState {
     ReplicatedRaftState {

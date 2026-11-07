@@ -51,7 +51,6 @@ use crate::api::ReplicatedRaftState;
 use crate::api::{LocalStoreMut, LocalStoreView, Replica, Router, StableLogSnapshot};
 use crate::error::Error;
 use crate::hlc::HlcGate;
-use crate::hlc::{Hlc, HlcParts};
 use crate::ids::{LogIndex, NodeId};
 use crate::leader::{SnapshotInputs, build_snapshot};
 use crate::learner::LocalStore;
@@ -64,6 +63,7 @@ use crate::tests::fast_raft_config as raft_config;
 use crate::tests::make_data;
 use crate::tests::{FixedClock, MapPeerRouter, ReadyReplica};
 use crate::tests::{Partition, TestNode};
+use zslg_time_types::{Hlc, HlcParts};
 
 async fn integrate_batch(
     store: &LocalStore,

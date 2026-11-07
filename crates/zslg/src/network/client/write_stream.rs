@@ -180,9 +180,10 @@ fn resolve_response(
 #[allow(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
-    use crate::error::{ClockError, NetError};
-    use crate::hlc::Hlc;
+    use crate::error::NetError;
     use crate::ids::DataId;
+    use zslg_time_types::ClockError;
+    use zslg_time_types::Hlc;
 
     fn data_id(tag: u8) -> DataId {
         DataId([tag; 32])

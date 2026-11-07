@@ -802,7 +802,7 @@ pub(crate) fn upstream(seed: u8) -> NodeId {
 /// needed.
 pub(crate) fn make_meta(seed: u8, hlc: u64) -> DataId {
     DataId::from_parts(
-        crate::Hlc(hlc),
+        zslg_time_types::Hlc(hlc),
         NodeId::from_uuid(uuid::Uuid::nil()),
         u64::from(seed),
     )

@@ -403,9 +403,9 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use crate::hlc::Hlc;
     use crate::ids::{LogIndex, NodeId};
     use crate::tests::upstream;
+    use zslg_time_types::Hlc;
 
     use super::*;
 

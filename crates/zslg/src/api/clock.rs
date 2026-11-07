@@ -9,7 +9,7 @@
 //!
 //! Substitutable so tests can drive time; the production impl is `HlcClock`.
 
-use crate::hlc::Hlc;
+use zslg_time_types::Hlc;
 
 pub(crate) trait Clock: Send + Sync + 'static {
     #[must_use]

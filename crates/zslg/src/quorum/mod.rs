@@ -93,7 +93,7 @@ mod tests {
         ReplicaMembership::JointDraining {
             old: ids_from(old),
             next: ids_from(new),
-            exit: crate::meta::Exit::WatermarkAbove(crate::hlc::Hlc(1)),
+            exit: crate::meta::Exit::WatermarkAbove(zslg_time_types::Hlc(1)),
         }
     }
 
@@ -227,7 +227,7 @@ mod tests {
             (id_set(7), id_set(7)).prop_map(|(old, next)| ReplicaMembership::JointDraining {
                 old,
                 next,
-                exit: crate::meta::Exit::WatermarkAbove(crate::hlc::Hlc(1)),
+                exit: crate::meta::Exit::WatermarkAbove(zslg_time_types::Hlc(1)),
             }),
         ]
     }

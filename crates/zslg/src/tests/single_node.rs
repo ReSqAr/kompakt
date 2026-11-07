@@ -14,9 +14,9 @@
     clippy::result_large_err,
     reason = "test code"
 )]
-use crate::error::ClockError;
 use crate::test_stream::ChannelTestExt as _;
 use std::time::Duration;
+use zslg_time_types::ClockError;
 
 use std::path::PathBuf;
 
@@ -26,7 +26,6 @@ use tempfile::TempDir;
 
 use crate::Error;
 use crate::ReplicaNode;
-use crate::hlc::Hlc;
 use crate::ids::DataId;
 use crate::ids::NodeId;
 use crate::ids::PeerAddr;
@@ -34,6 +33,7 @@ use crate::leader::CompactionTier;
 use crate::object_store::ObjectStoreConfig;
 use crate::replica_node::ReplicaNodeConfig;
 use crate::{Data, StableLogEvent};
+use zslg_time_types::Hlc;
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(30);
 

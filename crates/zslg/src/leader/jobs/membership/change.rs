@@ -30,12 +30,12 @@ use tracing::{debug, info, warn};
 
 use crate::api::{CandidateInfo, RaftLeadership, RaftStateView, SpareSelector};
 use crate::error::Error;
-use crate::hlc::Hlc;
 use crate::ids::{NodeId, RaftGeneration};
 use crate::leader::jobs::membership::{MembershipDriver, MembershipObserver, TickOutcome};
 use crate::meta::{Exit, ReplicaMembership};
 use crate::quorum::{FanOutResponse, fan_out_quorum};
 use crate::raft::SpareSelectionStrategy;
+use zslg_time_types::Hlc;
 
 pub(in crate::leader) trait LivenessQuery: Send + Sync + 'static {
     #[must_use]

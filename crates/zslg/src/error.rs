@@ -14,25 +14,9 @@ use error_union::error_union;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use zslg_lifecycle_types::{ConfigError, LifecycleError};
+use zslg_time_types::ClockError;
 
-use crate::hlc::Hlc;
 use crate::ids::NodeId;
-
-/// A hybrid-logical-clock violation: a cutoff, drift or skew bound was crossed.
-#[derive(Debug, Clone, PartialEq, Error, Serialize, Deserialize)]
-pub enum ClockError {
-    /// HLC below the current cutoff.
-    #[error("hlc cutoff violation: {0}")]
-    HlcCutoff(#[from] crate::hlc::CutoffError),
-
-    /// Peer's HLC drifted beyond the configured skew.
-    #[error("hlc drift too large: peer={peer:?} local={local:?}")]
-    HlcDriftTooLarge { peer: Hlc, local: Hlc },
-
-    /// Writer-replica wall-clock skew over max_clock_skew.
-    #[error("clock skew too large: writer={writer:?} replica={replica:?}")]
-    ClockSkewTooLarge { writer: Hlc, replica: Hlc },
-}
 
 /// The replicated and local logs and the storage under them: storage, codec, gaps, truncation, subscriptions.
 #[derive(Debug, Clone, PartialEq, Error, Serialize, Deserialize)]

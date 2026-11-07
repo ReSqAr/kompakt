@@ -24,7 +24,8 @@ use crate::api::ReplicatedRaftState;
 use crate::ids::SnapshotId;
 use crate::meta::{ReplicaMembership, SnapshotMetadata};
 use crate::tests::fast_raft_config as raft_config;
-use crate::{Hlc, LogIndex, NodeId};
+use crate::{LogIndex, NodeId};
+use zslg_time_types::Hlc;
 
 // ── tests ─────────────────────────────────────────────────────────────
 

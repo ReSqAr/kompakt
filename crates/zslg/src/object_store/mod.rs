@@ -197,7 +197,7 @@ pub(in crate::object_store) fn test_entry(idx: u64) -> crate::meta::SnapshotEntr
     crate::meta::SnapshotEntry {
         global_index: crate::ids::LogIndex(idx),
         data: crate::meta::Data {
-            data_id: crate::ids::DataId::test_id(crate::hlc::Hlc(0), idx),
+            data_id: crate::ids::DataId::test_id(zslg_time_types::Hlc(0), idx),
             blob: bytes::Bytes::copy_from_slice(format!("payload-{idx}").as_bytes()),
         },
     }

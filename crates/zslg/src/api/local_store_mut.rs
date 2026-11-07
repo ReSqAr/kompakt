@@ -17,10 +17,10 @@
 //! an attempt's progress would under-report it.
 
 use crate::api::LocalStoreView;
-use crate::hlc::Hlc;
 use crate::ids::{LogIndex, NodeId};
 use crate::meta::Data;
 use crossbeam_combinators::Channel;
+use zslg_time_types::Hlc;
 
 #[async_trait::async_trait]
 pub(crate) trait LocalStoreMut: LocalStoreView {

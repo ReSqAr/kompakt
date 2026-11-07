@@ -1,0 +1,23 @@
+[package]
+name = "zslg-time-types"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Hybrid logical clocks: the value type, its order, and the errors of crossing a bound"
+publish = false
+
+[dependencies]
+crossbeam-combinators = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+postcard = { workspace = true, features = ["alloc", "use-std"] }
+proptest = { workspace = true }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "types"

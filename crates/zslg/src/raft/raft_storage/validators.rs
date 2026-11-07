@@ -1,6 +1,6 @@
-use crate::hlc::Hlc;
 use crate::meta::ReplicaMembership;
 use crate::raft::{RaftLogIndex, RaftStateError};
+use zslg_time_types::Hlc;
 
 /// The structural-validity check for a proposed raft state, judged **on its
 /// own** — no reference to the state it replaces. Runs pre-flight on the

@@ -28,10 +28,11 @@ mod clock_skew_tests;
 #[cfg(test)]
 mod subscribe_status_tests;
 
-use crate::error::{ClockError, ConsensusError};
+use crate::error::ConsensusError;
 pub(crate) use log::{REPLICA_LOG_CF, ReplicaLogStore};
 use purge::run_purge_worker;
 use zslg_lifecycle_types::{ConfigError, LifecycleError};
+use zslg_time_types::ClockError;
 
 use futures::StreamExt as _;
 use futures::stream::BoxStream;
@@ -44,7 +45,7 @@ use tracing::{info, warn};
 
 use crate::api::{Clock as _, PeersWatcher, RaftStateView, Replica, StampedWrite, WriteOutcome};
 use crate::error::Error;
-use crate::hlc::{CutoffApplier, Hlc, HlcClock, HlcGate, HlcGuard};
+use crate::hlc::{CutoffApplier, HlcClock, HlcGate, HlcGuard};
 use crate::ids::{DataId, LogIndex, NodeId};
 use crate::meta::{Data, ReplicaStatus};
 use crate::metrics::{self, ReplicaWriteState};
@@ -52,6 +53,7 @@ use crate::replica::log::flush_loop;
 use crossbeam_combinators::Channel;
 use shutdown::Shutdown;
 use warn_throttle::WarnThrottle;
+use zslg_time_types::Hlc;
 
 /// Minimum spacing between replica-write-rejection `warn!`s. Rejections recur at
 /// the write rate (tens/sec) under a persistent failure, so they are throttled
@@ -830,7 +832,7 @@ mod tests {
         assert!(matches!(
             err,
             Error::Clock(ClockError::HlcCutoff(
-                crate::hlc::CutoffError::AtOrBeforeCutoff { .. }
+                zslg_time_types::CutoffError::AtOrBeforeCutoff { .. }
             ))
         ));
 

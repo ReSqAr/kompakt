@@ -54,8 +54,8 @@ pub(in crate::learner::local_store) fn encode_cursor_key(node: NodeId) -> [u8; C
 )]
 mod tests {
     use super::*;
-    use crate::hlc::Hlc;
     use proptest::prelude::*;
+    use zslg_time_types::Hlc;
 
     #[test]
     fn data_key_roundtrips() {

@@ -20,10 +20,10 @@ use std::time::Duration;
 use futures::StreamExt;
 
 use crate::api::Replica;
-use crate::hlc::Hlc;
 use crate::ids::{HostPort, PeerAddr, RaftGeneration};
 use crate::tests::nid;
 use crate::tests::{self as faults, ReplicaServiceHarness};
+use zslg_time_types::Hlc;
 
 /// `subscribe_status` must yield the current baseline immediately and then push
 /// a fresh status on every subsequent `RaftState` change. A long-lived

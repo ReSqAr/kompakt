@@ -31,7 +31,6 @@ use tracing::{debug, warn};
 use crate::api::{LocalStoreView, RaftStateView, Router, SnapshotStore, StableLogSnapshot};
 use crate::error::Error;
 use crate::error::ToStorage;
-use crate::hlc::Hlc;
 use crate::ids::{LogIndex, SnapshotId};
 use crate::learner::ReplicaPoller;
 use crate::meta::{SnapshotEntry, SnapshotMetadata};
@@ -39,6 +38,7 @@ use crate::metrics::{self, SnapshotState, SnapshotStep};
 use crate::object_store::CompressionLevel;
 use crate::quorum::{FanOutResponse, fan_out_quorum};
 use crossbeam_combinators::{Channel, Finite};
+use zslg_time_types::Hlc;
 
 pub(in crate::leader) struct SnapshotEntryInputs<'a> {
     pub(in crate::leader) local_store: &'a dyn LocalStoreView,
@@ -405,13 +405,13 @@ mod tests {
 
     use crate::api::{LocalStoreMut, StableLogSnapshot};
 
-    use crate::hlc::Hlc;
     use crate::ids::{DataId, LogIndex, NodeId};
     use crate::learner::LocalStore;
     use crate::learner::StableLog;
     use crate::learner::integrate_manifest_for_test;
     use crate::meta::Data;
     use crate::tests::{SnapshotHarness, boot_snapshot_harness, commit_snapshot_result};
+    use zslg_time_types::Hlc;
 
     async fn integrate_batch(
         store: &LocalStore,

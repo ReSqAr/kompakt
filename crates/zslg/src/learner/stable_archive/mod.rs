@@ -15,10 +15,10 @@ use crate::api::ArchiveStream;
 use crate::api::{
     ArchiveBounds, ArchiveUpperBound, RaftStateView, SnapshotStore, StableArchiveReader,
 };
-use crate::hlc::Hlc;
 use crate::ids::LogIndex;
 use crate::meta::{SnapshotEntry, SnapshotMetadata};
 use crossbeam_combinators::{Channel, Contiguous, NonDecreasing};
+use zslg_time_types::Hlc;
 
 /// Reads the archived (purged) prefix of the stable log from object-store
 /// snapshots. Holds the snapshot store (the object-store read point), the raft

@@ -59,11 +59,11 @@ pub(crate) async fn seed_foreign_membership_for_test(
     storage.fence().map_err(Into::into)
 }
 
-use crate::hlc::Hlc;
 use crate::ids::{LogIndex, SnapshotId};
 use crate::meta::Exit;
 use crate::tests::nid;
 use openraft::CommittedLeaderId;
+use zslg_time_types::Hlc;
 
 #[tokio::test]
 async fn vote_round_trips_across_reopen() {
@@ -280,7 +280,7 @@ fn fenced_entry(
                 // set can no longer serve that role — `Single -> Single`
                 // must be an identity, so every entry in a run carries the
                 // same set.
-                hlc_cutoff: Some(crate::hlc::Hlc(idx)),
+                hlc_cutoff: Some(zslg_time_types::Hlc(idx)),
             },
         }),
     }
@@ -953,7 +953,10 @@ async fn fenced_apply_rejects_stale_generation() {
         RaftGeneration(1),
         "rejected write must not apply"
     );
-    assert_eq!(snap.manifest_state.hlc_cutoff, Some(crate::hlc::Hlc(1)));
+    assert_eq!(
+        snap.manifest_state.hlc_cutoff,
+        Some(zslg_time_types::Hlc(1))
+    );
 
     // Entry 3 with the CORRECT fence (1) → applied, generation 3.
     let r = s
@@ -963,7 +966,10 @@ async fn fenced_apply_rejects_stale_generation() {
     assert!(matches!(r[0], RaftResponse::Applied));
     let snap = raft_state.snapshot();
     assert_eq!(snap.generation, RaftGeneration(3));
-    assert_eq!(snap.manifest_state.hlc_cutoff, Some(crate::hlc::Hlc(3)));
+    assert_eq!(
+        snap.manifest_state.hlc_cutoff,
+        Some(zslg_time_types::Hlc(3))
+    );
 }
 
 #[tokio::test]
@@ -995,7 +1001,7 @@ async fn reopen_replays_fence_verdicts_deterministically() {
     assert_eq!(snap.generation, RaftGeneration(3));
     assert_eq!(
         snap.manifest_state.hlc_cutoff,
-        Some(crate::hlc::Hlc(3)),
+        Some(zslg_time_types::Hlc(3)),
         "replayed state must reflect entries 1+3, never the rejected entry 2"
     );
 }
@@ -1031,7 +1037,10 @@ async fn reopen_with_unpurged_log_entries_below_snapshot_is_clean() {
     let _s = storage_at(&path, restored.clone()).await;
     let snap = restored.snapshot();
     assert_eq!(snap.generation, RaftGeneration(2));
-    assert_eq!(snap.manifest_state.hlc_cutoff, Some(crate::hlc::Hlc(2)));
+    assert_eq!(
+        snap.manifest_state.hlc_cutoff,
+        Some(zslg_time_types::Hlc(2))
+    );
 }
 
 /// F-14 invariant: a corrupt raft snapshot blob must fail `from_db`

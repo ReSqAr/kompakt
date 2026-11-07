@@ -26,25 +26,17 @@
 //! themselves. `set_lock` serialises concurrent callers so that answer is stable.
 
 use parking_lot::Mutex as SyncMutex;
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
-use thiserror::Error;
 use tokio::sync::{Mutex as AsyncMutex, Notify};
 
-use crate::hlc::Hlc;
 use crate::metrics;
+use zslg_time_types::{CutoffError, Hlc};
 
 /// Cadence for warning that a `set_cutoff` drain is still waiting on in-flight
 /// writes. A single stuck `HlcGuard` blocks the drain — and with it the leader's
 /// snapshot progress — so surface it rather than hang silently.
 const SET_CUTOFF_DRAIN_WARN_INTERVAL: Duration = Duration::from_secs(5);
-
-#[derive(Debug, Clone, PartialEq, Eq, Error, Serialize, Deserialize)]
-pub enum CutoffError {
-    #[error("hlc {hlc:?} is not strictly after cutoff {cutoff:?}")]
-    AtOrBeforeCutoff { hlc: Hlc, cutoff: Hlc },
-}
 
 struct TrackedHlcCutoff {
     cutoff: Option<Hlc>,

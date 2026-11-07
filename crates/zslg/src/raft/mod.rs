@@ -238,9 +238,13 @@ impl RaftConfig {
     /// Build an openraft [`openraft::Config`] from this config.
     pub(in crate::raft) fn to_openraft(&self) -> Result<openraft::Config, crate::error::Error> {
         let cfg = openraft::Config {
-            heartbeat_interval: crate::hlc::duration_as_ms_clamped(self.heartbeat_interval),
-            election_timeout_min: crate::hlc::duration_as_ms_clamped(self.election_timeout_min),
-            election_timeout_max: crate::hlc::duration_as_ms_clamped(self.election_timeout_max),
+            heartbeat_interval: zslg_time_types::duration_as_ms_clamped(self.heartbeat_interval),
+            election_timeout_min: zslg_time_types::duration_as_ms_clamped(
+                self.election_timeout_min,
+            ),
+            election_timeout_max: zslg_time_types::duration_as_ms_clamped(
+                self.election_timeout_max,
+            ),
             // Truncate the raft log aggressively: snapshot every
             // `snapshot_logs_since_last` entries, then purge all but
             // `max_in_snapshot_log_to_keep` below the frontier. openraft's own
