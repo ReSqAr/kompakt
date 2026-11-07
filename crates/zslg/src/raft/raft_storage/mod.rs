@@ -43,7 +43,6 @@ use zslg_log_types::LogError;
 
 use rocksdb_kit::{Batch, Cf};
 
-use crate::raft::NodeInfo;
 use openraft::Entry;
 use openraft::EntryPayload;
 use openraft::LogId;
@@ -64,15 +63,16 @@ use parking_lot::Mutex as SyncMutex;
 use rocksdb_kit::{CfSpec, Storage};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use zslg_raft_types::NodeInfo;
 
 use crate::error::{Error, ToCodec, ToStorage};
 use crate::metrics::{self, LogType};
-use crate::raft::{RaftResponse, TypeConfig};
 use zslg_consensus_types::RaftGeneration;
 use zslg_consensus_types::RaftLogIndex;
 use zslg_consensus_types::RaftStateHandle;
 use zslg_consensus_types::ReplicaMembership;
 use zslg_node_types::NodeId;
+use zslg_raft_types::{RaftResponse, TypeConfig};
 use zslg_time_types::Hlc;
 
 /// The raft log.
@@ -935,7 +935,7 @@ fn evaluate_fence(
     current: RaftGeneration,
     previous_replica: &ReplicaMembership,
     previous_cutoff: Option<Hlc>,
-    write: &crate::raft::FencedStateWrite,
+    write: &zslg_raft_types::FencedStateWrite,
     log_index: RaftLogIndex,
 ) -> RaftResponse {
     if write.expected_generation != current {
@@ -972,7 +972,7 @@ fn evaluate_fence(
 
 fn apply_normal_fenced(
     raft_state: &RaftStateHandle,
-    write: &crate::raft::FencedStateWrite,
+    write: &zslg_raft_types::FencedStateWrite,
     log_index: RaftLogIndex,
 ) -> Result<RaftResponse, Error> {
     let applied = raft_state.snapshot();

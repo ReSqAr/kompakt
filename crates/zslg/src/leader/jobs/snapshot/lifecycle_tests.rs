@@ -30,7 +30,6 @@ use crate::learner::LocalStore;
 use crate::learner::StableLog;
 use crate::learner::integrate_manifest_for_test;
 use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
-use crate::raft::Raft;
 use crate::raft::RaftNode;
 use zslg_consensus_types::RaftStateHandle;
 use zslg_consensus_types::ReplicaMembership;
@@ -39,6 +38,7 @@ use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
+use zslg_raft_types::Raft;
 use zslg_snapshot_types::CompressionLevel;
 use zslg_time_types::Hlc;
 
@@ -510,8 +510,8 @@ async fn invariant_stable_order_is_hlc_order() {
 
 #[tokio::test]
 async fn fenced_write_rejected_on_stale_generation() {
-    use crate::raft::{FencedStateWrite, RaftResponse};
     use zslg_consensus_types::RaftGeneration;
+    use zslg_raft_types::{FencedStateWrite, RaftResponse};
 
     let h = boot().await;
     let _ = h.leader_id;

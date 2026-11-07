@@ -29,6 +29,7 @@ use shutdown::Shutdown;
 use zslg_consensus_types::RaftStateHandle;
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
+use zslg_raft_types::NodeInfo;
 
 mod membership;
 mod node;
@@ -37,7 +38,6 @@ mod rpc;
 mod startup;
 mod state;
 mod tracker;
-mod types;
 
 #[cfg(test)]
 mod tests;
@@ -48,10 +48,6 @@ pub(crate) use startup::{RaftStartupConfig, run_raft_startup};
 pub(crate) use tracker::{
     NoOpRaftViewer, RaftTracker, RaftTrackerConfig, spawn_raft_tracker_streamer,
 };
-pub(crate) use types::{FencedStateWrite, NodeInfo, RaftResponse, TypeConfig};
-
-#[cfg(test)]
-pub(crate) use types::Raft;
 
 #[cfg(test)]
 pub(crate) use raft_storage::build_raft_for_test;

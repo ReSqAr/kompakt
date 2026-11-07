@@ -344,7 +344,7 @@ async fn full_lifecycle_bootstrap_snapshot_churn_failure() {
                 .manifest_watermark
                 .map_or(Hlc(100), |wm| Hlc(wm.raw().saturating_add(100)));
             leader_raft
-                .client_write(crate::raft::FencedStateWrite {
+                .client_write(zslg_raft_types::FencedStateWrite {
                     expected_generation: cur.generation,
                     state: ReplicatedRaftState {
                         replica: cur.replica.clone(),
@@ -404,7 +404,7 @@ async fn full_lifecycle_bootstrap_snapshot_churn_failure() {
         .manifest_watermark
         .map_or(Hlc(100), |wm| Hlc(wm.raw().saturating_add(100)));
     let nudged_state = leader_raft
-        .client_write(crate::raft::FencedStateWrite {
+        .client_write(zslg_raft_types::FencedStateWrite {
             expected_generation: cur.generation,
             state: ReplicatedRaftState {
                 replica: ReplicaMembership::single(current_replicas),
@@ -435,7 +435,7 @@ async fn full_lifecycle_bootstrap_snapshot_churn_failure() {
                 .manifest_watermark
                 .map_or(Hlc(100), |wm| Hlc(wm.raw().saturating_add(100)));
             leader_raft
-                .client_write(crate::raft::FencedStateWrite {
+                .client_write(zslg_raft_types::FencedStateWrite {
                     expected_generation: cur.generation,
                     state: ReplicatedRaftState {
                         replica: cur.replica.clone(),

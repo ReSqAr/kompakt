@@ -43,7 +43,7 @@ use super::rejoin::{
 use crate::api::{AddMemberOutcome, PeersWatcher, RaftStateView, Router, SnapshotStore};
 use crate::error::{Error, ToRaft};
 use crate::quorum::{FanOutResponse, fan_out_quorum};
-use crate::raft::{FencedStateWrite, RaftNode, membership_map};
+use crate::raft::{RaftNode, membership_map};
 use shutdown::Shutdown;
 use zslg_consensus_types::EvictionStatus;
 use zslg_consensus_types::RaftGeneration;
@@ -51,6 +51,7 @@ use zslg_consensus_types::ReplicatedRaftState;
 use zslg_consensus_types::{RaftState, ReplicaMembership};
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
+use zslg_raft_types::FencedStateWrite;
 
 const JOIN_INITIAL_BACKOFF: Duration = Duration::from_millis(50);
 const JOIN_MAX_BACKOFF: Duration = Duration::from_secs(10);

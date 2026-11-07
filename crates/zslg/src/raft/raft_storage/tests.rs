@@ -14,7 +14,7 @@ pub(crate) async fn build_raft_for_test<NF>(
     network: NF,
     dir: &std::path::Path,
     raft_state: RaftStateHandle,
-) -> Result<crate::raft::Raft, Error>
+) -> Result<zslg_raft_types::Raft, Error>
 where
     NF: openraft::RaftNetworkFactory<TypeConfig>,
 {
@@ -22,7 +22,7 @@ where
     let (log_store, sm) = RocksRaftStorage::open(raft_state, open_test_storage(dir)?)
         .await?
         .into_adaptor();
-    crate::raft::Raft::new(node_id, config, network, log_store, sm)
+    zslg_raft_types::Raft::new(node_id, config, network, log_store, sm)
         .await
         .to_raft("Raft::new (test)")
         .map_err(Into::into)
@@ -270,7 +270,7 @@ fn fenced_entry(
 ) -> Entry<TypeConfig> {
     Entry {
         log_id: LogId::new(leader, idx),
-        payload: EntryPayload::Normal(crate::raft::FencedStateWrite {
+        payload: EntryPayload::Normal(zslg_raft_types::FencedStateWrite {
             expected_generation,
             state: zslg_consensus_types::ReplicatedRaftState {
                 replica: ReplicaMembership::single(replicas.iter().copied().collect()),
@@ -306,7 +306,7 @@ fn malformed_manifest_entry(
 ) -> Entry<TypeConfig> {
     Entry {
         log_id: LogId::new(leader, idx),
-        payload: EntryPayload::Normal(crate::raft::FencedStateWrite {
+        payload: EntryPayload::Normal(zslg_raft_types::FencedStateWrite {
             expected_generation,
             state: zslg_consensus_types::ReplicatedRaftState {
                 replica: ReplicaMembership::single([nid(1)].into_iter().collect()),
@@ -647,7 +647,7 @@ fn evaluate_fence_rejects_early_joint_exit_as_value() {
     // A committed-but-illegal transition must be a *value* rejection, never
     // an `Err` — an `Err` here halts the state machine on an already
     // committed entry (see `evaluate_fence`).
-    let write = crate::raft::FencedStateWrite {
+    let write = zslg_raft_types::FencedStateWrite {
         expected_generation: RaftGeneration::ZERO,
         state: with_membership(ReplicaMembership::single(set(&[3, 4, 5])), Some(Hlc(10))),
     };
@@ -741,7 +741,7 @@ fn invariant_committed_cutoff_may_not_regress() {
 /// on the apply path, never a fatal `Err` (see the module header).
 #[test]
 fn evaluate_fence_rejects_a_regressed_cutoff_as_value() {
-    let write = crate::raft::FencedStateWrite {
+    let write = zslg_raft_types::FencedStateWrite {
         expected_generation: RaftGeneration::ZERO,
         state: replicated(vec![], None, Some(Hlc(50))),
     };
@@ -762,7 +762,7 @@ fn evaluate_fence_rejects_a_regressed_cutoff_as_value() {
 
 #[test]
 fn evaluate_fence_rejects_watermark_above_cutoff_as_value() {
-    let write = crate::raft::FencedStateWrite {
+    let write = zslg_raft_types::FencedStateWrite {
         expected_generation: RaftGeneration::ZERO,
         state: replicated(vec![], Some(Hlc(100)), Some(Hlc(50))),
     };

@@ -19,7 +19,6 @@ use crate::Error;
 use crate::api::{
     LivenessProbe, RaftConsensus, RaftStateView, Replica, StampedWrite, WriteOutcome,
 };
-use crate::raft::TypeConfig;
 use crossbeam_combinators::Channel;
 use futures::stream::BoxStream;
 use openraft::error::{InstallSnapshotError, RaftError};
@@ -31,6 +30,7 @@ use zslg_consensus_types::{RaftState, ReplicaStatus};
 use zslg_log_types::LogIndex;
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
+use zslg_raft_types::TypeConfig;
 
 pub(crate) struct LocalReplicaClient {
     replica: Arc<dyn Replica>,

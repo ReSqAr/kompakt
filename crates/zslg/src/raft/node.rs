@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use zslg_consensus_types::ConsensusError;
 use zslg_net_types::NetError;
+use zslg_raft_types::Raft;
 
 use futures::FutureExt as _;
 
@@ -24,14 +25,14 @@ use tracing::info;
 use crate::api::{MembershipGate, RaftConsensus, RaftLeadership, StateReplicator};
 use crate::error::{Error, ToRaft};
 use crate::metrics;
-use crate::raft::{FencedStateWrite, NodeInfo, RaftResponse};
 use zslg_consensus_types::RaftGeneration;
 use zslg_consensus_types::ReplicatedRaftState;
 use zslg_net_types::{PeerAddr, ServerName};
 use zslg_node_types::NodeId;
+use zslg_raft_types::{FencedStateWrite, NodeInfo, RaftResponse};
 
 pub(crate) struct RaftNode {
-    inner: openraft::Raft<crate::raft::TypeConfig>,
+    inner: openraft::Raft<zslg_raft_types::TypeConfig>,
     gate: Arc<dyn MembershipGate>,
     client_write_timeout: std::time::Duration,
 }
@@ -39,7 +40,7 @@ pub(crate) struct RaftNode {
 impl RaftNode {
     #[must_use]
     pub(crate) fn new(
-        inner: openraft::Raft<crate::raft::TypeConfig>,
+        inner: openraft::Raft<zslg_raft_types::TypeConfig>,
         gate: Arc<dyn MembershipGate>,
         client_write_timeout: std::time::Duration,
     ) -> Self {
@@ -51,7 +52,7 @@ impl RaftNode {
     }
 
     #[must_use]
-    pub(in crate::raft) fn inner(&self) -> &openraft::Raft<crate::raft::TypeConfig> {
+    pub(in crate::raft) fn inner(&self) -> &openraft::Raft<zslg_raft_types::TypeConfig> {
         &self.inner
     }
 
@@ -90,7 +91,7 @@ impl RaftNode {
 impl RaftConsensus for RaftNode {
     async fn append_entries(
         &self,
-        rpc: AppendEntriesRequest<crate::raft::TypeConfig>,
+        rpc: AppendEntriesRequest<zslg_raft_types::TypeConfig>,
     ) -> Result<AppendEntriesResponse<NodeId>, RaftError<NodeId>> {
         self.inner.append_entries(rpc).await
     }
@@ -104,7 +105,7 @@ impl RaftConsensus for RaftNode {
 
     async fn install_snapshot(
         &self,
-        rpc: InstallSnapshotRequest<crate::raft::TypeConfig>,
+        rpc: InstallSnapshotRequest<zslg_raft_types::TypeConfig>,
     ) -> Result<InstallSnapshotResponse<NodeId>, RaftError<NodeId, InstallSnapshotError>> {
         self.inner.install_snapshot(rpc).await
     }
@@ -298,6 +299,41 @@ impl StateReplicator for RaftNode {
             RaftResponse::RejectedInvalidState { reason } => {
                 metrics::raft_fenced_write();
                 Err(Error::invalid_raft_state(context, reason))
+            }
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl StateReplicator for Raft {
+    async fn replicate_state(
+        &self,
+        state: ReplicatedRaftState,
+        expected_generation: RaftGeneration,
+        context: &'static str,
+    ) -> Result<(), crate::Error> {
+        use crate::error::ToRaft as _;
+        // See `StateReplicator::replicate_state` for the pre-flight contract.
+        zslg_consensus_types::validate_replicated_state(&state)
+            .map_err(|source| crate::error::Error::invalid_raft_state(context, source))?;
+        let response = self
+            .client_write(FencedStateWrite {
+                expected_generation,
+                state,
+            })
+            .await
+            .to_raft(context)?;
+        match response.data {
+            RaftResponse::Applied => Ok(()),
+            RaftResponse::RejectedStaleGeneration { expected, current } => {
+                crate::metrics::raft_fenced_write();
+                Err(crate::error::Error::stale_state_write(
+                    context, expected, current,
+                ))
+            }
+            RaftResponse::RejectedInvalidState { reason } => {
+                crate::metrics::raft_fenced_write();
+                Err(crate::error::Error::invalid_raft_state(context, reason))
             }
         }
     }

@@ -41,7 +41,6 @@ use crate::api::{
 };
 use crate::learner::LocalStore;
 use crate::raft::build_raft_for_test;
-use crate::raft::{NodeInfo, Raft, TypeConfig};
 use crossbeam_combinators::{Channel, Finite, Infinite};
 use dashmap::DashMap;
 use futures::stream::BoxStream;
@@ -60,6 +59,7 @@ use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
+use zslg_raft_types::{NodeInfo, Raft, TypeConfig};
 // ── fault injection: pairwise partitions ─────────────────────────────
 
 /// Shared handle that cuts and heals in-process network links. Cloned into
@@ -376,7 +376,7 @@ pub(crate) async fn write_state_fenced(
     raft_state: &RaftStateHandle,
     state: zslg_consensus_types::ReplicatedRaftState,
 ) -> Result<(), String> {
-    use crate::raft::{FencedStateWrite, RaftResponse};
+    use zslg_raft_types::{FencedStateWrite, RaftResponse};
     // The transient outcomes keep different clocks, and only one of them is
     // this handle's to wait out:
     //

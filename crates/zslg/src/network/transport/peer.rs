@@ -23,7 +23,6 @@ use crate::network::client::{RpcClient, Target};
 use crate::network::messages::{
     RpcFrame, RpcRaftFrame, RpcRaftRequest, RpcReplicaFrame, RpcReplicaRequest, RpcRequest,
 };
-use crate::raft::TypeConfig;
 use async_trait::async_trait;
 use crossbeam_combinators::Channel;
 use futures::StreamExt;
@@ -37,6 +36,7 @@ use zslg_consensus_types::ReplicaStatus;
 use zslg_log_types::LogIndex;
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
+use zslg_raft_types::TypeConfig;
 /// Per-peer typed transport over [`RpcClient`]. The peer is addressed either by
 /// a registered `NodeId` ([`TcpPeerClient::new`]) or directly by
 /// `(addr, server_name)` ([`TcpPeerClient::direct`]); both expose the full

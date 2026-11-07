@@ -9,25 +9,23 @@
 //! and the recovery replay skip the entry without applying it.
 use std::io::Cursor;
 
-use crate::api::StateReplicator;
 use openraft::Entry;
 use openraft::TokioRuntime;
 use serde::{Deserialize, Serialize};
-use zslg_consensus_types::ReplicatedRaftState;
-use zslg_consensus_types::{RaftGeneration, RaftStateError};
+use zslg_consensus_types::{RaftGeneration, RaftStateError, ReplicatedRaftState};
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 
 /// One raft-log entry's payload: the replicated state plus the generation it
 /// must follow (the fence). An entry whose fence is stale applies as a no-op.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct FencedStateWrite {
-    pub(crate) expected_generation: RaftGeneration,
-    pub(crate) state: ReplicatedRaftState,
+pub struct FencedStateWrite {
+    pub expected_generation: RaftGeneration,
+    pub state: ReplicatedRaftState,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum RaftResponse {
+pub enum RaftResponse {
     Applied,
     RejectedStaleGeneration {
         expected: RaftGeneration,
@@ -45,7 +43,7 @@ pub(crate) enum RaftResponse {
 /// Uses `Option` so the default is simply `None` — no garbage address.
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
-pub(crate) struct NodeInfo(pub(crate) Option<PeerAddr>);
+pub struct NodeInfo(pub Option<PeerAddr>);
 
 impl std::ops::Deref for NodeInfo {
     type Target = PeerAddr;
@@ -77,7 +75,7 @@ impl std::fmt::Display for NodeInfo {
 }
 
 openraft::declare_raft_types!(
-    pub(crate) TypeConfig:
+    pub TypeConfig:
         D            = FencedStateWrite,
         R            = RaftResponse,
         NodeId       = NodeId,
@@ -87,39 +85,4 @@ openraft::declare_raft_types!(
         AsyncRuntime = TokioRuntime,
 );
 
-pub(crate) type Raft = openraft::Raft<TypeConfig>;
-
-#[async_trait::async_trait]
-impl StateReplicator for Raft {
-    async fn replicate_state(
-        &self,
-        state: ReplicatedRaftState,
-        expected_generation: RaftGeneration,
-        context: &'static str,
-    ) -> Result<(), crate::Error> {
-        use crate::error::ToRaft as _;
-        // See `StateReplicator::replicate_state` for the pre-flight contract.
-        zslg_consensus_types::validate_replicated_state(&state)
-            .map_err(|source| crate::error::Error::invalid_raft_state(context, source))?;
-        let response = self
-            .client_write(FencedStateWrite {
-                expected_generation,
-                state,
-            })
-            .await
-            .to_raft(context)?;
-        match response.data {
-            RaftResponse::Applied => Ok(()),
-            RaftResponse::RejectedStaleGeneration { expected, current } => {
-                crate::metrics::raft_fenced_write();
-                Err(crate::error::Error::stale_state_write(
-                    context, expected, current,
-                ))
-            }
-            RaftResponse::RejectedInvalidState { reason } => {
-                crate::metrics::raft_fenced_write();
-                Err(crate::error::Error::invalid_raft_state(context, reason))
-            }
-        }
-    }
-}
+pub type Raft = openraft::Raft<TypeConfig>;

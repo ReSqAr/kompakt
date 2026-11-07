@@ -40,12 +40,12 @@ use openraft::raft::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::raft::TypeConfig;
 use zslg_consensus_types::{RaftState, ReplicaStatus};
 use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
+use zslg_raft_types::TypeConfig;
 use zslg_time_types::Hlc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

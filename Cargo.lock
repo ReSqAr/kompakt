@@ -4469,6 +4469,7 @@ dependencies = [
  "zslg-log-types",
  "zslg-net-types",
  "zslg-node-types",
+ "zslg-raft-types",
  "zslg-snapshot-types",
  "zslg-time-types",
  "zstd",
@@ -4530,6 +4531,17 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "uuid",
+]
+
+[[package]]
+name = "zslg-raft-types"
+version = "0.1.0"
+dependencies = [
+ "openraft",
+ "serde",
+ "zslg-consensus-types",
+ "zslg-net-types",
+ "zslg-node-types",
 ]
 
 [[package]]
