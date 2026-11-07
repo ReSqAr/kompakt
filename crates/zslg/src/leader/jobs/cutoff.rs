@@ -25,9 +25,9 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use crate::error::Error;
-use crate::leader::integrator::{IntentOutcome, IntentSubmitter, RaftIntent};
 use crate::leader::jobs::is_local_leader;
 use crate::metrics::{self, LeaderJob, SnapshotState, SnapshotStep};
+use zslg_consensus::{IntentOutcome, IntentSubmitter, RaftIntent};
 use zslg_node_types::NodeId;
 use zslg_time::Clock;
 use zslg_time_types::Hlc;
@@ -55,7 +55,7 @@ pub(in crate::leader) struct CutoffJob {
     pub(in crate::leader) clock: Arc<dyn Clock>,
     pub(in crate::leader) leadership: Arc<dyn zslg_consensus::RaftLeadership>,
     pub(in crate::leader) raft_state: Arc<dyn RaftStateView>,
-    pub(in crate::leader) intents: IntentSubmitter,
+    pub(in crate::leader) intents: Arc<dyn IntentSubmitter>,
     /// How far behind "now" a new cutoff is placed, so in-flight writes below it
     /// have already been accepted or rejected.
     pub(in crate::leader) cutoff_lag: Duration,
@@ -110,8 +110,9 @@ impl CutoffJob {
             Ok(IntentOutcome::Superseded { reason }) => {
                 debug!(?cutoff, %reason, "hlc cutoff superseded; retrying next tick");
             }
-            Err(Error::Lifecycle(LifecycleError::Shutdown)) => {}
+            Err(zslg_consensus::Error::Lifecycle(LifecycleError::Shutdown)) => {}
             Err(e) => {
+                let e = Error::from(e);
                 warn!(error = %e, ?cutoff, "failed to publish hlc cutoff; retrying next tick");
                 metrics::snapshot_creation(e.snapshot_state());
             }

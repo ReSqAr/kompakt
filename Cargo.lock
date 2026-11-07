@@ -2263,6 +2263,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pace-kit"
+version = "0.1.0"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
 name = "parking_lot"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4457,6 +4464,7 @@ dependencies = [
  "metrics-kit",
  "metrics-util",
  "object_store",
+ "pace-kit",
  "parking_lot 0.13.0",
  "pprof",
  "proptest",

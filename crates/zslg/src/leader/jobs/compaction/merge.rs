@@ -37,9 +37,9 @@ use zslg_log_types::LogError;
 use zslg_snapshot::SnapshotStore;
 
 use crate::error::Error;
-use crate::leader::integrator::{IntentOutcome, IntentSubmitter};
 use crate::metrics::{self, OpState};
 use crossbeam_combinators::{Cancellation, Channel};
+use zslg_consensus::{IntentOutcome, IntentSubmitter};
 use zslg_snapshot_types::SnapshotId;
 use zslg_snapshot_types::SnapshotMetadata;
 use zslg_snapshot_types::{CompactionTier, CompressionLevel};
@@ -56,7 +56,7 @@ pub(in crate::leader) async fn compact<'a>(
     raft_state: &'a dyn RaftStateView,
     compaction_tiers: &'a [CompactionTier],
     compression: CompressionLevel,
-    intents: &'a IntentSubmitter,
+    intents: &'a dyn IntentSubmitter,
 ) -> Result<CompactionOutcome, Error> {
     let result = compact_inner(
         snapshot_store,
@@ -75,7 +75,7 @@ async fn compact_inner<'a>(
     raft_state: &'a dyn RaftStateView,
     compaction_tiers: &'a [CompactionTier],
     compression: CompressionLevel,
-    intents: &'a IntentSubmitter,
+    intents: &'a dyn IntentSubmitter,
 ) -> Result<CompactionOutcome, Error> {
     let prev_state = raft_state.snapshot();
     let current_manifest = prev_state.manifest_state.manifest.clone();
@@ -101,7 +101,7 @@ async fn compact_inner<'a>(
         let replaced: BTreeSet<SnapshotId> = entries.iter().map(|m| m.snapshot_id).collect();
         let merged = merge_group(snapshot_store, entries, compression).await?;
         match intents
-            .submit(crate::leader::RaftIntent::CompactManifest {
+            .submit(zslg_consensus::RaftIntent::CompactManifest {
                 replaced,
                 replacement: vec![merged],
             })
@@ -603,7 +603,7 @@ mod tests {
                 &leader.raft_state,
                 &tiers,
                 CompressionLevel::fast(),
-                &intents,
+                intents.as_ref(),
             ),
         )
         .await
@@ -745,7 +745,7 @@ mod tests {
             &leader.raft_state,
             &tiers,
             CompressionLevel::fast(),
-            &intents,
+            intents.as_ref(),
         )
         .await
         .expect("compact");

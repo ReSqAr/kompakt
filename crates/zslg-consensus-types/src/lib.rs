@@ -3,6 +3,7 @@
 
 mod error;
 mod handle;
+mod intent;
 mod meta;
 mod types;
 mod validators;
@@ -11,6 +12,7 @@ pub use error::{
     ConsensusError, InvalidRaftState, StaleStateWrite, SubscriptionEnded, UnexpectedNodeId,
 };
 pub use handle::RaftStateHandle;
+pub use intent::{IntentOutcome, RaftIntent};
 pub use meta::{
     Exit, RaftManifestState, RaftState, ReplicaMembership, ReplicaStatus, drain_satisfied,
 };

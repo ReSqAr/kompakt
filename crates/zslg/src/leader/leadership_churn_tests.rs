@@ -259,7 +259,7 @@ fn spawn_snapshot(
     leader: NodeId,
     store: Arc<dyn LocalStoreView>,
     physical_ms: u64,
-) -> tokio::task::JoinHandle<Result<crate::leader::IntentOutcome, Error>> {
+) -> tokio::task::JoinHandle<Result<zslg_consensus::IntentOutcome, Error>> {
     let raft = c.nodes.get(&leader).expect("leader").raft.clone();
     let raft_state = c.nodes.get(&leader).expect("leader").raft_state.clone();
     let stable_log = c.stable_log.clone();
@@ -313,7 +313,7 @@ fn spawn_snapshot(
             )),
             Arc::new(raft_state.clone()),
         );
-        let outcome = intents.submit(intent).await;
+        let outcome = intents.submit(intent).await.map_err(Error::from);
         drop(raft);
         outcome
     })
@@ -353,7 +353,7 @@ const CHURN_CAP: Duration = Duration::from_secs(120);
 /// build that did reach the stall cannot also be complete.
 async fn await_stall(
     entered: &Notify,
-    task: &mut tokio::task::JoinHandle<Result<crate::leader::IntentOutcome, Error>>,
+    task: &mut tokio::task::JoinHandle<Result<zslg_consensus::IntentOutcome, Error>>,
 ) {
     tokio::select! {
         () = entered.notified() => {}
@@ -586,7 +586,7 @@ async fn reelected_leader_snapshot_commit_applies_when_its_premise_held_body() {
     let _ = release_tx.send(());
     let outcome = task.await.expect("join").expect("publish");
     assert!(
-        matches!(outcome, crate::leader::IntentOutcome::Applied { .. }),
+        matches!(outcome, zslg_consensus::IntentOutcome::Applied { .. }),
         "a snapshot whose premise still holds must publish, got: {outcome:?}",
     );
 
@@ -690,7 +690,7 @@ async fn reelected_leader_snapshot_commit_is_refused_when_the_manifest_moved_bod
     let _ = release_tx.send(());
     let outcome = task.await.expect("join");
     assert!(
-        !matches!(outcome, Ok(crate::leader::IntentOutcome::Applied { .. })),
+        !matches!(outcome, Ok(zslg_consensus::IntentOutcome::Applied { .. })),
         "a snapshot whose premise moved must never publish, got: {outcome:?}",
     );
 
@@ -709,7 +709,7 @@ async fn reelected_leader_snapshot_commit_is_refused_when_the_manifest_moved_bod
         .expect("join")
         .expect("retried snapshot must publish");
     assert!(
-        matches!(result, crate::leader::IntentOutcome::Applied { .. }),
+        matches!(result, zslg_consensus::IntentOutcome::Applied { .. }),
         "expected the retried snapshot to publish, got: {result:?}",
     );
 }
@@ -761,7 +761,7 @@ async fn demoted_leader_snapshot_commit_fails_without_corruption_body() {
     let _ = release_tx.send(());
     let result = task.await.expect("join");
     assert!(
-        !matches!(result, Ok(crate::leader::IntentOutcome::Applied { .. })),
+        !matches!(result, Ok(zslg_consensus::IntentOutcome::Applied { .. })),
         "demoted leader's snapshot commit must not apply, got: {result:?}",
     );
 
@@ -779,7 +779,7 @@ async fn demoted_leader_snapshot_commit_fails_without_corruption_body() {
         .expect("join")
         .expect("new leader's snapshot must commit");
     assert!(
-        matches!(result, crate::leader::IntentOutcome::Applied { .. }),
+        matches!(result, zslg_consensus::IntentOutcome::Applied { .. }),
         "expected the retried snapshot to be published, got: {result:?}",
     );
     assert_eq!(covered_entries(&c, n2).await, usize::from(SEEDED_ENTRIES));

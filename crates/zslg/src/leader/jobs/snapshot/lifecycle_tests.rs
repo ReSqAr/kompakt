@@ -770,7 +770,7 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
         .await
         .expect("submit");
     assert!(
-        matches!(outcome, crate::leader::IntentOutcome::Superseded { .. }),
+        matches!(outcome, zslg_consensus::IntentOutcome::Superseded { .. }),
         "expected the stale build to be superseded, got: {outcome:?}"
     );
 

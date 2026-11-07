@@ -83,6 +83,7 @@ backoff-kit = { path = "crates/backoff-kit" }
 raft-kit = { path = "crates/raft-kit" }
 shutdown = { path = "crates/shutdown" }
 warn-throttle = { path = "crates/warn-throttle" }
+pace-kit = { path = "crates/pace-kit" }
 zslg = { path = "crates/zslg" }
 zslg-consensus = { path = "crates/zslg-consensus" }
 zslg-consensus-types = { path = "crates/zslg-consensus-types" }

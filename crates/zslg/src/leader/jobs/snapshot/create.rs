@@ -88,7 +88,7 @@ pub(crate) struct WrittenObject {
 impl SnapshotResult {
     /// The intent that publishes this build, if there is anything to publish.
     #[must_use]
-    pub(in crate::leader) fn commit_intent(&self) -> Option<crate::leader::RaftIntent> {
+    pub(in crate::leader) fn commit_intent(&self) -> Option<zslg_consensus::RaftIntent> {
         match self {
             Self::Skipped => None,
             Self::Committed {
@@ -97,7 +97,7 @@ impl SnapshotResult {
                 prev_watermark,
                 prev_end_index,
                 ..
-            } => Some(crate::leader::RaftIntent::CommitSnapshot {
+            } => Some(zslg_consensus::RaftIntent::CommitSnapshot {
                 entry: object.as_ref().map(|o| o.entry.clone()),
                 new_watermark: *new_watermark,
                 prev_watermark: *prev_watermark,

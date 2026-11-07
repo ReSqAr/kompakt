@@ -8,6 +8,7 @@ use zslg_net_types::NetError;
 use zslg_snapshot_types::SnapshotError;
 use zslg_time_types::ClockError;
 
+mod intent_submitter;
 mod membership_gate;
 mod quorum_check;
 mod raft_leadership;
@@ -15,6 +16,7 @@ mod raft_membership;
 mod raft_state;
 mod state_replicator;
 
+pub use intent_submitter::IntentSubmitter;
 pub use membership_gate::MembershipGate;
 pub use quorum_check::QuorumCheck;
 pub use raft_leadership::RaftLeadership;
@@ -22,11 +24,11 @@ pub use raft_membership::{AddMemberOutcome, RaftMembership};
 pub use raft_state::{RaftStateTracker, RaftStateView};
 pub use state_replicator::StateReplicator;
 pub use zslg_consensus_types::{
-    CandidateInfo, ConsensusError, EvictionStatus, Exit, InvalidRaftState, RaftGeneration,
-    RaftLogIndex, RaftManifestState, RaftState, RaftStateError, RaftStateHandle, ReplicaMembership,
-    ReplicaStatus, ReplicatedRaftState, SpareSelectionStrategy, StaleStateWrite, SubscriptionEnded,
-    ToRaft, UnexpectedNodeId, all_targets, drain_satisfied, is_quorum, validate_cutoff_advance,
-    validate_replicated_state, validate_transition,
+    CandidateInfo, ConsensusError, EvictionStatus, Exit, IntentOutcome, InvalidRaftState,
+    RaftGeneration, RaftIntent, RaftLogIndex, RaftManifestState, RaftState, RaftStateError,
+    RaftStateHandle, ReplicaMembership, ReplicaStatus, ReplicatedRaftState, SpareSelectionStrategy,
+    StaleStateWrite, SubscriptionEnded, ToRaft, UnexpectedNodeId, all_targets, drain_satisfied,
+    is_quorum, validate_cutoff_advance, validate_replicated_state, validate_transition,
 };
 pub use zslg_node_types::NodeId;
 

@@ -37,6 +37,7 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "ti
 tokio-util = { workspace = true, features = ["io-util"] }
 tracing = { workspace = true }
 warn-throttle = { workspace = true }
+pace-kit = { workspace = true }
 zslg-consensus = { workspace = true }
 zslg-consensus-types = { workspace = true }
 zslg-lifecycle-types = { workspace = true }

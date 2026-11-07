@@ -11,6 +11,7 @@
 //! group as a splice rather than a whole manifest is what lets a snapshot
 //! committed mid-merge keep its place. Bucketing is in [`merge`].
 
+use std::sync::Arc;
 use std::time::Duration;
 use zslg_lifecycle_types::LifecycleError;
 
@@ -19,10 +20,10 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use crate::error::Error;
-use crate::leader::integrator::IntentSubmitter;
 use crate::leader::jobs::compaction::merge::compact;
 use crate::leader::jobs::{LeaderHandles, is_local_leader};
 use crate::metrics::{self, LeaderJob};
+use zslg_consensus::IntentSubmitter;
 use zslg_node_types::NodeId;
 use zslg_snapshot_types::CompactionTier;
 use zslg_snapshot_types::CompressionLevel;
@@ -49,7 +50,7 @@ pub(in crate::leader) fn spawn(
 pub(in crate::leader) struct CompactionJob {
     pub(in crate::leader) self_node_id: NodeId,
     pub(in crate::leader) handles: LeaderHandles,
-    pub(in crate::leader) intents: IntentSubmitter,
+    pub(in crate::leader) intents: Arc<dyn IntentSubmitter>,
     pub(in crate::leader) tiers: Vec<CompactionTier>,
     pub(in crate::leader) compression: CompressionLevel,
     pub(in crate::leader) interval: Duration,
@@ -84,7 +85,7 @@ impl CompactionJob {
             self.handles.raft_state.as_ref(),
             &self.tiers,
             self.compression,
-            &self.intents,
+            self.intents.as_ref(),
         )
         .await
         {

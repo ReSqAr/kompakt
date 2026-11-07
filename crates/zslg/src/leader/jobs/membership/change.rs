@@ -47,7 +47,7 @@ pub(in crate::leader) struct MembershipChangeInputs {
     pub(in crate::leader) self_node_id: NodeId,
     /// Membership steps are published through the leader's single Raft
     /// writer, which validates each transition before it can reach the log.
-    pub(in crate::leader) intents: crate::leader::IntentSubmitter,
+    pub(in crate::leader) intents: Arc<dyn zslg_consensus::IntentSubmitter>,
     pub(in crate::leader) leadership: Arc<dyn RaftLeadership>,
     pub(in crate::leader) raft_state: Arc<dyn RaftStateView>,
     pub(in crate::leader) observer: Arc<dyn MembershipObserver>,
@@ -249,11 +249,12 @@ impl MembershipChangeManager {
     async fn submit(
         &self,
         replica: ReplicaMembership,
-    ) -> Result<crate::leader::IntentOutcome, Error> {
+    ) -> Result<zslg_consensus::IntentOutcome, Error> {
         self.inputs
             .intents
-            .submit(crate::leader::RaftIntent::SetMembership { replica })
+            .submit(zslg_consensus::RaftIntent::SetMembership { replica })
             .await
+            .map_err(Error::from)
     }
 
     fn is_still_leader(&self) -> bool {
@@ -427,12 +428,12 @@ impl MembershipDriver for MembershipChangeManager {
                     .boxed()
                     .await?
                 {
-                    crate::leader::IntentOutcome::Applied { .. }
-                    | crate::leader::IntentOutcome::AlreadySatisfied => {
+                    zslg_consensus::IntentOutcome::Applied { .. }
+                    | zslg_consensus::IntentOutcome::AlreadySatisfied => {
                         *self.episode.lock().expect("episode lock") = None;
                         Ok(TickOutcome::Complete)
                     }
-                    crate::leader::IntentOutcome::Superseded { reason } => {
+                    zslg_consensus::IntentOutcome::Superseded { reason } => {
                         debug!(%reason, "step 4 superseded; restarting at step 2");
                         *self.episode.lock().expect("episode lock") = None;
                         Ok(TickOutcome::Pending)

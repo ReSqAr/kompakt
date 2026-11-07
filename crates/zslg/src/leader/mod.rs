@@ -21,7 +21,7 @@ mod leadership_churn_tests;
 use crate::leader::jobs::LeaderHandles;
 pub(super) use crate::leader::jobs::membership::liveness::LivenessConfig;
 pub(super) use crate::leader::jobs::snapshot::SnapshotConfig;
-pub(in crate::leader) use integrator::{Integrator, IntentOutcome, IntentSubmitter, RaftIntent};
+pub(in crate::leader) use integrator::Integrator;
 use zslg_consensus::{RaftLeadership, RaftStateView, StateReplicator};
 use zslg_net::{PeersWatcher, Router};
 use zslg_snapshot::SnapshotStore;

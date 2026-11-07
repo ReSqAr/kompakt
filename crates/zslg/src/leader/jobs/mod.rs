@@ -25,18 +25,15 @@
 //!
 //! Pacing: the timer-driven jobs rate-limit themselves via `MissedTickBehavior::
 //! Skip`. `snapshot` and `membership` do not — they re-evaluate immediately, and
-//! carry an explicit [`Pace`] floor. Each states its own reason at its constant;
+//! carry an explicit [`pace_kit::Pace`] floor. Each states its own reason at its constant;
 //! the reasons differ.
 
 use std::sync::Arc;
-use std::time::Duration;
 use zslg_consensus::{RaftLeadership, RaftStateView};
 use zslg_net::Router;
 use zslg_snapshot::SnapshotStore;
 
-use tokio::time::Instant;
-
-use crate::leader::IntentSubmitter;
+use zslg_consensus::IntentSubmitter;
 use zslg_log::{LocalStoreView, StableLogSnapshot};
 use zslg_node_types::NodeId;
 use zslg_time::Clock;
@@ -51,34 +48,6 @@ pub(in crate::leader) mod voters;
 #[cfg(test)]
 mod pacing_tests;
 
-/// A floor on a loop's iteration *rate*, measured start-to-start.
-///
-/// Never an added delay: an iteration that already outran the floor waits for
-/// nothing. Load-bearing for [`snapshot::SnapshotJob`], whose immediate
-/// loop-back is how a chunked snapshot drains a backlog.
-pub(in crate::leader) struct Pace {
-    floor: Duration,
-    last: Option<Instant>,
-}
-
-impl Pace {
-    #[must_use]
-    pub(in crate::leader) fn new(floor: Duration) -> Self {
-        Self { floor, last: None }
-    }
-
-    /// Wait out the remainder of the floor, then mark this iteration started.
-    pub(in crate::leader) async fn wait(&mut self) {
-        if let Some(last) = self.last {
-            // Overflow falls back to "now", i.e. no wait: it can never stall a
-            // loop, only fail to slow one on a clock about to wrap.
-            let earliest = last.checked_add(self.floor).unwrap_or_else(Instant::now);
-            tokio::time::sleep_until(earliest).await;
-        }
-        self.last = Some(Instant::now());
-    }
-}
-
 /// Everything a job needs to run. All `Arc`, so cloning per job is cheap.
 #[derive(Clone)]
 pub(in crate::leader) struct LeaderHandles {
@@ -91,7 +60,7 @@ pub(in crate::leader) struct LeaderHandles {
     pub(in crate::leader) router: Arc<dyn Router>,
     pub(in crate::leader) self_node_id: NodeId,
     /// Unused by `cleanup` and `voters`, which write no replicated state.
-    pub(in crate::leader) intents: IntentSubmitter,
+    pub(in crate::leader) intents: Arc<dyn IntentSubmitter>,
 }
 
 /// Every job's first gate.
@@ -100,5 +69,5 @@ pub(in crate::leader) fn is_local_leader(
     leadership: &dyn RaftLeadership,
     self_node_id: NodeId,
 ) -> bool {
-    leadership.current_leader() == Some(self_node_id)
+    leadership.is_leader(self_node_id)
 }

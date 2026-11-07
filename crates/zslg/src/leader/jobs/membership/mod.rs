@@ -28,10 +28,10 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use crate::error::Error;
-use crate::leader::jobs::Pace;
 use crate::leader::jobs::is_local_leader;
 use crate::leader::jobs::membership::liveness::LivenessState;
 use crate::metrics::{self, LeaderJob, OpState};
+use pace_kit::Pace;
 use zslg_consensus_types::RaftGeneration;
 use zslg_consensus_types::{RaftState, ReplicaMembership, ReplicaStatus};
 use zslg_node_types::NodeId;

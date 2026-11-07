@@ -14,6 +14,7 @@
 //! so the window stays open and the loop-back drives the next chunk. That
 //! loop-back is load-bearing — see [`SNAPSHOT_LOOP_FLOOR`].
 
+use std::sync::Arc;
 use std::time::Duration;
 use zslg_lifecycle_types::{ConfigError, LifecycleError};
 
@@ -22,12 +23,12 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use crate::error::Error;
-use crate::leader::integrator::{IntentOutcome, IntentSubmitter};
-use crate::leader::jobs::Pace;
 use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
 use crate::leader::jobs::{LeaderHandles, is_local_leader};
 use crate::metrics::{self, LeaderJob, SnapshotStep};
+use pace_kit::Pace;
 use warn_throttle::ThrottledWarn;
+use zslg_consensus::{IntentOutcome, IntentSubmitter};
 use zslg_node_types::NodeId;
 use zslg_snapshot_types::CompactionTier;
 use zslg_snapshot_types::CompressionLevel;
@@ -80,7 +81,7 @@ const SNAPSHOT_WARN_INTERVAL: Duration = Duration::from_secs(5);
 pub(in crate::leader) struct SnapshotJob {
     pub(in crate::leader) self_node_id: NodeId,
     pub(in crate::leader) handles: LeaderHandles,
-    pub(in crate::leader) intents: IntentSubmitter,
+    pub(in crate::leader) intents: Arc<dyn IntentSubmitter>,
     pub(in crate::leader) quorum_poll_interval: Duration,
     pub(in crate::leader) quorum_wait_timeout: Duration,
     pub(in crate::leader) compression: CompressionLevel,
@@ -189,8 +190,9 @@ impl SnapshotJob {
                 // The uploaded object is left for `jobs::cleanup`.
                 info!(?cutoff, %reason, "snapshot superseded while building; rebuilding");
             }
-            Err(Error::Lifecycle(LifecycleError::Shutdown)) => {}
+            Err(zslg_consensus::Error::Lifecycle(LifecycleError::Shutdown)) => {}
             Err(e) => {
+                let e = Error::from(e);
                 warn!(error = %e, ?cutoff, "failed to publish snapshot; will retry");
                 metrics::snapshot_creation(e.snapshot_state());
             }

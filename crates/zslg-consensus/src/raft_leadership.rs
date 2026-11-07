@@ -20,6 +20,12 @@ pub trait RaftLeadership: Send + Sync + 'static {
     #[must_use]
     fn current_leader(&self) -> Option<NodeId>;
 
+    /// Whether `node` is the leader right now — every leader job's first gate.
+    #[must_use]
+    fn is_leader(&self, node: NodeId) -> bool {
+        self.current_leader() == Some(node)
+    }
+
     #[must_use]
     fn voter_ids(&self) -> BTreeSet<NodeId>;
 

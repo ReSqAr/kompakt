@@ -26,9 +26,8 @@
 //! Premises are per intent, not per batch: one rejected intent does not sink the
 //! others drained with it.
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
-use zslg_consensus::{RaftStateView, StateReplicator};
+use zslg_consensus::{IntentOutcome, IntentSubmitter, RaftIntent, RaftStateView, StateReplicator};
 use zslg_consensus_types::ConsensusError;
 use zslg_lifecycle_types::LifecycleError;
 
@@ -38,73 +37,12 @@ use tracing::{debug, info, warn};
 
 use crate::error::Error;
 use crate::metrics::IntentState;
-use zslg_consensus_types::RaftGeneration;
+use zslg_consensus_types::RaftState;
 use zslg_consensus_types::ReplicatedRaftState;
-use zslg_consensus_types::{RaftState, ReplicaMembership};
-use zslg_log_types::LogIndex;
-use zslg_snapshot_types::SnapshotId;
-use zslg_snapshot_types::SnapshotMetadata;
-use zslg_time_types::Hlc;
 
 /// Queue depth. Every submitter awaits its own reply, so this only has to
 /// absorb one drain's worth of concurrent jobs.
 const INTENT_QUEUE_CAPACITY: usize = 64;
-
-/// A requested change to the replicated Raft state.
-///
-/// Each variant carries the premise it was computed under, so the integrator can
-/// tell "this is still applicable" from "the world moved on".
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::leader) enum RaftIntent {
-    /// Publish a new HLC cutoff (snapshot protocol step 1). Idempotent: a cutoff
-    /// at or below the committed one is already satisfied.
-    AdvanceCutoff { cutoff: Hlc },
-
-    /// Append `entry` to the manifest (absent for an empty window) and advance
-    /// the watermark. Premise: the manifest it was built against — its index
-    /// assignment continues from `prev_end_index`, so it cannot be rebased onto
-    /// a manifest that has grown since.
-    CommitSnapshot {
-        entry: Option<SnapshotMetadata>,
-        new_watermark: Hlc,
-        prev_watermark: Option<Hlc>,
-        prev_end_index: Option<LogIndex>,
-    },
-
-    /// Splice `replacement` over `replaced`, leaving the rest of the manifest
-    /// alone. A splice rather than a whole manifest so a long compaction
-    /// survives snapshot commits that land while it runs.
-    CompactManifest {
-        replaced: BTreeSet<SnapshotId>,
-        replacement: Vec<SnapshotMetadata>,
-    },
-
-    /// A replica-membership transition, validated by the same function the
-    /// Raft apply fence uses.
-    SetMembership { replica: ReplicaMembership },
-}
-
-impl RaftIntent {
-    fn describe(&self) -> &'static str {
-        match self {
-            Self::AdvanceCutoff { .. } => "AdvanceCutoff",
-            Self::CommitSnapshot { .. } => "CommitSnapshot",
-            Self::CompactManifest { .. } => "CompactManifest",
-            Self::SetMembership { .. } => "SetMembership",
-        }
-    }
-}
-
-/// Distinct from `Err`: the integrator worked, the intent no longer applies.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::leader) enum IntentOutcome {
-    /// Folded into a proposal that committed.
-    Applied { generation: RaftGeneration },
-    /// Already true in the committed state; nothing to propose.
-    AlreadySatisfied,
-    /// The premise no longer holds; recompute from current state.
-    Superseded { reason: String },
-}
 
 type Reply = oneshot::Sender<Result<IntentOutcome, Error>>;
 
@@ -123,26 +61,21 @@ impl IntentRequest {
 
 /// Submission handle held by every leader job.
 #[derive(Clone)]
-pub(in crate::leader) struct IntentSubmitter {
+pub(in crate::leader) struct IntentQueue {
     tx: mpsc::Sender<IntentRequest>,
 }
 
-impl IntentSubmitter {
-    /// Submit an intent and wait for its outcome. `Error::Shutdown` if the
-    /// integrator is gone, which can only mean shutdown — same cancellation
-    /// tree as its callers.
-    #[must_use = "an intent's outcome says whether the state actually changed"]
-    pub(in crate::leader) async fn submit(
-        &self,
-        intent: RaftIntent,
-    ) -> Result<IntentOutcome, Error> {
+#[async_trait::async_trait]
+impl IntentSubmitter for IntentQueue {
+    async fn submit(&self, intent: RaftIntent) -> Result<IntentOutcome, zslg_consensus::Error> {
         let (reply, rx) = oneshot::channel();
         self.tx
             .send(IntentRequest { intent, reply })
             .await
-            .map_err(|_| Error::Lifecycle(LifecycleError::Shutdown))?;
+            .map_err(|_| LifecycleError::Shutdown)?;
         rx.await
-            .map_err(|_| Error::Lifecycle(LifecycleError::Shutdown))?
+            .map_err(|_| LifecycleError::Shutdown)?
+            .map_err(Into::into)
     }
 }
 
@@ -158,7 +91,7 @@ impl Integrator {
     pub(in crate::leader) fn new(
         state_replicator: Arc<dyn StateReplicator>,
         raft_state: Arc<dyn RaftStateView>,
-    ) -> (Self, IntentSubmitter) {
+    ) -> (Self, Arc<dyn IntentSubmitter>) {
         let (tx, rx) = mpsc::channel(INTENT_QUEUE_CAPACITY);
         (
             Self {
@@ -166,7 +99,7 @@ impl Integrator {
                 state_replicator,
                 raft_state,
             },
-            IntentSubmitter { tx },
+            Arc::new(IntentQueue { tx }),
         )
     }
 
@@ -177,7 +110,7 @@ impl Integrator {
     pub(in crate::leader) fn spawn_for_test(
         state_replicator: Arc<dyn StateReplicator>,
         raft_state: Arc<dyn RaftStateView>,
-    ) -> (IntentSubmitter, CancellationToken) {
+    ) -> (Arc<dyn IntentSubmitter>, CancellationToken) {
         let (integrator, submitter) = Self::new(state_replicator, raft_state);
         let cancel = CancellationToken::new();
         tokio::spawn(integrator.run(cancel.clone()));
@@ -464,8 +397,12 @@ fn apply_intent(
     reason = "test code"
 )]
 mod tests {
+    use std::collections::BTreeSet;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use zslg_consensus_types::Exit;
+    use zslg_consensus_types::{Exit, RaftGeneration, ReplicaMembership};
+    use zslg_log_types::LogIndex;
+    use zslg_snapshot_types::{SnapshotId, SnapshotMetadata};
+    use zslg_time_types::Hlc;
 
     use super::*;
     use crate::tests::nid;
@@ -606,7 +543,7 @@ mod tests {
     }
 
     /// Start a real integrator over a `FakeRaft`.
-    fn start(initial: RaftState) -> (Arc<FakeRaft>, IntentSubmitter, CancellationToken) {
+    fn start(initial: RaftState) -> (Arc<FakeRaft>, Arc<dyn IntentSubmitter>, CancellationToken) {
         let raft = FakeRaft::new(initial);
         let view: Arc<dyn RaftStateView> = Arc::new(raft.state.clone());
         let (integrator, submitter) = Integrator::new(raft.clone(), view);
@@ -1031,7 +968,7 @@ mod tests {
         assert!(
             matches!(
                 err,
-                Error::Consensus(ConsensusError::StaleStateWrite { .. })
+                zslg_consensus::Error::Consensus(ConsensusError::StaleStateWrite { .. })
             ),
             "the submitter must see the replicator's real error: {err:?}"
         );
@@ -1086,7 +1023,7 @@ mod tests {
                 .submit(RaftIntent::AdvanceCutoff { cutoff: Hlc(200) })
                 .await
             {
-                Err(Error::Lifecycle(LifecycleError::Shutdown)) => break,
+                Err(zslg_consensus::Error::Lifecycle(LifecycleError::Shutdown)) => break,
                 other => {
                     assert!(
                         tokio::time::Instant::now() < deadline,
