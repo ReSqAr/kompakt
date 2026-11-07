@@ -2,4 +2,4 @@
 
 mod peer;
 
-pub(in crate::network) use peer::TcpPeerClient;
+pub use peer::TcpPeerClient;

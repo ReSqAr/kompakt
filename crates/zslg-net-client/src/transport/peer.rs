@@ -14,11 +14,11 @@
 use std::sync::Arc;
 use zslg_consensus::{AddMemberOutcome, RaftMembership};
 use zslg_net::LivenessProbe;
-use zslg_net_types::NetError;
+use zslg_net::NetError;
 use zslg_raft::RaftTransport;
 
-use crate::error::Error;
-use crate::network::client::{RpcClient, Target};
+use crate::Error;
+use crate::client::{RpcClient, Target};
 use async_trait::async_trait;
 use crossbeam_combinators::Channel;
 use futures::StreamExt;
@@ -28,21 +28,21 @@ use openraft::raft::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
     VoteRequest, VoteResponse,
 };
-use zslg_consensus_types::ReplicaStatus;
+use zslg_consensus::NodeId;
+use zslg_consensus::ReplicaStatus;
+use zslg_log::LogIndex;
 use zslg_log::{Replica, StampedWrite, WriteOutcome};
-use zslg_log_types::LogIndex;
-use zslg_net_types::PeerAddr;
+use zslg_net::PeerAddr;
 use zslg_net_wire::messages::{
     RpcFrame, RpcRaftFrame, RpcRaftRequest, RpcReplicaFrame, RpcReplicaRequest, RpcRequest,
 };
-use zslg_node_types::NodeId;
-use zslg_raft_types::TypeConfig;
+use zslg_raft::TypeConfig;
 /// Per-peer typed transport over [`RpcClient`]. The peer is addressed either by
 /// a registered `NodeId` ([`TcpPeerClient::new`]) or directly by
 /// `(addr, server_name)` ([`TcpPeerClient::direct`]); both expose the full
 /// [`ReplicaClient`](zslg_net::ReplicaClient) surface. Built only inside
 /// [`RemoteRouter`](crate::network::RemoteRouter).
-pub(in crate::network) struct TcpPeerClient {
+pub struct TcpPeerClient {
     rpc_client: Arc<RpcClient>,
     target: Target,
 }
@@ -50,7 +50,7 @@ pub(in crate::network) struct TcpPeerClient {
 impl TcpPeerClient {
     /// Transport to a peer already registered in the routing table.
     #[must_use]
-    pub(in crate::network) fn new(rpc_client: Arc<RpcClient>, node_id: NodeId) -> Self {
+    pub fn new(rpc_client: Arc<RpcClient>, node_id: NodeId) -> Self {
         Self {
             rpc_client,
             target: Target::Registered(node_id),
@@ -60,7 +60,7 @@ impl TcpPeerClient {
     /// Transport to an anonymous peer dialed directly by address — used during
     /// cluster join before the target's `NodeId` is known.
     #[must_use]
-    pub(in crate::network) fn direct(rpc_client: Arc<RpcClient>, peer_addr: PeerAddr) -> Self {
+    pub fn direct(rpc_client: Arc<RpcClient>, peer_addr: PeerAddr) -> Self {
         Self {
             rpc_client,
             target: Target::Direct(peer_addr),
@@ -80,7 +80,7 @@ impl TcpPeerClient {
 }
 
 impl TcpPeerClient {
-    pub(crate) async fn add_member_in(
+    pub async fn add_member_in(
         &self,
         node_id: NodeId,
         peer_addr: PeerAddr,
@@ -113,8 +113,8 @@ impl TcpPeerClient {
 impl RaftMembership for TcpPeerClient {
     async fn add_member(
         &self,
-        node_id: zslg_node_types::NodeId,
-        peer_addr: zslg_net_types::PeerAddr,
+        node_id: zslg_consensus::NodeId,
+        peer_addr: zslg_net::PeerAddr,
     ) -> Result<zslg_consensus::AddMemberOutcome, zslg_consensus::Error> {
         self.add_member_in(node_id, peer_addr)
             .await
@@ -123,7 +123,7 @@ impl RaftMembership for TcpPeerClient {
 }
 
 impl TcpPeerClient {
-    pub(crate) async fn probe_in(&self) -> Result<(), Error> {
+    pub async fn probe_in(&self) -> Result<(), Error> {
         self.rpc_client.echo(self.target_node_id()).await
     }
 }
@@ -235,7 +235,7 @@ impl Replica for TcpPeerClient {
 }
 
 impl TcpPeerClient {
-    pub(crate) async fn append_entries_in(
+    pub async fn append_entries_in(
         &self,
         rpc: AppendEntriesRequest<TypeConfig>,
     ) -> Result<Result<AppendEntriesResponse<NodeId>, RaftError<NodeId>>, Error> {
@@ -252,7 +252,7 @@ impl TcpPeerClient {
         }
     }
 
-    pub(crate) async fn vote_in(
+    pub async fn vote_in(
         &self,
         rpc: VoteRequest<NodeId>,
     ) -> Result<Result<VoteResponse<NodeId>, RaftError<NodeId>>, Error> {
@@ -269,7 +269,7 @@ impl TcpPeerClient {
         }
     }
 
-    pub(crate) async fn install_snapshot_in(
+    pub async fn install_snapshot_in(
         &self,
         rpc: InstallSnapshotRequest<TypeConfig>,
     ) -> Result<
@@ -297,11 +297,11 @@ impl TcpPeerClient {
 impl RaftTransport for TcpPeerClient {
     async fn append_entries(
         &self,
-        rpc: openraft::raft::AppendEntriesRequest<zslg_raft_types::TypeConfig>,
+        rpc: openraft::raft::AppendEntriesRequest<zslg_raft::TypeConfig>,
     ) -> Result<
         Result<
-            openraft::raft::AppendEntriesResponse<zslg_node_types::NodeId>,
-            openraft::error::RaftError<zslg_node_types::NodeId>,
+            openraft::raft::AppendEntriesResponse<zslg_consensus::NodeId>,
+            openraft::error::RaftError<zslg_consensus::NodeId>,
         >,
         zslg_raft::Error,
     > {
@@ -309,11 +309,11 @@ impl RaftTransport for TcpPeerClient {
     }
     async fn vote(
         &self,
-        rpc: openraft::raft::VoteRequest<zslg_node_types::NodeId>,
+        rpc: openraft::raft::VoteRequest<zslg_consensus::NodeId>,
     ) -> Result<
         Result<
-            openraft::raft::VoteResponse<zslg_node_types::NodeId>,
-            openraft::error::RaftError<zslg_node_types::NodeId>,
+            openraft::raft::VoteResponse<zslg_consensus::NodeId>,
+            openraft::error::RaftError<zslg_consensus::NodeId>,
         >,
         zslg_raft::Error,
     > {
@@ -321,12 +321,12 @@ impl RaftTransport for TcpPeerClient {
     }
     async fn install_snapshot(
         &self,
-        rpc: openraft::raft::InstallSnapshotRequest<zslg_raft_types::TypeConfig>,
+        rpc: openraft::raft::InstallSnapshotRequest<zslg_raft::TypeConfig>,
     ) -> Result<
         Result<
-            openraft::raft::InstallSnapshotResponse<zslg_node_types::NodeId>,
+            openraft::raft::InstallSnapshotResponse<zslg_consensus::NodeId>,
             openraft::error::RaftError<
-                zslg_node_types::NodeId,
+                zslg_consensus::NodeId,
                 openraft::error::InstallSnapshotError,
             >,
         >,

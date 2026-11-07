@@ -28,15 +28,15 @@ use openraft::raft::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
     VoteRequest, VoteResponse,
 };
+use zslg_consensus::NodeId;
 use zslg_consensus::{AddMemberOutcome, RaftMembership};
-use zslg_consensus_types::{ConsensusError, RaftState, ReplicaStatus};
+use zslg_consensus::{ConsensusError, RaftState, ReplicaStatus};
+use zslg_log::LogIndex;
 use zslg_log::{Replica, StampedWrite, WriteOutcome};
-use zslg_log_types::LogIndex;
-use zslg_net_types::PeerAddr;
-use zslg_node_types::NodeId;
-use zslg_raft_types::TypeConfig;
+use zslg_net::PeerAddr;
+use zslg_raft::TypeConfig;
 
-pub(crate) struct LocalReplicaClient {
+pub struct LocalReplicaClient {
     replica: Arc<dyn Replica>,
     raft: Arc<dyn RaftConsensus>,
     raft_state: Arc<dyn RaftStateView>,
@@ -44,7 +44,7 @@ pub(crate) struct LocalReplicaClient {
 
 impl LocalReplicaClient {
     #[must_use]
-    pub(crate) fn new(
+    pub fn new(
         replica: Arc<dyn Replica>,
         raft: Arc<dyn RaftConsensus>,
         raft_state: Arc<dyn RaftStateView>,
@@ -145,17 +145,11 @@ impl RaftStateView for LocalReplicaClient {
     }
 }
 
-impl LocalReplicaClient {
-    pub(crate) async fn probe_in(&self) -> Result<(), crate::Error> {
-        // A node is trivially alive to itself.
-        Ok(())
-    }
-}
-
 #[async_trait::async_trait]
 impl LivenessProbe for LocalReplicaClient {
     async fn probe(&self) -> Result<(), zslg_net::Error> {
-        self.probe_in().await.map_err(Into::into)
+        // A node is trivially alive to itself.
+        Ok(())
     }
 }
 

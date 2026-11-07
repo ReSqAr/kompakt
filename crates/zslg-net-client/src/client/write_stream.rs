@@ -13,12 +13,12 @@
 use std::sync::Weak;
 use zslg_lifecycle_types::LifecycleError;
 
-use crate::error::Error;
+use crate::Error;
+use crate::client::{RpcClient, Target};
 use crate::metrics;
-use crate::network::client::{RpcClient, Target};
 use crossbeam_combinators::{Channel, Feed, Finite, Infinite};
+use zslg_log::Data;
 use zslg_log::{StampedWrite, WriteOutcome};
-use zslg_log_types::Data;
 use zslg_net_wire::messages::WriteOutcome as WireWriteOutcome;
 use zslg_net_wire::messages::{RpcReplicaRequest, RpcRequest, WriteStreamResponse};
 use zslg_net_wire::{TcpFrameSink, TcpFrameStream, adopt_blocking};
@@ -31,7 +31,7 @@ use zslg_net_wire::{TcpFrameSink, TcpFrameStream, adopt_blocking};
 /// writer pulls `input` straight onto the wire (no intermediate channel), the reader
 /// decodes responses into the output. Symmetric with the server (`run_write`).
 #[must_use]
-pub(in crate::network) fn open_write(
+pub(crate) fn open_write(
     client: Weak<RpcClient>,
     target: Target,
     input: Channel<StampedWrite, Finite>,
@@ -183,10 +183,10 @@ fn resolve_response(
 #[allow(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
-    use zslg_log_types::DataId;
-    use zslg_net_types::NetError;
-    use zslg_time_types::ClockError;
-    use zslg_time_types::Hlc;
+    use zslg_log::DataId;
+    use zslg_net::NetError;
+    use zslg_time::ClockError;
+    use zslg_time::Hlc;
 
     fn data_id(tag: u8) -> DataId {
         DataId([tag; 32])

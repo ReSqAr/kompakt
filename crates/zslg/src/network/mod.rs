@@ -22,11 +22,7 @@
 //! hands back a [`Router`], so the rest of the crate names peers by `NodeId` and
 //! cannot reach the wire directly.
 
-mod client;
 mod peers;
-mod router;
-mod server;
-mod transport;
 
 use std::sync::Arc;
 use zslg_net::{ReplicaClient, Router};
@@ -35,17 +31,18 @@ use tokio_util::sync::CancellationToken;
 
 use crate::Error;
 
-use crate::network::client::RpcClient;
-pub(crate) use crate::network::client::RpcClientConfig;
-use crate::network::server::DispatchHandler;
-use crate::network::server::RpcServer;
-pub(crate) use crate::network::server::RpcServerConfig;
 pub(crate) use peers::PeersMembershipGate;
 #[cfg(test)]
 pub(crate) use peers::permissive_gate;
 pub(crate) use peers::static_peers;
-pub(crate) use router::{LocalReplicaClient, PeerRouter, RemoteRouter};
 use shutdown::Shutdown;
+pub(crate) use zslg_net_client::RemoteRouter;
+use zslg_net_client::RpcClient;
+pub(crate) use zslg_net_client::RpcClientConfig;
+pub(crate) use zslg_net_router::{LocalReplicaClient, PeerRouter};
+use zslg_net_server::DispatchHandler;
+use zslg_net_server::RpcServer;
+pub(crate) use zslg_net_server::RpcServerConfig;
 pub(crate) use zslg_net_wire::tcp::SocketOpts;
 use zslg_time::Clock;
 
@@ -76,7 +73,9 @@ pub(crate) fn bind_server(
     let server = RpcServer::bind(handler, hlc_clock, server_config, shutdown.token())?;
 
     let server_addr = server.local_addr();
-    shutdown.spawn("rpc_server", server.run());
+    shutdown.spawn("rpc_server", async move {
+        server.run().await.map_err(Error::from)
+    });
 
     Ok(server_addr)
 }

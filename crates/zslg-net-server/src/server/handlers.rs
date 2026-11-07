@@ -10,8 +10,8 @@
 use std::sync::Arc;
 use zslg_consensus::AddMemberOutcome;
 use zslg_lifecycle_types::LifecycleError;
+use zslg_net::NetError;
 use zslg_net::ReplicaClient;
-use zslg_net_types::NetError;
 
 use async_trait::async_trait;
 use futures::FutureExt as _;
@@ -20,7 +20,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::Error;
 
-use crate::network::server::{run_subscribe, run_write};
+use crate::server::{run_subscribe, run_write};
 use zslg_net_wire::messages::{
     RpcFrame, RpcRaftFrame, RpcRaftRequest, RpcReplicaFrame, RpcReplicaRequest, RpcRequest,
     RpcStreamKind,
@@ -28,7 +28,7 @@ use zslg_net_wire::messages::{
 use zslg_net_wire::{AsyncFrameSink, AsyncFrameStream};
 
 #[async_trait]
-pub(in crate::network) trait RpcHandlers: Send + Sync + 'static {
+pub trait RpcHandlers: Send + Sync + 'static {
     /// Handle one unary request, writing its response to `sink`.
     async fn dispatch(&self, request: RpcRequest, sink: &mut AsyncFrameSink) -> Result<(), Error>;
 
@@ -45,13 +45,13 @@ pub(in crate::network) trait RpcHandlers: Send + Sync + 'static {
 }
 
 #[derive(Clone)]
-pub(in crate::network) struct DispatchHandler {
+pub struct DispatchHandler {
     client: Arc<dyn ReplicaClient>,
 }
 
 impl DispatchHandler {
     #[must_use]
-    pub(in crate::network) fn new(client: Arc<dyn ReplicaClient>) -> Self {
+    pub fn new(client: Arc<dyn ReplicaClient>) -> Self {
         Self { client }
     }
 }

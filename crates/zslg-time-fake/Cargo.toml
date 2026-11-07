@@ -1,0 +1,18 @@
+[package]
+name = "zslg-time-fake"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "In-memory Clock for tests"
+publish = false
+
+[dependencies]
+parking_lot = { workspace = true }
+zslg-time = { workspace = true }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "fake"

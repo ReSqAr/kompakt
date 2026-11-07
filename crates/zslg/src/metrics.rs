@@ -79,7 +79,6 @@ pub(crate) const METRIC_PREFIX: &str = "zslg_";
 
 const LABEL_LOG_TYPE: &str = "log_type";
 const LABEL_STEP: &str = "step";
-const LABEL_METHOD: &str = "method";
 const LABEL_SOURCE: &str = "source";
 const LABEL_REASON: &str = "reason";
 const LABEL_KIND: &str = "kind";
@@ -108,7 +107,6 @@ const ALL_LABEL_KEYS: &[&str] = &[
     LABEL_STATE,
     LABEL_LOG_TYPE,
     LABEL_STEP,
-    LABEL_METHOD,
     LABEL_SOURCE,
     LABEL_REASON,
     LABEL_KIND,
@@ -331,11 +329,6 @@ metrics!("zslg_", write_path_writer; {
         "Feeder dropped an id because a replica's fan was full/gone (id \
          resent on that replica's next reconnect prime). ~0 in steady \
          state; sustained = a chronically-behind replica.";
-    counter writer_outcome_dropped  WRITER_OUTCOME_DROPPED_TOTAL
-        "writer_outcome_dropped_total"
-        "Outcome dropped because the per-connection outcome channel was \
-         full. ~0 in steady state; sustained = consumer (coordinator \
-         per-replica loop) is falling behind and writes will time out.";
     counter writer_submit_dropped  WRITER_SUBMIT_DROPPED_TOTAL
         "writer_submit_dropped_total"
         "Write dropped because the coordinator's submit channel was full. \
@@ -389,6 +382,13 @@ metrics!("zslg_", write_path_replica; {
          enforced at ingress as hlc_drift_too_large on the fresh per-RPC \
          HLC, not here.)"
         (state: ReplicaWriteState) [LABEL_STATE => state.as_str()];
+    hist_duration server_dispatch_wait SERVER_DISPATCH_WAIT_SECONDS
+        "server_dispatch_wait_seconds"
+        "Time a replicated write sat in the follower's server -> raft-append \
+         dispatch channel (frame received -> the raft submit picks it up). \
+         Directly timestamped on the queued object; grows under follower \
+         backpressure."
+        (elapsed: Duration);
 });
 
 // ── write path (replica side) + HLC cutoff: hand-written emission helpers ───
@@ -408,14 +408,6 @@ metrics!("zslg_", logs; {
         "log_subscription_reconnects_total"
         "Subscription reconnects (learner side). Sustained rate = flaky \
          link or replica restarts.";
-    counter subscription_reorder LOG_SUBSCRIPTION_REORDERS_TOTAL
-        "log_subscription_reorders_total"
-        "Subscription streams closed because a replica's delivered index \
-         went BACKWARDS (a reorder or duplicate). The replica log is \
-         gapless and single-writer and is read in index order, so this \
-         should always be zero: any non-zero value means local \
-         replica-log corruption on the serving replica, which warrants \
-         the wipe + new NodeId procedure.";
     custom  subscription_messages LOG_SUBSCRIPTION_MESSAGES_TOTAL
         "log_subscription_messages_total" Counter None
         "Records received via log subscription (learner side). \
@@ -464,16 +456,6 @@ pub(crate) fn subscription_messages(count: usize) {
 // shedding behaviour.
 
 metrics!("zslg_", subscription; {
-    counter subscription_consumer_stalled LOG_SUBSCRIPTION_CONSUMER_STALLED_TOTAL
-        "log_subscription_consumer_stalled_total"
-        "Subscriptions ended because the consumer accepted nothing for \
-         the whole stall timeout (30s). NOT backpressure: a slow \
-         consumer is waited on and is not counted anywhere. This fires \
-         only when an integrate loop has stopped making room entirely, \
-         which is a bug — an fsync-fenced batch frees a slot in \
-         milliseconds. No data is lost (the subscriber resumes from its \
-         durable cursor); the thread and socket are released so a \
-         wedged consumer cannot pin them forever. MUST be zero.";
     labeled_counter subscription_ended LOG_SUBSCRIPTION_ENDED_TOTAL
         "log_subscription_ended_total"
         "Subscription attempts that ended, by reason (learner side). \
@@ -650,17 +632,6 @@ pub(crate) fn read_request(source: ReadSource) {
 // ── RPC server ───────────────────────────────────────────────────────────────
 
 metrics!("zslg_", rpc_server; {
-    custom  rpc_server_request  RPC_SERVER_REQUESTS_TOTAL
-        "rpc_server_requests_total" Counter None
-        "RPC requests handled, by method and outcome.";
-    custom  rpc_server_request_duration RPC_SERVER_REQUEST_DURATION_SECONDS
-        "rpc_server_request_duration_seconds" Histogram Seconds
-        "Server-side RPC handler latency by method.";
-    gauge   rpc_connections_active RPC_CONNECTIONS_ACTIVE
-        "rpc_connections_active" Count
-        "Open TCP connections on the RPC server (unary keep-alive \
-         connections + persistent write/subscribe connections)."
-        (count: u64);
     counter raft_log_read_empty_range RAFT_LOG_READ_EMPTY_RANGE_TOTAL
         "raft_log_read_empty_range_total"
         "Raft-log reads for a non-empty index range that returned no \
@@ -675,23 +646,6 @@ metrics!("zslg_", rpc_server; {
 
 // ── RPC server: hand-written emission helpers ────────────────────────────────
 // (custom rows above; each fn below emits the metrics named in its row)
-
-pub(crate) fn rpc_server_request(method: &'static str, state: OpState) {
-    metrics::counter!(
-        RPC_SERVER_REQUESTS_TOTAL,
-        LABEL_METHOD => method,
-        LABEL_STATE => state.as_str(),
-    )
-    .increment(1);
-}
-
-pub(crate) fn rpc_server_request_duration(method: &'static str, elapsed: Duration) {
-    metrics::histogram!(
-        RPC_SERVER_REQUEST_DURATION_SECONDS,
-        LABEL_METHOD => method,
-    )
-    .record(elapsed);
-}
 
 // ── RPC client (writer/learner outbound; async-path investigation) ───────────
 // Additive decomposition of one client-side unary RPC:
@@ -731,25 +685,6 @@ metrics!("zslg_", rpc_client; {
          writer's oneshot fires). What the client's write() actually waits \
          for. Compare to the per-follower replica_write_rpc: a gap means the \
          quorum waits on a path the per-follower round trip misses."
-        (elapsed: Duration);
-    hist_duration write_stream_send WRITE_STREAM_SEND_SECONDS
-        "write_stream_send_seconds"
-        "Time to feed + flush one batch of frames on the write-stream socket \
-         (leader -> follower). Grows when the follower's server isn't reading \
-         (TCP backpressure on the leader's send)."
-        (elapsed: Duration);
-    hist_duration write_stream_input_wait WRITE_STREAM_INPUT_WAIT_SECONDS
-        "write_stream_input_wait_seconds"
-        "Time a write sat in the write stream's input channel (coordinator \
-         fan pickup -> the blocking writer loop dequeues it). Directly \
-         timestamped on the queued object; ~0 when the writer loop keeps up."
-        (elapsed: Duration);
-    hist_duration server_dispatch_wait SERVER_DISPATCH_WAIT_SECONDS
-        "server_dispatch_wait_seconds"
-        "Time a replicated write sat in the follower's server -> raft-append \
-         dispatch channel (frame received -> the raft submit picks it up). \
-         Directly timestamped on the queued object; grows under follower \
-         backpressure."
         (elapsed: Duration);
 });
 
@@ -1333,11 +1268,6 @@ metrics!("zslg_", probes; {
         "Segment-WAL append + fsync latency inside StableLog::append \
          batches (the stable log's own durability fence).  High values = \
          slow WAL fsyncs during snapshot load.";
-    probe_unlabeled rpc_conn_checkout_probe RPC_CONN_CHECKOUT_SECONDS
-        "rpc_conn_checkout_seconds"
-        "Fresh-dial cost paid on a unary keep-alive pool miss (DNS + TCP \
-         connect + socket setup). A pool hit reuses an idle connection and \
-         is not recorded here; see rpc_conn_reuse_total for the hit rate.";
     probe_unlabeled replica_append_postcommit_probe REPLICA_APPEND_POSTCOMMIT_SECONDS
         "replica_append_postcommit_seconds"
         "Post-fsync work per replica-log flush: frontier update, broadcast, \
@@ -1345,11 +1275,6 @@ metrics!("zslg_", probes; {
     probe   write_duration_probe WRITE_DURATION_SECONDS "write_duration_seconds"
         "End-to-end client write latency: fan-out start to quorum \
          resolution. Count per state doubles as the writes counter.";
-    probe   rpc_roundtrip_probe RPC_ROUNDTRIP_SECONDS "rpc_roundtrip_seconds"
-        "Whole client-side unary RPC: open to first response frame.";
-    probe   rpc_open_stream_probe RPC_OPEN_STREAM_SECONDS "rpc_open_stream_seconds"
-        "Client open: dedicated connection dial + request send for a \
-         server-streaming RPC (subscribe); no response wait.";
     probe   read_token_wait_probe READ_TOKEN_WAIT_DURATION_SECONDS
         "read_token_wait_duration_seconds"
         "Time read-your-writes tokens waited for the store to catch up.";
@@ -1365,74 +1290,10 @@ metrics!("zslg_", probes; {
         "local_store_integrate_duration_seconds"
         "LocalStore::integrate_batch latency by outcome. _count is the \
          integrate throughput.";
-    custom  rpc_conn_reuse RPC_CONN_REUSE_TOTAL "rpc_conn_reuse_total" Counter None
-        "Unary connection-pool checkouts by outcome. Label `state`: `hit` \
-         reused an idle connection, `miss` required a fresh dial. A low hit \
-         rate under load = connections churning (peer closing them, or the \
-         idle cap too small).";
 });
 
 // ── probes: hand-written emission helpers ──────────────────────────────────
 // (custom rows above; each fn below emits the metrics named in its row)
-
-/// Count a unary connection-pool checkout as a reuse hit (`true`) or a miss
-/// that required a fresh dial (`false`).
-pub(crate) fn rpc_conn_reuse(hit: bool) {
-    let state = if hit { "hit" } else { "miss" };
-    metrics::counter!(RPC_CONN_REUSE_TOTAL, LABEL_STATE => state).increment(1);
-}
-
-// ── RPC server dual-metric guard ──────────────────────────────────────
-
-/// RAII guard for RPC server handler metrics. Records one histogram
-/// (`rpc_server_request_duration_seconds`) and one counter
-/// (`rpc_server_requests_total`) on drop — the two-metric pattern that
-/// [`Probe`] is not designed for.
-#[must_use = "RpcServerGuard records metrics on drop"]
-pub(crate) struct RpcServerGuard {
-    t0: tokio::time::Instant,
-    method: &'static str,
-    armed: bool,
-}
-
-impl RpcServerGuard {
-    pub(crate) fn new() -> Self {
-        Self {
-            t0: tokio::time::Instant::now(),
-            method: "handshake",
-            armed: true,
-        }
-    }
-
-    /// Record the dispatched request kind so a cancellation mid-dispatch is
-    /// attributed to the right method.
-    pub(crate) fn set_method(&mut self, method: &'static str) {
-        self.method = method;
-    }
-
-    /// Suppress emission entirely (e.g. clean shutdown, not a request failure).
-    pub(crate) fn disarm(&mut self) {
-        self.armed = false;
-    }
-
-    /// Record both metrics with the given outcome and suppress drop emission.
-    pub(crate) fn finish(mut self, ok: bool) {
-        self.armed = false;
-        let elapsed = self.t0.elapsed();
-        rpc_server_request_duration(self.method, elapsed);
-        rpc_server_request(self.method, OpState::from_ok(ok));
-    }
-}
-
-impl Drop for RpcServerGuard {
-    fn drop(&mut self) {
-        if self.armed {
-            let elapsed = self.t0.elapsed();
-            rpc_server_request_duration(self.method, elapsed);
-            rpc_server_request(self.method, OpState::Failure);
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // The canonical registry
@@ -1446,6 +1307,9 @@ const ALL_METRICS: &[&[MetricDef]] = &[
     zslg_object_store::metrics::METRICS,
     // --- quorum fan-out (zslg-quorum-read) ---
     zslg_quorum_read::metrics::METRICS,
+    // --- RPC client and server (zslg-net-client, zslg-net-server) ---
+    zslg_net_client::metrics::METRICS,
+    zslg_net_server::metrics::METRICS,
     // --- RPC wire (zslg-net-wire) ---
     zslg_net_wire::metrics::METRICS,
     // --- storage memory budget (namespaced) ---

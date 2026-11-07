@@ -28,8 +28,8 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use zslg_consensus_types::ConsensusError;
-use zslg_time_types::ClockError;
+use zslg_consensus::ConsensusError;
+use zslg_time::ClockError;
 
 use tokio::net::TcpListener;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
@@ -37,28 +37,28 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, trace, warn};
 
-use crate::error::Error;
+use crate::Error;
 use crate::metrics::{self};
-use zslg_net_types::ToRpc;
+use zslg_consensus::NodeId;
+use zslg_net::ToRpc;
 use zslg_net_wire::messages::{RpcFrame, RpcRequest};
 use zslg_net_wire::tcp::{self, SocketOpts};
 use zslg_net_wire::{AsyncFrameSink, AsyncFrameStream};
-use zslg_node_types::NodeId;
 use zslg_time::Clock;
 
 mod handlers;
 mod stream_handler;
 
-pub(in crate::network) use handlers::{DispatchHandler, RpcHandlers};
-pub(in crate::network) use stream_handler::{run_subscribe, run_write};
+pub use handlers::{DispatchHandler, RpcHandlers};
+pub(crate) use stream_handler::{run_subscribe, run_write};
 
-pub(crate) struct RpcServerConfig {
-    pub(crate) listen_addr: SocketAddr,
-    pub(crate) socket_opts: SocketOpts,
-    pub(crate) node_id: NodeId,
+pub struct RpcServerConfig {
+    pub listen_addr: SocketAddr,
+    pub socket_opts: SocketOpts,
+    pub node_id: NodeId,
 }
 
-pub(in crate::network) struct RpcServer {
+pub struct RpcServer {
     listener: TcpListener,
     handlers: Arc<dyn RpcHandlers>,
     clock: Arc<dyn Clock>,
@@ -70,7 +70,7 @@ pub(in crate::network) struct RpcServer {
 }
 
 impl RpcServer {
-    pub(in crate::network) fn bind(
+    pub fn bind(
         handlers: Arc<dyn RpcHandlers>,
         clock: Arc<dyn Clock>,
         RpcServerConfig {
@@ -101,11 +101,11 @@ impl RpcServer {
     }
 
     #[must_use]
-    pub(in crate::network) fn local_addr(&self) -> SocketAddr {
+    pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
 
-    pub(in crate::network) async fn run(self) -> Result<(), Error> {
+    pub async fn run(self) -> Result<(), Error> {
         info!(addr = %self.local_addr, node_id = ?self.node_id, "rpc server: starting");
 
         let mut conn_tasks = JoinSet::new();

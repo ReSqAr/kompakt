@@ -34,9 +34,9 @@
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
-use zslg_consensus_types::ConsensusError;
+use zslg_consensus::ConsensusError;
 use zslg_lifecycle_types::ConfigError;
-use zslg_net_types::NetError;
+use zslg_net::NetError;
 
 use dashmap::DashMap;
 use parking_lot::Mutex;
@@ -44,20 +44,20 @@ use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
-use crate::ByteSize;
-use crate::error::Error;
-use crate::metrics::OpState;
+use crate::Error;
+use bytesize::ByteSize;
 use crossbeam_combinators::Channel;
+use metrics_kit::OpState;
+use zslg_consensus::NodeId;
+use zslg_log::LogIndex;
 use zslg_log::{StampedWrite, WriteOutcome};
-use zslg_log_types::LogIndex;
-use zslg_net_types::PeerAddr;
+use zslg_net::PeerAddr;
 use zslg_net_wire::messages::{
     RpcFrame, RpcRaftFrame, RpcRaftRequest, RpcReplicaFrame, RpcReplicaRequest, RpcRequest,
     RpcStreamKind,
 };
 use zslg_net_wire::tcp::{self, SocketOpts};
 use zslg_net_wire::{AsyncFrameSink, AsyncFrameStream};
-use zslg_node_types::NodeId;
 use zslg_time::Clock;
 
 mod write_stream;
@@ -72,7 +72,7 @@ type UnaryKey = (PeerAddr, Option<NodeId>);
 
 /// How an outgoing RPC reaches its peer.
 #[derive(Debug, Clone)]
-pub(in crate::network) enum Target {
+pub enum Target {
     /// A peer already in the routing table: pooled connection, responses are
     /// `NodeId`-verified.
     Registered(NodeId),
@@ -83,27 +83,27 @@ pub(in crate::network) enum Target {
 
 /// Knobs for [`RpcClient::new`], grouped so the constructor stays under the
 /// argument limit. TCP socket tuning and write-pool knobs are inlined (flat).
-pub(crate) struct RpcClientConfig {
-    pub(crate) tcp_keepalive_interval: Duration,
+pub struct RpcClientConfig {
+    pub tcp_keepalive_interval: Duration,
     #[cfg(target_os = "linux")]
-    pub(crate) tcp_user_timeout: Duration,
-    pub(crate) tcp_keepalive_retries: u32,
-    pub(crate) socket_buffer_size: ByteSize,
-    pub(crate) unary_timeout: Duration,
-    pub(crate) connect_timeout: Duration,
-    pub(crate) max_unary_conns_per_peer: usize,
-    pub(crate) max_idle_unary_conns_per_peer: usize,
-    pub(crate) pool_channel_capacity: usize,
+    pub tcp_user_timeout: Duration,
+    pub tcp_keepalive_retries: u32,
+    pub socket_buffer_size: ByteSize,
+    pub unary_timeout: Duration,
+    pub connect_timeout: Duration,
+    pub max_unary_conns_per_peer: usize,
+    pub max_idle_unary_conns_per_peer: usize,
+    pub pool_channel_capacity: usize,
     /// Receive-buffer depth for a replica-log subscription. Defaults to the
     /// replica's live-channel depth: a smaller value here would just move the
     /// bottleneck one hop downstream. Unlike the replica's fan-out this
     /// **blocks** (see `CONSUMER_STALL_TIMEOUT`) rather than shedding, so an
     /// undersized buffer stalls the stream instead of collapsing it.
-    pub(crate) subscribe_channel_capacity: NonZeroUsize,
+    pub subscribe_channel_capacity: NonZeroUsize,
 }
 
 impl RpcClientConfig {
-    pub(crate) fn validate(&self) -> Result<(), Error> {
+    pub fn validate(&self) -> Result<(), Error> {
         if self.tcp_keepalive_retries == 0 {
             return Err(Error::Config(ConfigError::InvalidConfiguration(
                 "tcp_keepalive_retries must be >= 1".to_owned(),
@@ -425,14 +425,14 @@ impl StreamOpener {
     }
 }
 
-pub(in crate::network) struct RpcClient {
+pub struct RpcClient {
     addrs: AddrBook,
     rpc: Arc<UnaryPoolStore>,
     streams: StreamOpener,
 }
 
 impl RpcClient {
-    pub(in crate::network) fn new(
+    pub fn new(
         clock: Arc<dyn Clock>,
         opts: RpcClientConfig,
         cancel: CancellationToken,
@@ -473,13 +473,13 @@ impl RpcClient {
     /// Make `node_id` addressable, so a [`Target::Registered`] can resolve. Fed
     /// lazily from Raft membership as peers are learned; a node registers itself
     /// too, since its own `RpcClient` may route back to it.
-    pub(in crate::network) fn register_peer(&self, node_id: NodeId, peer_addr: PeerAddr) {
+    pub fn register_peer(&self, node_id: NodeId, peer_addr: PeerAddr) {
         self.addrs.register(node_id, peer_addr);
     }
 
     /// Send one request and receive exactly one response frame, bounded by the
     /// per-RPC deadline. Pooled, with the one retry described in the header.
-    pub(in crate::network) async fn send_unary(
+    pub async fn send_unary(
         &self,
         target: &Target,
         request: RpcRequest,
@@ -494,7 +494,7 @@ impl RpcClient {
     }
 
     /// Send one replica request and receive the response as `RpcReplicaFrame`.
-    pub(in crate::network) async fn call_replica(
+    pub async fn call_replica(
         &self,
         target: &Target,
         request: RpcReplicaRequest,
@@ -513,7 +513,7 @@ impl RpcClient {
 
     /// Send one Raft request and receive the response as `RpcRaftFrame`.
     /// Converts `RpcFrame::Error` into `Err` automatically.
-    pub(in crate::network) async fn call_raft(
+    pub async fn call_raft(
         &self,
         target: &Target,
         request: RpcRaftRequest,
@@ -531,7 +531,7 @@ impl RpcClient {
     }
 
     /// Ping `peer` with an echo and confirm the reply arrives.
-    pub(in crate::network) async fn echo(&self, peer: NodeId) -> Result<(), Error> {
+    pub async fn echo(&self, peer: NodeId) -> Result<(), Error> {
         match self
             .send_unary(&Target::Registered(peer), RpcRequest::Echo)
             .await?
@@ -548,7 +548,7 @@ impl RpcClient {
     /// half is dropped immediately: the subscription never writes again, so
     /// half-closing it is clean. The connection lives until the returned stream
     /// is dropped.
-    pub(in crate::network) async fn open(
+    pub async fn open(
         &self,
         target: &Target,
         request: RpcRequest,
@@ -559,7 +559,7 @@ impl RpcClient {
 
     /// Dial and send the `ReplicaWrite` handshake, handing both halves to the
     /// pool worker.
-    pub(in crate::network) async fn dial_write_stream(
+    pub async fn dial_write_stream(
         &self,
         target: &Target,
     ) -> Result<(AsyncFrameSink, AsyncFrameStream), Error> {
@@ -572,7 +572,7 @@ impl RpcClient {
     /// owns reopen, so there is no cross-caller pool to arbitrate. Items carry
     /// their enqueue timestamp (the write→replica queue-residency probes).
     #[must_use]
-    pub(in crate::network) fn write(
+    pub fn write(
         &self,
         node_id: NodeId,
         input: Channel<StampedWrite, crossbeam_combinators::Finite>,
@@ -582,7 +582,7 @@ impl RpcClient {
 
     /// Open a fresh connection for a subscribe stream: dial, send the
     /// `ReplicaSubscribe { from }` handshake.
-    pub(in crate::network) async fn dial_subscribe_stream(
+    pub async fn dial_subscribe_stream(
         &self,
         target: &Target,
         from: Option<LogIndex>,
@@ -594,7 +594,7 @@ impl RpcClient {
     }
 
     #[must_use]
-    pub(in crate::network) fn subscribe_from(
+    pub fn subscribe_from(
         &self,
         node_id: NodeId,
         from: Option<LogIndex>,
@@ -617,7 +617,7 @@ mod tests {
     use tokio::net::TcpListener;
 
     use super::*;
-    use zslg_hlc_clock::HlcClock;
+    use zslg_time_fake::CountingClock;
 
     fn test_opts(unary_timeout: Duration) -> RpcClientConfig {
         RpcClientConfig {
@@ -707,7 +707,7 @@ mod tests {
             }
         });
 
-        let clock = Arc::new(HlcClock::new(Duration::from_secs(60)));
+        let clock = Arc::new(CountingClock::new());
         let client = RpcClient::new(
             clock,
             test_opts(Duration::from_millis(300)),

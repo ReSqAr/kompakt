@@ -12,11 +12,11 @@ use std::sync::Weak;
 
 use tokio_util::sync::CancellationToken;
 
-use crate::error::Error;
-use crate::network::client::{RpcClient, Target};
+use crate::Error;
+use crate::client::{RpcClient, Target};
 use crossbeam_combinators::{Channel, Feed, Infinite};
-use zslg_log_types::Data;
-use zslg_log_types::LogIndex;
+use zslg_log::Data;
+use zslg_log::LogIndex;
 use zslg_net_wire::messages::SubscribeStreamItem;
 use zslg_net_wire::{TcpFrameStream, adopt_blocking};
 
@@ -50,7 +50,7 @@ const CONSUMER_STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_se
 /// force-closes the socket from inside its own blocking task the moment its
 /// input drains, which EOFs its reader. Subscribe drops the sink at the
 /// handshake, so it has no such loop and nothing to cascade from.
-pub(in crate::network) fn open_subscribe(
+pub(crate) fn open_subscribe(
     client: Weak<RpcClient>,
     target: Target,
     from: Option<LogIndex>,
@@ -198,10 +198,16 @@ fn subscribe_reader_loop(
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "test code")]
 mod tests {
     use super::*;
-    use crate::tests::make_meta;
+    fn make_meta(seed: u8, hlc: u64) -> zslg_log::DataId {
+        zslg_log::DataId::from_parts(
+            zslg_time::Hlc(hlc),
+            zslg_consensus::NodeId::from_uuid(uuid::Uuid::nil()),
+            u64::from(seed),
+        )
+    }
     use bytes::Bytes;
     use std::sync::Arc;
-    use zslg_net_types::PeerAddr;
+    use zslg_net::PeerAddr;
 
     fn item(idx: u8) -> (LogIndex, Data) {
         (
@@ -304,9 +310,7 @@ mod tests {
 
         let cancel = CancellationToken::new();
         let client = RpcClient::new(
-            Arc::new(zslg_hlc_clock::HlcClock::new(
-                std::time::Duration::from_secs(60),
-            )),
+            Arc::new(zslg_time_fake::CountingClock::new()),
             test_client_config(),
             cancel.clone(),
         );
@@ -346,9 +350,9 @@ mod tests {
         );
     }
 
-    fn test_client_config() -> crate::network::client::RpcClientConfig {
+    fn test_client_config() -> crate::client::RpcClientConfig {
         let sopts = zslg_net_wire::tcp::SocketOpts::for_test();
-        crate::network::client::RpcClientConfig {
+        crate::client::RpcClientConfig {
             tcp_keepalive_interval: sopts.keepalive_interval,
             #[cfg(target_os = "linux")]
             tcp_user_timeout: sopts.user_timeout,

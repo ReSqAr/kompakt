@@ -98,6 +98,28 @@ macro_rules! error_union {
     };
 }
 
+/// Narrow a union into a wider-or-equal one declared elsewhere: generates
+/// `From<$src> for $dst` for each destination, mapping each named variant to
+/// the variant of the same name. The compiler's exhaustiveness check enforces
+/// that `$variant` lists every variant of `$src`. For use where the
+/// destination cannot name the source (a port crate's union), so the source
+/// side declares the conversion.
+#[macro_export]
+macro_rules! error_bridge {
+    (@one $src:ident, $dst:path, [$($variant:ident),+]) => {
+        impl From<$src> for $dst {
+            fn from(e: $src) -> Self {
+                match e { $( $src::$variant(x) => Self::$variant(x), )+ }
+            }
+        }
+    };
+    ($src:ident => ; $($variant:ident),+ $(,)?) => {};
+    ($src:ident => $dst:path $(, $rest:path)* $(,)? ; $($variant:ident),+ $(,)?) => {
+        $crate::error_bridge!(@one $src, $dst, [$($variant),+]);
+        $crate::error_bridge!($src => $($rest),* ; $($variant),+);
+    };
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "test code")]
 mod tests {

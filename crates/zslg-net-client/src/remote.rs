@@ -4,21 +4,21 @@
 use std::sync::Arc;
 use zslg_net::{ReplicaClient, Router};
 
-use crate::network::client::RpcClient;
-use crate::network::transport::TcpPeerClient;
-use zslg_net_types::PeerAddr;
-use zslg_node_types::NodeId;
+use crate::client::RpcClient;
+use crate::transport::TcpPeerClient;
+use zslg_consensus::NodeId;
+use zslg_net::PeerAddr;
 
 /// The single owner of the peer-connection [`RpcClient`]. Built inside
 /// [`setup_router`](crate::network::setup_router), which keeps the raw client
 /// from ever escaping the `network` module.
-pub(crate) struct RemoteRouter {
+pub struct RemoteRouter {
     rpc_client: Arc<RpcClient>,
 }
 
 impl RemoteRouter {
     #[must_use]
-    pub(in crate::network) fn new(rpc_client: Arc<RpcClient>) -> Self {
+    pub fn new(rpc_client: Arc<RpcClient>) -> Self {
         Self { rpc_client }
     }
 
@@ -29,16 +29,13 @@ impl RemoteRouter {
     /// The shutdown token is a fresh one nobody holds: these tests drive
     /// teardown by dropping the router, never by cancelling. A test that wants
     /// to exercise cancellation calls the stream opener directly.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     #[must_use]
-    pub(crate) fn for_test(
-        clock: Arc<dyn zslg_time::Clock>,
-        unary_timeout: std::time::Duration,
-    ) -> Self {
+    pub fn for_test(clock: Arc<dyn zslg_time::Clock>, unary_timeout: std::time::Duration) -> Self {
         let sopts = zslg_net_wire::tcp::SocketOpts::for_test();
         Self::new(RpcClient::new(
             clock,
-            crate::network::client::RpcClientConfig {
+            crate::client::RpcClientConfig {
                 tcp_keepalive_interval: sopts.keepalive_interval,
                 #[cfg(target_os = "linux")]
                 tcp_user_timeout: sopts.user_timeout,
@@ -57,10 +54,10 @@ impl RemoteRouter {
 
     /// Test-only: build the client side from an [`RpcClientConfig`] (from the
     /// node config's `router_config()` producer).
-    #[cfg(test)]
+    #[cfg(any(test, feature = "testing"))]
     #[must_use]
-    pub(crate) fn for_test_from_client(
-        config: crate::network::RpcClientConfig,
+    pub fn for_test_from_client(
+        config: crate::client::RpcClientConfig,
         clock: Arc<dyn zslg_time::Clock>,
     ) -> Self {
         Self::new(RpcClient::new(

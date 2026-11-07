@@ -1,0 +1,48 @@
+[package]
+name = "zslg-net-client"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "RPC client: unary pool, streams, and the per-peer ReplicaClient"
+publish = false
+
+[dependencies]
+dashmap = { workspace = true }
+async-trait = { workspace = true }
+bytesize = { workspace = true }
+crossbeam-channel = { workspace = true }
+crossbeam-combinators = { workspace = true, features = ["tokio"] }
+error-union = { workspace = true }
+futures = { workspace = true }
+metrics-kit = { workspace = true }
+openraft = { workspace = true }
+parking_lot = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "time", "net", "io-util", "macros"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+zslg-consensus = { workspace = true }
+zslg-lifecycle-types = { workspace = true }
+zslg-log = { workspace = true }
+zslg-net = { workspace = true }
+zslg-net-wire = { workspace = true }
+zslg-raft = { workspace = true }
+zslg-snapshot = { workspace = true }
+zslg-time = { workspace = true }
+
+[dev-dependencies]
+bytes = { workspace = true }
+uuid = { workspace = true }
+zslg-time-fake = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time", "net", "io-util", "test-util"] }
+zslg-net-wire = { workspace = true, features = ["testing"] }
+
+[features]
+# `RemoteRouter::for_test*`, for the tests of the crates that dial.
+testing = ["zslg-net-wire/testing"]
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "implementation"

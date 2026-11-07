@@ -4472,6 +4472,9 @@ dependencies = [
  "zslg-log",
  "zslg-log-types",
  "zslg-net",
+ "zslg-net-client",
+ "zslg-net-router",
+ "zslg-net-server",
  "zslg-net-types",
  "zslg-net-wire",
  "zslg-node-id",
@@ -4605,6 +4608,75 @@ dependencies = [
  "zslg-raft",
  "zslg-snapshot-types",
  "zslg-time-types",
+]
+
+[[package]]
+name = "zslg-net-client"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "bytesize",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "dashmap",
+ "error-union",
+ "futures",
+ "metrics-kit",
+ "openraft",
+ "parking_lot 0.13.0",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "zslg-consensus",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-net-wire",
+ "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
+ "zslg-time-fake",
+]
+
+[[package]]
+name = "zslg-net-router"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crossbeam-combinators",
+ "futures",
+ "openraft",
+ "tokio",
+ "zslg-consensus",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-raft",
+]
+
+[[package]]
+name = "zslg-net-server"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "error-union",
+ "futures",
+ "metrics-kit",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-net-wire",
+ "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
 ]
 
 [[package]]
@@ -4784,6 +4856,14 @@ dependencies = [
  "zslg-net-types",
  "zslg-snapshot-types",
  "zslg-time-types",
+]
+
+[[package]]
+name = "zslg-time-fake"
+version = "0.1.0"
+dependencies = [
+ "parking_lot 0.13.0",
+ "zslg-time",
 ]
 
 [[package]]

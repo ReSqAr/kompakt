@@ -33,10 +33,10 @@ use zslg_net::ReplicaClient;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
-use crate::error::{Error, Home};
+use crate::Error;
 use crossbeam_combinators::{AbortReason, Channel};
+use zslg_log::LogIndex;
 use zslg_log::StampedWrite;
-use zslg_log_types::LogIndex;
 use zslg_net_wire::messages::{RpcReplicaRequest, RpcRequest, WriteOutcome, WriteStreamResponse};
 use zslg_net_wire::{
     AsyncFrameSink, AsyncFrameStream, TcpFrameSink, TcpFrameStream, adopt_blocking,
@@ -53,7 +53,7 @@ const WRITE_STREAM_CAPACITY: usize = 4096;
 const MAX_BATCH: usize = 512;
 
 /// Server end of a persistent write stream — see the header for the shape.
-pub(in crate::network) async fn run_write(
+pub(crate) async fn run_write(
     client: Arc<dyn ReplicaClient>,
     frame_recv: AsyncFrameStream,
     sink: AsyncFrameSink,
@@ -82,7 +82,7 @@ pub(in crate::network) async fn run_write(
     drop(client);
 
     let reader = tokio::task::spawn_blocking(move || reader_loop(blk_recv, &data_tx, &drift_tx));
-    let writer = tokio::task::spawn_blocking(move || writer_loop(blk_sink, outcomes.home()));
+    let writer = tokio::task::spawn_blocking(move || writer_loop(blk_sink, outcomes.err_into()));
 
     // Join both off the reactor; on cancel, force both socket ops to return so the
     // blocking loops exit.
@@ -197,7 +197,7 @@ fn outcome_to_response(outcome: zslg_log::WriteOutcome) -> WriteStreamResponse {
     }
 }
 
-pub(in crate::network) async fn run_subscribe(
+pub(crate) async fn run_subscribe(
     client: Arc<dyn ReplicaClient>,
     from: Option<LogIndex>,
     frame_recv: AsyncFrameStream,
