@@ -4,25 +4,25 @@
 use std::time::Duration;
 
 use zslg_lifecycle_types::ConfigError;
-use zslg_snapshot_types::{CompactionTier, CompressionLevel};
+use zslg_snapshot::{CompactionTier, CompressionLevel};
 
 /// Snapshot creation, compaction, and cleanup configuration.
 #[derive(Debug, Clone)]
-pub(crate) struct SnapshotConfig {
-    pub(crate) interval: Duration,
-    pub(crate) cutoff_timeout: Duration,
-    pub(crate) compaction_tiers: Vec<CompactionTier>,
-    pub(crate) compaction_interval: Duration,
-    pub(crate) cleanup_retention: Duration,
-    pub(crate) cleanup_interval: Duration,
-    pub(crate) compression: CompressionLevel,
+pub struct SnapshotConfig {
+    pub interval: Duration,
+    pub cutoff_timeout: Duration,
+    pub compaction_tiers: Vec<CompactionTier>,
+    pub compaction_interval: Duration,
+    pub cleanup_retention: Duration,
+    pub cleanup_interval: Duration,
+    pub compression: CompressionLevel,
     /// Soft cap on entries per snapshot object. Bounds build time, object size,
     /// and a catching-up node's load granularity: without it, a stalled cluster
     /// produces one unbounded object that must be loaded monolithically.
     ///
     /// Soft because a chunk always runs to the end of the HLC it lands in
     /// (`stream_window`), so the real count can exceed this slightly.
-    pub(crate) max_snapshot_entries: std::num::NonZeroUsize,
+    pub max_snapshot_entries: std::num::NonZeroUsize,
 }
 
 impl Default for SnapshotConfig {
@@ -50,39 +50,35 @@ impl Default for SnapshotConfig {
 }
 
 impl SnapshotConfig {
-    pub(crate) fn validate(&self) -> Result<(), crate::error::Error> {
+    pub fn validate(&self) -> Result<(), crate::Error> {
         match self.compaction_tiers.first() {
             None => {
-                return Err(crate::error::Error::Config(
-                    ConfigError::InvalidConfiguration(
-                        "compaction_tiers must not be empty".to_owned(),
-                    ),
-                ));
+                return Err(crate::Error::Config(ConfigError::InvalidConfiguration(
+                    "compaction_tiers must not be empty".to_owned(),
+                )));
             }
             Some(first) if first.as_duration() < self.interval => {
-                return Err(crate::error::Error::Config(
-                    ConfigError::InvalidConfiguration(format!(
+                return Err(crate::Error::Config(ConfigError::InvalidConfiguration(
+                    format!(
                         "compaction_tiers[0] ({:?}) must be >= snapshot_interval ({:?})",
                         first, self.interval
-                    )),
-                ));
+                    ),
+                )));
             }
             Some(_) => {}
         }
         for window in self.compaction_tiers.windows(2) {
             let (a, b) = (window[0], window[1]);
             if b < a {
-                return Err(crate::error::Error::Config(
-                    ConfigError::InvalidConfiguration(format!(
-                        "compaction_tiers must be non-decreasing; saw {a:?} before {b:?}"
-                    )),
-                ));
+                return Err(crate::Error::Config(ConfigError::InvalidConfiguration(
+                    format!("compaction_tiers must be non-decreasing; saw {a:?} before {b:?}"),
+                )));
             }
         }
         if self.compaction_interval.is_zero() {
-            return Err(crate::error::Error::Config(
-                ConfigError::InvalidConfiguration("compaction_interval must be > 0".to_owned()),
-            ));
+            return Err(crate::Error::Config(ConfigError::InvalidConfiguration(
+                "compaction_interval must be > 0".to_owned(),
+            )));
         }
         // `compression` needs no check here: `CompressionLevel` cannot be
         // constructed out of zstd's range.
@@ -99,7 +95,7 @@ impl SnapshotConfig {
 )]
 mod config_tests {
     use super::*;
-    use crate::error::Error;
+    use crate::Error;
     use std::time::Duration;
 
     // ── config validation ────────────────────────────────────────────────

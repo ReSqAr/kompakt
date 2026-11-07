@@ -21,32 +21,32 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use zslg_consensus::RaftLeadership;
-use zslg_log_types::LogError;
-use zslg_log_types::SnapshotEntry;
+use zslg_log::LogError;
+use zslg_log::SnapshotEntry;
 use zslg_snapshot::{CleanupReport, SnapshotStore, SnapshotWrite};
 
 use tokio::sync::watch;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-use crate::error::Error;
+use crate::Error;
 use crossbeam_combinators::Channel;
 use pace_kit::Pace;
-use zslg_consensus_types::RaftStateHandle;
-use zslg_consensus_types::{RaftManifestState, RaftState, ReplicaMembership};
+use zslg_consensus::NodeId;
+use zslg_consensus::RaftStateHandle;
+use zslg_consensus::{RaftManifestState, RaftState, ReplicaMembership};
 use zslg_leader_integrator::Integrator;
 use zslg_leader_membership::LivenessState;
 use zslg_leader_membership::{MEMBERSHIP_STEP_FLOOR, MembershipJob};
 use zslg_leader_membership::{MembershipDriver, TickOutcome};
 use zslg_leader_snapshot::{SNAPSHOT_LOOP_FLOOR, SnapshotJob};
+use zslg_log::Data;
+use zslg_log::LogIndex;
 use zslg_log::{LocalStoreView, StableLogSnapshot};
-use zslg_log_types::Data;
-use zslg_log_types::LogIndex;
-use zslg_net_types::ServerName;
-use zslg_node_types::NodeId;
-use zslg_snapshot_types::CompressionLevel;
-use zslg_snapshot_types::SnapshotId;
-use zslg_time_types::Hlc;
+use zslg_net::ServerName;
+use zslg_snapshot::CompressionLevel;
+use zslg_snapshot::SnapshotId;
+use zslg_time::Hlc;
 
 // ── the pure pacing primitive ────────────────────────────────────────────
 
@@ -129,7 +129,7 @@ impl RaftLeadership for SelfLeader {
     }
     async fn remove_member(
         &self,
-        node_id: zslg_node_types::NodeId,
+        node_id: zslg_consensus::NodeId,
     ) -> Result<(), zslg_consensus::Error> {
         self.remove_member_in(node_id).await.map_err(Into::into)
     }
@@ -316,7 +316,7 @@ impl LocalStoreView for FailingWindowStore {
 
     fn subscribe_unstable(
         &self,
-    ) -> crossbeam_combinators::Channel<zslg_log_types::Data, crossbeam_combinators::Infinite> {
+    ) -> crossbeam_combinators::Channel<zslg_log::Data, crossbeam_combinators::Infinite> {
         crossbeam_combinators::Channel::from_infinite(crossbeam_channel::never(), "stub unstable")
     }
 
@@ -342,7 +342,7 @@ impl StableLogSnapshot for EmptyStableLog {
     async fn append(
         &self,
         _entries: Channel<
-            Result<zslg_log_types::SnapshotEntry, zslg_log::Error>,
+            Result<zslg_log::SnapshotEntry, zslg_log::Error>,
             crossbeam_combinators::Finite,
         >,
     ) -> Result<usize, zslg_log::Error> {
@@ -357,7 +357,7 @@ impl StableLogSnapshot for EmptyStableLog {
     }
     fn subscribe_events(
         &self,
-    ) -> Channel<zslg_log_types::StableLogEvent, crossbeam_combinators::Infinite> {
+    ) -> Channel<zslg_log::StableLogEvent, crossbeam_combinators::Infinite> {
         unimplemented!("pacing tests never subscribe to stable-log events")
     }
     fn watermark(&self) -> crossbeam_combinators::Level<Option<Hlc>> {
@@ -389,23 +389,18 @@ impl UnusedSnapshotStore {
     pub(crate) async fn write_snapshot_in(
         &self,
         _id: SnapshotId,
-        _entries: Channel<
-            Result<zslg_log_types::SnapshotEntry, Error>,
-            crossbeam_combinators::Finite,
-        >,
+        _entries: Channel<Result<zslg_log::SnapshotEntry, Error>, crossbeam_combinators::Finite>,
         _compression: CompressionLevel,
-        _reason: zslg_snapshot_types::ObjectStoreReason,
+        _reason: zslg_snapshot::ObjectStoreReason,
     ) -> Result<zslg_snapshot::SnapshotWrite, Error> {
         unimplemented!("pacing tests never reach the object write")
     }
     pub(crate) async fn read_snapshot_in(
         &self,
         _id: SnapshotId,
-        _reason: zslg_snapshot_types::ObjectStoreReason,
-    ) -> Result<
-        Channel<Result<zslg_log_types::SnapshotEntry, Error>, crossbeam_combinators::Finite>,
-        Error,
-    > {
+        _reason: zslg_snapshot::ObjectStoreReason,
+    ) -> Result<Channel<Result<zslg_log::SnapshotEntry, Error>, crossbeam_combinators::Finite>, Error>
+    {
         unimplemented!("pacing tests never read a snapshot")
     }
     pub(crate) async fn has_bootstrap_fence_in(&self) -> Result<bool, Error> {
@@ -433,7 +428,7 @@ impl SnapshotStore for UnusedSnapshotStore {
             crossbeam_combinators::Finite,
         >,
         compression: CompressionLevel,
-        reason: zslg_snapshot_types::ObjectStoreReason,
+        reason: zslg_snapshot::ObjectStoreReason,
     ) -> Result<SnapshotWrite, zslg_snapshot::Error> {
         self.write_snapshot_in(id, entries.err_into(), compression, reason)
             .await
@@ -442,7 +437,7 @@ impl SnapshotStore for UnusedSnapshotStore {
     async fn read_snapshot(
         &self,
         id: SnapshotId,
-        reason: zslg_snapshot_types::ObjectStoreReason,
+        reason: zslg_snapshot::ObjectStoreReason,
     ) -> Result<
         Channel<Result<SnapshotEntry, zslg_snapshot::Error>, crossbeam_combinators::Finite>,
         zslg_snapshot::Error,
@@ -500,11 +495,10 @@ fn spawn_always_failing_snapshot_job() -> SnapshotHarness {
 
     // A replica that is always drained and caught up, so the quorum wait costs
     // nothing and the build reaches the window read every time.
-    let ready: Arc<dyn zslg_log::Replica> = Arc::new(crate::tests::ReadyReplica {
+    let ready: Arc<dyn zslg_log::Replica> = Arc::new(zslg_net_fake::ReadyReplica {
         raft_state: (*raft_state).clone(),
     });
-    let router =
-        crate::tests::common::fn_remote(move |_| crate::tests::common::replica_only(ready.clone()));
+    let router = zslg_net_fake::fn_remote(move |_| zslg_net_fake::replica_only(ready.clone()));
 
     // A real integrator, so `submit` cannot be the thing that stalls the loop.
     // It is never reached here (every build fails first), but wiring the real
@@ -549,8 +543,8 @@ struct NoopReplicator;
 impl NoopReplicator {
     pub(crate) async fn replicate_state_in(
         &self,
-        _state: zslg_consensus_types::ReplicatedRaftState,
-        _expected_generation: zslg_consensus_types::RaftGeneration,
+        _state: zslg_consensus::ReplicatedRaftState,
+        _expected_generation: zslg_consensus::RaftGeneration,
         _context: &'static str,
     ) -> Result<(), Error> {
         unimplemented!("pacing tests never reach a proposal")
@@ -561,8 +555,8 @@ impl NoopReplicator {
 impl zslg_consensus::StateReplicator for NoopReplicator {
     async fn replicate_state(
         &self,
-        state: zslg_consensus_types::ReplicatedRaftState,
-        expected_generation: zslg_consensus_types::RaftGeneration,
+        state: zslg_consensus::ReplicatedRaftState,
+        expected_generation: zslg_consensus::RaftGeneration,
         context: &'static str,
     ) -> Result<(), zslg_consensus::Error> {
         self.replicate_state_in(state, expected_generation, context)

@@ -22,8 +22,8 @@ pub(crate) use invariants::{
 };
 mod faults;
 pub(crate) use faults::{
-    FaultyReplica, FixedClock, MapPeerRouter, ReadyReplica, ReplicaServiceHarness,
-    SharedClockController, SkewedClock, skewed_clock_pair,
+    FaultyReplica, MapPeerRouter, ReplicaServiceHarness, SharedClockController, SkewedClock,
+    skewed_clock_pair,
 };
 mod snapshot;
 pub(crate) use snapshot::{SnapshotHarness, boot_snapshot_harness, commit_snapshot_result};
@@ -33,8 +33,9 @@ pub(crate) use cutoff_observer::CutoffObserver;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 pub(crate) use zslg_learner::testing::{local_store_at, stable_log_at, stable_log_engine};
-pub(crate) use zslg_net_fake::{fn_remote, replica_only};
+pub(crate) use zslg_net_fake::{ReadyReplica, replica_only};
 use zslg_net_types::NetError;
+pub(crate) use zslg_time_fake::FixedClock;
 
 use crate::Error;
 

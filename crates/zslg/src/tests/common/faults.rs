@@ -28,8 +28,6 @@ use zslg_log::{Replica, StampedWrite, WriteOutcome};
 use zslg_log_types::{DataId, LogIndex};
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
-use zslg_time::Clock;
-use zslg_time_types::Hlc;
 
 /// Control handle for a [`FaultyReplica`]. Clone freely; clones share state.
 #[derive(Clone)]
@@ -203,54 +201,6 @@ impl Replica for FaultyReplica {
     }
 }
 
-/// Replica stub that is always drained and caught up: cutoff at `u64::MAX`,
-/// no frontier — snapshot quorum checks pass instantly against it.
-pub(crate) struct ReadyReplica {
-    pub(crate) raft_state: RaftStateHandle,
-}
-
-#[async_trait]
-impl Replica for ReadyReplica {
-    fn write(
-        &self,
-        _: Channel<StampedWrite, Finite>,
-    ) -> Channel<Result<WriteOutcome, zslg_log::Error>, Infinite> {
-        let run = || -> Channel<Result<WriteOutcome, Error>, Infinite> {
-            unimplemented!("ReadyReplica does not serve writes")
-        };
-        let result: Channel<Result<WriteOutcome, Error>, Infinite> = run();
-        result.err_into()
-    }
-    fn subscribe_from(&self, _: Option<LogIndex>) -> zslg_log::ReplicaStream {
-        unimplemented!("ReadyReplica does not serve subscriptions")
-    }
-    async fn fetch_status(&self) -> Result<ReplicaStatus, zslg_log::Error> {
-        let result: Result<ReplicaStatus, crate::Error> = async {
-            Ok(ReplicaStatus {
-                node_id: zslg_node_types::NodeId::default(),
-                frontier: None,
-                raft_state: (*self.raft_state.snapshot()).clone(),
-                effective_cutoff: Some(Hlc(u64::MAX)),
-                max_hlc: None,
-                peer_names: Vec::new(),
-            })
-        }
-        .await;
-        result.map_err(Into::into)
-    }
-    async fn subscribe_status(
-        &self,
-    ) -> Result<BoxStream<'static, Result<ReplicaStatus, zslg_log::Error>>, zslg_log::Error> {
-        let result: Result<BoxStream<'static, Result<ReplicaStatus, crate::Error>>, crate::Error> =
-            async { unimplemented!("ReadyReplica does not serve status subscriptions") }.await;
-        result
-            .map(|s| {
-                futures::StreamExt::boxed(futures::StreamExt::map(s, |r| r.map_err(Into::into)))
-            })
-            .map_err(Into::into)
-    }
-}
-
 // ── Clock-skew injection ───────────────────────────────────────────────
 
 struct SkewState {
@@ -360,23 +310,6 @@ fn wall_clock_ms_now() -> u64 {
 }
 
 // ── Fixed test clock ───────────────────────────────────────────────────
-
-/// Clock pinned to a fixed HLC; `integrate` echoes the peer.
-pub(crate) struct FixedClock {
-    pub(crate) now: Hlc,
-}
-
-impl Clock for FixedClock {
-    fn now(&self) -> Hlc {
-        self.now
-    }
-    fn integrate(&self, peer: Hlc) -> Result<Hlc, zslg_time::Error> {
-        Ok(peer)
-    }
-    fn skew_against(&self, _peer: Hlc) -> std::time::Duration {
-        std::time::Duration::ZERO
-    }
-}
 
 /// Static per-node replica routing for tests; panics on unknown peers.
 pub(crate) struct MapPeerRouter {
@@ -691,7 +624,8 @@ mod tests {
     use zslg_node_types::NodeId;
     use zslg_time_types::Hlc;
 
-    use super::{DuplicateReplica, MapPeerRouter, ReadyReplica, ReplicaServiceHarness};
+    use super::{DuplicateReplica, MapPeerRouter, ReplicaServiceHarness};
+    use zslg_net_fake::ReadyReplica;
 
     fn nids() -> [NodeId; 3] {
         [NodeId::new_v4(), NodeId::new_v4(), NodeId::new_v4()]

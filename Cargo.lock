@@ -4464,7 +4464,6 @@ dependencies = [
  "metrics-kit",
  "metrics-util",
  "object_store",
- "pace-kit",
  "parking_lot 0.13.0",
  "pprof",
  "proptest",
@@ -4484,12 +4483,12 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
- "warn-throttle",
  "zslg-consensus",
  "zslg-consensus-fake",
  "zslg-consensus-types",
  "zslg-hlc-clock",
  "zslg-hlc-gate",
+ "zslg-leader",
  "zslg-leader-compaction",
  "zslg-leader-integrator",
  "zslg-leader-membership",
@@ -4529,6 +4528,7 @@ dependencies = [
  "zslg-stable-log",
  "zslg-subscriber",
  "zslg-time",
+ "zslg-time-fake",
  "zslg-time-types",
  "zslg-writer",
 ]
@@ -4600,6 +4600,32 @@ dependencies = [
  "tokio-util",
  "tracing",
  "zslg-consensus",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-leader"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "error-union",
+ "pace-kit",
+ "shutdown",
+ "tokio",
+ "tokio-util",
+ "warn-throttle",
+ "zslg-consensus",
+ "zslg-leader-compaction",
+ "zslg-leader-integrator",
+ "zslg-leader-membership",
+ "zslg-leader-snapshot",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-net-fake",
+ "zslg-snapshot",
  "zslg-time",
 ]
 

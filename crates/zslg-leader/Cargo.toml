@@ -1,0 +1,41 @@
+[package]
+name = "zslg-leader"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Leader assembly: hands every leader job its handles and config slice"
+publish = false
+
+[dependencies]
+crossbeam-combinators = { workspace = true }
+error-union = { workspace = true }
+shutdown = { workspace = true }
+zslg-consensus = { workspace = true }
+zslg-leader-compaction = { workspace = true }
+zslg-leader-integrator = { workspace = true }
+zslg-leader-membership = { workspace = true }
+zslg-leader-snapshot = { workspace = true }
+zslg-lifecycle-types = { workspace = true }
+zslg-log = { workspace = true }
+zslg-net = { workspace = true }
+zslg-snapshot = { workspace = true }
+zslg-time = { workspace = true }
+
+[dev-dependencies]
+crossbeam-channel = { workspace = true }
+async-trait = { workspace = true }
+crossbeam-combinators = { workspace = true, features = ["tokio", "testing"] }
+pace-kit = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }
+tokio-util = { workspace = true }
+warn-throttle = { workspace = true }
+zslg-leader-integrator = { workspace = true, features = ["testing"] }
+zslg-leader-membership = { workspace = true, features = ["testing"] }
+zslg-net-fake = { workspace = true }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "assembly"

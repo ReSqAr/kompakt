@@ -36,3 +36,24 @@ impl Clock for CountingClock {
         std::time::Duration::from_millis(peer.0.abs_diff(now))
     }
 }
+
+/// Pinned to a fixed HLC; `integrate` echoes the peer and no skew is ever
+/// reported.
+#[derive(Debug, Clone, Copy)]
+pub struct FixedClock {
+    pub now: Hlc,
+}
+
+impl Clock for FixedClock {
+    fn now(&self) -> Hlc {
+        self.now
+    }
+
+    fn integrate(&self, peer: Hlc) -> Result<Hlc, zslg_time::Error> {
+        Ok(peer)
+    }
+
+    fn skew_against(&self, _peer: Hlc) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
+}

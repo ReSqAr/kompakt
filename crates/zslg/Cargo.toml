@@ -58,6 +58,7 @@ zslg-raft-tracker = { workspace = true }
 zslg-raft-node = { workspace = true }
 zslg-raft-setup = { workspace = true, features = ["testing"] }
 zslg-raft-startup = { workspace = true }
+zslg-leader = { workspace = true }
 zslg-learner = { workspace = true, features = ["testing"] }
 zslg-local-store = { workspace = true }
 zslg-stable-log = { workspace = true }
@@ -81,9 +82,7 @@ zslg-time-types = { workspace = true }
 raft-kit = { workspace = true }
 zslg-raft-rpc = { workspace = true }
 async-trait = { workspace = true }
-pace-kit = { workspace = true }
 parking_lot = { workspace = true }
-warn-throttle = { workspace = true }
 rand = { workspace = true }
 bytes = { workspace = true }
 dashmap = { workspace = true }
@@ -91,6 +90,7 @@ zslg-replica-log = { workspace = true, features = ["testing"] }
 zslg-reader = { workspace = true, features = ["testing"] }
 zslg-local-store = { workspace = true, features = ["testing"] }
 zslg-net-fake = { workspace = true }
+zslg-time-fake = { workspace = true }
 zslg-raft-node = { workspace = true, features = ["testing"] }
 zslg-consensus-fake = { workspace = true }
 zslg-raft-storage = { workspace = true, features = ["testing"] }

@@ -366,3 +366,40 @@ error_union::error_union! {
 
 error_union::error_bridge!(Error => zslg_log::Error, zslg_net::Error, zslg_raft::Error, zslg_consensus::Error; Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus);
 error_union::error_home!(Error);
+
+/// Replica stub that is always drained and caught up: cutoff at `u64::MAX`,
+/// no frontier — snapshot quorum checks pass instantly against it.
+pub struct ReadyReplica {
+    pub raft_state: zslg_consensus::RaftStateHandle,
+}
+
+#[async_trait::async_trait]
+impl Replica for ReadyReplica {
+    fn write(
+        &self,
+        _: Channel<StampedWrite, Finite>,
+    ) -> Channel<Result<WriteOutcome, zslg_log::Error>, Infinite> {
+        unimplemented!("ReadyReplica does not serve writes")
+    }
+
+    fn subscribe_from(&self, _: Option<LogIndex>) -> zslg_log::ReplicaStream {
+        unimplemented!("ReadyReplica does not serve subscriptions")
+    }
+
+    async fn fetch_status(&self) -> Result<ReplicaStatus, zslg_log::Error> {
+        Ok(ReplicaStatus {
+            node_id: NodeId::default(),
+            frontier: None,
+            raft_state: (*self.raft_state.snapshot()).clone(),
+            effective_cutoff: Some(zslg_time::Hlc(u64::MAX)),
+            max_hlc: None,
+            peer_names: Vec::new(),
+        })
+    }
+
+    async fn subscribe_status(
+        &self,
+    ) -> Result<BoxStream<'static, Result<ReplicaStatus, zslg_log::Error>>, zslg_log::Error> {
+        unimplemented!("ReadyReplica does not serve status subscriptions")
+    }
+}
