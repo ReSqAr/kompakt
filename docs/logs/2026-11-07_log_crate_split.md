@@ -64,7 +64,18 @@ to make sense; decided with the cross-cutting utilities.
 Check before implementing: how many places in nlnr match on `zslg::Error`
 variants (the nesting is a visible API change).
 
+### D5. Metrics: kit crate + vocabulary in the owning crate
+
+`zslg-metrics-kit` holds the mechanism (MetricDef, registry macro,
+`label_enum!`, Probe/guards, `describe_all`); each crate declares its own
+`METRICS` slice, label enums and emission helpers; the facade concatenates them
+in `describe_metrics()`. Exported names and the `zslg_` namespace do not change.
+Cross-crate name uniqueness becomes a facade test; label enums used by two
+crates live in the lower crate. Rejected: one central metrics crate (any metric
+edit rebuilds everything, defeating the build-time side goal).
+
 ## Open
 
-- Q5: `metrics.rs` (2.7k lines, one central registry, referenced by every
-  module) — central crate or per-crate sections?
+- Q6: domain-free primitives (`ByteSize`, `warn_throttle`, `shutdown`
+  supervision, `Cancelled`/`Shutdown` errors, `framing`): one support crate or
+  fold into homes?

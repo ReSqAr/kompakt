@@ -4,7 +4,7 @@ Working document for the IAIC interview. Current model only.
 
 ## Where we are
 
-Q1-Q4 settled (D1-D4). Asked Q5 (metrics). Then: cross-cutting utilities crate (Cancelled, shutdown, warn_throttle, ByteSize, framing?), then the implementation layer cut (database, object-store, quorum, clock impl, net, raft, learner, leader, replica, facade). No design doc yet.
+Q1-Q5 settled (D1-D5). Asked Q6 (cross-cutting primitives). Then the implementation layer cut (database, object-store, quorum, clock impl, net, raft, learner, leader, replica, facade). No design doc yet.
 
 ## Model of the problem
 
