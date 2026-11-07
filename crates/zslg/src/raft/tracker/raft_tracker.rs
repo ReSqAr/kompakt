@@ -10,11 +10,11 @@
 //! seen. The "integrate an observed state" logic lives here, next to the
 //! write path.
 
-use crate::error::NetError;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 use zslg_lifecycle_types::ConfigError;
+use zslg_net_types::NetError;
 
 use tokio::sync::watch;
 use tracing::debug;

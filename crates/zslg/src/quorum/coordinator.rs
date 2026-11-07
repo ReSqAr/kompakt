@@ -493,11 +493,11 @@ fn fanout_state(outcome: &WriteOutcome) -> FanoutResponseState {
     reason = "test code"
 )]
 mod tests {
-    use crate::error::NetError;
     use crossbeam_combinators::{Finite, Infinite};
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use zslg_net_types::NetError;
 
     use async_trait::async_trait;
     use futures::stream::BoxStream;
@@ -587,12 +587,12 @@ mod tests {
     }
 
     impl Router for ScriptRouter {
-        fn register_peer(&self, _: NodeId, _: crate::ids::PeerAddr) {}
+        fn register_peer(&self, _: NodeId, _: zslg_net_types::PeerAddr) {}
         fn remote(&self, node_id: NodeId) -> Arc<dyn ReplicaClient> {
             let resp = self.script.get(&node_id).cloned().unwrap_or(Resp::Down);
             replica_only(Arc::new(FakeReplica { resp }))
         }
-        fn remote_direct(&self, _: crate::ids::PeerAddr) -> Arc<dyn ReplicaClient> {
+        fn remote_direct(&self, _: zslg_net_types::PeerAddr) -> Arc<dyn ReplicaClient> {
             unimplemented!("ScriptRouter: direct dial not used")
         }
     }

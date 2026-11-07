@@ -198,10 +198,10 @@ fn subscribe_reader_loop(
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "test code")]
 mod tests {
     use super::*;
-    use crate::ids::PeerAddr;
     use crate::tests::make_meta;
     use bytes::Bytes;
     use std::sync::Arc;
+    use zslg_net_types::PeerAddr;
 
     fn item(idx: u8) -> (LogIndex, Data) {
         (

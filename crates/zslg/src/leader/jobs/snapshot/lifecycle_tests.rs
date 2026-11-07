@@ -23,7 +23,6 @@ use bytes::Bytes;
 use uuid::Uuid;
 
 use crate::api::{LocalStoreMut, ReplicatedRaftState, StableLogSnapshot};
-use crate::ids::PeerAddr;
 use crate::leader::jobs::snapshot::create::{
     SnapshotEntryInputs, SnapshotResult, create_snapshot_entry,
 };
@@ -37,6 +36,7 @@ use crate::raft::RaftNode;
 use crate::raft::RaftStateHandle;
 use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};
+use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 use zslg_snapshot_types::CompressionLevel;
 use zslg_time_types::Hlc;
@@ -887,11 +887,11 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
     use crate::api::Router;
     use crate::api::{RaftLeadership, SnapshotStore};
     use crate::error::Error;
-    use crate::ids::ServerName;
     use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
     use crate::tests::ReadyReplica;
     use crossbeam_combinators::Channel;
     use zslg_log_types::SnapshotEntry;
+    use zslg_net_types::ServerName;
     use zslg_snapshot_types::SnapshotId;
 
     /// Replica stub: always drained, no end_index — quorum checks pass instantly.

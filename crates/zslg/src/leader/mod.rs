@@ -53,7 +53,7 @@ pub(super) struct LeaderLoopConfig {
     pub(super) peers_watcher: Arc<dyn PeersWatcher>,
     /// The local node's server name, included in the allowed-voter set alongside
     /// the peer list.
-    pub(super) self_server_name: crate::ids::ServerName,
+    pub(super) self_server_name: zslg_net_types::ServerName,
     /// The durable node id of the local node — filled by the producer.
     pub(super) self_node_id: zslg_node_types::NodeId,
 }

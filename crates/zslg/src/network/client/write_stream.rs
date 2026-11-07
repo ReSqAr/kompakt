@@ -180,8 +180,8 @@ fn resolve_response(
 #[allow(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
-    use crate::error::NetError;
     use zslg_log_types::DataId;
+    use zslg_net_types::NetError;
     use zslg_time_types::ClockError;
     use zslg_time_types::Hlc;
 

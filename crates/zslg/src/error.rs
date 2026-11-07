@@ -15,18 +15,11 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use zslg_lifecycle_types::{ConfigError, LifecycleError};
 use zslg_log_types::LogError;
+use zslg_net_types::NetError;
 use zslg_snapshot_types::SnapshotError;
 use zslg_time_types::ClockError;
 
 use zslg_node_types::NodeId;
-
-/// The wire between nodes.
-#[derive(Debug, Clone, PartialEq, Error, Serialize, Deserialize)]
-pub enum NetError {
-    /// RPC transport failure.
-    #[error("rpc error: {0}")]
-    Rpc(String),
-}
 
 /// Raft and the cluster around it: leadership, membership, quorum, replicated state.
 #[derive(Debug, Clone, PartialEq, Error, Serialize, Deserialize)]

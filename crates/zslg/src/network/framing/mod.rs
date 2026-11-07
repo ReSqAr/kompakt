@@ -84,9 +84,9 @@ pub(in crate::network) type AsyncFrameStream = FrameStream<tokio::net::tcp::Owne
 )]
 mod tests {
     use super::*;
-    use crate::error::NetError;
     use std::sync::Arc;
     use zslg_log_types::LogError;
+    use zslg_net_types::NetError;
 
     use serde::Serialize;
     use serde::de::DeserializeOwned;

@@ -16,8 +16,8 @@
 //! [`RaftConsensus`](crate::api::RaftConsensus) (the server applying the change).
 
 use crate::error::ConsensusError;
-use crate::ids::PeerAddr;
 use crate::meta::RaftState;
+use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 
 /// Outcome of a `RaftAddMember` proposal (see [`RaftMembership::add_member`]).

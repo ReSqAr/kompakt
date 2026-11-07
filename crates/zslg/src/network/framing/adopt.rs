@@ -2,8 +2,8 @@
 //! connection make it: the client at `open_write`, the server at `run_write`.
 //! Doing it twice would risk the two halves disagreeing about the read-ahead.
 
-use crate::error::NetError;
 use crate::error::{Error, ToRpc};
+use zslg_net_types::NetError;
 
 use super::{AsyncFrameSink, AsyncFrameStream, TcpFrameSink, TcpFrameStream};
 

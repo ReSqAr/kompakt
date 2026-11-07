@@ -16,10 +16,10 @@
 //! a liveness change (retarget), and a slow poll as a backstop. Every wake-up
 //! re-reads current state, so a missed event costs only latency.
 
-use crate::error::NetError;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_net_types::NetError;
 
 use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;

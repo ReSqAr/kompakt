@@ -4,9 +4,9 @@
 use std::sync::Arc;
 
 use crate::api::{ReplicaClient, Router};
-use crate::ids::PeerAddr;
 use crate::network::client::RpcClient;
 use crate::network::transport::TcpPeerClient;
+use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 
 /// The single owner of the peer-connection [`RpcClient`]. Built inside

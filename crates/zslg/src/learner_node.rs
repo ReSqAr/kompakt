@@ -12,7 +12,6 @@
 //! stable log, so the id must survive restarts.
 
 use crate::database::NODE_ID_CF;
-use crate::error::NetError;
 use crate::learner::{LOCAL_STORE_CURSORS_CF, LOCAL_STORE_DATA_CF, STABLE_LOG_CF};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,6 +19,7 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 use zslg_lifecycle_types::ConfigError;
+use zslg_net_types::NetError;
 
 use std::num::NonZeroUsize;
 
@@ -28,7 +28,6 @@ use crate::api::{self, RaftStateView, SnapshotStore};
 use crate::database;
 use crate::error::Error;
 use crate::hlc::{HlcClock, run_clock_gauges};
-use crate::ids::PeerAddr;
 use crate::learner::LearnerConfig;
 use crate::learner::{LearnerService, StableLog, spawn_learner, spawn_stable_store};
 use crate::network::setup_router;
@@ -37,6 +36,7 @@ use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use crate::raft::{RaftTrackerConfig, spawn_raft_tracker_streamer};
 use rocksdb_kit::{CfSpec, Storage, StorageConfig};
 use shutdown::Shutdown;
+use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 
 /// Configuration for a free-standing learner node.

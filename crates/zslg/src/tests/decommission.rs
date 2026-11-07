@@ -191,7 +191,7 @@ async fn evicted_node_survives_a_denied_rejoin() {
 
     // Every OTHER node's peer list, minus the victim's name. Computed once,
     // before any kill (`kill` shrinks placements as it goes).
-    let trimmed_peers: Vec<crate::ids::PeerAddr> = cluster
+    let trimmed_peers: Vec<zslg_net_types::PeerAddr> = cluster
         .peer_addrs()
         .into_iter()
         .filter(|p| p.server_name != victim_name)
@@ -404,7 +404,7 @@ async fn unwanted_leader_evicts_itself() {
 
     // Trim the LEADER from every other node's peers, leaving the leader's own
     // list intact — the exact shape that is inescapable today.
-    let trimmed: Vec<crate::ids::PeerAddr> = cluster
+    let trimmed: Vec<zslg_net_types::PeerAddr> = cluster
         .peer_addrs()
         .into_iter()
         .filter(|p| p.server_name != leader_name)

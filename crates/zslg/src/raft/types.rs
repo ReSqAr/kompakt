@@ -11,10 +11,11 @@ use std::collections::BTreeSet;
 use std::io::Cursor;
 
 use crate::api::{ReplicatedRaftState, StateReplicator};
-use crate::ids::{PeerAddr, RaftGeneration};
+use crate::ids::RaftGeneration;
 use openraft::Entry;
 use openraft::TokioRuntime;
 use serde::{Deserialize, Serialize};
+use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 use zslg_snapshot_types::SnapshotId;
 use zslg_time_types::Hlc;

@@ -7,7 +7,7 @@
 //! sync. Bootstrap does not pass through it at all: `openraft::Raft::initialize`
 //! never calls `add_member`, so the founding set is admitted by construction.
 
-use crate::ids::PeerAddr;
+use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 
 pub(crate) trait MembershipGate: Send + Sync + 'static {

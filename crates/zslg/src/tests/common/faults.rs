@@ -1,13 +1,13 @@
-/// Fault-injection doubles at the `Replica` trait seam, shared by the
-/// integration tests. Two modes, matching what the tests need:
-/// `fail_next(n)` (the next n calls error like a dropped RPC) and
-/// `wedge()`/`unwedge()` (calls hang until released — a slow replica).
-use crate::error::NetError;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 use zslg_log_types::LogError;
+/// Fault-injection doubles at the `Replica` trait seam, shared by the
+/// integration tests. Two modes, matching what the tests need:
+/// `fail_next(n)` (the next n calls error like a dropped RPC) and
+/// `wedge()`/`unwedge()` (calls hang until released — a slow replica).
+use zslg_net_types::NetError;
 
 use async_trait::async_trait;
 use futures::stream::BoxStream;
@@ -17,13 +17,13 @@ use tokio::sync::watch;
 use crate::api::{Clock, Replica, Router, StampedWrite, WriteOutcome};
 use crate::error::Error;
 use crate::hlc::{HlcClock, HlcGate};
-use crate::ids::PeerAddr;
 use crate::meta::{RaftState, ReplicaMembership, ReplicaStatus};
 use crate::raft::RaftStateHandle;
 use crate::replica::ReplicaLogStore;
 use crate::replica::ReplicaService;
 use crossbeam_combinators::{Channel, Finite, Infinite};
 use zslg_log_types::{DataId, LogIndex};
+use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 

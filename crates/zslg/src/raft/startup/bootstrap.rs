@@ -44,11 +44,12 @@ use crate::api::{
     AddMemberOutcome, PeersWatcher, RaftStateView, ReplicatedRaftState, Router, SnapshotStore,
 };
 use crate::error::{Error, ToRaft};
-use crate::ids::{PeerAddr, RaftGeneration};
+use crate::ids::RaftGeneration;
 use crate::meta::{RaftState, ReplicaMembership};
 use crate::quorum::{FanOutResponse, fan_out_quorum};
 use crate::raft::{FencedStateWrite, RaftNode, membership_map};
 use shutdown::Shutdown;
+use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 
 const JOIN_INITIAL_BACKOFF: Duration = Duration::from_millis(50);

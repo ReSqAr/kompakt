@@ -11,15 +11,14 @@
 //! A `Direct` (join-time) client is the one asymmetry: dialed before the peer's
 //! `NodeId` is known, it can carry membership and status but not writes.
 
-use crate::error::NetError;
 use std::sync::Arc;
+use zslg_net_types::NetError;
 
 use crate::api::{
     AddMemberOutcome, LivenessProbe, RaftMembership, RaftTransport, Replica, StampedWrite,
     WriteOutcome,
 };
 use crate::error::Error;
-use crate::ids::PeerAddr;
 use crate::meta::ReplicaStatus;
 use crate::network::client::{RpcClient, Target};
 use crate::network::messages::{
@@ -36,6 +35,7 @@ use openraft::raft::{
     VoteRequest, VoteResponse,
 };
 use zslg_log_types::LogIndex;
+use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 /// Per-peer typed transport over [`RpcClient`]. The peer is addressed either by
 /// a registered `NodeId` ([`TcpPeerClient::new`]) or directly by

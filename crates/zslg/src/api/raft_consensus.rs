@@ -19,8 +19,8 @@ use openraft::raft::{
     VoteRequest, VoteResponse,
 };
 
-use crate::ids::PeerAddr;
 use crate::raft::TypeConfig;
+use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 
 #[async_trait::async_trait]

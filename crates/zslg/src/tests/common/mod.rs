@@ -30,16 +30,15 @@ pub(crate) use snapshot::{SnapshotHarness, boot_snapshot_harness, commit_snapsho
 mod cutoff_observer;
 pub(crate) use cutoff_observer::CutoffObserver;
 
-use crate::error::NetError;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use zslg_net_types::NetError;
 
 use crate::Error;
 use crate::api::{
     AddMemberOutcome, LivenessProbe, RaftMembership, RaftTransport, Replica, ReplicaClient, Router,
     StampedWrite, WriteOutcome,
 };
-use crate::ids::PeerAddr;
 use crate::learner::LocalStore;
 use crate::meta::{RaftState, ReplicaStatus};
 use crate::raft::RaftStateHandle;
@@ -59,6 +58,7 @@ use openraft::raft::{
 };
 use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};
+use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 // ── fault injection: pairwise partitions ─────────────────────────────
 

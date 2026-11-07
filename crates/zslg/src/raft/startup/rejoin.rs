@@ -37,8 +37,8 @@ use super::bootstrap::{JoinAttempt, attempt_join_once};
 use crate::api::PeersWatcher;
 use crate::api::Router;
 use crate::error::Error;
-use crate::ids::PeerAddr;
 use crate::raft::RaftNode;
+use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 
 /// How often the monitor re-evaluates whether it needs to probe.

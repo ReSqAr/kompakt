@@ -147,10 +147,10 @@ fn dispatch_to_new<F, Fut>(
     reason = "test code"
 )]
 mod tests {
-    use crate::error::NetError;
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::sync::Mutex;
+    use zslg_net_types::NetError;
 
     use super::*;
     use crate::ids::RaftGeneration;

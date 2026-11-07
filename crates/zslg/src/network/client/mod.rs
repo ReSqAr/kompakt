@@ -31,11 +31,12 @@
 //! the connection onto dedicated blocking threads, since it is the only hot
 //! path. Subscribes stay async.
 
-use crate::error::{ConsensusError, NetError};
+use crate::error::ConsensusError;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use zslg_lifecycle_types::ConfigError;
+use zslg_net_types::NetError;
 
 use dashmap::DashMap;
 use parking_lot::Mutex;
@@ -46,7 +47,6 @@ use tracing::debug;
 use crate::ByteSize;
 use crate::api::{Clock, StampedWrite, WriteOutcome};
 use crate::error::Error;
-use crate::ids::PeerAddr;
 use crate::metrics::OpState;
 use crate::network::framing::{AsyncFrameSink, AsyncFrameStream};
 use crate::network::messages::{
@@ -56,6 +56,7 @@ use crate::network::messages::{
 use crate::network::tcp::{self, SocketOpts};
 use crossbeam_combinators::Channel;
 use zslg_log_types::LogIndex;
+use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 
 mod write_stream;

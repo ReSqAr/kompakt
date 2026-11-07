@@ -42,8 +42,8 @@ use object_store::memory::InMemory;
 use tempfile::TempDir;
 
 use crate::error::Error;
-use crate::ids::{PeerAddr, ServerName};
 use crate::replica_node::{ReplicaNode, ReplicaNodeConfig};
+use zslg_net_types::{PeerAddr, ServerName};
 use zslg_node_types::NodeId;
 
 use super::reserve_port;

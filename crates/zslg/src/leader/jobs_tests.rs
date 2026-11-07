@@ -34,7 +34,6 @@ use crate::api::{
 use crate::hlc::CutoffApplier;
 use crate::hlc::HlcClock;
 use crate::hlc::HlcGate;
-use crate::ids::PeerAddr;
 use crate::leader::jobs::membership::liveness::LivenessConfig;
 use crate::leader::{LeaderLoopConfig, SnapshotConfig, spawn_leader_loop};
 use crate::learner::LocalStore;
@@ -52,6 +51,7 @@ use crate::replica::ReplicaService;
 use shutdown::Shutdown;
 use zslg_log_types::LogIndex;
 use zslg_log_types::SnapshotEntry;
+use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 use zslg_snapshot_types::CompactionTier;
 use zslg_snapshot_types::SnapshotId;

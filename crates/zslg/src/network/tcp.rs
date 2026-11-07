@@ -15,8 +15,8 @@
 //! drift: bounding them turns a pile-up into backpressure instead of a tripped
 //! skew guard.
 
-use crate::error::NetError;
 use std::time::Duration;
+use zslg_net_types::NetError;
 
 use socket2::{SockRef, TcpKeepalive};
 use tokio::net::TcpStream;
@@ -24,8 +24,8 @@ use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 
 use crate::ByteSize;
 use crate::error::{Error, ToRpc};
-use crate::ids::PeerAddr;
 use crate::metrics::ConnectFailure;
+use zslg_net_types::PeerAddr;
 
 /// TCP socket tuning applied to every connection on both the dialing and
 /// accepting side. Derived from flat `network_*` node-config fields.

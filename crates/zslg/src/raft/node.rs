@@ -6,10 +6,11 @@
 //! (`MembershipGate`), removes DNS-colliding node ids at the same address
 //! atomically with the add, and retries the membership change across a lost
 //! leadership mid-change.
-use crate::error::{ConsensusError, NetError};
+use crate::error::ConsensusError;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_net_types::NetError;
 
 use futures::FutureExt as _;
 
@@ -24,9 +25,10 @@ use crate::api::{
     MembershipGate, RaftConsensus, RaftLeadership, ReplicatedRaftState, StateReplicator,
 };
 use crate::error::{Error, ToRaft};
-use crate::ids::{PeerAddr, RaftGeneration, ServerName};
+use crate::ids::RaftGeneration;
 use crate::metrics;
 use crate::raft::{FencedStateWrite, NodeInfo, RaftResponse};
+use zslg_net_types::{PeerAddr, ServerName};
 use zslg_node_types::NodeId;
 
 pub(crate) struct RaftNode {

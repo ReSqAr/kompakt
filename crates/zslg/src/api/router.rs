@@ -19,7 +19,7 @@
 use std::sync::Arc;
 
 use crate::api::ReplicaClient;
-use crate::ids::PeerAddr;
+use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 
 pub(crate) trait Router: Send + Sync + 'static {

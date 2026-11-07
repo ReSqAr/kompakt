@@ -97,7 +97,7 @@ async fn evicted_member_leaves_the_replicated_set_while_still_running() {
     // Build a peer list of every placement EXCEPT the victim's server name.
     // Computed ONCE, before any kill: `kill` removes the node's placement, so
     // `peer_addrs()` shrinks as we go.
-    let trimmed_peers: Vec<crate::ids::PeerAddr> = cluster
+    let trimmed_peers: Vec<zslg_net_types::PeerAddr> = cluster
         .peer_addrs()
         .into_iter()
         .filter(|p| p.server_name != victim_name)

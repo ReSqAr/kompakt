@@ -11,7 +11,7 @@ use std::sync::Arc;
 use tokio::sync::watch;
 
 use crate::api::{MembershipGate, PeersWatcher};
-use crate::ids::{PeerAddr, ServerName};
+use zslg_net_types::{PeerAddr, ServerName};
 use zslg_node_types::NodeId;
 
 /// A static, never-changing implementation of [`PeersWatcher`].

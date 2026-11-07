@@ -8,7 +8,7 @@
 
 use tokio::sync::watch;
 
-use crate::ids::PeerAddr;
+use zslg_net_types::PeerAddr;
 
 pub(crate) trait PeersWatcher: Send + Sync + std::fmt::Debug + 'static {
     /// Notified on every change; the receiver starts primed with the current

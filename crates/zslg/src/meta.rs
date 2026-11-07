@@ -16,8 +16,9 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{RaftGeneration, ServerName};
+use crate::ids::RaftGeneration;
 use zslg_log_types::LogIndex;
+use zslg_net_types::ServerName;
 use zslg_node_types::NodeId;
 use zslg_snapshot_types::SnapshotMetadata;
 use zslg_time_types::Hlc;

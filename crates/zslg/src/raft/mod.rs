@@ -20,13 +20,13 @@ use openraft::storage::Adaptor;
 
 use crate::api::{MembershipGate, Router};
 use crate::error::{Error, ToRaft};
-use crate::ids::PeerAddr;
 use crate::raft::raft_storage::RocksRaftStorage;
 use crate::raft::rpc::NetworkFactory;
 use crate::raft::rpc::PeerRegistrationWatcher;
 use crate::raft::state::RaftStatePublisher;
 use rocksdb_kit::Storage;
 use shutdown::Shutdown;
+use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 
 mod membership;

@@ -12,7 +12,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::ids::ServerName;
+use zslg_net_types::ServerName;
 use zslg_node_types::NodeId;
 
 #[async_trait::async_trait]

@@ -21,9 +21,9 @@ use tracing::debug;
 
 use crate::api::{RaftStateTracker, Router};
 use crate::error::Error;
-use crate::ids::PeerAddr;
 use crate::raft::{RaftTracker, RaftTrackerConfig};
 use shutdown::Shutdown;
+use zslg_net_types::PeerAddr;
 
 /// Create a fresh [`RaftTracker`], register the stream supervisor with
 /// `shutdown`, and block until a quorum of write targets have been discovered

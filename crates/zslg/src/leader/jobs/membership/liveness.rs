@@ -1,8 +1,9 @@
-use crate::error::{ConsensusError, NetError};
+use crate::error::ConsensusError;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 use zslg_lifecycle_types::ConfigError;
+use zslg_net_types::NetError;
 
 use parking_lot::Mutex as SyncMutex;
 use tokio::sync::watch;
@@ -306,11 +307,11 @@ mod tests {
 
     use super::*;
     use crate::api::LivenessProbe;
-    use crate::ids::ServerName;
     use crate::meta::{RaftState, ReplicaMembership};
     use crate::raft::RaftStateHandle;
     use async_trait::async_trait;
     use shutdown::Shutdown;
+    use zslg_net_types::ServerName;
 
     struct NoVoters;
     #[async_trait::async_trait]

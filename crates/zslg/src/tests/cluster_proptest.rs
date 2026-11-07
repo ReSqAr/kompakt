@@ -1125,7 +1125,7 @@ fn generated_configs_validate_at_every_regime_corner() {
                         // peer's server_name must match `cfg.network_server_name`
                         // (set by `default_fast_config` to "placeholder") or
                         // this trips the "own config omits self" check.
-                        cfg.peers = vec![crate::ids::PeerAddr {
+                        cfg.peers = vec![zslg_net_types::PeerAddr {
                             addr: "127.0.0.1:1".into(),
                             server_name: cfg.network_server_name.clone(),
                         }];

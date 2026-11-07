@@ -28,7 +28,6 @@ use tokio_util::sync::CancellationToken;
 
 use crate::api::{LocalStoreView, RaftLeadership, SnapshotStore, StableLogSnapshot};
 use crate::error::Error;
-use crate::ids::ServerName;
 use crate::leader::integrator::Integrator;
 use crate::leader::jobs::LeaderHandles;
 use crate::leader::jobs::Pace;
@@ -41,6 +40,7 @@ use crate::raft::RaftStateHandle;
 use crossbeam_combinators::Channel;
 use zslg_log_types::Data;
 use zslg_log_types::LogIndex;
+use zslg_net_types::ServerName;
 use zslg_node_types::NodeId;
 use zslg_snapshot_types::CompressionLevel;
 use zslg_snapshot_types::SnapshotId;
