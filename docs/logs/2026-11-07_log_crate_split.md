@@ -74,8 +74,26 @@ Cross-crate name uniqueness becomes a facade test; label enums used by two
 crates live in the lower crate. Rejected: one central metrics crate (any metric
 edit rebuilds everything, defeating the build-time side goal).
 
+### D6. Tiny crates are fine: one crate per domain-free primitive
+
+`ByteSize`, `WarnThrottle`, the supervision tree (`shutdown`) and the
+`Cancelled`/`Shutdown` errors each get their own crate rather than a shared
+support crate. Default for the two borderline files (not yet confirmed):
+`framing` is generic (`[record | crc32]`, used by network and object_store) so it
+is its own crate; `ordered` names log types so it stays in the `log` group.
+Rejected: one `zslg-support` crate; folding into metrics-kit/facade.
+
+## Finding (not a decision): the implementation layer is nearly acyclic
+
+The `learner -> leader` and `learner -> replica` edges are doc links only.
+Remaining production back-edges are small: `RaftStateHandle` and
+`EvictionStatus` (raft/, used by learner) are state handles and move down into
+the `consensus` group; `leader/jobs/snapshot` vs `learner/stable_log/
+snapshot_loader` share snapshot-format knowledge that belongs to the `snapshot`
+group.
+
 ## Open
 
-- Q6: domain-free primitives (`ByteSize`, `warn_throttle`, `shutdown`
-  supervision, `Cancelled`/`Shutdown` errors, `framing`): one support crate or
-  fold into homes?
+- Q7: granularity of the implementation layer (learner 8.8k, leader 10.7k,
+  raft 6.9k, network 4.3k, replica 3.4k lines): per top-level module or per
+  subfolder?
