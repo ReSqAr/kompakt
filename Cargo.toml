@@ -68,6 +68,7 @@ shutdown = { path = "crates/shutdown" }
 warn-throttle = { path = "crates/warn-throttle" }
 zslg = { path = "crates/zslg" }
 zslg-lifecycle-types = { path = "crates/zslg-lifecycle-types" }
+zslg-log-types = { path = "crates/zslg-log-types" }
 zslg-node-types = { path = "crates/zslg-node-types" }
 zslg-time-types = { path = "crates/zslg-time-types" }
 

@@ -12,10 +12,10 @@
 //! (CLAUDE.md §8): the row is durable — and safe to hand to a caller — only
 //! after [`Storage::fence`] returns, never before.
 
-use crate::error::LogError;
 use rocksdb_kit::Batch;
 use rocksdb_kit::ColumnFamily;
 use uuid::Uuid;
+use zslg_log_types::LogError;
 
 use crate::Error;
 use crate::error::ToStorage;

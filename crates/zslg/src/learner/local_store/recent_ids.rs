@@ -26,7 +26,7 @@
 use std::collections::{HashSet, VecDeque};
 use std::num::NonZeroUsize;
 
-use crate::ids::DataId;
+use zslg_log_types::DataId;
 
 /// Whether this store filters duplicates. `Off` is matched **once per batch**,
 /// not once per record — the disabled path costs nothing on the hot loop.
@@ -122,7 +122,7 @@ mod tests {
         Dedup::new(Some(std::num::NonZeroUsize::new(n).unwrap()))
     }
 
-    fn id(seed: u8) -> crate::ids::DataId {
+    fn id(seed: u8) -> zslg_log_types::DataId {
         make_data(seed, u64::from(seed), b"payload").data_id
     }
 

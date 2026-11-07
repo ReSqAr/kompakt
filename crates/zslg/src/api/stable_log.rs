@@ -26,8 +26,8 @@
 
 use crossbeam_combinators::Channel;
 
-use crate::ids::LogIndex;
-use crate::meta::{Data, SnapshotEntry, StableLogEvent};
+use zslg_log_types::LogIndex;
+use zslg_log_types::{Data, SnapshotEntry, StableLogEvent};
 use zslg_time_types::Hlc;
 
 #[async_trait::async_trait]

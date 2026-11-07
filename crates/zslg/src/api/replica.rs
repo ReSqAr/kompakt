@@ -25,9 +25,10 @@
 //! storage failure has no state to report (CLAUDE.md §9).
 
 use crate::Error;
-use crate::ids::{DataId, LogIndex};
-use crate::meta::{Data, RaftState, ReplicaStatus};
+use crate::meta::{RaftState, ReplicaStatus};
 use crossbeam_combinators::{Channel, Infinite, OrderedChannel, StrictlyIncreasing};
+use zslg_log_types::Data;
+use zslg_log_types::{DataId, LogIndex};
 
 /// The replica append stream: strictly increasing indices, forward purge gaps
 /// allowed.

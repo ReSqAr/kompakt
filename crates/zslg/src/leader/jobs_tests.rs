@@ -15,11 +15,11 @@
     clippy::type_complexity,
     reason = "test code"
 )]
-use crate::meta::Data;
 use crate::object_store::CompressionLevel;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_log_types::Data;
 
 use object_store::ObjectStore;
 use object_store::memory::InMemory;
@@ -34,13 +34,13 @@ use crate::api::{
 use crate::hlc::CutoffApplier;
 use crate::hlc::HlcClock;
 use crate::hlc::HlcGate;
-use crate::ids::{LogIndex, PeerAddr, SnapshotId};
+use crate::ids::{PeerAddr, SnapshotId};
 use crate::leader::jobs::membership::liveness::LivenessConfig;
 use crate::leader::{CompactionTier, LeaderLoopConfig, SnapshotConfig, spawn_leader_loop};
 use crate::learner::LocalStore;
 use crate::learner::StableLog;
 use crate::learner::integrate_manifest_for_test;
-use crate::meta::{ReplicaMembership, SnapshotEntry, SnapshotMetadata};
+use crate::meta::{ReplicaMembership, SnapshotMetadata};
 use crate::network::static_peers;
 use crate::network::{LocalReplicaClient, PeerRouter, RemoteRouter};
 use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
@@ -50,6 +50,8 @@ use crate::raft::SpareSelectionStrategy;
 use crate::replica::ReplicaLogStore;
 use crate::replica::ReplicaService;
 use shutdown::Shutdown;
+use zslg_log_types::LogIndex;
+use zslg_log_types::SnapshotEntry;
 use zslg_node_types::NodeId;
 use zslg_time_types::{Hlc, HlcParts};
 

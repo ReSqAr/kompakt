@@ -46,7 +46,7 @@ use tracing::debug;
 use crate::ByteSize;
 use crate::api::{Clock, StampedWrite, WriteOutcome};
 use crate::error::Error;
-use crate::ids::{LogIndex, PeerAddr};
+use crate::ids::PeerAddr;
 use crate::metrics::OpState;
 use crate::network::framing::{AsyncFrameSink, AsyncFrameStream};
 use crate::network::messages::{
@@ -55,6 +55,7 @@ use crate::network::messages::{
 };
 use crate::network::tcp::{self, SocketOpts};
 use crossbeam_combinators::Channel;
+use zslg_log_types::LogIndex;
 use zslg_node_types::NodeId;
 
 mod write_stream;

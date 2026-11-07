@@ -15,10 +15,11 @@
     reason = "test code"
 )]
 use crate::error::ConsensusError;
-use crate::meta::{Data, ReplicaMembership, ReplicaStatus};
+use crate::meta::{ReplicaMembership, ReplicaStatus};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_log_types::Data;
 
 use async_trait::async_trait;
 use object_store::memory::InMemory;
@@ -29,7 +30,6 @@ use crate::api::LocalStoreMut;
 use crate::api::ReplicatedRaftState;
 use crate::error::Error;
 use crate::hlc::HlcGate;
-use crate::ids::LogIndex;
 use crate::leader::jobs::membership::change::{
     LivenessQuery, MembershipChangeInputs, MembershipChangeManager,
 };
@@ -48,6 +48,7 @@ use crate::tests::fast_raft_config as raft_config;
 use crate::tests::make_data;
 use crate::tests::upstream;
 use crate::tests::wait_for_leader;
+use zslg_log_types::LogIndex;
 use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 

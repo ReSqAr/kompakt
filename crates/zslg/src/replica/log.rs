@@ -35,9 +35,9 @@
 //! open rather than repairing itself by discarding; wipe and rejoin under a new
 //! `NodeId` is the operator procedure.
 
-use crate::error::LogError;
 use rocksdb_kit::ColumnFamily;
 use std::sync::{Arc, Weak};
+use zslg_log_types::LogError;
 
 use rocksdb_kit::Batch as RocksBatch;
 use tokio_util::sync::CancellationToken;
@@ -45,13 +45,13 @@ use tracing::{error, info};
 
 use crate::error::{Error, ToStorage};
 use crate::hlc::HlcGuard;
-use crate::ids::{DataId, LogIndex};
-use crate::meta::Data;
 use crate::metrics::{self, FlushTrigger, LogType, OpState};
 use crossbeam_combinators::{
     Channel, Fanout, FanoutConfig, OverflowPolicy, Registry, Seam, Segment, broadcast,
 };
 use rocksdb_kit::Storage;
+use zslg_log_types::Data;
+use zslg_log_types::{DataId, LogIndex};
 use zslg_time_types::Hlc;
 
 /// Fallback sizing for [`ReplicaLogStore::open_with_flush`], the
@@ -1083,8 +1083,8 @@ mod tests {
     use crate::api::{LocalStoreMut, LocalStoreView};
 
     use crate::hlc::HlcGate;
-    use crate::ids::{DataId, LogIndex};
     use crate::learner::LocalStore;
+    use zslg_log_types::{DataId, LogIndex};
     use zslg_node_types::NodeId;
     use zslg_time_types::Hlc;
 

@@ -14,28 +14,30 @@
     clippy::result_large_err,
     reason = "test code"
 )]
-use crate::error::LogError;
 use crate::test_stream::ChannelTestExt as _;
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_log_types::LogError;
 
 use bytes::Bytes;
 use uuid::Uuid;
 
 use crate::api::{LocalStoreMut, ReplicatedRaftState, StableLogSnapshot};
-use crate::ids::{DataId, LogIndex, PeerAddr};
+use crate::ids::PeerAddr;
 use crate::leader::jobs::snapshot::create::{
     SnapshotEntryInputs, SnapshotResult, create_snapshot_entry,
 };
 use crate::learner::LocalStore;
 use crate::learner::StableLog;
 use crate::learner::integrate_manifest_for_test;
-use crate::meta::{Data, ReplicaMembership};
+use crate::meta::ReplicaMembership;
 use crate::object_store::CompressionLevel;
 use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use crate::raft::Raft;
 use crate::raft::RaftNode;
 use crate::raft::RaftStateHandle;
+use zslg_log_types::Data;
+use zslg_log_types::{DataId, LogIndex};
 use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 
@@ -111,7 +113,7 @@ async fn snapshot_refuses_to_commit_an_aborted_window() {
         }
         fn subscribe_unstable(
             &self,
-        ) -> crossbeam_combinators::Channel<crate::meta::Data, crossbeam_combinators::Infinite>
+        ) -> crossbeam_combinators::Channel<zslg_log_types::Data, crossbeam_combinators::Infinite>
         {
             self.inner.subscribe_unstable()
         }
@@ -215,7 +217,7 @@ async fn snapshot_round_trip_through_object_store() {
 
     assert_eq!(learner_stable.end_hlc(), Some(Hlc(300)));
     assert_eq!(learner_stable.end_index(), Some(LogIndex(2)));
-    let stable_entries: Vec<(crate::ids::LogIndex, crate::meta::Data)> = learner_stable
+    let stable_entries: Vec<(zslg_log_types::LogIndex, zslg_log_types::Data)> = learner_stable
         .range(None, LogIndex(3))
         .items()
         .filter_map(|r| r.ok())
@@ -369,7 +371,7 @@ async fn second_snapshot_extends_stable_log_via_load() {
     assert_eq!(learner_stable.end_index(), Some(LogIndex(3)));
     assert_eq!(learner_stable.end_hlc(), Some(Hlc(210)));
 
-    let entries: Vec<(crate::ids::LogIndex, crate::meta::Data)> = learner_stable
+    let entries: Vec<(zslg_log_types::LogIndex, zslg_log_types::Data)> = learner_stable
         .range(None, LogIndex(4))
         .items()
         .filter_map(|r| r.ok())
@@ -578,9 +580,10 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
     use crate::api::Replica;
     use crate::api::{LocalStoreView, Router};
     use crate::error::Error;
-    use crate::ids::{LogIndex, RaftGeneration, SnapshotId};
+    use crate::ids::{RaftGeneration, SnapshotId};
     use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
     use crate::meta::SnapshotMetadata;
+    use zslg_log_types::LogIndex;
     use zslg_node_types::NodeId;
     use zslg_time_types::{Hlc, HlcParts};
 
@@ -633,7 +636,7 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
 
         fn subscribe_unstable(
             &self,
-        ) -> crossbeam_combinators::Channel<crate::meta::Data, crossbeam_combinators::Infinite>
+        ) -> crossbeam_combinators::Channel<zslg_log_types::Data, crossbeam_combinators::Infinite>
         {
             self.inner.subscribe_unstable()
         }
@@ -886,9 +889,9 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
     use crate::ids::ServerName;
     use crate::ids::SnapshotId;
     use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
-    use crate::meta::SnapshotEntry;
     use crate::tests::ReadyReplica;
     use crossbeam_combinators::Channel;
+    use zslg_log_types::SnapshotEntry;
 
     /// Replica stub: always drained, no end_index — quorum checks pass instantly.
     struct OnePeerRouter {

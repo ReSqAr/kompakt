@@ -22,13 +22,13 @@ use crate::test_stream::ChannelTestExt as _;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::StableLogEvent;
 use crate::tests::{
     Cluster, ClusterConfig, assert_cluster_invariants_with_acks, default_fast_config,
 };
 use bytes::Bytes;
 use futures::StreamExt;
 use object_store::memory::InMemory;
+use zslg_log_types::StableLogEvent;
 
 /// Write data, wait for a snapshot (stable prefix), and verify the data
 /// appears in every node's stable tail.

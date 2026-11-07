@@ -27,10 +27,10 @@
 //! round trip, so concurrent callers coalesce into one batch and batches are
 //! spaced by `deadtime`. Every waiter of a batch gets that batch's result.
 
-use crate::error::LogError;
 use std::sync::Arc;
 use std::time::Duration;
 use zslg_lifecycle_types::LifecycleError;
+use zslg_log_types::LogError;
 
 use async_trait::async_trait;
 use parking_lot::Mutex as SyncMutex;
@@ -174,7 +174,7 @@ impl ReplicaPoller {
         };
         tracing::debug!(
             ?target,
-            frontier = ?end_index.map(crate::ids::LogIndex::raw),
+            frontier = ?end_index.map(zslg_log_types::LogIndex::raw),
             "quorum read: replica status fetched"
         );
 
@@ -226,7 +226,7 @@ impl ReplicaPoller {
     async fn upstream_caught_up(
         local_store: &dyn LocalStoreView,
         upstream: NodeId,
-        end_index: crate::ids::LogIndex,
+        end_index: zslg_log_types::LogIndex,
     ) -> Result<bool, Error> {
         let cursor = local_store.subscription_cursor(upstream).await?;
         Ok(cursor.is_some_and(|c| c >= end_index))
@@ -403,8 +403,8 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use crate::ids::LogIndex;
     use crate::tests::upstream;
+    use zslg_log_types::LogIndex;
     use zslg_node_types::NodeId;
     use zslg_time_types::Hlc;
 
@@ -517,7 +517,7 @@ mod tests {
         }
         fn subscribe_unstable(
             &self,
-        ) -> crossbeam_combinators::Channel<crate::meta::Data, crossbeam_combinators::Infinite>
+        ) -> crossbeam_combinators::Channel<zslg_log_types::Data, crossbeam_combinators::Infinite>
         {
             crossbeam_combinators::Channel::from_infinite(
                 crossbeam_channel::never(),

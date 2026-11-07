@@ -4466,6 +4466,7 @@ dependencies = [
  "uuid",
  "warn-throttle",
  "zslg-lifecycle-types",
+ "zslg-log-types",
  "zslg-node-types",
  "zslg-time-types",
  "zstd",
@@ -4477,6 +4478,20 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "zslg-log-types"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "crossbeam-combinators",
+ "postcard",
+ "serde",
+ "thiserror 2.0.21",
+ "uuid",
+ "zslg-node-types",
+ "zslg-time-types",
 ]
 
 [[package]]

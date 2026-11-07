@@ -121,7 +121,7 @@ impl LocalStoreConfig {
         let integrate = u64::try_from(self.integrate_channel_capacity.get())
             .unwrap_or(u64::MAX)
             .saturating_mul(QUEUE_REFERENCE_PAYLOAD_BYTES);
-        let id_bytes = u64::try_from(std::mem::size_of::<crate::ids::DataId>())
+        let id_bytes = u64::try_from(std::mem::size_of::<zslg_log_types::DataId>())
             .unwrap_or(u64::MAX)
             .saturating_mul(2);
         let ring = self

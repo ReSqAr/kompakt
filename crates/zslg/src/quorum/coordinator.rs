@@ -43,11 +43,11 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
 use crate::api::{RaftStateTracker, Router, StampedWrite, WriteOutcome};
 use crate::error::Error;
-use crate::ids::DataId;
-use crate::meta::Data;
 use crate::metrics::{self, FanoutResponseState, WriteRpcOutcome};
 use crate::quorum::{all_targets, is_quorum};
 use crossbeam_combinators::Channel;
+use zslg_log_types::Data;
+use zslg_log_types::DataId;
 use zslg_node_types::NodeId;
 
 /// Global in-flight cap. A permit is held for a write's whole life, so this
@@ -504,9 +504,10 @@ mod tests {
 
     use super::*;
     use crate::api::{RaftStateTracker, Replica, ReplicaClient};
-    use crate::ids::{LogIndex, RaftGeneration};
+    use crate::ids::RaftGeneration;
     use crate::meta::{RaftManifestState, RaftState, ReplicaMembership, ReplicaStatus};
     use crate::tests::{make_data, nid, replica_only};
+    use zslg_log_types::LogIndex;
 
     fn state(generation: u64, replicas: &[NodeId]) -> RaftState {
         RaftState {

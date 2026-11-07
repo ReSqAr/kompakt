@@ -10,9 +10,9 @@
 //! manifest — so snapshot selection lives in exactly one place.
 
 use crate::error::Error;
-use crate::ids::LogIndex;
-use crate::meta::SnapshotEntry;
 use crossbeam_combinators::{Contiguous, Finite, OrderedChannel};
+use zslg_log_types::LogIndex;
+use zslg_log_types::SnapshotEntry;
 
 /// The archive stream: gapless indices, tiled from snapshots.
 pub(crate) type ArchiveStream =

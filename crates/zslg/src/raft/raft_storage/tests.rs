@@ -59,10 +59,11 @@ pub(crate) async fn seed_foreign_membership_for_test(
     storage.fence().map_err(Into::into)
 }
 
-use crate::ids::{LogIndex, SnapshotId};
+use crate::ids::SnapshotId;
 use crate::meta::Exit;
 use crate::tests::nid;
 use openraft::CommittedLeaderId;
+use zslg_log_types::LogIndex;
 use zslg_time_types::Hlc;
 
 #[tokio::test]

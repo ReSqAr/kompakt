@@ -20,7 +20,7 @@ use zslg_time_types::Hlc;
 
 /// Index into the raft log: openraft's `u64` boundary representation, wrapped
 /// so raft-internal code never mixes it with the crate's data-log
-/// [`crate::ids::LogIndex`] or a raw position. Numerically the same space as
+/// [`zslg_log_types::LogIndex`] or a raw position. Numerically the same space as
 /// `LogIndex` (the stable log mirrors the applied raft log) and
 /// `RaftGeneration` (the applied generation *is* the applied entry's index);
 /// conversion happens only where this type meets openraft's `u64` API.

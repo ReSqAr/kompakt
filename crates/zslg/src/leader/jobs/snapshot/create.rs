@@ -23,21 +23,24 @@
 //! Ordering is crash-safety-critical: the cutoff appears in both the opening
 //! proposal and the committing one, so a crash between them is safe.
 
-use crate::error::{ConsensusError, LogError};
+use crate::error::ConsensusError;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, warn};
+use zslg_log_types::LogError;
 
 use crate::api::{LocalStoreView, RaftStateView, Router, SnapshotStore, StableLogSnapshot};
 use crate::error::Error;
 use crate::error::ToStorage;
-use crate::ids::{LogIndex, SnapshotId};
+use crate::ids::SnapshotId;
 use crate::learner::ReplicaPoller;
-use crate::meta::{SnapshotEntry, SnapshotMetadata};
+use crate::meta::SnapshotMetadata;
 use crate::metrics::{self, SnapshotState, SnapshotStep};
 use crate::object_store::CompressionLevel;
 use crate::quorum::{FanOutResponse, fan_out_quorum};
 use crossbeam_combinators::{Channel, Finite};
+use zslg_log_types::LogIndex;
+use zslg_log_types::SnapshotEntry;
 use zslg_time_types::Hlc;
 
 pub(in crate::leader) struct SnapshotEntryInputs<'a> {
@@ -405,12 +408,12 @@ mod tests {
 
     use crate::api::{LocalStoreMut, StableLogSnapshot};
 
-    use crate::ids::{DataId, LogIndex};
     use crate::learner::LocalStore;
     use crate::learner::StableLog;
     use crate::learner::integrate_manifest_for_test;
-    use crate::meta::Data;
     use crate::tests::{SnapshotHarness, boot_snapshot_harness, commit_snapshot_result};
+    use zslg_log_types::Data;
+    use zslg_log_types::{DataId, LogIndex};
     use zslg_node_types::NodeId;
     use zslg_time_types::Hlc;
 

@@ -30,11 +30,12 @@
 //! Object names are injective in the [`SnapshotId`] and never reused, since with
 //! no CAS available that is the only thing preventing an overwrite.
 
-use crate::error::{LogError, SnapshotError};
+use crate::error::SnapshotError;
 use std::collections::BTreeSet;
 use std::io;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use zslg_log_types::LogError;
 
 use bytes::Bytes;
 use futures::TryStreamExt as _;
@@ -52,11 +53,11 @@ use crate::error::ToStorage as _;
 use crate::ids::SnapshotId;
 #[cfg(test)]
 use crate::meta::ReplicaMembership;
-use crate::meta::SnapshotEntry;
 use crate::metrics::{self, ObjectStoreOp, OpState};
 use crate::object_store::CompressionLevel;
 use crate::object_store::framing;
 use crossbeam_combinators::Channel;
+use zslg_log_types::SnapshotEntry;
 
 const SNAPSHOT_PREFIX: &str = "snapshots";
 
@@ -490,10 +491,10 @@ mod tests {
     use object_store::memory::InMemory;
 
     use super::*;
-    use crate::ids::LogIndex;
     use crate::meta::SnapshotMetadata;
     use crate::object_store::CompressionLevel;
     use crate::raft::RaftStateHandle;
+    use zslg_log_types::LogIndex;
     use zslg_time_types::Hlc;
 
     /// Retention for the cleanup tests below. `cleanup_snapshots` takes it

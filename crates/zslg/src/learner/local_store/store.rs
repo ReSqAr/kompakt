@@ -18,7 +18,6 @@
 //! lost to a crash; the subscription is at-least-once and the rescan that
 //! follows a hang-up, not the live path, is its recovery.
 
-use crate::error::LogError;
 use rocksdb_kit::ColumnFamily;
 use std::collections::{HashMap, HashSet};
 use std::ops::Bound;
@@ -26,6 +25,7 @@ use std::sync::Arc;
 use std::sync::Weak;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+use zslg_log_types::LogError;
 
 use rocksdb_kit::Batch;
 
@@ -45,9 +45,9 @@ use tracing::error;
 
 use crate::api::StableLogSnapshot;
 use crate::error::{Error, ToStorage};
-use crate::ids::{DataId, LogIndex};
-use crate::meta::Data;
 use crate::metrics::{self, LocalWriteKind, LogType, OpState};
+use zslg_log_types::Data;
+use zslg_log_types::{DataId, LogIndex};
 use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 
@@ -895,7 +895,7 @@ mod tests {
     use super::*;
     use crate::api::{LocalStoreMut, LocalStoreView};
 
-    use crate::ids::DataId;
+    use zslg_log_types::DataId;
     use zslg_node_types::NodeId;
     use zslg_time_types::Hlc;
 

@@ -14,10 +14,8 @@ use crate::error::NetError;
 use std::net::SocketAddr;
 
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
-use zslg_node_types::NodeId;
-use zslg_time_types::Hlc;
+use zslg_log_types::LogIndex;
 
 /// Stable identity string for a peer (e.g. its Kubernetes hostname). A newtype
 /// wrapper around `String` used consistently through config, RPC messages, and
@@ -114,128 +112,6 @@ pub struct PeerAddr {
 impl std::fmt::Display for PeerAddr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.addr)
-    }
-}
-
-/// Unique data identifier: 32 bytes = 64-bit HLC (big-endian) ‖ 128-bit NodeId
-/// (big-endian) ‖ 64-bit random (big-endian). Self-describing — the originating
-/// node and creation HLC are both recoverable, so no separate `Meta` header is
-/// needed.
-///
-/// Derives `Ord` so lexicographic sort by the raw bytes produces
-/// `(hlc, node_id, random)` ordering — the leading 8 HLC bytes dominate, which
-/// is what the HLC-ordered unstable tail relies on. The 64-bit random word makes
-/// same-`(hlc, node)` collisions effectively impossible (2⁻⁶⁴ per pair).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct DataId(pub(crate) [u8; 32]);
-
-impl DataId {
-    /// Assemble from an HLC, the originating node, and a random tiebreaker.
-    /// Argument order matches the byte layout: HLC, then NodeId, then random.
-    #[must_use]
-    pub(crate) fn from_parts(hlc: Hlc, node_id: NodeId, random: u64) -> Self {
-        let mut bytes = [0u8; 32];
-        bytes[..8].copy_from_slice(&hlc.raw().to_be_bytes());
-        bytes[8..24].copy_from_slice(&node_id.0.as_u128().to_be_bytes());
-        bytes[24..].copy_from_slice(&random.to_be_bytes());
-        Self(bytes)
-    }
-
-    /// The creation HLC, extracted from bytes 0..8.
-    #[must_use]
-    #[allow(
-        clippy::expect_used,
-        reason = "try_into on exact [u8; 8] is infallible"
-    )]
-    pub fn hlc(self) -> Hlc {
-        Hlc(u64::from_be_bytes(self.0[..8].try_into().expect("8 bytes")))
-    }
-
-    /// The originating node, extracted from bytes 8..24.
-    #[must_use]
-    #[allow(
-        clippy::expect_used,
-        reason = "try_into on exact [u8; 16] is infallible"
-    )]
-    pub fn source_node(self) -> NodeId {
-        NodeId(Uuid::from_u128(u128::from_be_bytes(
-            self.0[8..24].try_into().expect("16 bytes"),
-        )))
-    }
-
-    /// Test helper: a deterministic id with a nil node and `seed` as the random
-    /// word. Keeps the HLC orderable while giving distinct ids per `seed`.
-    #[must_use]
-    pub fn test_id(hlc: Hlc, seed: u64) -> Self {
-        Self::from_parts(hlc, NodeId(Uuid::nil()), seed)
-    }
-
-    #[must_use]
-    pub fn from_bytes(bytes: [u8; 32]) -> Self {
-        Self(bytes)
-    }
-
-    #[must_use]
-    pub fn into_bytes(self) -> [u8; 32] {
-        self.0
-    }
-}
-
-/// Contiguous, monotonic index into a replica or local log.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct LogIndex(pub(crate) u64);
-
-impl LogIndex {
-    /// The first index of any log. A subscription starts *after* a position
-    /// (`Reader::subscribe_stable_log(after)`), and `None` means from the
-    /// beginning; this is the first index that start yields.
-    pub const ZERO: Self = Self(0);
-
-    #[must_use]
-    pub fn raw(self) -> u64 {
-        self.0
-    }
-
-    /// Return the index that follows `prev`, or `ZERO` when `prev` is `None`.
-    ///
-    /// # Panics
-    /// Panics on `u64::MAX` — saturating would silently produce a *duplicate*
-    /// index, violating the gapless-and-unique log invariant. The overflow is
-    /// unreachable in practice (2^64 appends).
-    #[must_use]
-    #[allow(
-        clippy::expect_used,
-        reason = "2^64 log entries is unreachable in practice"
-    )]
-    pub fn next_after(prev: Option<LogIndex>) -> LogIndex {
-        match prev {
-            None => LogIndex::ZERO,
-            Some(i) => LogIndex(
-                i.raw()
-                    .checked_add(1)
-                    .expect("LogIndex overflow: log index space exhausted"),
-            ),
-        }
-    }
-
-    /// The exclusive start that names this index as the first one wanted:
-    /// the index before it, or `None` for the very first. The inverse of
-    /// [`next_after`](Self::next_after) — `next_after(i.before()) == i`.
-    #[must_use]
-    pub fn before(self) -> Option<LogIndex> {
-        self.0.checked_sub(1).map(LogIndex)
-    }
-
-    #[must_use]
-    pub fn from_bytes(bytes: [u8; 8]) -> Self {
-        Self(u64::from_be_bytes(bytes))
-    }
-
-    #[must_use]
-    pub fn into_bytes(self) -> [u8; 8] {
-        self.0.to_be_bytes()
     }
 }
 
@@ -350,93 +226,9 @@ impl RaftGeneration {
 )]
 mod tests {
     use super::*;
-
-    // ── DataId ──────────────────────────────────────────────────────────
-
-    #[test]
-    fn data_id_test_id_is_unique_per_seed() {
-        assert_ne!(DataId::test_id(Hlc(0), 1), DataId::test_id(Hlc(0), 2));
-    }
-
-    #[test]
-    fn data_id_parts_roundtrip() {
-        let hlc = Hlc(0x1234_5678_9abc_def0);
-        let node = NodeId::from_uuid(Uuid::from_u128(0x0011_2233_4455_6677_8899_aabb_ccdd_eeff));
-        let random = 0xcafe_babe_dead_beef;
-        let id = DataId::from_parts(hlc, node, random);
-        assert_eq!(id.hlc(), hlc);
-        assert_eq!(id.source_node(), node);
-        assert_eq!(u64::from_be_bytes(id.0[24..].try_into().unwrap()), random);
-    }
-
-    #[test]
-    fn data_id_hlc_extracts_first_8_bytes() {
-        let hlc = Hlc(0xaaaa_bbbb_cccc_dddd);
-        let id = DataId::test_id(hlc, 0);
-        assert_eq!(id.hlc(), hlc);
-    }
-
-    #[test]
-    fn data_id_bytes_roundtrip() {
-        let mut bytes = [0u8; 32];
-        bytes[0] = 0xde;
-        bytes[31] = 0xef;
-        let id = DataId::from_bytes(bytes);
-        assert_eq!(id.into_bytes(), bytes);
-    }
-
-    #[test]
-    fn data_id_ordering_follows_hlc() {
-        // HLC dominates over both node and random.
-        let a = DataId::from_parts(Hlc(1), NodeId::from_uuid(Uuid::from_u128(u128::MAX)), 999);
-        let b = DataId::test_id(Hlc(2), 0);
-        assert!(a < b);
-    }
-
-    #[test]
-    fn data_id_ordering_then_node_then_random() {
-        // Same HLC: NodeId is the next discriminator, then random.
-        let a = DataId::from_parts(Hlc(1), NodeId::from_uuid(Uuid::from_u128(1)), u64::MAX);
-        let b = DataId::from_parts(Hlc(1), NodeId::from_uuid(Uuid::from_u128(2)), 0);
-        assert!(a < b);
-
-        let c = DataId::from_parts(Hlc(1), NodeId::from_uuid(Uuid::from_u128(1)), 0);
-        let d = DataId::from_parts(Hlc(1), NodeId::from_uuid(Uuid::from_u128(1)), 1);
-        assert!(c < d);
-    }
-
-    // ── LogIndex ────────────────────────────────────────────────────────
-
-    #[test]
-    fn log_index_zero_and_raw() {
-        assert_eq!(LogIndex::ZERO, LogIndex(0));
-        assert_eq!(LogIndex::ZERO.raw(), 0);
-        assert_eq!(LogIndex(42).raw(), 42);
-    }
-
-    #[test]
-    fn log_index_next_after_none_is_zero() {
-        assert_eq!(LogIndex::next_after(None), LogIndex::ZERO);
-    }
-
-    #[test]
-    fn log_index_next_after_some_increments() {
-        assert_eq!(LogIndex::next_after(Some(LogIndex(5))), LogIndex(6));
-    }
-
-    /// F-5: saturating at `u64::MAX` would silently hand out a *duplicate*
-    /// index; overflow must panic instead (unreachable in practice).
-    #[test]
-    #[should_panic(expected = "LogIndex overflow")]
-    fn log_index_next_after_panics_at_max() {
-        let _ = LogIndex::next_after(Some(LogIndex(u64::MAX)));
-    }
-
-    #[test]
-    fn log_index_ordering() {
-        assert!(LogIndex(1) < LogIndex(2));
-        assert_eq!(LogIndex(7), LogIndex(7));
-    }
+    use zslg_log_types::DataId;
+    use zslg_node_types::NodeId;
+    use zslg_time_types::Hlc;
 
     // ── SnapshotId ──────────────────────────────────────────────────────
 

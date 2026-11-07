@@ -193,11 +193,11 @@ impl IntoArcObjectStore for Arc<dyn ObjectStore> {
 
 #[cfg(test)]
 #[allow(clippy::expect_used, reason = "test code")]
-pub(in crate::object_store) fn test_entry(idx: u64) -> crate::meta::SnapshotEntry {
-    crate::meta::SnapshotEntry {
-        global_index: crate::ids::LogIndex(idx),
-        data: crate::meta::Data {
-            data_id: crate::ids::DataId::test_id(zslg_time_types::Hlc(0), idx),
+pub(in crate::object_store) fn test_entry(idx: u64) -> zslg_log_types::SnapshotEntry {
+    zslg_log_types::SnapshotEntry {
+        global_index: zslg_log_types::LogIndex(idx),
+        data: zslg_log_types::Data {
+            data_id: zslg_log_types::DataId::test_id(zslg_time_types::Hlc(0), idx),
             blob: bytes::Bytes::copy_from_slice(format!("payload-{idx}").as_bytes()),
         },
     }

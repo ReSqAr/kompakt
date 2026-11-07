@@ -29,10 +29,10 @@
 //! the manifest, which holds because a bucket, once closed, stays closed — so
 //! keys are monotone in age and cannot interleave.
 
-use crate::error::LogError;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_log_types::LogError;
 
 use crate::api::{RaftStateView, SnapshotStore};
 use crate::error::Error;
@@ -283,8 +283,8 @@ async fn merge_group(
 )]
 mod tests {
     use super::*;
-    use crate::ids::LogIndex;
     use crate::test_stream::ChannelTestExt as _;
+    use zslg_log_types::LogIndex;
     use zslg_node_types::NodeId;
     use zslg_time_types::Hlc;
     use zslg_time_types::HlcParts;
@@ -467,16 +467,16 @@ mod tests {
 
     use crate::api::{LocalStoreMut, SnapshotStore, StableLogSnapshot};
 
-    use crate::ids::DataId;
     use crate::leader::jobs::snapshot::create::{
         SnapshotEntryInputs, SnapshotResult, create_snapshot_entry,
     };
     use crate::learner::LocalStore;
     use crate::learner::StableLog;
     use crate::learner::integrate_manifest_for_test;
-    use crate::meta::Data;
     use crate::object_store::CompressionLevel;
     use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
+    use zslg_log_types::Data;
+    use zslg_log_types::DataId;
 
     use crate::tests::commit_snapshot_result;
     use crate::tests::fast_raft_config as raft_config;

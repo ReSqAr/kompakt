@@ -14,97 +14,12 @@
 
 use std::collections::BTreeSet;
 
-use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{DataId, LogIndex, RaftGeneration, ServerName, SnapshotId};
+use crate::ids::{RaftGeneration, ServerName, SnapshotId};
+use zslg_log_types::LogIndex;
 use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
-
-/// Self-describing data id + opaque user blob. The id carries the creation HLC
-/// (`data_id.hlc()`) and the originating node (`data_id.source_node()`), so no
-/// separate metadata header is needed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Data {
-    pub data_id: DataId,
-    #[serde(with = "serde_bytes_compat")]
-    pub blob: Bytes,
-}
-
-/// Events emitted on the stable-log broadcast channel in causal order:
-/// `Appended` entries appear before any `Watermark` that covers them, so when a
-/// consumer sees `Watermark(hlc)`, every entry with `data_id.hlc() <= hlc` has
-/// already been emitted.
-#[derive(Debug, Clone)]
-pub enum StableLogEvent {
-    Appended { index: LogIndex, data: Data },
-    Watermark(Hlc),
-}
-
-/// Events of the unstable-tail subscription, in arrival (integration) order.
-/// `Appended` may repeat; consumers dedup by `data_id`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum UnstableEvent {
-    Appended(Data),
-    /// Every entry with `data_id.hlc() <= hlc` is settled: the stable log
-    /// delivers it, or it never converged and is gone. Drop held entries at or
-    /// below it.
-    Watermark(Hlc),
-}
-
-mod serde_bytes_compat {
-    use bytes::Bytes;
-    use serde::de::{Error, Visitor};
-    use serde::{Deserializer, Serializer};
-    use std::fmt;
-
-    pub(in crate::meta) fn serialize<S: Serializer>(
-        bytes: &Bytes,
-        ser: S,
-    ) -> Result<S::Ok, S::Error> {
-        ser.serialize_bytes(bytes.as_ref())
-    }
-
-    /// Bulk byte-buffer deserialize. The previous `<Vec<u8>>::deserialize` went
-    /// through serde's generic `Vec<T>` path = one `SeqAccess::next_element`
-    /// visitor call **per byte**, which dominated CPU on the hot decode path
-    /// (`Data::decode` was ~40% of all samples at inflight=128; see
-    /// docs/PERFORMANCE.md entry 9). `deserialize_bytes` hands us the whole slice
-    /// in one shot (postcard reads a varint length, then the raw bytes).
-    pub(in crate::meta) fn deserialize<'de, D: Deserializer<'de>>(
-        de: D,
-    ) -> Result<Bytes, D::Error> {
-        struct BytesVisitor;
-
-        impl<'de> Visitor<'de> for BytesVisitor {
-            type Value = Bytes;
-
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("a byte buffer")
-            }
-
-            fn visit_bytes<E: Error>(self, v: &[u8]) -> Result<Bytes, E> {
-                Ok(Bytes::copy_from_slice(v))
-            }
-
-            fn visit_borrowed_bytes<E: Error>(self, v: &'de [u8]) -> Result<Bytes, E> {
-                Ok(Bytes::copy_from_slice(v))
-            }
-
-            fn visit_byte_buf<E: Error>(self, v: Vec<u8>) -> Result<Bytes, E> {
-                Ok(Bytes::from(v))
-            }
-        }
-
-        de.deserialize_bytes(BytesVisitor)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct SnapshotEntry {
-    pub(crate) global_index: LogIndex,
-    pub(crate) data: Data,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct SnapshotMetadata {
@@ -405,10 +320,6 @@ mod tests {
         assert!(Exit::WatermarkAbove(Hlc(1)) < Exit::WatermarkAbove(Hlc(2)));
     }
 
-    fn sample_data_id() -> DataId {
-        DataId::from_parts(Hlc(100), NodeId::from_uuid(Uuid::from_u128(1)), 2)
-    }
-
     fn sample_snapshot_meta(start: u64, end: u64, sid: u64) -> SnapshotMetadata {
         SnapshotMetadata {
             start_hlc: Hlc(start),
@@ -496,35 +407,6 @@ mod tests {
         );
     }
 
-    // ── serde roundtrips ────────────────────────────────────────────────
-
-    #[test]
-    fn data_serde_roundtrip() {
-        let d = Data {
-            data_id: sample_data_id(),
-            blob: Bytes::from_static(b"hello world"),
-        };
-        let bytes = postcard::to_allocvec(&d).expect("encode");
-        let decoded: Data = postcard::from_bytes(&bytes).expect("decode");
-        assert_eq!(decoded, d);
-    }
-
-    #[test]
-    fn snapshot_entry_serde_roundtrip() {
-        let e = SnapshotEntry {
-            global_index: LogIndex(7),
-            data: Data {
-                data_id: sample_data_id(),
-                blob: Bytes::from_static(b"x"),
-            },
-        };
-        let bytes = postcard::to_allocvec(&e).expect("encode");
-        assert_eq!(
-            postcard::from_bytes::<SnapshotEntry>(&bytes).expect("decode"),
-            e
-        );
-    }
-
     #[test]
     fn snapshot_metadata_serde_roundtrip() {
         let m = sample_snapshot_meta(1, 99, 42);
@@ -592,18 +474,6 @@ mod tests {
             "voters and the replica set are different sets — a test that let \
              them coincide would not notice one being decoded into the other"
         );
-    }
-
-    #[test]
-    fn empty_blob_roundtrips() {
-        let d = Data {
-            data_id: sample_data_id(),
-            blob: Bytes::new(),
-        };
-        let bytes = postcard::to_allocvec(&d).expect("encode");
-        let decoded: Data = postcard::from_bytes(&bytes).expect("decode");
-        assert_eq!(decoded, d);
-        assert!(decoded.blob.is_empty());
     }
 
     /// `peer_names` must survive the wire — it is the evidence a leader uses to

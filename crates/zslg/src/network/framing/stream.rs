@@ -22,8 +22,9 @@
 //! frame can fail just that one. [`FrameStream::next_frame`] is the fail-fast
 //! default.
 
-use crate::error::{LogError, NetError};
+use crate::error::NetError;
 use std::sync::Arc;
+use zslg_log_types::LogError;
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;

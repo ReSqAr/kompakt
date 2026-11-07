@@ -39,9 +39,9 @@ use crate::api::{
     AddMemberOutcome, LivenessProbe, RaftMembership, RaftTransport, Replica, ReplicaClient, Router,
     StampedWrite, WriteOutcome,
 };
-use crate::ids::{DataId, LogIndex, PeerAddr};
+use crate::ids::PeerAddr;
 use crate::learner::LocalStore;
-use crate::meta::{Data, RaftState, ReplicaStatus};
+use crate::meta::{RaftState, ReplicaStatus};
 use crate::raft::RaftStateHandle;
 use crate::raft::build_raft_for_test;
 use crate::raft::{NodeInfo, Raft, TypeConfig};
@@ -57,6 +57,8 @@ use openraft::raft::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
     VoteRequest, VoteResponse,
 };
+use zslg_log_types::Data;
+use zslg_log_types::{DataId, LogIndex};
 use zslg_node_types::NodeId;
 // ── fault injection: pairwise partitions ─────────────────────────────
 

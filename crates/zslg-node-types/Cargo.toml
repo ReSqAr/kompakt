@@ -9,7 +9,7 @@ publish = false
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
-uuid = { workspace = true, features = ["v4"] }
+uuid = { workspace = true, features = ["v4", "serde"] }
 
 [lints]
 workspace = true

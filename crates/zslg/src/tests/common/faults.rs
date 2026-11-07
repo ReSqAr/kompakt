@@ -2,11 +2,12 @@
 /// integration tests. Two modes, matching what the tests need:
 /// `fail_next(n)` (the next n calls error like a dropped RPC) and
 /// `wedge()`/`unwedge()` (calls hang until released — a slow replica).
-use crate::error::{LogError, NetError};
+use crate::error::NetError;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
+use zslg_log_types::LogError;
 
 use async_trait::async_trait;
 use futures::stream::BoxStream;
@@ -16,12 +17,13 @@ use tokio::sync::watch;
 use crate::api::{Clock, Replica, Router, StampedWrite, WriteOutcome};
 use crate::error::Error;
 use crate::hlc::{HlcClock, HlcGate};
-use crate::ids::{DataId, LogIndex, PeerAddr};
+use crate::ids::PeerAddr;
 use crate::meta::{RaftState, ReplicaMembership, ReplicaStatus};
 use crate::raft::RaftStateHandle;
 use crate::replica::ReplicaLogStore;
 use crate::replica::ReplicaService;
 use crossbeam_combinators::{Channel, Finite, Infinite};
+use zslg_log_types::{DataId, LogIndex};
 use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 
@@ -647,8 +649,8 @@ mod tests {
 
     use crate::api::Replica;
     use crate::api::Router;
-    use crate::ids::DataId;
     use crate::tests::nid;
+    use zslg_log_types::DataId;
     use zslg_node_types::NodeId;
     use zslg_time_types::Hlc;
 
@@ -690,7 +692,7 @@ mod tests {
         let transport = router.remote(n2);
         let err = crate::tests::common::replica_write(
             &*transport,
-            crate::meta::Data {
+            zslg_log_types::Data {
                 data_id: DataId::from_parts(Hlc(0), n1, 0),
                 blob: Bytes::from_static(b"x"),
             },
@@ -761,7 +763,7 @@ mod tests {
         // Next write is sent twice, concurrently.
         dup_handle.duplicate_next(1, 2);
 
-        let data = crate::meta::Data {
+        let data = zslg_log_types::Data {
             data_id: DataId::from_parts(clock.hlc_clock().now(), me, 0),
             blob: Bytes::from_static(b"duplicate-write"),
         };
@@ -774,7 +776,7 @@ mod tests {
         // Data is stored exactly once (the single write got index 0).
         let mut ch = harness
             .replica
-            .subscribe_from(Some(crate::ids::LogIndex::ZERO));
+            .subscribe_from(Some(zslg_log_types::LogIndex::ZERO));
         let first = ch.recv();
         assert!(
             first.is_ok_and(|r| r.is_ok()),

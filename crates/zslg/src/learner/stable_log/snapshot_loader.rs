@@ -8,8 +8,8 @@
 //! manifest solely for its own bookkeeping — the completeness check and the
 //! watermark advance — never to pick snapshots.
 
-use crate::error::LogError;
 use std::sync::Arc;
+use zslg_log_types::LogError;
 
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
@@ -18,8 +18,8 @@ use crate::api::{
     ArchiveBounds, ArchiveUpperBound, RaftStateView, StableArchiveReader, StableLogSnapshot,
 };
 use crate::error::Error;
-use crate::ids::LogIndex;
 use crate::meta::RaftManifestState;
+use zslg_log_types::LogIndex;
 
 pub(in crate::learner) async fn integrate_manifest(
     archive: &dyn StableArchiveReader,
@@ -210,13 +210,15 @@ mod tests {
     use super::*;
     use crate::api::{CleanupReport, SnapshotStore};
 
-    use crate::ids::{LogIndex, SnapshotId};
+    use crate::ids::SnapshotId;
     use crate::learner::StableLog;
     use crate::learner::stable_archive::ObjectStoreArchiveReader;
-    use crate::meta::{SnapshotEntry, SnapshotMetadata};
+    use crate::meta::SnapshotMetadata;
     use crate::object_store::CompressionLevel;
     use crate::tests::make_data;
     use std::sync::Arc;
+    use zslg_log_types::LogIndex;
+    use zslg_log_types::SnapshotEntry;
     use zslg_time_types::Hlc;
 
     /// Build the production archive reader over a scripted store, seeded with

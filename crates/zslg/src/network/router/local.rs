@@ -19,7 +19,7 @@ use crate::Error;
 use crate::api::{
     LivenessProbe, RaftConsensus, RaftStateView, Replica, StampedWrite, WriteOutcome,
 };
-use crate::ids::{LogIndex, PeerAddr};
+use crate::ids::PeerAddr;
 use crate::meta::{RaftState, ReplicaStatus};
 use crate::raft::TypeConfig;
 use crossbeam_combinators::Channel;
@@ -29,6 +29,7 @@ use openraft::raft::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
     VoteRequest, VoteResponse,
 };
+use zslg_log_types::LogIndex;
 use zslg_node_types::NodeId;
 
 pub(crate) struct LocalReplicaClient {

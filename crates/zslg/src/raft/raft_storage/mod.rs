@@ -31,12 +31,12 @@
 //! borrowed block-cache blocks rather than copies. That block stays pinned for
 //! as long as the borrow lives, so no pinned value may cross an `.await` or a
 //! batch commit — every such site states the rule where it is taken.
-use crate::error::LogError;
 use rocksdb_kit::ColumnFamily;
 use std::fmt::Debug;
 use std::io::Cursor;
 use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
+use zslg_log_types::LogError;
 
 use rocksdb_kit::{Batch, Cf};
 

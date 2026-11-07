@@ -20,11 +20,11 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use crate::LogIndex;
 use crate::api::ReplicatedRaftState;
 use crate::ids::SnapshotId;
 use crate::meta::{ReplicaMembership, SnapshotMetadata};
 use crate::tests::fast_raft_config as raft_config;
+use zslg_log_types::LogIndex;
 use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 

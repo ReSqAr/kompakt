@@ -17,9 +17,9 @@
 //! an attempt's progress would under-report it.
 
 use crate::api::LocalStoreView;
-use crate::ids::LogIndex;
-use crate::meta::Data;
 use crossbeam_combinators::Channel;
+use zslg_log_types::Data;
+use zslg_log_types::LogIndex;
 use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 

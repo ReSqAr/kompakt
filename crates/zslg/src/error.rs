@@ -14,81 +14,10 @@ use error_union::error_union;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use zslg_lifecycle_types::{ConfigError, LifecycleError};
+use zslg_log_types::LogError;
 use zslg_time_types::ClockError;
 
 use zslg_node_types::NodeId;
-
-/// The replicated and local logs and the storage under them: storage, codec, gaps, truncation, subscriptions.
-#[derive(Debug, Clone, PartialEq, Error, Serialize, Deserialize)]
-pub enum LogError {
-    /// Storage I/O failure.
-    #[error("storage error: {0}")]
-    Storage(String),
-
-    /// The leader's local stable log has not yet caught up with the committed
-    /// manifest, so a snapshot's global index assignment cannot continue from
-    /// it. Backpressure, not a fault: the leader re-ingests its own snapshots
-    /// through the object store, so this clears on its own. Distinct from
-    /// `Storage` precisely so it does not report as a storage failure
-    /// (`SnapshotState::WaitingForStableLog`).
-    #[error(
-        "stable log behind manifest: end_index={end_index:?}, manifest_end_index={manifest_end_index:?}"
-    )]
-    StableLogBehindManifest {
-        end_index: Option<crate::ids::LogIndex>,
-        manifest_end_index: crate::ids::LogIndex,
-    },
-
-    /// A gap or ordering violation in the stable log's recoverable history:
-    /// the never-GC'd snapshots that must tile an index window skipped an
-    /// index, delivered one out of HLC order, or stopped short of the window;
-    /// or a served stable read would emit a non-contiguous / HLC-regressing
-    /// entry. The stable history is meant to be a gapless, HLC-monotonic,
-    /// index-ordered stream fully tiled by object-store snapshots (design doc
-    /// §794; CLAUDE.md §8) — a violation is a serious invariant breach,
-    /// surfaced loudly instead of forwarding a gap to a reader. Distinct from a
-    /// transient `Storage`/`ObjectStore` fault so callers and metrics can page
-    /// on it specifically.
-    #[error("stable log gap: {0}")]
-    StableLogGap(String),
-
-    /// postcard serialisation/deserialisation failure.
-    #[error("codec error: {0}")]
-    Codec(String),
-
-    /// A finite stream ended without its producer declaring completion (see
-    /// `channel::End::Aborted`): the producer panicked, or was discarded before
-    /// it ran. Items may be missing, so a consumer that needs the whole stream
-    /// must fail rather than treat it as a clean end.
-    #[error("stream {what} ended without closing; it may be truncated")]
-    StreamTruncated { what: String },
-
-    /// A subscription stream ended. Subscriptions are infinite by contract — a
-    /// replica's append stream never completes — so any end means the upstream
-    /// went away: a dropped connection, or a peer that is shutting down or not
-    /// routable. A *declared* close is no different: it only ever comes from a
-    /// stub with nothing to serve. The subscriber backs off and resumes from its
-    /// durable cursor.
-
-    /// A subscription stream ended without naming its peer — produced inside
-    /// `integrate_loop`, which serves any upstream and so cannot attribute it.
-    /// The per-peer caller re-wraps it as [`Error::SubscriptionEnded`].
-    #[error("subscription stream ended: {reason}")]
-    SubscriptionStreamEnded { reason: String },
-
-    /// A client write exceeded `WriterConfig::write_timeout` (default 10s),
-    /// covering the admission-acquire + fan-out phases, so a leaked permit or a
-    /// stalled self/loopback target surfaces as a bounded error instead of a
-    /// silent hang.
-    #[error("write timed out after {elapsed:?}")]
-    WriteTimeout { elapsed: std::time::Duration },
-
-    /// A quorum read could not confirm replica catch-up within the deadline.
-    /// The system may be partitioned or an upstream may be unrecoverable;
-    /// callers can retry or fall back to a weaker read level.
-    #[error("quorum read timed out after {timeout:?}")]
-    QuorumReadTimeout { timeout: std::time::Duration },
-}
 
 /// Snapshots in object storage: the backend and the compression.
 #[derive(Debug, Clone, PartialEq, Error, Serialize, Deserialize)]
@@ -457,7 +386,7 @@ mod tests {
     #[test]
     fn error_is_within_the_size_bar() {
         let error = size_of::<Error>();
-        let bar = size_of::<crate::ids::DataId>() + 8;
+        let bar = size_of::<zslg_log_types::DataId>() + 8;
         assert!(
             error <= bar,
             "size_of::<Error>() == {error}, over the {bar}-byte bar. \
@@ -587,8 +516,8 @@ mod tests {
     /// alerts on normal operation.
     #[test]
     fn stable_log_behind_manifest_is_not_a_failure_state() {
-        use crate::ids::LogIndex;
         use crate::metrics::SnapshotState;
+        use zslg_log_types::LogIndex;
 
         let e = Error::Log(LogError::StableLogBehindManifest {
             end_index: Some(LogIndex(41)),

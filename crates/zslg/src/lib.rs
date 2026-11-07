@@ -55,7 +55,6 @@ pub(crate) mod metrics;
 pub(crate) mod network;
 pub(crate) mod object_store;
 pub(crate) mod observability;
-mod ordered;
 pub(crate) mod quorum;
 pub(crate) mod raft;
 pub(crate) mod replica;
@@ -68,18 +67,13 @@ pub(crate) mod writer;
 pub(crate) mod writer_node;
 
 pub use crate::api::{RaftStateView, Reader, StableStream, Writer};
-pub use crate::error::{ConsensusError, Error, LogError, NetError, SnapshotError};
+pub use crate::error::{ConsensusError, Error, NetError, SnapshotError};
 pub use crate::follower_node::{FollowerNode, FollowerNodeConfig};
 pub use crate::hlc::HlcClock;
-pub use crate::ids::{
-    DataId, HostPort, LogIndex, PeerAddr, RaftGeneration, ServerName, SnapshotId,
-};
+pub use crate::ids::{HostPort, PeerAddr, RaftGeneration, ServerName, SnapshotId};
 pub use crate::leader::CompactionTier;
 pub use crate::learner_node::{LearnerNode, LearnerNodeConfig};
-pub use crate::meta::{
-    Data, Exit, RaftManifestState, RaftState, ReplicaMembership, SnapshotMetadata, StableLogEvent,
-    UnstableEvent,
-};
+pub use crate::meta::{Exit, RaftManifestState, RaftState, ReplicaMembership, SnapshotMetadata};
 pub use crate::object_store::{CompressionLevel, IntoArcObjectStore, ObjectStoreConfig};
 #[cfg(feature = "prometheus")]
 pub use crate::observability::configure_prometheus;
@@ -89,6 +83,9 @@ pub use crate::replica_node::{InitialisingReplicaNode, ReplicaNode, ReplicaNodeC
 pub use crate::writer_node::{WriterNode, WriterNodeConfig};
 pub use bytesize::ByteSize;
 pub use zslg_lifecycle_types::{ConfigError, LifecycleError};
+pub use zslg_log_types::LogError;
+pub use zslg_log_types::{Data, StableLogEvent, UnstableEvent};
+pub use zslg_log_types::{DataId, LogIndex};
 pub use zslg_node_types::NodeId;
 pub use zslg_time_types::{ClockError, Hlc};
 

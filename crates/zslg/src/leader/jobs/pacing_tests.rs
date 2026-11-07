@@ -16,11 +16,11 @@
     reason = "test code"
 )]
 
-use crate::error::LogError;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+use zslg_log_types::LogError;
 
 use tokio::sync::watch;
 use tokio::time::Instant;
@@ -28,7 +28,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::api::{LocalStoreView, RaftLeadership, SnapshotStore, StableLogSnapshot};
 use crate::error::Error;
-use crate::ids::{LogIndex, ServerName, SnapshotId};
+use crate::ids::{ServerName, SnapshotId};
 use crate::leader::integrator::Integrator;
 use crate::leader::jobs::LeaderHandles;
 use crate::leader::jobs::Pace;
@@ -36,10 +36,12 @@ use crate::leader::jobs::membership::liveness::LivenessState;
 use crate::leader::jobs::membership::{MEMBERSHIP_STEP_FLOOR, MembershipJob};
 use crate::leader::jobs::membership::{MembershipDriver, TickOutcome};
 use crate::leader::jobs::snapshot::{SNAPSHOT_LOOP_FLOOR, SnapshotJob};
-use crate::meta::{Data, RaftManifestState, RaftState, ReplicaMembership};
+use crate::meta::{RaftManifestState, RaftState, ReplicaMembership};
 use crate::object_store::CompressionLevel;
 use crate::raft::RaftStateHandle;
 use crossbeam_combinators::Channel;
+use zslg_log_types::Data;
+use zslg_log_types::LogIndex;
 use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 
@@ -301,7 +303,7 @@ impl LocalStoreView for FailingWindowStore {
 
     fn subscribe_unstable(
         &self,
-    ) -> crossbeam_combinators::Channel<crate::meta::Data, crossbeam_combinators::Infinite> {
+    ) -> crossbeam_combinators::Channel<zslg_log_types::Data, crossbeam_combinators::Infinite> {
         crossbeam_combinators::Channel::from_infinite(crossbeam_channel::never(), "stub unstable")
     }
 
@@ -322,7 +324,10 @@ impl StableLogSnapshot for EmptyStableLog {
     }
     async fn append(
         &self,
-        _entries: Channel<Result<crate::meta::SnapshotEntry, Error>, crossbeam_combinators::Finite>,
+        _entries: Channel<
+            Result<zslg_log_types::SnapshotEntry, Error>,
+            crossbeam_combinators::Finite,
+        >,
     ) -> Result<usize, Error> {
         unimplemented!("pacing tests never append")
     }
@@ -331,7 +336,7 @@ impl StableLogSnapshot for EmptyStableLog {
     }
     fn subscribe_events(
         &self,
-    ) -> Channel<crate::meta::StableLogEvent, crossbeam_combinators::Infinite> {
+    ) -> Channel<zslg_log_types::StableLogEvent, crossbeam_combinators::Infinite> {
         unimplemented!("pacing tests never subscribe to stable-log events")
     }
     fn watermark(&self) -> crossbeam_combinators::Level<Option<Hlc>> {
@@ -358,7 +363,10 @@ impl SnapshotStore for UnusedSnapshotStore {
     async fn write_snapshot(
         &self,
         _id: SnapshotId,
-        _entries: Channel<Result<crate::meta::SnapshotEntry, Error>, crossbeam_combinators::Finite>,
+        _entries: Channel<
+            Result<zslg_log_types::SnapshotEntry, Error>,
+            crossbeam_combinators::Finite,
+        >,
         _compression: CompressionLevel,
         _reason: crate::metrics::ObjectStoreReason,
     ) -> Result<crate::api::SnapshotWrite, Error> {
@@ -369,7 +377,7 @@ impl SnapshotStore for UnusedSnapshotStore {
         _id: SnapshotId,
         _reason: crate::metrics::ObjectStoreReason,
     ) -> Result<
-        Channel<Result<crate::meta::SnapshotEntry, Error>, crossbeam_combinators::Finite>,
+        Channel<Result<zslg_log_types::SnapshotEntry, Error>, crossbeam_combinators::Finite>,
         Error,
     > {
         unimplemented!("pacing tests never read a snapshot")

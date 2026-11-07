@@ -40,9 +40,11 @@ use openraft::raft::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{DataId, LogIndex, PeerAddr};
-use crate::meta::{Data, RaftState, ReplicaStatus};
+use crate::ids::PeerAddr;
+use crate::meta::{RaftState, ReplicaStatus};
 use crate::raft::TypeConfig;
+use zslg_log_types::Data;
+use zslg_log_types::{DataId, LogIndex};
 use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 

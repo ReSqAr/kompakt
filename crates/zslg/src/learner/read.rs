@@ -52,9 +52,7 @@ use crate::api::{
     ArchiveBounds, ArchiveUpperBound, Clock, LocalStoreView, Reader, StableArchiveReader,
     StableLogSnapshot,
 };
-use crate::ids::LogIndex;
 use crate::learner::QuorumReadDebouncer;
-use crate::meta::{Data, StableLogEvent, UnstableEvent};
 use crate::metrics::{self, ReadEntrySource, ReadSource};
 use crate::raft::EvictionStatus;
 use crossbeam_combinators::{
@@ -63,6 +61,8 @@ use crossbeam_combinators::{
 };
 use std::sync::Arc;
 use zslg_lifecycle_types::LifecycleError;
+use zslg_log_types::LogIndex;
+use zslg_log_types::{Data, StableLogEvent, UnstableEvent};
 use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 
@@ -673,13 +673,14 @@ mod tests {
     use std::time::Duration;
     use zslg_lifecycle_types::LifecycleError;
 
+    use crate::Reader;
     use crate::api::QuorumCheck;
     use crate::api::{LocalStoreMut, StableLogSnapshot};
-    use crate::{Reader, StableLogEvent};
     use crossbeam_combinators::{Cancellation, Channel, Finite, Infinite};
+    use zslg_log_types::StableLogEvent;
 
-    use crate::ids::LogIndex;
     use crate::learner::{LocalStore, QuorumReadDebouncer, StableLog};
+    use zslg_log_types::LogIndex;
     use zslg_node_types::NodeId;
     use zslg_time_types::Hlc;
 
@@ -687,9 +688,9 @@ mod tests {
     fn test_clock() -> Arc<dyn crate::api::Clock> {
         Arc::new(crate::hlc::HlcClock::new(Duration::from_secs(60)))
     }
-    use crate::meta::Data;
     use async_trait::async_trait;
     use futures::StreamExt;
+    use zslg_log_types::Data;
 
     use super::ReaderImpl;
     use crate::learner::stable_archive::ObjectStoreArchiveReader;
@@ -765,12 +766,12 @@ mod tests {
     #[derive(Default)]
     struct ScriptedSnapshotStore {
         snapshots: std::sync::Mutex<
-            std::collections::HashMap<crate::ids::SnapshotId, Vec<crate::meta::SnapshotEntry>>,
+            std::collections::HashMap<crate::ids::SnapshotId, Vec<zslg_log_types::SnapshotEntry>>,
         >,
     }
 
     impl ScriptedSnapshotStore {
-        fn script(&self, id: crate::ids::SnapshotId, entries: Vec<crate::meta::SnapshotEntry>) {
+        fn script(&self, id: crate::ids::SnapshotId, entries: Vec<zslg_log_types::SnapshotEntry>) {
             self.snapshots.lock().expect("lock").insert(id, entries);
         }
     }
@@ -781,7 +782,7 @@ mod tests {
             &self,
             _id: crate::ids::SnapshotId,
             _entries: crossbeam_combinators::Channel<
-                Result<crate::meta::SnapshotEntry, crate::Error>,
+                Result<zslg_log_types::SnapshotEntry, crate::Error>,
                 Finite,
             >,
             _compression: crate::object_store::CompressionLevel,
@@ -795,7 +796,7 @@ mod tests {
             _reason: crate::metrics::ObjectStoreReason,
         ) -> Result<
             crossbeam_combinators::Channel<
-                Result<crate::meta::SnapshotEntry, crate::Error>,
+                Result<zslg_log_types::SnapshotEntry, crate::Error>,
                 Finite,
             >,
             crate::Error,
@@ -839,13 +840,13 @@ mod tests {
     /// Pre-load a closed `Channel` for the channel-based `append`.
     fn rx_of(
         items: impl IntoIterator<Item = Result<(LogIndex, Data), crate::Error>>,
-    ) -> crossbeam_combinators::Channel<Result<crate::meta::SnapshotEntry, crate::Error>, Finite>
+    ) -> crossbeam_combinators::Channel<Result<zslg_log_types::SnapshotEntry, crate::Error>, Finite>
     {
         crossbeam_combinators::Channel::from_vec(
             items
                 .into_iter()
                 .map(|item| {
-                    item.map(|(global_index, data)| crate::meta::SnapshotEntry {
+                    item.map(|(global_index, data)| zslg_log_types::SnapshotEntry {
                         global_index,
                         data,
                     })
@@ -1013,7 +1014,8 @@ mod tests {
     #[tokio::test]
     async fn stable_tail_serves_purged_prefix_from_object_store() {
         use crate::ids::SnapshotId;
-        use crate::meta::{RaftManifestState, SnapshotEntry, SnapshotMetadata};
+        use crate::meta::{RaftManifestState, SnapshotMetadata};
+        use zslg_log_types::SnapshotEntry;
 
         let dir = tempfile::tempdir().expect("tempdir");
         let stable_log = crate::tests::stable_log_at(&dir.path().join("stable.db")).await;
@@ -1161,7 +1163,7 @@ mod tests {
             *self.end_hlc.lock().expect("lock") = Some(hlc);
             let _ = self
                 .events
-                .publish(crate::meta::StableLogEvent::Watermark(hlc));
+                .publish(zslg_log_types::StableLogEvent::Watermark(hlc));
             self.watermark.set(Some(hlc));
         }
 
@@ -1178,7 +1180,7 @@ mod tests {
             *self.end_hlc.lock().expect("lock") = Some(hlc);
             let _ = self
                 .events
-                .publish(crate::meta::StableLogEvent::Appended { index, data });
+                .publish(zslg_log_types::StableLogEvent::Appended { index, data });
         }
     }
 
@@ -1192,14 +1194,14 @@ mod tests {
         }
         async fn append(
             &self,
-            _entries: Channel<Result<crate::meta::SnapshotEntry, crate::Error>, Finite>,
+            _entries: Channel<Result<zslg_log_types::SnapshotEntry, crate::Error>, Finite>,
         ) -> Result<usize, crate::Error> {
             unimplemented!("scripted stable log is read-only")
         }
         async fn record_end_hlc(&self, _end_hlc: Hlc) -> Result<(), crate::Error> {
             unimplemented!("scripted stable log is read-only")
         }
-        fn subscribe_events(&self) -> Channel<crate::meta::StableLogEvent, Infinite> {
+        fn subscribe_events(&self) -> Channel<zslg_log_types::StableLogEvent, Infinite> {
             self.events_registry.subscribe_infinite()
         }
         fn watermark(&self) -> crossbeam_combinators::Level<Option<Hlc>> {
@@ -1261,7 +1263,7 @@ mod tests {
                 .expect("stream stalled")
                 .expect("stream ended early")
                 .expect("a lagged consumer must never see an error");
-            if let crate::meta::StableLogEvent::Appended { index, .. } = ev {
+            if let zslg_log_types::StableLogEvent::Appended { index, .. } = ev {
                 seen.push(index.raw());
             }
         }
@@ -1309,8 +1311,8 @@ mod tests {
                 .expect("stream ended early")
                 .expect("a consumer that fell behind must never see an error");
             match ev {
-                crate::meta::StableLogEvent::Appended { .. } => appended += 1,
-                crate::meta::StableLogEvent::Watermark(hlc) => watermarks.push(hlc),
+                zslg_log_types::StableLogEvent::Appended { .. } => appended += 1,
+                zslg_log_types::StableLogEvent::Watermark(hlc) => watermarks.push(hlc),
             }
             if appended == 8 && watermarks.iter().any(|hlc| *hlc >= Hlc(5000)) {
                 return;
@@ -1398,7 +1400,7 @@ mod tests {
                 .expect("stream stalled")
                 .expect("stream ended early")
                 .expect("no error");
-            if matches!(ev, crate::meta::StableLogEvent::Appended { .. }) {
+            if matches!(ev, zslg_log_types::StableLogEvent::Appended { .. }) {
                 seen += 1;
             }
         }
@@ -1413,7 +1415,7 @@ mod tests {
                 .expect("stream stalled")
                 .expect("stream ended early")
                 .expect("no error");
-            if let crate::meta::StableLogEvent::Appended { index, .. } = ev {
+            if let zslg_log_types::StableLogEvent::Appended { index, .. } = ev {
                 assert_eq!(index, LogIndex(6));
                 break;
             }
@@ -1484,7 +1486,7 @@ mod tests {
     #[tokio::test]
     async fn stable_tail_fills_interior_hole_from_object_store() {
         use crate::ids::SnapshotId;
-        use crate::meta::SnapshotEntry;
+        use zslg_log_types::SnapshotEntry;
 
         let local: Vec<(LogIndex, Data)> = [(0u64, 100u64), (1, 101), (4, 104), (5, 105)]
             .into_iter()
@@ -1539,7 +1541,7 @@ mod tests {
     #[tokio::test]
     async fn stable_tail_errors_when_archive_cannot_fill_hole() {
         use crate::ids::SnapshotId;
-        use crate::meta::SnapshotEntry;
+        use zslg_log_types::SnapshotEntry;
 
         let local: Vec<(LogIndex, Data)> = [(0u64, 100u64), (1, 101), (4, 104), (5, 105)]
             .into_iter()
@@ -1676,7 +1678,7 @@ mod tests {
 
     // ── subscribe_unstable_tail ─────────────────────────────────────────────
 
-    type UnstableStream = Channel<Result<crate::UnstableEvent, crate::Error>, Infinite>;
+    type UnstableStream = Channel<Result<zslg_log_types::UnstableEvent, crate::Error>, Infinite>;
 
     /// A reader over a local store and the stable log it reads its watermark
     /// from, on one `Storage` (the production shape), with the stable
@@ -1711,7 +1713,7 @@ mod tests {
     }
 
     /// The next event, without blocking the runtime the store's workers run on.
-    async fn next_unstable(stream: &mut UnstableStream) -> crate::UnstableEvent {
+    async fn next_unstable(stream: &mut UnstableStream) -> zslg_log_types::UnstableEvent {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         loop {
             if let Some(item) = stream.try_recv() {
@@ -1750,22 +1752,22 @@ mod tests {
         let mut stream = reader.subscribe_unstable_tail();
         assert_eq!(
             next_unstable(&mut stream).await,
-            crate::UnstableEvent::Watermark(Hlc(50))
+            zslg_log_types::UnstableEvent::Watermark(Hlc(50))
         );
         assert_eq!(
             next_unstable(&mut stream).await,
-            crate::UnstableEvent::Appended(a)
+            zslg_log_types::UnstableEvent::Appended(a)
         );
         assert_eq!(
             next_unstable(&mut stream).await,
-            crate::UnstableEvent::Appended(b)
+            zslg_log_types::UnstableEvent::Appended(b)
         );
 
         let c = make_data(3, 300, b"c");
         integrate_one(&local, 2, c.clone()).await;
         assert_eq!(
             next_unstable(&mut stream).await,
-            crate::UnstableEvent::Appended(c)
+            zslg_log_types::UnstableEvent::Appended(c)
         );
         assert_quiet(&mut stream).await;
     }
@@ -1779,7 +1781,7 @@ mod tests {
         let mut stream = reader.subscribe_unstable_tail();
         assert_eq!(
             next_unstable(&mut stream).await,
-            crate::UnstableEvent::Watermark(Hlc(50))
+            zslg_log_types::UnstableEvent::Watermark(Hlc(50))
         );
 
         let written: Vec<Data> = (0..6u8)
@@ -1793,10 +1795,10 @@ mod tests {
         let mut watermarks = 0usize;
         while seen.len() < written.len() {
             match next_unstable(&mut stream).await {
-                crate::UnstableEvent::Appended(data) => {
+                zslg_log_types::UnstableEvent::Appended(data) => {
                     seen.insert(data.data_id);
                 }
-                crate::UnstableEvent::Watermark(hlc) => {
+                zslg_log_types::UnstableEvent::Watermark(hlc) => {
                     assert_eq!(hlc, Hlc(50));
                     watermarks += 1;
                 }
@@ -1817,13 +1819,13 @@ mod tests {
         let mut stream = reader.subscribe_unstable_tail();
         assert_eq!(
             next_unstable(&mut stream).await,
-            crate::UnstableEvent::Watermark(Hlc(50))
+            zslg_log_types::UnstableEvent::Watermark(Hlc(50))
         );
         for hlc in [60, 70] {
             stable.record_end_hlc(Hlc(hlc)).await.expect("advance");
             assert_eq!(
                 next_unstable(&mut stream).await,
-                crate::UnstableEvent::Watermark(Hlc(hlc))
+                zslg_log_types::UnstableEvent::Watermark(Hlc(hlc))
             );
         }
         assert_quiet(&mut stream).await;
@@ -1837,7 +1839,7 @@ mod tests {
         let mut stream = reader.subscribe_unstable_tail();
         assert_eq!(
             next_unstable(&mut stream).await,
-            crate::UnstableEvent::Watermark(Hlc(50))
+            zslg_log_types::UnstableEvent::Watermark(Hlc(50))
         );
 
         integrate_one(&local, 0, make_data(1, 100, b"settles")).await;
@@ -1845,7 +1847,7 @@ mod tests {
 
         assert_eq!(
             next_unstable(&mut stream).await,
-            crate::UnstableEvent::Watermark(Hlc(150))
+            zslg_log_types::UnstableEvent::Watermark(Hlc(150))
         );
         assert_quiet(&mut stream).await;
     }
@@ -1918,13 +1920,13 @@ mod tests {
     fn drain_ready(
         stream: &mut UnstableStream,
         stable: &StableLog,
-        delivered: &mut std::collections::BTreeSet<crate::ids::DataId>,
+        delivered: &mut std::collections::BTreeSet<zslg_log_types::DataId>,
         last_watermark: &mut Option<Hlc>,
     ) -> Result<(), proptest::test_runner::TestCaseError> {
         use proptest::prelude::*;
         while let Some(item) = stream.try_recv() {
             match item.expect("no errors") {
-                crate::UnstableEvent::Appended(data) => {
+                zslg_log_types::UnstableEvent::Appended(data) => {
                     let current = stable.end_hlc();
                     prop_assert!(
                         current.is_none_or(|w| data.data_id.hlc() > w),
@@ -1933,7 +1935,7 @@ mod tests {
                     );
                     delivered.insert(data.data_id);
                 }
-                crate::UnstableEvent::Watermark(hlc) => {
+                zslg_log_types::UnstableEvent::Watermark(hlc) => {
                     prop_assert!(Some(hlc) >= *last_watermark, "watermark regressed");
                     *last_watermark = Some(hlc);
                 }
@@ -2003,7 +2005,7 @@ mod tests {
                     }
                 }
 
-                let expected: std::collections::BTreeSet<crate::ids::DataId> = reader
+                let expected: std::collections::BTreeSet<zslg_log_types::DataId> = reader
                     .unstable_tail()
                     .into_test_stream()
                     .map_ok(|data| data.data_id)
@@ -2054,7 +2056,7 @@ mod tests {
                 .expect("item")
                 .expect("ok");
             match ev {
-                crate::meta::StableLogEvent::Appended { index, .. } => {
+                zslg_log_types::StableLogEvent::Appended { index, .. } => {
                     assert_eq!(index.raw(), expected);
                 }
                 other => panic!("expected historical Appended({expected}), got {other:?}"),

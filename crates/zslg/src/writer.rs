@@ -22,19 +22,20 @@
 //! the coordinator learns to reap the entry and free its permit — so every
 //! per-write resource here is released by `Drop`, not by the success path.
 
-use crate::error::{ConsensusError, LogError};
+use crate::error::ConsensusError;
 use std::sync::Arc;
 use std::time::Duration;
 use zslg_lifecycle_types::ConfigError;
+use zslg_log_types::LogError;
 
 use bytes::Bytes;
 use tracing::warn;
 
 use crate::api::{Clock, RaftStateTracker, Router};
 use crate::error::Error;
-use crate::meta::Data;
 use crate::metrics::{self, OpState};
 use crate::quorum::Coordinator;
+use zslg_log_types::Data;
 use zslg_node_types::NodeId;
 
 pub(crate) struct WriterConfig {
@@ -83,9 +84,10 @@ impl WriterService {
 
 #[async_trait::async_trait]
 impl crate::api::Writer for WriterService {
-    async fn write(&self, blob: Bytes) -> Result<crate::ids::DataId, Error> {
+    async fn write(&self, blob: Bytes) -> Result<zslg_log_types::DataId, Error> {
         let creation_hlc = self.clock.now();
-        let data_id = crate::ids::DataId::from_parts(creation_hlc, self.node_id, rand::random());
+        let data_id =
+            zslg_log_types::DataId::from_parts(creation_hlc, self.node_id, rand::random());
 
         let _in_flight = metrics::writes_in_flight_guard();
         let probe = metrics::write_duration_probe();

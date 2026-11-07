@@ -9,7 +9,7 @@
 use bytes::Bytes;
 
 use crate::Error;
-use crate::ids::DataId;
+use zslg_log_types::DataId;
 
 #[async_trait::async_trait]
 pub trait Writer: Send + Sync + 'static {

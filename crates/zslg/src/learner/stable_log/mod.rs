@@ -110,10 +110,10 @@ pub(in crate::learner) use snapshot_loader::SnapshotLoader;
 #[cfg(test)]
 pub(crate) use snapshot_loader::integrate_manifest_for_test;
 
-use crate::error::LogError;
 use rocksdb_kit::ColumnFamily;
 use std::sync::Arc;
 use zslg_lifecycle_types::ConfigError;
+use zslg_log_types::LogError;
 
 use parking_lot::Mutex as SyncMutex;
 use rocksdb_kit::Batch;
@@ -121,14 +121,14 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use crate::Error;
 use crate::error::{ToCodec, ToStorage};
-use crate::ids::LogIndex;
-use crate::meta::{Data, SnapshotEntry, StableLogEvent};
 use crate::metrics::{self, LogType, OpState};
 use crossbeam_combinators::{
     Channel, Fanout, FanoutConfig, Finite, Infinite, Level, LevelSetter, OverflowPolicy, Registry,
     broadcast,
 };
 use rocksdb_kit::Storage;
+use zslg_log_types::LogIndex;
+use zslg_log_types::{Data, SnapshotEntry, StableLogEvent};
 use zslg_time_types::Hlc;
 
 // ── key codec ───────────────────────────────────────────────────────────────
@@ -1045,8 +1045,8 @@ mod tests {
     async fn read_snapshot_then_append_matches() {
         use crate::api::SnapshotStore as _;
         use crate::ids::SnapshotId;
-        use crate::meta::SnapshotEntry;
         use crate::object_store::CompressionLevel;
+        use zslg_log_types::SnapshotEntry;
 
         // End-to-end of the production load path: write a snapshot through the
         // public SnapshotStore API, then `read_snapshot` (off-reactor decode →
@@ -1354,7 +1354,7 @@ mod tests {
             .await
             .expect("ok");
         }
-        let entries: Vec<(crate::ids::LogIndex, crate::meta::Data)> = log
+        let entries: Vec<(zslg_log_types::LogIndex, zslg_log_types::Data)> = log
             .range(None, LogIndex(5))
             .items()
             .filter_map(|r| r.ok())

@@ -31,9 +31,9 @@
 //! shaped around.
 
 use crate::Error;
-use crate::ids::LogIndex;
-use crate::meta::{Data, StableLogEvent, UnstableEvent};
 use crossbeam_combinators::{Channel, Contiguous, Infinite, OrderedChannel};
+use zslg_log_types::LogIndex;
+use zslg_log_types::{Data, StableLogEvent, UnstableEvent};
 use zslg_time_types::Hlc;
 
 /// The stable-log read: gapless indices, strictly after the caller's `after`.

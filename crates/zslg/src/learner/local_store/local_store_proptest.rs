@@ -23,8 +23,8 @@ use proptest::prelude::*;
 use super::open_test_local_store;
 use super::store::LocalStore;
 use crate::api::{LocalStoreMut, LocalStoreView};
-use crate::ids::{DataId, LogIndex};
-use crate::meta::Data;
+use zslg_log_types::Data;
+use zslg_log_types::{DataId, LogIndex};
 use zslg_node_types::NodeId;
 
 async fn integrate_batch(

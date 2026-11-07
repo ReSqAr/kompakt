@@ -10,8 +10,8 @@
 //! truncated away, because a length prefix promising bytes that never arrive
 //! would desynchronize the peer's stream permanently.
 
-use crate::error::LogError;
 use std::sync::Arc;
+use zslg_log_types::LogError;
 
 use futures::FutureExt as _;
 use futures::future::BoxFuture;

@@ -34,12 +34,12 @@ use tracing::warn;
 
 use crate::api::{ReplicaClient, StampedWrite};
 use crate::error::Error;
-use crate::ids::LogIndex;
 use crate::network::framing::{
     AsyncFrameSink, AsyncFrameStream, TcpFrameSink, TcpFrameStream, adopt_blocking,
 };
 use crate::network::messages::{RpcReplicaRequest, RpcRequest, WriteOutcome, WriteStreamResponse};
 use crossbeam_combinators::{AbortReason, Channel};
+use zslg_log_types::LogIndex;
 
 /// In-flight window between the socket reader and the replica's write pipeline.
 /// Backpressure, not buffering: a peer that outruns the replica's flush loop

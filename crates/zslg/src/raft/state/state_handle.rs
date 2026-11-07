@@ -221,8 +221,9 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
-    use crate::ids::{LogIndex, SnapshotId};
+    use crate::ids::SnapshotId;
     use crate::meta::{ReplicaMembership, SnapshotMetadata};
+    use zslg_log_types::LogIndex;
     use zslg_node_types::NodeId;
     use zslg_time_types::Hlc;
 

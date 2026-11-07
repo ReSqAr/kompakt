@@ -23,9 +23,10 @@
 //! read anywhere else in a frame is truncation, not an ending. That asymmetry is
 //! what makes a short object an error rather than a shorter snapshot.
 
-use crate::error::{LogError, SnapshotError};
+use crate::error::SnapshotError;
 use std::io;
 use std::io::Read as _;
+use zslg_log_types::LogError;
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -224,8 +225,8 @@ mod tests {
     use super::*;
 
     use super::super::test_entry as entry;
-    use crate::meta::SnapshotEntry;
     use crate::object_store::CompressionLevel;
+    use zslg_log_types::SnapshotEntry;
 
     /// Encode `records` into an in-memory buffer with `encode_framed_records_streaming`
     /// (pulling from a `Vec::into_iter`), then decode the buffer back with the sync

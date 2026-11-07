@@ -32,10 +32,10 @@ use std::time::Duration;
 use bytes::Bytes;
 use futures::StreamExt;
 
-use crate::StableLogEvent;
-use crate::ids::DataId;
 use crate::meta::{RaftState, ReplicaMembership};
 use crate::tests::common::Cluster;
+use zslg_log_types::DataId;
+use zslg_log_types::StableLogEvent;
 use zslg_node_types::NodeId;
 
 /// Assert every global invariant that holds of a quiesced cluster.

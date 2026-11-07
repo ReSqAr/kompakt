@@ -22,9 +22,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::Error;
 use crate::ids::SnapshotId;
-use crate::meta::SnapshotEntry;
 use crate::object_store::CompressionLevel;
 use crossbeam_combinators::Channel;
+use zslg_log_types::SnapshotEntry;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct CleanupReport {
@@ -34,7 +34,7 @@ pub(crate) struct CleanupReport {
 /// Where an entry sits: its global index and HLC.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct EntryMeta {
-    pub(crate) index: crate::ids::LogIndex,
+    pub(crate) index: zslg_log_types::LogIndex,
     pub(crate) hlc: zslg_time_types::Hlc,
 }
 

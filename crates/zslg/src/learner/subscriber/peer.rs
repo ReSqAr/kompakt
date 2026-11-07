@@ -18,11 +18,11 @@
 
 use crate::Error;
 use crate::api::{LocalStoreMut, Replica};
-use crate::error::LogError;
 use crate::hlc::HlcClock;
-use crate::ids::LogIndex;
-use crate::meta::Data;
 use std::sync::Arc;
+use zslg_log_types::Data;
+use zslg_log_types::LogError;
+use zslg_log_types::LogIndex;
 use zslg_node_types::NodeId;
 
 /// Sample `zslg_hlc_skew_seconds` for roughly every Nth replicated item — a
@@ -186,10 +186,11 @@ mod tests {
     use super::*;
     use crate::api::{LocalStoreView, Replica, StampedWrite, WriteOutcome};
     use crate::hlc::HlcClock;
-    use crate::ids::LogIndex;
-    use crate::meta::{Data, ReplicaStatus};
+    use crate::meta::ReplicaStatus;
     use crate::tests::{fresh_local, make_meta, upstream as upstream_id};
     use crossbeam_combinators::{Channel, Finite, Infinite};
+    use zslg_log_types::Data;
+    use zslg_log_types::LogIndex;
 
     /// Drive a subscriber whose fake upstream declares completion. Even a
     /// *declared* close is an error (a subscription cannot complete), so these
@@ -338,7 +339,7 @@ mod tests {
         run_expecting_end(sub).await;
 
         use futures::TryStreamExt as _;
-        let all: Vec<crate::meta::Data> = local
+        let all: Vec<zslg_log_types::Data> = local
             .stream_above_hlc(None)
             .into_test_stream()
             .try_collect::<Vec<_>>()
@@ -442,7 +443,7 @@ mod tests {
         run_expecting_end(sub).await;
 
         use futures::TryStreamExt as _;
-        let data_ids: Vec<crate::ids::DataId> = local
+        let data_ids: Vec<zslg_log_types::DataId> = local
             .stream_above_hlc(None)
             .into_test_stream()
             .try_collect::<Vec<_>>()

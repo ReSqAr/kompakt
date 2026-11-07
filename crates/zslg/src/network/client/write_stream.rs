@@ -15,13 +15,13 @@ use zslg_lifecycle_types::LifecycleError;
 
 use crate::api::{StampedWrite, WriteOutcome};
 use crate::error::Error;
-use crate::meta::Data;
 use crate::metrics;
 use crate::network::client::{RpcClient, Target};
 use crate::network::framing::{TcpFrameSink, TcpFrameStream, adopt_blocking};
 use crate::network::messages::WriteOutcome as WireWriteOutcome;
 use crate::network::messages::{RpcReplicaRequest, RpcRequest, WriteStreamResponse};
 use crossbeam_combinators::{Channel, Feed, Finite, Infinite};
+use zslg_log_types::Data;
 
 /// Open a write stream to `target` over **one** connection. Drives writes off
 /// `input`, yielding their outcomes. See [`Replica::write`](crate::api::Replica::write).
@@ -181,7 +181,7 @@ fn resolve_response(
 mod tests {
     use super::*;
     use crate::error::NetError;
-    use crate::ids::DataId;
+    use zslg_log_types::DataId;
     use zslg_time_types::ClockError;
     use zslg_time_types::Hlc;
 

@@ -18,10 +18,10 @@
 use tokio::sync::watch;
 
 use crate::error::Error;
-use crate::ids::DataId;
-use crate::ids::LogIndex;
-use crate::meta::Data;
 use crossbeam_combinators::{Channel, Finite, OrderedChannel, StrictlyIncreasing};
+use zslg_log_types::Data;
+use zslg_log_types::DataId;
+use zslg_log_types::LogIndex;
 use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 

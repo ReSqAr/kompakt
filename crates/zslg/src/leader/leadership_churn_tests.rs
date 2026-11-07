@@ -14,7 +14,6 @@
     clippy::result_large_err,
     reason = "test code"
 )]
-use crate::error::LogError;
 use crate::test_stream::ChannelTestExt as _;
 /// Leadership churn against an in-flight snapshot (EXPERT_REVIEW Appendix
 /// B.4): a real 3-node raft cluster, a snapshot pipeline stalled between
@@ -40,6 +39,7 @@ use crate::test_stream::ChannelTestExt as _;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_log_types::LogError;
 
 use crate::object_store::CompressionLevel;
 use object_store::ObjectStore;
@@ -51,18 +51,19 @@ use crate::api::ReplicatedRaftState;
 use crate::api::{LocalStoreMut, LocalStoreView, Replica, Router, StableLogSnapshot};
 use crate::error::Error;
 use crate::hlc::HlcGate;
-use crate::ids::LogIndex;
 use crate::leader::{SnapshotInputs, build_snapshot};
 use crate::learner::LocalStore;
 use crate::learner::StableLog;
 use crate::learner::integrate_manifest_for_test;
-use crate::meta::{Data, ReplicaMembership};
+use crate::meta::ReplicaMembership;
 use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use crate::raft::RaftNode;
 use crate::tests::fast_raft_config as raft_config;
 use crate::tests::make_data;
 use crate::tests::{FixedClock, MapPeerRouter, ReadyReplica};
 use crate::tests::{Partition, TestNode};
+use zslg_log_types::Data;
+use zslg_log_types::LogIndex;
 use zslg_node_types::NodeId;
 use zslg_time_types::{Hlc, HlcParts};
 
@@ -136,7 +137,7 @@ impl LocalStoreView for StallingLocalStore {
 
     fn subscribe_unstable(
         &self,
-    ) -> crossbeam_combinators::Channel<crate::meta::Data, crossbeam_combinators::Infinite> {
+    ) -> crossbeam_combinators::Channel<zslg_log_types::Data, crossbeam_combinators::Infinite> {
         self.inner.subscribe_unstable()
     }
 

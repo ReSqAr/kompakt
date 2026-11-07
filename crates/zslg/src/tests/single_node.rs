@@ -26,12 +26,12 @@ use tempfile::TempDir;
 
 use crate::Error;
 use crate::ReplicaNode;
-use crate::ids::DataId;
 use crate::ids::PeerAddr;
 use crate::leader::CompactionTier;
 use crate::object_store::ObjectStoreConfig;
 use crate::replica_node::ReplicaNodeConfig;
-use crate::{Data, StableLogEvent};
+use zslg_log_types::DataId;
+use zslg_log_types::{Data, StableLogEvent};
 use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
 
