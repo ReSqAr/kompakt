@@ -83,13 +83,14 @@ pub(in crate::network) type AsyncFrameStream = FrameStream<tokio::net::tcp::Owne
     reason = "test code"
 )]
 mod tests {
+    use super::*;
+    use crate::error::{LogError, NetError};
     use std::sync::Arc;
 
     use serde::Serialize;
     use serde::de::DeserializeOwned;
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _, duplex};
 
-    use super::*;
     use crate::api::Clock;
     use crate::error::Error;
     use crate::hlc::Hlc;
@@ -229,7 +230,10 @@ mod tests {
         let mut sink = FrameSink::new(wr, clock(), None);
         let huge = vec![0u8; MAX_FRAME_LEN.saturating_add(1)];
         let err = sink.feed(huge).await.expect_err("oversized frame refused");
-        assert!(matches!(err, Error::Codec(_)), "unexpected error: {err:?}");
+        assert!(
+            matches!(err, Error::Log(LogError::Codec(_))),
+            "unexpected error: {err:?}"
+        );
         assert!(sink.pending.is_empty(), "partial frame left in the sink");
 
         // The sink is still usable, and the next frame is the first thing the
@@ -254,7 +258,10 @@ mod tests {
             .await
             .expect("some")
             .expect_err("absurd length must be rejected");
-        assert!(matches!(err, Error::Codec(_)), "unexpected error: {err:?}");
+        assert!(
+            matches!(err, Error::Log(LogError::Codec(_))),
+            "unexpected error: {err:?}"
+        );
         assert!(
             stream.scratch.capacity() <= READ_CHUNK,
             "reserved for an unvalidated length: {}",
@@ -274,7 +281,10 @@ mod tests {
             .await
             .expect("some")
             .expect_err("truncated frame must be rejected");
-        assert!(matches!(err, Error::Rpc(_)), "unexpected error: {err:?}");
+        assert!(
+            matches!(err, Error::Net(NetError::Rpc(_))),
+            "unexpected error: {err:?}"
+        );
     }
 
     /// Frames are reassembled across arbitrary read boundaries: a reader that
@@ -376,7 +386,10 @@ mod tests {
             .await
             .expect("some")
             .expect_err("corruption must be rejected");
-        assert!(matches!(err, Error::Codec(_)), "unexpected error: {err:?}");
+        assert!(
+            matches!(err, Error::Log(LogError::Codec(_))),
+            "unexpected error: {err:?}"
+        );
     }
 
     /// Decode one value off a blocking stream, asserting no HLC drift.
@@ -445,7 +458,10 @@ mod tests {
             .next_frame_raw_blocking::<u64>()
             .expect("some")
             .expect_err("truncated frame must be rejected");
-        assert!(matches!(err, Error::Rpc(_)), "unexpected error: {err:?}");
+        assert!(
+            matches!(err, Error::Net(NetError::Rpc(_))),
+            "unexpected error: {err:?}"
+        );
     }
 
     /// The handshake handoff: read-ahead bytes buffered past a frame on the async

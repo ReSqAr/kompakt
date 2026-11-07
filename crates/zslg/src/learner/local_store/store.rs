@@ -18,6 +18,7 @@
 //! lost to a crash; the subscription is at-least-once and the rescan that
 //! follows a hang-up, not the live path, is its recovery.
 
+use crate::error::LogError;
 use rocksdb_kit::ColumnFamily;
 use std::collections::{HashMap, HashSet};
 use std::ops::Bound;
@@ -309,9 +310,9 @@ impl crate::api::LocalStoreMut for LocalStore {
                     Err(crossbeam_combinators::End::Complete) => return (Ok(()), sent_any),
                     Err(crossbeam_combinators::End::Aborted { reason }) => {
                         return (
-                            Err(Error::SubscriptionStreamEnded {
+                            Err(Error::Log(LogError::SubscriptionStreamEnded {
                                 reason: reason.to_string(),
-                            }),
+                            })),
                             sent_any,
                         );
                     }
@@ -324,7 +325,9 @@ impl crate::api::LocalStoreMut for LocalStore {
                     };
                     if tx.send(IntegrateItem::Record(node, idx, data)).is_err() {
                         return (
-                            Err(Error::Storage("local store integrator gone".into())),
+                            Err(Error::Log(LogError::Storage(
+                                "local store integrator gone".into(),
+                            ))),
                             sent_any,
                         );
                     }
@@ -613,7 +616,9 @@ impl BatchIntegrator {
         if !data_rows.is_empty() || !sub_cursors.is_empty() {
             #[cfg(test)]
             if store.fail_next_append.swap(false, Ordering::SeqCst) {
-                return Err(Error::Storage("induced append failure (test)".into()));
+                return Err(Error::Log(LogError::Storage(
+                    "induced append failure (test)".into(),
+                )));
             }
             commit_batch(store, &data_rows, &sub_cursors)?;
             // THE FENCE: only ids whose data is now in the DB are remembered. A
@@ -650,7 +655,11 @@ fn read_cursor(storage: &Storage, upstream: NodeId) -> Result<Option<LogIndex>, 
     let cf = storage.cf(LOCAL_STORE_CURSORS_CF)?;
     let Some(pinned) = storage
         .get_pinned(&cf, encode_cursor_key(upstream))
-        .map_err(|e| Error::Storage(format!("read local-store cursor for {upstream:?}: {e}")))?
+        .map_err(|e| {
+            Error::Log(LogError::Storage(format!(
+                "read local-store cursor for {upstream:?}: {e}"
+            )))
+        })?
     else {
         return Ok(None);
     };
@@ -695,10 +704,10 @@ fn for_each_data(
         // current block and pin it in the block cache. Neither may cross an
         // `.await` or a batch commit; the sink copies what it wants to keep.
         let Some(data_id) = decode_data_key(key) else {
-            return Err(Error::Storage(format!(
+            return Err(Error::Log(LogError::Storage(format!(
                 "undecodable local-store data key ({} bytes)",
                 key.len()
-            )));
+            ))));
         };
         let past_end = match end {
             Bound::Unbounded => false,
@@ -712,18 +721,21 @@ fn for_each_data(
         // but substituting an empty payload for a missing one would hand a
         // caller a silently truncated record (§20).
         let Some(value) = it.value() else {
-            return Err(Error::Storage(format!(
+            return Err(Error::Log(LogError::Storage(format!(
                 "local-store data key with no value ({} bytes): {key:02x?}",
                 key.len()
-            )));
+            ))));
         };
         if !sink(data_id, value) {
             return Ok(());
         }
         it.next();
     }
-    it.status()
-        .map_err(|e| Error::Storage(format!("rocksdb scan (local store data): {e}")))
+    it.status().map_err(|e| {
+        Error::Log(LogError::Storage(format!(
+            "rocksdb scan (local store data): {e}"
+        )))
+    })
 }
 
 /// Stage one batch's data rows and cursor advances into a **single**

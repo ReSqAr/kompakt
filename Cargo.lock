@@ -4431,6 +4431,7 @@ dependencies = [
  "crossbeam-channel",
  "crossbeam-combinators",
  "dashmap",
+ "error-union",
  "framing",
  "futures",
  "http-body-util",

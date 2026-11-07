@@ -16,6 +16,7 @@
 //! [`Writer`] + [`Reader`] traits.
 
 use crate::database::NODE_ID_CF;
+use crate::error::{ConfigError, NetError};
 use crate::learner::{LOCAL_STORE_CURSORS_CF, LOCAL_STORE_DATA_CF, STABLE_LOG_CF};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -314,24 +315,24 @@ impl FollowerNodeConfig {
         self.storage_config().validate()?;
         self.router_config().validate()?;
         if self.peers.is_empty() {
-            return Err(Error::InvalidConfiguration(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(
                 "peers must not be empty".to_owned(),
-            ));
+            )));
         }
         // Dummy identity — validation doesn't need a real node_id, just tunings.
         self.writer_config(NodeId::new_v4()).validate()?;
         self.raft_tracker_config().validate()?;
         self.learner_config().validate()?;
         if self.db_path.as_os_str().is_empty() {
-            return Err(Error::InvalidConfiguration(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(
                 "db_path must not be empty".to_owned(),
-            ));
+            )));
         }
         self.stable_log_config().validate()?;
         if self.drain_timeout.is_zero() {
-            return Err(Error::InvalidConfiguration(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(
                 "drain_timeout must be non-zero".to_owned(),
-            ));
+            )));
         }
         Ok(())
     }
@@ -436,10 +437,10 @@ impl FollowerNode {
         {
             Ok(res) => res?,
             Err(_) => {
-                return Err(Error::Rpc(format!(
+                return Err(Error::Net(NetError::Rpc(format!(
                     "learner subsystem did not become ready within {:?}",
                     config.startup_timeout,
-                )));
+                ))));
             }
         };
 

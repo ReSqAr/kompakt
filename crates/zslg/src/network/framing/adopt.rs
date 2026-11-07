@@ -2,6 +2,7 @@
 //! connection make it: the client at `open_write`, the server at `run_write`.
 //! Doing it twice would risk the two halves disagreeing about the read-ahead.
 
+use crate::error::NetError;
 use crate::error::{Error, ToRpc};
 
 use super::{AsyncFrameSink, AsyncFrameStream, TcpFrameSink, TcpFrameStream};
@@ -21,7 +22,7 @@ pub(in crate::network) fn adopt_blocking(
     let (read_half, remainder, clock, expected) = stream.into_raw_parts();
     let tcp = read_half
         .reunite(write_half)
-        .map_err(|e| Error::Rpc(format!("reunite tcp halves: {e}")))?;
+        .map_err(|e| Error::Net(NetError::Rpc(format!("reunite tcp halves: {e}"))))?;
     let raw = tcp.into_std().to_rpc("tcp into_std")?;
     raw.set_nonblocking(false)
         .to_rpc("tcp set_nonblocking(false)")?;

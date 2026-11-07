@@ -28,6 +28,7 @@ mod clock_skew_tests;
 #[cfg(test)]
 mod subscribe_status_tests;
 
+use crate::error::{ClockError, ConfigError, ConsensusError, LifecycleError};
 pub(crate) use log::{REPLICA_LOG_CF, ReplicaLogStore};
 use purge::run_purge_worker;
 
@@ -254,7 +255,7 @@ impl WriteSubmitter {
             metrics::replica_write_request(ReplicaWriteState::FailStorage);
             return Gated::Answer(Box::new(WriteOutcome::Failed {
                 data_id,
-                error: Error::Shutdown,
+                error: Error::Lifecycle(LifecycleError::Shutdown),
             }));
         }
         let state = self.raft_state.snapshot();
@@ -276,9 +277,9 @@ impl WriteSubmitter {
             }
             return Gated::Answer(Box::new(WriteOutcome::Rejected {
                 data_id,
-                error: Error::NotAReplica {
+                error: Error::Consensus(ConsensusError::NotAReplica {
                     node_id: self.node_id,
-                },
+                }),
                 raft_state: (*state).clone(),
             }));
         }
@@ -311,7 +312,7 @@ impl WriteSubmitter {
                 }
                 return Gated::Answer(Box::new(WriteOutcome::Rejected {
                     data_id,
-                    error: Error::HlcCutoff(e),
+                    error: Error::Clock(ClockError::HlcCutoff(e)),
                     raft_state: (*state).clone(),
                 }));
             }
@@ -379,7 +380,7 @@ impl WriteSubmitter {
                         metrics::replica_write_request(ReplicaWriteState::FailStorage);
                         Some(Ok(WriteOutcome::Failed {
                             data_id: data.data_id,
-                            error: Error::Shutdown,
+                            error: Error::Lifecycle(LifecycleError::Shutdown),
                         }))
                     }
                 },
@@ -568,16 +569,18 @@ impl ReplicaLogConfig {
 
     pub(crate) fn validate(&self) -> Result<(), crate::error::Error> {
         if self.subscribe_channel_capacity < self.max_flush_batch {
-            return Err(crate::error::Error::InvalidConfiguration(format!(
-                "replica_log_subscribe_channel_capacity ({}) must be >= \
+            return Err(crate::error::Error::Config(
+                ConfigError::InvalidConfiguration(format!(
+                    "replica_log_subscribe_channel_capacity ({}) must be >= \
                  replica_log_max_flush_batch ({}): one flush batch would shed \
                  every subscriber on the node",
-                self.subscribe_channel_capacity, self.max_flush_batch,
-            )));
+                    self.subscribe_channel_capacity, self.max_flush_batch,
+                )),
+            ));
         }
         if self.fetch_sweep_interval.is_zero() {
-            return Err(crate::error::Error::InvalidConfiguration(
-                "fetch_sweep_interval must be > 0".to_owned(),
+            return Err(crate::error::Error::Config(
+                ConfigError::InvalidConfiguration("fetch_sweep_interval must be > 0".to_owned()),
             ));
         }
         Ok(())
@@ -768,7 +771,7 @@ mod tests {
             collected.iter().all(|o| matches!(
                 o,
                 Ok(WriteOutcome::Rejected {
-                    error: Error::NotAReplica { .. },
+                    error: Error::Consensus(ConsensusError::NotAReplica { .. }),
                     ..
                 })
             )),
@@ -785,7 +788,9 @@ mod tests {
         let err = crate::tests::common::replica_write(&*node, make_data(0, 1_000, b"payload"))
             .await
             .expect_err("must reject");
-        assert!(matches!(err, Error::NotAReplica { node_id } if node_id == me));
+        assert!(
+            matches!(err, Error::Consensus(ConsensusError::NotAReplica { node_id }) if node_id == me)
+        );
     }
 
     #[tokio::test]
@@ -823,7 +828,9 @@ mod tests {
             .expect_err("== cutoff must reject");
         assert!(matches!(
             err,
-            Error::HlcCutoff(crate::hlc::CutoffError::AtOrBeforeCutoff { .. })
+            Error::Clock(ClockError::HlcCutoff(
+                crate::hlc::CutoffError::AtOrBeforeCutoff { .. }
+            ))
         ));
 
         // Strictly above the cutoff is accepted.

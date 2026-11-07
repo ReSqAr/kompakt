@@ -14,6 +14,7 @@
     clippy::result_large_err,
     reason = "test code"
 )]
+use crate::error::ConsensusError;
 use crate::meta::{Data, ReplicaMembership, ReplicaStatus};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -109,7 +110,9 @@ impl MembershipObserver for LocalObserver {
                 max_hlc: self.max_hlc.lock().get(&peer).copied().flatten(),
                 peer_names: Vec::new(),
             }),
-            None => Err(Error::Raft(format!("peer {peer:?} not registered"))),
+            None => Err(Error::Consensus(ConsensusError::Raft(format!(
+                "peer {peer:?} not registered"
+            )))),
         }
     }
 }

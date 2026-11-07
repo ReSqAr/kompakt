@@ -14,6 +14,7 @@
     clippy::result_large_err,
     reason = "test code"
 )]
+use crate::error::LifecycleError;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -270,7 +271,7 @@ async fn hard_crash_restart_surfaces_fresh_node_id_error() {
         .await
         .expect_err("second boot must surface HardCrashDataLoss");
     assert!(
-        matches!(err, Error::HardCrashDataLoss),
+        matches!(err, Error::Lifecycle(LifecycleError::HardCrashDataLoss)),
         "expected HardCrashDataLoss; got {err:?}",
     );
 }

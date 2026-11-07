@@ -29,6 +29,7 @@
     reason = "test code"
 )]
 
+use crate::error::ConsensusError;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::SocketAddr;
@@ -626,9 +627,9 @@ impl Cluster {
             let start = async { ReplicaNode::start(cfg).await?.wait_until_ready().await };
             match tokio::time::timeout(Duration::from_secs(60), start).await {
                 Ok(res) => res,
-                Err(_) => Err(Error::Raft(
+                Err(_) => Err(Error::Consensus(ConsensusError::Raft(
                     "restart: node start timed out (60s)".to_owned(),
-                )),
+                ))),
             }
         })
     }

@@ -4,6 +4,7 @@
 //! provides the concrete [`StaticPeers`] implementation and the
 //! [`static_peers`] convenience constructor.
 
+use crate::error::ConsensusError;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -92,7 +93,9 @@ impl MembershipGate for PeersMembershipGate {
                 %peer_addr.server_name,
                 "AddMember denied: server_name not in config.peers",
             );
-            Err(crate::Error::MembershipDenied { node_id })
+            Err(crate::Error::Consensus(ConsensusError::MembershipDenied {
+                node_id,
+            }))
         }
     }
 }

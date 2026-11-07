@@ -28,6 +28,7 @@
 //! `raft::startup::rejoin::tests::unreachable_cluster_never_fatal`, which
 //! asserts `EvictionStatus` stays clear through a whole simulated partition).
 
+use crate::error::LifecycleError;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -285,7 +286,7 @@ async fn evicted_node_survives_a_denied_rejoin() {
         .await
         .expect_err("a denied node must refuse client reads");
     assert!(
-        matches!(err, crate::Error::NotReady(_)),
+        matches!(err, crate::Error::Lifecycle(LifecycleError::NotReady(_))),
         "expected NotReady, got {err:?}"
     );
 

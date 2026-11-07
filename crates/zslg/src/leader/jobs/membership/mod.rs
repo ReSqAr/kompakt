@@ -16,6 +16,7 @@
 //! a liveness change (retarget), and a slow poll as a backstop. Every wake-up
 //! re-reads current state, so a missed event costs only latency.
 
+use crate::error::NetError;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -133,11 +134,11 @@ impl NetworkMembershipObserver {
 #[async_trait::async_trait]
 impl MembershipObserver for NetworkMembershipObserver {
     async fn observe(&self, peer: NodeId) -> Result<ReplicaStatus, Error> {
-        self.router
-            .remote(peer)
-            .fetch_status()
-            .await
-            .map_err(|e| Error::Rpc(format!("ReplicaFetchStatus from {peer:?}: {e}")))
+        self.router.remote(peer).fetch_status().await.map_err(|e| {
+            Error::Net(NetError::Rpc(format!(
+                "ReplicaFetchStatus from {peer:?}: {e}"
+            )))
+        })
     }
 }
 

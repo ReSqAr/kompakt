@@ -20,6 +20,7 @@ use ::metrics::Unit;
 use tokio_util::sync::CancellationToken;
 
 use crate::Error;
+use crate::error::ConfigError;
 use crate::metrics;
 
 /// The namespace every metric this crate owns is exported under.
@@ -122,7 +123,11 @@ pub fn configure_prometheus(
     for (name, buckets) in histogram_buckets() {
         builder = builder
             .set_buckets_for_metric(Matcher::Full(name.to_owned()), buckets)
-            .map_err(|e| Error::Observability(format!("bucket config for {name}: {e}")))?;
+            .map_err(|e| {
+                Error::Config(ConfigError::Observability(format!(
+                    "bucket config for {name}: {e}"
+                )))
+            })?;
     }
     Ok(builder)
 }

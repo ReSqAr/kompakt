@@ -14,6 +14,7 @@
 //! so the window stays open and the loop-back drives the next chunk. That
 //! loop-back is load-bearing — see [`SNAPSHOT_LOOP_FLOOR`].
 
+use crate::error::{ConfigError, LifecycleError};
 use std::time::Duration;
 
 use tokio::time::Instant;
@@ -188,7 +189,7 @@ impl SnapshotJob {
                 // The uploaded object is left for `jobs::cleanup`.
                 info!(?cutoff, %reason, "snapshot superseded while building; rebuilding");
             }
-            Err(Error::Shutdown) => {}
+            Err(Error::Lifecycle(LifecycleError::Shutdown)) => {}
             Err(e) => {
                 warn!(error = %e, ?cutoff, "failed to publish snapshot; will retry");
                 metrics::snapshot_creation(e.snapshot_state());
@@ -244,29 +245,35 @@ impl SnapshotConfig {
     pub(crate) fn validate(&self) -> Result<(), crate::error::Error> {
         match self.compaction_tiers.first() {
             None => {
-                return Err(crate::error::Error::InvalidConfiguration(
-                    "compaction_tiers must not be empty".to_owned(),
+                return Err(crate::error::Error::Config(
+                    ConfigError::InvalidConfiguration(
+                        "compaction_tiers must not be empty".to_owned(),
+                    ),
                 ));
             }
             Some(first) if first.as_duration() < self.interval => {
-                return Err(crate::error::Error::InvalidConfiguration(format!(
-                    "compaction_tiers[0] ({:?}) must be >= snapshot_interval ({:?})",
-                    first, self.interval
-                )));
+                return Err(crate::error::Error::Config(
+                    ConfigError::InvalidConfiguration(format!(
+                        "compaction_tiers[0] ({:?}) must be >= snapshot_interval ({:?})",
+                        first, self.interval
+                    )),
+                ));
             }
             Some(_) => {}
         }
         for window in self.compaction_tiers.windows(2) {
             let (a, b) = (window[0], window[1]);
             if b < a {
-                return Err(crate::error::Error::InvalidConfiguration(format!(
-                    "compaction_tiers must be non-decreasing; saw {a:?} before {b:?}"
-                )));
+                return Err(crate::error::Error::Config(
+                    ConfigError::InvalidConfiguration(format!(
+                        "compaction_tiers must be non-decreasing; saw {a:?} before {b:?}"
+                    )),
+                ));
             }
         }
         if self.compaction_interval.is_zero() {
-            return Err(crate::error::Error::InvalidConfiguration(
-                "compaction_interval must be > 0".to_owned(),
+            return Err(crate::error::Error::Config(
+                ConfigError::InvalidConfiguration("compaction_interval must be > 0".to_owned()),
             ));
         }
         // `compression` needs no check here: `CompressionLevel` cannot be
@@ -302,14 +309,20 @@ mod config_tests {
         let mut c = ok_snapshot_config();
         c.interval = Duration::from_secs(2);
         c.compaction_tiers[0] = Duration::from_secs(1).into();
-        assert!(matches!(c.validate(), Err(Error::InvalidConfiguration(_))));
+        assert!(matches!(
+            c.validate(),
+            Err(Error::Config(ConfigError::InvalidConfiguration(_)))
+        ));
     }
 
     #[test]
     fn rejects_empty_compaction_tiers() {
         let mut c = ok_snapshot_config();
         c.compaction_tiers.clear();
-        assert!(matches!(c.validate(), Err(Error::InvalidConfiguration(_))));
+        assert!(matches!(
+            c.validate(),
+            Err(Error::Config(ConfigError::InvalidConfiguration(_)))
+        ));
     }
 
     #[test]
@@ -320,7 +333,10 @@ mod config_tests {
             Duration::from_secs(10).into(),
             Duration::from_secs(3600).into(),
         ];
-        assert!(matches!(c.validate(), Err(Error::InvalidConfiguration(_))));
+        assert!(matches!(
+            c.validate(),
+            Err(Error::Config(ConfigError::InvalidConfiguration(_)))
+        ));
     }
 
     #[test]

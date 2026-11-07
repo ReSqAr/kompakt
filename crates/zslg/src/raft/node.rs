@@ -6,6 +6,7 @@
 //! (`MembershipGate`), removes DNS-colliding node ids at the same address
 //! atomically with the add, and retries the membership change across a lost
 //! leadership mid-change.
+use crate::error::{ConsensusError, NetError};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -113,10 +114,10 @@ impl RaftConsensus for RaftNode {
         let metrics = self.inner.metrics().borrow().clone();
 
         if metrics.current_leader != Some(metrics.id) {
-            return Err(Error::Raft(format!(
+            return Err(Error::Consensus(ConsensusError::Raft(format!(
                 "add_member: not the leader (current leader: {:?})",
                 metrics.current_leader
-            )));
+            ))));
         }
 
         let membership = metrics.membership_config;
@@ -166,10 +167,10 @@ impl RaftConsensus for RaftNode {
             // Re-check leadership on each iteration — may have been demoted.
             let metrics = self.inner.metrics().borrow().clone();
             if metrics.current_leader != Some(metrics.id) {
-                return Err(Error::Raft(format!(
+                return Err(Error::Consensus(ConsensusError::Raft(format!(
                     "add_member: lost leadership during membership change (current leader: {:?})",
                     metrics.current_leader
-                )));
+                ))));
             }
             let mut members: BTreeSet<NodeId> =
                 metrics.membership_config.membership().voter_ids().collect();
@@ -199,7 +200,11 @@ impl RaftConsensus for RaftNode {
                     change_retries = change_retries.saturating_add(1);
                     tokio::time::sleep(Duration::from_millis(50)).await;
                 }
-                Err(e) => return Err(Error::Raft(format!("change_membership: {e}"))),
+                Err(e) => {
+                    return Err(Error::Consensus(ConsensusError::Raft(format!(
+                        "change_membership: {e}"
+                    ))));
+                }
             }
         }
     }
@@ -276,10 +281,10 @@ impl StateReplicator for RaftNode {
         .await
         .map_err(|_| {
             crate::metrics::raft_client_write_timeout();
-            Error::Rpc(format!(
+            Error::Net(NetError::Rpc(format!(
                 "raft client_write ({context}) timed out after {:?}",
                 self.client_write_timeout
-            ))
+            )))
         })?
         .to_raft(context)?;
         match response.data {

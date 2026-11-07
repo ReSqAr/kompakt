@@ -57,11 +57,11 @@ impl StableLogConfig {
         // Stated in prose next to STABLE_LOAD_BATCH since it was introduced;
         // executable here.
         if self.subscriber_queue_capacity.get() < STABLE_LOAD_BATCH {
-            return Err(Error::InvalidConfiguration(format!(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(format!(
                 "stable_log_subscriber_queue_capacity ({}) must be >= the load \
                  batch ({STABLE_LOAD_BATCH}); a shallower queue is overrun by one batch",
                 self.subscriber_queue_capacity,
-            )));
+            ))));
         }
         Ok(())
     }
@@ -110,6 +110,7 @@ pub(in crate::learner) use snapshot_loader::SnapshotLoader;
 #[cfg(test)]
 pub(crate) use snapshot_loader::integrate_manifest_for_test;
 
+use crate::error::{ConfigError, LogError};
 use rocksdb_kit::ColumnFamily;
 use std::sync::Arc;
 
@@ -185,10 +186,10 @@ fn decode_key(bytes: &[u8]) -> Option<(LogIndex, Hlc)> {
 }
 
 fn undecodable(key: &[u8]) -> Error {
-    Error::Storage(format!(
+    Error::Log(LogError::Storage(format!(
         "undecodable stable log key ({} bytes): {key:02x?}",
         key.len()
-    ))
+    )))
 }
 
 /// A live key whose value is missing. Unreachable through RocksDB's iterator
@@ -196,10 +197,10 @@ fn undecodable(key: &[u8]) -> Error {
 /// substituting an empty payload keeps the durability layer from serving
 /// garbage silently (§20).
 fn missing_value(key: &[u8]) -> Error {
-    Error::Storage(format!(
+    Error::Log(LogError::Storage(format!(
         "stable log key with no value ({} bytes): {key:02x?}",
         key.len()
-    ))
+    )))
 }
 
 // ── storage access ──────────────────────────────────────────────────────────
@@ -222,8 +223,11 @@ fn newest_live_entry(storage: &Storage) -> Result<Option<(LogIndex, Hlc)>, Error
         // end before the iterator moves.
         return decode_key(key).map(Some).ok_or_else(|| undecodable(key));
     }
-    it.status()
-        .map_err(|e| Error::Storage(format!("rocksdb reverse scan (stable log): {e}")))?;
+    it.status().map_err(|e| {
+        Error::Log(LogError::Storage(format!(
+            "rocksdb reverse scan (stable log): {e}"
+        )))
+    })?;
     Ok(None)
 }
 
@@ -260,8 +264,11 @@ fn purge_boundary(storage: &Storage, threshold: Hlc) -> Result<Option<LogIndex>,
         boundary = Some(LogIndex::next_after(Some(index)));
         it.next();
     }
-    it.status()
-        .map_err(|e| Error::Storage(format!("rocksdb purge-boundary scan (stable log): {e}")))?;
+    it.status().map_err(|e| {
+        Error::Log(LogError::Storage(format!(
+            "rocksdb purge-boundary scan (stable log): {e}"
+        )))
+    })?;
     Ok(boundary)
 }
 
@@ -296,7 +303,7 @@ fn for_each_entry(
         it.next();
     }
     it.status()
-        .map_err(|e| Error::Storage(format!("rocksdb scan (stable log): {e}")))
+        .map_err(|e| Error::Log(LogError::Storage(format!("rocksdb scan (stable log): {e}"))))
 }
 
 /// Is `index` live — present and not covered by the armed retire threshold?
@@ -517,9 +524,9 @@ impl BatchAppender {
                 Ok(batch) => batch,
                 Err(crossbeam_combinators::End::Complete) => return Ok(total),
                 Err(crossbeam_combinators::End::Aborted { reason }) => {
-                    return Err(Error::StreamTruncated {
+                    return Err(Error::Log(LogError::StreamTruncated {
                         what: reason.label().to_owned(),
-                    });
+                    }));
                 }
             };
             let _probe = metrics::stable_log_commit_probe();
@@ -554,9 +561,9 @@ impl BatchAppender {
                 if let Some(prev) = watermark.max(frontier_entry_hlc)
                     && hlc < prev
                 {
-                    pending_err = Some(Error::StableLogGap(format!(
+                    pending_err = Some(Error::Log(LogError::StableLogGap(format!(
                         "snapshot stream must be HLC-sorted: got {hlc:?} after {prev:?}"
-                    )));
+                    ))));
                     break;
                 }
                 // Settled only strictly below this entry: several entries can
@@ -689,9 +696,9 @@ impl crate::api::StableLogSnapshot for StableLog {
             let mut guard = self.end_hlc.lock();
             let prev = *guard;
             if prev.is_some_and(|p| end_hlc < p) {
-                return Err(Error::Storage(format!(
+                return Err(Error::Log(LogError::Storage(format!(
                     "end_hlc would regress from {prev:?} to {end_hlc:?}"
-                )));
+                ))));
             }
             // `advanced` distinguishes a genuine forward move (stamp the age
             // gauge) from a redundant re-record of the same watermark.
@@ -744,7 +751,7 @@ impl crate::api::StableLogSnapshot for StableLog {
                 {
                     Ok(d) => feed.send(Ok((idx, d))).is_ok(),
                     Err(e) => {
-                        decode_err = Some(e);
+                        decode_err = Some(e.into());
                         false
                     }
                 },
@@ -842,14 +849,14 @@ mod tests {
             .append(rx_of([
                 Ok((LogIndex(0), make_data(1, 100, b"a"))),
                 Ok((LogIndex(1), make_data(2, 200, b"b"))),
-                Err(Error::StableLogGap(
+                Err(Error::Log(LogError::StableLogGap(
                     "archive stream: expected index 5".into(),
-                )),
+                ))),
             ]))
             .await
             .expect_err("the terminal error must still surface");
         assert!(
-            matches!(err, Error::StableLogGap(_)),
+            matches!(err, Error::Log(LogError::StableLogGap(_))),
             "expected the original error, got: {err:?}"
         );
         assert_eq!(
@@ -1149,7 +1156,7 @@ mod tests {
             .await
             .expect_err("unsorted stream must be refused");
         assert!(
-            matches!(err, Error::StableLogGap(ref m) if m.contains("HLC-sorted")),
+            matches!(err, Error::Log(LogError::StableLogGap(ref m)) if m.contains("HLC-sorted")),
             "expected a StableLogGap naming the HLC ordering violation, got: {err:?}"
         );
         assert_eq!(log.end_hlc(), Some(Hlc(199)), "watermark unchanged");
@@ -1202,7 +1209,7 @@ mod tests {
             .await
             .expect_err("gap must be rejected");
         assert!(
-            matches!(err, Error::StreamTruncated { ref what } if what.contains("stable log loader")),
+            matches!(err, Error::Log(LogError::StreamTruncated { ref what }) if what.contains("stable log loader")),
             "typed gap error expected, got: {err}"
         );
 

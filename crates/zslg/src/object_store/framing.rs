@@ -23,6 +23,7 @@
 //! read anywhere else in a frame is truncation, not an ending. That asymmetry is
 //! what makes a short object an error rather than a shorter snapshot.
 
+use crate::error::{LogError, SnapshotError};
 use std::io;
 use std::io::Read as _;
 
@@ -66,22 +67,24 @@ fn encode_frames<T: Serialize, W: io::Write>(
         scratch = postcard::to_extend(&item, scratch).to_codec("encode snapshot entry")?;
         append_crc32(&mut scratch);
         let body_len = u32::try_from(scratch.len())
-            .map_err(|_| Error::Storage("snapshot frame length overflow".into()))?;
-        writer
-            .write_all(&body_len.to_be_bytes())
-            .map_err(|e| Error::Compression(format!("write frame length: {e}")))?;
-        writer
-            .write_all(&scratch)
-            .map_err(|e| Error::Compression(format!("write frame body: {e}")))?;
+            .map_err(|_| Error::Log(LogError::Storage("snapshot frame length overflow".into())))?;
+        writer.write_all(&body_len.to_be_bytes()).map_err(|e| {
+            Error::Snapshot(SnapshotError::Compression(format!(
+                "write frame length: {e}"
+            )))
+        })?;
+        writer.write_all(&scratch).map_err(|e| {
+            Error::Snapshot(SnapshotError::Compression(format!("write frame body: {e}")))
+        })?;
 
         // Both counters can only grow by a bounded per-record amount; overflow
         // is a corruption signal, so propagate rather than wrap/saturate.
         uncompressed_bytes = uncompressed_bytes
             .checked_add(u64::from(body_len))
-            .ok_or_else(|| Error::Storage("snapshot byte count overflow".into()))?;
+            .ok_or_else(|| Error::Log(LogError::Storage("snapshot byte count overflow".into())))?;
         count = count
             .checked_add(1)
-            .ok_or_else(|| Error::Storage("record count overflow".into()))?;
+            .ok_or_else(|| Error::Log(LogError::Storage("record count overflow".into())))?;
     }
     Ok((count, uncompressed_bytes))
 }
@@ -101,14 +104,16 @@ pub(in crate::object_store) fn encode_framed_records_streaming<T: Serialize, W: 
 ) -> (Option<W>, Result<(usize, u64), Error>) {
     if let Err(e) = writer
         .write_all(&MAGIC)
-        .map_err(|e| Error::Compression(format!("write magic: {e}")))
+        .map_err(|e| Error::Snapshot(SnapshotError::Compression(format!("write magic: {e}"))))
     {
         return (Some(writer), Err(e));
     }
 
-    let mut enc = match zstd::stream::write::Encoder::new(writer, compression.get())
-        .map_err(|e| Error::Compression(format!("zstd encoder init: {e}")))
-    {
+    let mut enc = match zstd::stream::write::Encoder::new(writer, compression.get()).map_err(|e| {
+        Error::Snapshot(SnapshotError::Compression(format!(
+            "zstd encoder init: {e}"
+        )))
+    }) {
         Ok(enc) => enc,
         // `new` consumed `writer` before failing — it is unrecoverable.
         Err(e) => return (None, Err(e)),
@@ -120,9 +125,9 @@ pub(in crate::object_store) fn encode_framed_records_streaming<T: Serialize, W: 
         Ok(writer) => (Some(writer), frames),
         Err(fe) => {
             // Prefer the original framing error; fall back to the finish error.
-            let err = frames
-                .err()
-                .unwrap_or_else(|| Error::Compression(format!("zstd finish: {fe}")));
+            let err = frames.err().unwrap_or_else(|| {
+                Error::Snapshot(SnapshotError::Compression(format!("zstd finish: {fe}")))
+            });
             (None, Err(err))
         }
     }
@@ -138,18 +143,22 @@ fn read_full_or_eof<R: io::Read>(reader: &mut R, buf: &mut [u8]) -> Result<bool,
                 if filled == 0 {
                     return Ok(false);
                 }
-                return Err(Error::Compression(format!(
+                return Err(Error::Snapshot(SnapshotError::Compression(format!(
                     "truncated frame length prefix: {filled} of {} bytes",
                     buf.len()
-                )));
+                ))));
             }
             Ok(n) => {
-                filled = filled
-                    .checked_add(n)
-                    .ok_or_else(|| Error::Storage("frame read offset overflow".into()))?;
+                filled = filled.checked_add(n).ok_or_else(|| {
+                    Error::Log(LogError::Storage("frame read offset overflow".into()))
+                })?;
             }
             Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-            Err(e) => return Err(Error::Compression(format!("read frame length: {e}"))),
+            Err(e) => {
+                return Err(Error::Snapshot(SnapshotError::Compression(format!(
+                    "read frame length: {e}"
+                ))));
+            }
         }
     }
     Ok(true)
@@ -168,15 +177,18 @@ pub(in crate::object_store) fn decode_framed_records_streaming<T: DeserializeOwn
     let mut magic = [0u8; 4];
     reader
         .read_exact(&mut magic)
-        .map_err(|e| Error::Compression(format!("read magic: {e}")))?;
+        .map_err(|e| Error::Snapshot(SnapshotError::Compression(format!("read magic: {e}"))))?;
 
     if magic != MAGIC {
-        return Err(Error::Compression(format!(
+        return Err(Error::Snapshot(SnapshotError::Compression(format!(
             "unknown magic bytes: {magic:02x?}"
-        )));
+        ))));
     }
-    let mut inner = zstd::stream::read::Decoder::new(reader)
-        .map_err(|e| Error::Compression(format!("zstd decoder init: {e}")))?;
+    let mut inner = zstd::stream::read::Decoder::new(reader).map_err(|e| {
+        Error::Snapshot(SnapshotError::Compression(format!(
+            "zstd decoder init: {e}"
+        )))
+    })?;
 
     let mut frame: Vec<u8> = Vec::new();
     loop {
@@ -185,14 +197,14 @@ pub(in crate::object_store) fn decode_framed_records_streaming<T: DeserializeOwn
             break;
         }
         let frame_len = usize::try_from(u32::from_be_bytes(len_buf))
-            .map_err(|_| Error::Storage("snapshot frame length overflow".into()))?;
+            .map_err(|_| Error::Log(LogError::Storage("snapshot frame length overflow".into())))?;
         // `read_exact`, not `read_full_or_eof`: past the length prefix an EOF is
         // truncation, however clean it looks.
         reset_scratch(&mut frame);
         frame.resize(frame_len, 0);
-        inner
-            .read_exact(&mut frame)
-            .map_err(|e| Error::Compression(format!("read frame body: {e}")))?;
+        inner.read_exact(&mut frame).map_err(|e| {
+            Error::Snapshot(SnapshotError::Compression(format!("read frame body: {e}")))
+        })?;
         let inner_bytes = verify_frame_crc32(&frame).to_codec("verify snapshot entry")?;
         let value = postcard::from_bytes::<T>(inner_bytes).to_codec("decode snapshot entry")?;
         sink(value)?;

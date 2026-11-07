@@ -15,6 +15,7 @@
 //! from the build. A cutoff keeps advancing while a build sits in its quorum
 //! wait, and the build takes whatever is committed when it next runs.
 
+use crate::error::LifecycleError;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -108,7 +109,7 @@ impl CutoffJob {
             Ok(IntentOutcome::Superseded { reason }) => {
                 debug!(?cutoff, %reason, "hlc cutoff superseded; retrying next tick");
             }
-            Err(Error::Shutdown) => {}
+            Err(Error::Lifecycle(LifecycleError::Shutdown)) => {}
             Err(e) => {
                 warn!(error = %e, ?cutoff, "failed to publish hlc cutoff; retrying next tick");
                 metrics::snapshot_creation(e.snapshot_state());

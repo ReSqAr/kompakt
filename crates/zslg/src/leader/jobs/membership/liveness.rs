@@ -1,3 +1,4 @@
+use crate::error::{ConfigError, ConsensusError, NetError};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
@@ -195,9 +196,9 @@ impl LivenessWorker {
                     let result = tokio::time::timeout(probe_timeout, client.probe())
                         .await
                         .unwrap_or_else(|_| {
-                            Err(Error::Rpc(format!(
+                            Err(Error::Net(NetError::Rpc(format!(
                                 "liveness probe to {peer:?} timed out after {probe_timeout:?}"
-                            )))
+                            ))))
                         });
                     (peer, result, t0.elapsed())
                 }
@@ -219,7 +220,7 @@ impl LivenessWorker {
                         self.live.send_if_modified(|live| live.insert(peer));
                         debug!(?peer, ?rtt, "liveness probe ok");
                     }
-                    Err(Error::UnexpectedNodeId(ids)) => {
+                    Err(Error::Consensus(ConsensusError::UnexpectedNodeId(ids))) => {
                         let crate::error::UnexpectedNodeId { expected, actual } = *ids;
                         debug!(
                             ?peer,
@@ -231,7 +232,7 @@ impl LivenessWorker {
                         self.rtts.lock().remove(&peer);
                         crate::metrics::node_live(peer, false);
                     }
-                    Err(Error::UnknownPeer { .. }) => {
+                    Err(Error::Consensus(ConsensusError::UnknownPeer { .. })) => {
                         debug!(
                             ?peer,
                             "liveness probe: peer evicted from registry; removing from live set"
@@ -282,8 +283,8 @@ impl Default for LivenessConfig {
 impl LivenessConfig {
     pub(crate) fn validate(&self) -> Result<(), crate::error::Error> {
         if self.probe_timeout.is_zero() {
-            return Err(crate::error::Error::InvalidConfiguration(
-                "liveness_probe_timeout must be > 0".to_owned(),
+            return Err(crate::error::Error::Config(
+                ConfigError::InvalidConfiguration("liveness_probe_timeout must be > 0".to_owned()),
             ));
         }
         Ok(())
@@ -355,7 +356,7 @@ mod tests {
     #[async_trait]
     impl LivenessProbe for FailProbe {
         async fn probe(&self) -> Result<(), Error> {
-            Err(crate::error::Error::Rpc("simulated".into()))
+            Err(crate::error::Error::Net(NetError::Rpc("simulated".into())))
         }
     }
 

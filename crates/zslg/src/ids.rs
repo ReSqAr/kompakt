@@ -10,6 +10,7 @@
 //! creation HLC, the originating node and 64 random bits, so a `Data` needs no
 //! metadata header and no two writes can collide (CLAUDE.md §8).
 
+use crate::error::NetError;
 use std::net::SocketAddr;
 
 use serde::{Deserialize, Serialize};
@@ -111,9 +112,11 @@ impl HostPort {
     pub async fn resolve(&self) -> Result<SocketAddr, crate::Error> {
         tokio::net::lookup_host(self.0.as_str())
             .await
-            .map_err(|e| crate::Error::Rpc(format!("resolve {}: {e}", self.0)))?
+            .map_err(|e| crate::Error::Net(NetError::Rpc(format!("resolve {}: {e}", self.0))))?
             .next()
-            .ok_or_else(|| crate::Error::Rpc(format!("resolve {}: no addresses", self.0)))
+            .ok_or_else(|| {
+                crate::Error::Net(NetError::Rpc(format!("resolve {}: no addresses", self.0)))
+            })
     }
 }
 

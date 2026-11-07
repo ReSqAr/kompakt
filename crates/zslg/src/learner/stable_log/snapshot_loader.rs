@@ -8,6 +8,7 @@
 //! manifest solely for its own bookkeeping — the completeness check and the
 //! watermark advance — never to pick snapshots.
 
+use crate::error::LogError;
 use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
@@ -54,13 +55,13 @@ pub(in crate::learner) async fn integrate_manifest(
     if let Some(target) = manifest_end {
         let loaded = stable_log.end_index();
         if loaded.is_none_or(|end| end < target) {
-            return Err(Error::Storage(format!(
+            return Err(Error::Log(LogError::Storage(format!(
                 "stable-log manifest integration incomplete: loaded end_index {:?} < manifest \
                  end_index {} — a snapshot stream ended early or a snapshot is missing; \
                  aborting manifest integration (resumable on the next attempt)",
                 loaded.map(LogIndex::raw),
                 target.raw(),
-            )));
+            ))));
         }
     }
 
@@ -198,6 +199,7 @@ impl SnapshotLoader {
     reason = "test code"
 )]
 mod tests {
+    use crate::error::SnapshotError;
     use crate::test_stream::ChannelTestExt as _;
     use std::collections::{BTreeSet, HashMap};
     use std::sync::Mutex;
@@ -297,7 +299,11 @@ mod tests {
                 .expect("lock")
                 .get(&id)
                 .cloned()
-                .ok_or_else(|| Error::ObjectStore(format!("no scripted snapshot {id:?}")))?;
+                .ok_or_else(|| {
+                    Error::Snapshot(SnapshotError::ObjectStore(format!(
+                        "no scripted snapshot {id:?}"
+                    )))
+                })?;
             let deliver = truncate_after.unwrap_or(entries.len());
             Ok(crossbeam_combinators::Channel::from_vec(
                 entries.into_iter().take(deliver).map(Ok).collect(),
@@ -454,7 +460,7 @@ mod tests {
             .await
             .expect_err("disconnected snapshot must be rejected");
         assert!(
-            matches!(err, Error::StreamTruncated { ref what } if what == "archive tiling"),
+            matches!(err, Error::Log(LogError::StreamTruncated { ref what }) if what == "archive tiling"),
             "archive-layer gap error expected, got: {err:?}"
         );
         assert_eq!(log.end_index(), None, "nothing committed above a hole");
@@ -484,7 +490,7 @@ mod tests {
             .await
             .expect_err("a gap between covering snapshots must be rejected");
         assert!(
-            matches!(err, Error::StreamTruncated { ref what } if what == "archive tiling"),
+            matches!(err, Error::Log(LogError::StreamTruncated { ref what }) if what == "archive tiling"),
             "archive contiguity error expected, got: {err:?}"
         );
         assert_eq!(
@@ -526,7 +532,7 @@ mod tests {
             .await
             .expect_err("HLC regression must be rejected");
         assert!(
-            matches!(err, Error::StreamTruncated { ref what } if what == "archive HLC"),
+            matches!(err, Error::Log(LogError::StreamTruncated { ref what }) if what == "archive HLC"),
             "an HLC regression aborts the archive stream (no panic), got: {err:?}"
         );
         assert_eq!(

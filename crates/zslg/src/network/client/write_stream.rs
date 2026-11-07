@@ -10,6 +10,7 @@
 //! Responses are keyed by `DataId` on the wire (already unique — 64 random bits +
 //! HLC), so the server may reply in any order.
 
+use crate::error::LifecycleError;
 use std::sync::Weak;
 
 use crate::api::{StampedWrite, WriteOutcome};
@@ -40,7 +41,7 @@ pub(in crate::network) fn open_write(
     // sends never fill.
     Channel::produce_async(cap, "client write stream", move |out_tx| async move {
         let Some(rpc) = client.upgrade() else {
-            let _ = out_tx.send(Err(Error::Shutdown));
+            let _ = out_tx.send(Err(Error::Lifecycle(LifecycleError::Shutdown)));
             return; // node shutting down
         };
         let dialed = rpc.dial_write_stream(&target).await;
@@ -179,6 +180,7 @@ fn resolve_response(
 #[allow(clippy::unwrap_used, reason = "test code")]
 mod tests {
     use super::*;
+    use crate::error::{ClockError, NetError};
     use crate::hlc::Hlc;
     use crate::ids::DataId;
 
@@ -189,16 +191,16 @@ mod tests {
     #[test]
     fn drift_response_fails_only_its_own_write() {
         let (out, mut rx) = Feed::<_, Infinite>::channel(8, "test");
-        let drift = Some(Error::HlcDriftTooLarge {
+        let drift = Some(Error::Clock(ClockError::HlcDriftTooLarge {
             peer: Hlc(0),
             local: Hlc(0),
-        });
+        }));
         resolve_response(
             &out,
             WriteStreamResponse {
                 data_id: data_id(1),
                 outcome: WireWriteOutcome::Failed {
-                    error: Error::Rpc("unused on drift path".into()),
+                    error: Error::Net(NetError::Rpc("unused on drift path".into())),
                 },
             },
             drift,
@@ -207,7 +209,7 @@ mod tests {
         assert!(matches!(
             rx.try_recv(),
             Some(Ok(WriteOutcome::Failed {
-                error: Error::HlcDriftTooLarge { .. },
+                error: Error::Clock(ClockError::HlcDriftTooLarge { .. }),
                 ..
             }))
         ));
@@ -221,7 +223,7 @@ mod tests {
             WriteStreamResponse {
                 data_id: data_id(1),
                 outcome: WireWriteOutcome::Failed {
-                    error: Error::Rpc("boom".into()),
+                    error: Error::Net(NetError::Rpc("boom".into())),
                 },
             },
             None,
@@ -230,7 +232,7 @@ mod tests {
         assert!(matches!(
             rx.try_recv(),
             Some(Ok(WriteOutcome::Failed {
-                error: Error::Rpc(_),
+                error: Error::Net(NetError::Rpc(_)),
                 ..
             }))
         ));
@@ -245,7 +247,7 @@ mod tests {
             WriteStreamResponse {
                 data_id: data_id(1),
                 outcome: WireWriteOutcome::Failed {
-                    error: Error::Rpc("boom".into()),
+                    error: Error::Net(NetError::Rpc("boom".into())),
                 },
             },
             None,

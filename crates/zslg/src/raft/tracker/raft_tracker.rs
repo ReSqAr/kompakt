@@ -10,6 +10,7 @@
 //! seen. The "integrate an observed state" logic lives here, next to the
 //! write path.
 
+use crate::error::{ConfigError, NetError};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -45,20 +46,20 @@ pub(crate) struct RaftTrackerConfig {
 impl RaftTrackerConfig {
     pub(crate) fn validate(&self) -> Result<(), Error> {
         if self.min_backoff > self.max_backoff {
-            return Err(Error::InvalidConfiguration(format!(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(format!(
                 "raft_tracker.min_backoff ({:?}) must be <= max_backoff ({:?})",
                 self.min_backoff, self.max_backoff
-            )));
+            ))));
         }
         if self.min_backoff.is_zero() {
-            return Err(Error::InvalidConfiguration(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(
                 "raft_tracker.min_backoff must be non-zero".to_owned(),
-            ));
+            )));
         }
         if self.startup_timeout.is_zero() {
-            return Err(Error::InvalidConfiguration(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(
                 "startup_timeout must be non-zero".to_owned(),
-            ));
+            )));
         }
         Ok(())
     }
@@ -125,9 +126,9 @@ impl RaftTracker {
         }
         tokio::time::timeout(timeout, async {
             loop {
-                rx.changed()
-                    .await
-                    .map_err(|_| Error::Rpc("raft tracker shut down before ready".into()))?;
+                rx.changed().await.map_err(|_| {
+                    Error::Net(NetError::Rpc("raft tracker shut down before ready".into()))
+                })?;
                 if self.is_ready() {
                     return Ok::<_, Error>(());
                 }
@@ -135,9 +136,9 @@ impl RaftTracker {
         })
         .await
         .map_err(|_| {
-            Error::Rpc(format!(
+            Error::Net(NetError::Rpc(format!(
                 "did not discover a quorum of replicas within {timeout:?}",
-            ))
+            )))
         })?
     }
 }

@@ -31,6 +31,7 @@
 //! borrowed block-cache blocks rather than copies. That block stays pinned for
 //! as long as the borrow lives, so no pinned value may cross an `.await` or a
 //! batch commit — every such site states the rule where it is taken.
+use crate::error::LogError;
 use rocksdb_kit::ColumnFamily;
 use std::fmt::Debug;
 use std::io::Cursor;
@@ -253,11 +254,11 @@ impl RocksRaftStorage {
             {
                 let payload =
                     postcard::from_bytes::<SnapshotPayload>(&stored.data).map_err(|e| {
-                        Error::Storage(format!(
+                        Error::Log(LogError::Storage(format!(
                             "corrupt raft snapshot blob (snapshot_id {id}): {e}; \
                          refusing to start — wipe state and rejoin as a new node",
                             id = stored.meta.snapshot_id
-                        ))
+                        )))
                     })?;
                 blob_last_applied = payload.last_applied.map(|id| id.index);
                 let mut restored = (*payload.apply.snapshot()).clone();
@@ -270,8 +271,9 @@ impl RocksRaftStorage {
                 let lower = blob_last_applied
                     .map(RaftLogIndex::from)
                     .map(|i| {
-                        i.checked_next()
-                            .ok_or_else(|| Error::Storage("raft log index overflow".into()))
+                        i.checked_next().ok_or_else(|| {
+                            Error::Log(LogError::Storage("raft log index overflow".into()))
+                        })
                     })
                     .transpose()?
                     .unwrap_or(RaftLogIndex::ZERO);
@@ -310,7 +312,7 @@ impl RocksRaftStorage {
         tokio::task::spawn_blocking(move || {
             let inner = inner
                 .try_lock()
-                .ok_or_else(|| Error::Storage("storage busy".into()))?;
+                .ok_or_else(|| Error::Log(LogError::Storage("storage busy".into())))?;
             let vote = read_meta::<Vote<NodeId>>(&inner.storage, RaftMetaSlot::Vote)?;
             if vote.is_some() {
                 return Ok(true);
@@ -371,7 +373,9 @@ impl RaftLogReader<TypeConfig> for RocksRaftStorage {
         })
         .await
         .map_err(|e| {
-            StorageIOError::read(&Error::Storage(format!("spawn_blocking panicked: {e}")))
+            StorageIOError::read(&Error::Log(LogError::Storage(format!(
+                "spawn_blocking panicked: {e}"
+            ))))
         })?
     }
 
@@ -399,10 +403,10 @@ impl RaftLogReader<TypeConfig> for RocksRaftStorage {
                  and abort the process. If this is frequent, the follower is \
                  falling behind faster than max_in_snapshot_log_to_keep covers.",
             );
-            return Err(storage_io_read(Error::Storage(format!(
+            return Err(storage_io_read(Error::Log(LogError::Storage(format!(
                 "raft log range [{start}, {end}) is entirely purged; \
                  replication must fall back to a snapshot"
-            ))));
+            )))));
         }
         Ok(entries)
     }
@@ -427,7 +431,9 @@ impl RaftStorage<TypeConfig> for RocksRaftStorage {
         })
         .await
         .map_err(|e| {
-            StorageIOError::write(&Error::Storage(format!("spawn_blocking panicked: {e}")))
+            StorageIOError::write(&Error::Log(LogError::Storage(format!(
+                "spawn_blocking panicked: {e}"
+            ))))
         })?
     }
 
@@ -439,7 +445,9 @@ impl RaftStorage<TypeConfig> for RocksRaftStorage {
         })
         .await
         .map_err(|e| {
-            StorageIOError::read(&Error::Storage(format!("spawn_blocking panicked: {e}")))
+            StorageIOError::read(&Error::Log(LogError::Storage(format!(
+                "spawn_blocking panicked: {e}"
+            ))))
         })?
     }
 
@@ -456,7 +464,9 @@ impl RaftStorage<TypeConfig> for RocksRaftStorage {
         })
         .await
         .map_err(|e| {
-            StorageIOError::write(&Error::Storage(format!("spawn_blocking panicked: {e}")))
+            StorageIOError::write(&Error::Log(LogError::Storage(format!(
+                "spawn_blocking panicked: {e}"
+            ))))
         })?
     }
 
@@ -470,7 +480,9 @@ impl RaftStorage<TypeConfig> for RocksRaftStorage {
         })
         .await
         .map_err(|e| {
-            StorageIOError::read(&Error::Storage(format!("spawn_blocking panicked: {e}")))
+            StorageIOError::read(&Error::Log(LogError::Storage(format!(
+                "spawn_blocking panicked: {e}"
+            ))))
         })?
     }
 
@@ -493,7 +505,9 @@ impl RaftStorage<TypeConfig> for RocksRaftStorage {
         })
         .await
         .map_err(|e| {
-            StorageIOError::read(&Error::Storage(format!("spawn_blocking panicked: {e}")))
+            StorageIOError::read(&Error::Log(LogError::Storage(format!(
+                "spawn_blocking panicked: {e}"
+            ))))
         })?
     }
 
@@ -527,7 +541,9 @@ impl RaftStorage<TypeConfig> for RocksRaftStorage {
         })
         .await
         .map_err(|e| {
-            StorageIOError::write(&Error::Storage(format!("spawn_blocking panicked: {e}")))
+            StorageIOError::write(&Error::Log(LogError::Storage(format!(
+                "spawn_blocking panicked: {e}"
+            ))))
         })?
     }
 
@@ -568,7 +584,9 @@ impl RaftStorage<TypeConfig> for RocksRaftStorage {
         })
         .await
         .map_err(|e| {
-            StorageIOError::write(&Error::Storage(format!("spawn_blocking panicked: {e}")))
+            StorageIOError::write(&Error::Log(LogError::Storage(format!(
+                "spawn_blocking panicked: {e}"
+            ))))
         })?
     }
 
@@ -624,7 +642,9 @@ impl RaftStorage<TypeConfig> for RocksRaftStorage {
         })
         .await
         .map_err(|e| {
-            StorageIOError::write(&Error::Storage(format!("spawn_blocking panicked: {e}")))
+            StorageIOError::write(&Error::Log(LogError::Storage(format!(
+                "spawn_blocking panicked: {e}"
+            ))))
         })?
     }
 
@@ -648,7 +668,9 @@ impl RaftStorage<TypeConfig> for RocksRaftStorage {
         })
         .await
         .map_err(|e| {
-            StorageIOError::read(&Error::Storage(format!("spawn_blocking panicked: {e}")))
+            StorageIOError::read(&Error::Log(LogError::Storage(format!(
+                "spawn_blocking panicked: {e}"
+            ))))
         })?
     }
 
@@ -725,7 +747,9 @@ impl RaftStorage<TypeConfig> for RocksRaftStorage {
         })
         .await
         .map_err(|e| {
-            StorageIOError::write(&Error::Storage(format!("spawn_blocking panicked: {e}")))
+            StorageIOError::write(&Error::Log(LogError::Storage(format!(
+                "spawn_blocking panicked: {e}"
+            ))))
         })??;
         if let Some(idx) = last_index {
             crate::metrics::raft_applied_log_index(u64::from(idx));
@@ -791,7 +815,9 @@ impl RaftStorage<TypeConfig> for RocksRaftStorage {
         })
         .await
         .map_err(|e| {
-            StorageIOError::write(&Error::Storage(format!("spawn_blocking panicked: {e}")))
+            StorageIOError::write(&Error::Log(LogError::Storage(format!(
+                "spawn_blocking panicked: {e}"
+            ))))
         })??;
         let mut restored = (*payload_apply.snapshot()).clone();
         restored.generation = payload_gen;
@@ -814,7 +840,9 @@ impl RaftStorage<TypeConfig> for RocksRaftStorage {
         })
         .await
         .map_err(|e| {
-            StorageIOError::read(&Error::Storage(format!("spawn_blocking panicked: {e}")))
+            StorageIOError::read(&Error::Log(LogError::Storage(format!(
+                "spawn_blocking panicked: {e}"
+            ))))
         })?
     }
 }
@@ -894,7 +922,9 @@ impl RaftSnapshotBuilder<TypeConfig> for RocksRaftStorage {
         })
         .await
         .map_err(|e| {
-            StorageIOError::write(&Error::Storage(format!("spawn_blocking panicked: {e}")))
+            StorageIOError::write(&Error::Log(LogError::Storage(format!(
+                "spawn_blocking panicked: {e}"
+            ))))
         })?
     }
 }
@@ -963,9 +993,11 @@ fn read_meta<T: DeserializeOwned>(
 ) -> Result<Option<T>, Error> {
     let cf = storage.cf(RAFT_META_CF)?;
     let key = encode_meta_key(slot);
-    let Some(pinned) = storage
-        .get_pinned(&cf, key)
-        .map_err(|e| Error::Storage(format!("read raft meta slot {slot:?}: {e}")))?
+    let Some(pinned) = storage.get_pinned(&cf, key).map_err(|e| {
+        Error::Log(LogError::Storage(format!(
+            "read raft meta slot {slot:?}: {e}"
+        )))
+    })?
     else {
         return Ok(None);
     };
@@ -1013,10 +1045,10 @@ fn for_each_log_entry(
     it.seek(encode_log_primary(lo));
     while let Some(key) = it.key() {
         let Some((index, _rank)) = decode_log_key(key) else {
-            return Err(Error::Storage(format!(
+            return Err(Error::Log(LogError::Storage(format!(
                 "undecodable key in {}",
                 RAFT_LOG_CF.name()
-            )));
+            ))));
         };
         if hi.is_some_and(|end| index >= end) {
             break;
@@ -1025,11 +1057,11 @@ fn for_each_log_entry(
         // but substituting an empty payload for a missing one would feed
         // openraft an undecodable entry instead of failing (§20).
         let Some(value) = it.value() else {
-            return Err(Error::Storage(format!(
+            return Err(Error::Log(LogError::Storage(format!(
                 "key with no value in {} ({} bytes)",
                 RAFT_LOG_CF.name(),
                 key.len()
-            )));
+            ))));
         };
         if !sink(index, value)? {
             return Ok(());
@@ -1037,7 +1069,7 @@ fn for_each_log_entry(
         it.next();
     }
     it.status()
-        .map_err(|e| Error::Storage(format!("scan raft log: {e}")))
+        .map_err(|e| Error::Log(LogError::Storage(format!("scan raft log: {e}"))))
 }
 
 /// The newest live log index, or `None` if every stored entry is retired.
@@ -1048,10 +1080,15 @@ fn newest_live_index(storage: &Storage) -> Result<Option<RaftLogIndex>, Error> {
     if let Some(key) = it.key() {
         return decode_log_key(key)
             .map(|(index, _)| Some(index))
-            .ok_or_else(|| Error::Storage(format!("undecodable key in {}", RAFT_LOG_CF.name())));
+            .ok_or_else(|| {
+                Error::Log(LogError::Storage(format!(
+                    "undecodable key in {}",
+                    RAFT_LOG_CF.name()
+                )))
+            });
     }
     it.status()
-        .map_err(|e| Error::Storage(format!("scan raft log: {e}")))?;
+        .map_err(|e| Error::Log(LogError::Storage(format!("scan raft log: {e}"))))?;
     Ok(None)
 }
 
@@ -1071,7 +1108,11 @@ fn newest_live_entry(
     let cf = storage.cf(RAFT_LOG_CF)?;
     let Some(pinned) = storage
         .get_pinned(&cf, encode_log_key(index, index))
-        .map_err(|e| Error::Storage(format!("read raft log entry {index}: {e}")))?
+        .map_err(|e| {
+            Error::Log(LogError::Storage(format!(
+                "read raft log entry {index}: {e}"
+            )))
+        })?
     else {
         return Ok(None);
     };

@@ -52,6 +52,7 @@ use crate::api::{
     ArchiveBounds, ArchiveUpperBound, Clock, LocalStoreView, Reader, StableArchiveReader,
     StableLogSnapshot,
 };
+use crate::error::LifecycleError;
 use crate::hlc::Hlc;
 use crate::ids::{LogIndex, NodeId};
 use crate::learner::QuorumReadDebouncer;
@@ -120,10 +121,10 @@ impl GatedReader {
     }
 
     fn not_ready(&self) -> Error {
-        Error::NotReady(format!(
+        Error::Lifecycle(LifecycleError::NotReady(format!(
             "node {} has been denied re-admission to the group",
             self.node_id
-        ))
+        )))
     }
 }
 
@@ -665,6 +666,7 @@ impl Reader for ReaderImpl {
     reason = "test code"
 )]
 mod tests {
+    use crate::error::{LifecycleError, SnapshotError};
     use crate::test_stream::ChannelTestExt as _;
     use std::sync::Arc;
     use std::time::Duration;
@@ -801,7 +803,11 @@ mod tests {
                 .expect("lock")
                 .get(&id)
                 .cloned()
-                .ok_or_else(|| crate::Error::ObjectStore(format!("no scripted snapshot {id:?}")))?;
+                .ok_or_else(|| {
+                    crate::Error::Snapshot(SnapshotError::ObjectStore(format!(
+                        "no scripted snapshot {id:?}"
+                    )))
+                })?;
             Ok(crossbeam_combinators::Channel::from_vec(
                 entries.into_iter().map(Ok).collect(),
             ))
@@ -1851,7 +1857,10 @@ mod tests {
             upstream(9),
         );
         let mut stream = gated.subscribe_unstable_tail();
-        assert!(matches!(stream.recv(), Ok(Err(crate::Error::NotReady(_)))));
+        assert!(matches!(
+            stream.recv(),
+            Ok(Err(crate::Error::Lifecycle(LifecycleError::NotReady(_))))
+        ));
     }
 
     /// Node shutdown ends a quiet unstable subscription with `AbortReason::Cancelled`.

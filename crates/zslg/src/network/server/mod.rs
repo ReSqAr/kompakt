@@ -25,6 +25,7 @@
 //! answered with an `Error` frame before closing, so the caller learns why
 //! instead of seeing a bare disconnect.
 
+use crate::error::{ClockError, ConsensusError};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -177,12 +178,12 @@ async fn handle_connection(
             r = frame_recv.next_frame() => r,
         } {
             Some(Ok(r)) => r,
-            Some(Err(e @ Error::HlcDriftTooLarge { .. })) => {
+            Some(Err(e @ Error::Clock(ClockError::HlcDriftTooLarge { .. }))) => {
                 debug!(error = %e, "request rejected: HLC drift");
                 let _ = sink.send(RpcFrame::Error(e)).await;
                 return;
             }
-            Some(Err(e @ Error::UnexpectedNodeId { .. })) => {
+            Some(Err(e @ Error::Consensus(ConsensusError::UnexpectedNodeId { .. }))) => {
                 debug!(error = %e, "request rejected: unexpected node_id");
                 let _ = sink.send(RpcFrame::Error(e)).await;
                 return;

@@ -18,6 +18,7 @@
 
 use crate::Error;
 use crate::api::{LocalStoreMut, Replica};
+use crate::error::LogError;
 use crate::hlc::HlcClock;
 use crate::ids::{LogIndex, NodeId};
 use crate::meta::Data;
@@ -153,7 +154,7 @@ impl ReplicationSubscriber {
                 "upstream declared the stream complete, but a \
                  subscription cannot complete",
             )),
-            Err(Error::SubscriptionStreamEnded { reason }) => {
+            Err(Error::Log(LogError::SubscriptionStreamEnded { reason })) => {
                 Err(Error::subscription_ended(peer_id, reason))
             }
             Err(other) => Err(other),
@@ -170,6 +171,7 @@ impl ReplicationSubscriber {
     reason = "test code"
 )]
 mod tests {
+    use crate::error::ConsensusError;
     use crate::test_stream::ChannelTestExt as _;
     use std::sync::Arc;
     use std::sync::Mutex;
@@ -200,7 +202,10 @@ mod tests {
             .result
             .expect_err("a subscription cannot complete");
         assert!(
-            matches!(err, Error::SubscriptionEnded { .. }),
+            matches!(
+                err,
+                Error::Consensus(ConsensusError::SubscriptionEnded { .. })
+            ),
             "expected SubscriptionEnded, got: {err:?}"
         );
     }
@@ -294,7 +299,10 @@ mod tests {
             .result
             .expect_err("a dead subscription must not look like a clean finish");
         assert!(
-            matches!(err, Error::SubscriptionEnded { .. }),
+            matches!(
+                err,
+                Error::Consensus(ConsensusError::SubscriptionEnded { .. })
+            ),
             "expected SubscriptionEnded, got: {err:?}"
         );
     }

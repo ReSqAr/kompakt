@@ -68,7 +68,10 @@ pub(crate) mod writer;
 pub(crate) mod writer_node;
 
 pub use crate::api::{RaftStateView, Reader, StableStream, Writer};
-pub use crate::error::Error;
+pub use crate::error::{
+    ClockError, ConfigError, ConsensusError, Error, LifecycleError, LogError, NetError,
+    SnapshotError,
+};
 pub use crate::follower_node::{FollowerNode, FollowerNodeConfig};
 pub use crate::hlc::{Hlc, HlcClock};
 pub use crate::ids::{

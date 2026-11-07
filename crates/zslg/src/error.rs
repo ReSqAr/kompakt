@@ -10,50 +10,32 @@
 //! (CLAUDE.md §5), and module-local error enums convert in via `From` rather
 //! than being re-described here.
 
-use std::sync::Arc;
-
+use error_union::error_union;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::hlc::Hlc;
 use crate::ids::NodeId;
 
-/// Crate-wide error type.
-///
-/// Every fallible public API returns `Result<T, Error>`. Clone is derived so
-/// the same error can fan out to multiple waiters (e.g. quorum-read debouncer).
-/// `Serialize`/`Deserialize` let an `Error` cross the RPC boundary and be
-/// reconstructed *exactly* on the caller side (no lossy string flattening) —
-/// see `crate::network::messages::RpcFrame::Error`.
+/// What a node's lifecycle can end in: asked to stop, stopped by itself, or not ready yet.
 #[derive(Debug, Clone, PartialEq, Error, Serialize, Deserialize)]
-pub enum Error {
-    /// Configuration validation failed.
-    #[error("invalid configuration: {0}")]
-    InvalidConfiguration(String),
+pub enum LifecycleError {
+    /// Operation was cancelled.
+    #[error("cancelled")]
+    Cancelled,
 
-    /// Tracing or metrics initialization failed.
-    #[error("observability init failed: {0}")]
-    Observability(String),
+    #[error("node shutting down")]
+    Shutdown,
 
-    /// HLC below the current cutoff.
-    #[error("hlc cutoff violation: {0}")]
-    HlcCutoff(#[from] crate::hlc::CutoffError),
-
-    /// Peer's HLC drifted beyond the configured skew.
-    #[error("hlc drift too large: peer={peer:?} local={local:?}")]
-    HlcDriftTooLarge { peer: Hlc, local: Hlc },
-
-    /// RPC received by a node that does not match the caller's expected target.
-    #[error(transparent)]
-    UnexpectedNodeId(Box<UnexpectedNodeId>),
-
-    /// Writer-replica wall-clock skew over max_clock_skew.
-    #[error("clock skew too large: writer={writer:?} replica={replica:?}")]
-    ClockSkewTooLarge { writer: Hlc, replica: Hlc },
-
-    /// No quorum could be reached against the current Raft generation.
-    #[error("quorum unreachable")]
-    QuorumUnreachable,
+    /// The node is running but cannot serve client reads or writes: it is not
+    /// in the voter set, so its view of replicated state has stopped
+    /// advancing. Serving from it would return a snapshot that silently ceases
+    /// to move.
+    ///
+    /// Retryable. A node in this state stays up deliberately — being removed by
+    /// the group is not grounds for the process to terminate itself.
+    #[error("node is not ready to serve clients: {0}")]
+    NotReady(String),
 
     /// The node's shutdown token was cancelled while it was still catching up to
     /// a quorum, so it never became ready.
@@ -66,41 +48,47 @@ pub enum Error {
     #[error("node startup cancelled before the node became ready")]
     StartupCancelled,
 
-    #[error(transparent)]
-    StaleStateWrite(Box<StaleStateWrite>),
+    /// Local Raft state exists but cluster membership doesn't list this node.
+    /// Must wipe state and restart — a fresh NodeId will be auto-generated.
+    #[error("hard-crash data loss; wipe data directory and restart")]
+    HardCrashDataLoss,
 
-    /// A fenced state write carried a manifest that failed the apply-fence shape
-    /// check. Rejected as a *value* at the fence (never a fatal storage fault);
-    /// the proposing leader maps that rejection to this error. `source` carries
-    /// the structured reason so it reconstructs exactly across the RPC boundary.
-    /// A fenced state write was structurally invalid — a malformed manifest, or
-    /// a `manifest_watermark > hlc_cutoff` regression (a cutoff at or below
-    /// committed snapshot coverage, which no future snapshot window could ever
-    /// cover). Caught pre-flight at the propose site and rejected as a *value* at
-    /// the apply fence, so it never rides the fatal apply path. `source` carries
-    /// the structured reason so it reconstructs exactly across the RPC boundary.
-    #[error(transparent)]
-    InvalidRaftState(Box<InvalidRaftState>),
+    /// Feature not yet implemented.
+    #[error("not yet implemented: {0}")]
+    NotYetImplemented(String),
+}
 
-    /// A quorum read could not confirm replica catch-up within the deadline.
-    /// The system may be partitioned or an upstream may be unrecoverable;
-    /// callers can retry or fall back to a weaker read level.
-    #[error("quorum read timed out after {timeout:?}")]
-    QuorumReadTimeout { timeout: std::time::Duration },
+/// A configuration the node cannot run with.
+#[derive(Debug, Clone, PartialEq, Error, Serialize, Deserialize)]
+pub enum ConfigError {
+    /// Configuration validation failed.
+    #[error("invalid configuration: {0}")]
+    InvalidConfiguration(String),
 
-    /// Invariant violation: an applied state's generation would move backwards.
-    /// Unreachable through the fenced Raft apply path; surfaced as an error
-    /// (instead of a process-killing assert) so the host stays in control.
-    #[error("raft state generation went backwards: current {current:?}, attempted {attempted:?}")]
-    StateRegression {
-        current: crate::ids::RaftGeneration,
-        attempted: crate::ids::RaftGeneration,
-    },
+    /// Tracing or metrics initialization failed.
+    #[error("observability init failed: {0}")]
+    Observability(String),
+}
 
-    /// Peer is not the current Raft leader.
-    #[error("not leader (hint: {hint:?})")]
-    NotLeader { hint: Option<NodeId> },
+/// A hybrid-logical-clock violation: a cutoff, drift or skew bound was crossed.
+#[derive(Debug, Clone, PartialEq, Error, Serialize, Deserialize)]
+pub enum ClockError {
+    /// HLC below the current cutoff.
+    #[error("hlc cutoff violation: {0}")]
+    HlcCutoff(#[from] crate::hlc::CutoffError),
 
+    /// Peer's HLC drifted beyond the configured skew.
+    #[error("hlc drift too large: peer={peer:?} local={local:?}")]
+    HlcDriftTooLarge { peer: Hlc, local: Hlc },
+
+    /// Writer-replica wall-clock skew over max_clock_skew.
+    #[error("clock skew too large: writer={writer:?} replica={replica:?}")]
+    ClockSkewTooLarge { writer: Hlc, replica: Hlc },
+}
+
+/// The replicated and local logs and the storage under them: storage, codec, gaps, truncation, subscriptions.
+#[derive(Debug, Clone, PartialEq, Error, Serialize, Deserialize)]
+pub enum LogError {
     /// Storage I/O failure.
     #[error("storage error: {0}")]
     Storage(String),
@@ -132,17 +120,16 @@ pub enum Error {
     #[error("stable log gap: {0}")]
     StableLogGap(String),
 
-    /// Object-store I/O failure.
-    #[error("object store error: {0}")]
-    ObjectStore(String),
+    /// postcard serialisation/deserialisation failure.
+    #[error("codec error: {0}")]
+    Codec(String),
 
-    /// RPC transport failure.
-    #[error("rpc error: {0}")]
-    Rpc(String),
-
-    /// RPC to a peer not in the routing table.
-    #[error("unknown peer: {0}")]
-    UnknownPeer(NodeId),
+    /// A finite stream ended without its producer declaring completion (see
+    /// `channel::End::Aborted`): the producer panicked, or was discarded before
+    /// it ran. Items may be missing, so a consumer that needs the whole stream
+    /// must fail rather than treat it as a clean end.
+    #[error("stream {what} ended without closing; it may be truncated")]
+    StreamTruncated { what: String },
 
     /// A subscription stream ended. Subscriptions are infinite by contract — a
     /// replica's append stream never completes — so any end means the upstream
@@ -156,36 +143,6 @@ pub enum Error {
     /// The per-peer caller re-wraps it as [`Error::SubscriptionEnded`].
     #[error("subscription stream ended: {reason}")]
     SubscriptionStreamEnded { reason: String },
-    #[error(transparent)]
-    SubscriptionEnded(Box<SubscriptionEnded>),
-
-    /// openraft library failure.
-    #[error("raft error: {0}")]
-    Raft(String),
-
-    /// postcard serialisation/deserialisation failure.
-    #[error("codec error: {0}")]
-    Codec(String),
-
-    /// zstd compression/decompression failure.
-    #[error("compression error: {0}")]
-    Compression(String),
-
-    /// Operation was cancelled.
-    #[error("cancelled")]
-    Cancelled,
-
-    /// Local Raft state exists but cluster membership doesn't list this node.
-    /// Must wipe state and restart — a fresh NodeId will be auto-generated.
-    #[error("hard-crash data loss; wipe data directory and restart")]
-    HardCrashDataLoss,
-
-    /// A finite stream ended without its producer declaring completion (see
-    /// `channel::End::Aborted`): the producer panicked, or was discarded before
-    /// it ran. Items may be missing, so a consumer that needs the whole stream
-    /// must fail rather than treat it as a clean end.
-    #[error("stream {what} ended without closing; it may be truncated")]
-    StreamTruncated { what: String },
 
     /// A client write exceeded `WriterConfig::write_timeout` (default 10s),
     /// covering the admission-acquire + fan-out phases, so a leaked permit or a
@@ -194,20 +151,84 @@ pub enum Error {
     #[error("write timed out after {elapsed:?}")]
     WriteTimeout { elapsed: std::time::Duration },
 
+    /// A quorum read could not confirm replica catch-up within the deadline.
+    /// The system may be partitioned or an upstream may be unrecoverable;
+    /// callers can retry or fall back to a weaker read level.
+    #[error("quorum read timed out after {timeout:?}")]
+    QuorumReadTimeout { timeout: std::time::Duration },
+}
+
+/// Snapshots in object storage: the backend and the compression.
+#[derive(Debug, Clone, PartialEq, Error, Serialize, Deserialize)]
+pub enum SnapshotError {
+    /// Object-store I/O failure.
+    #[error("object store error: {0}")]
+    ObjectStore(String),
+
+    /// zstd compression/decompression failure.
+    #[error("compression error: {0}")]
+    Compression(String),
+}
+
+/// The wire between nodes.
+#[derive(Debug, Clone, PartialEq, Error, Serialize, Deserialize)]
+pub enum NetError {
+    /// RPC transport failure.
+    #[error("rpc error: {0}")]
+    Rpc(String),
+}
+
+/// Raft and the cluster around it: leadership, membership, quorum, replicated state.
+#[derive(Debug, Clone, PartialEq, Error, Serialize, Deserialize)]
+pub enum ConsensusError {
+    /// RPC received by a node that does not match the caller's expected target.
+    #[error(transparent)]
+    UnexpectedNodeId(Box<UnexpectedNodeId>),
+
+    /// No quorum could be reached against the current Raft generation.
+    #[error("quorum unreachable")]
+    QuorumUnreachable,
+
+    #[error(transparent)]
+    StaleStateWrite(Box<StaleStateWrite>),
+
+    /// A fenced state write carried a manifest that failed the apply-fence shape
+    /// check. Rejected as a *value* at the fence (never a fatal storage fault);
+    /// the proposing leader maps that rejection to this error. `source` carries
+    /// the structured reason so it reconstructs exactly across the RPC boundary.
+    /// A fenced state write was structurally invalid — a malformed manifest, or
+    /// a `manifest_watermark > hlc_cutoff` regression (a cutoff at or below
+    /// committed snapshot coverage, which no future snapshot window could ever
+    /// cover). Caught pre-flight at the propose site and rejected as a *value* at
+    /// the apply fence, so it never rides the fatal apply path. `source` carries
+    /// the structured reason so it reconstructs exactly across the RPC boundary.
+    #[error(transparent)]
+    InvalidRaftState(Box<InvalidRaftState>),
+
+    /// Invariant violation: an applied state's generation would move backwards.
+    /// Unreachable through the fenced Raft apply path; surfaced as an error
+    /// (instead of a process-killing assert) so the host stays in control.
+    #[error("raft state generation went backwards: current {current:?}, attempted {attempted:?}")]
+    StateRegression {
+        current: crate::ids::RaftGeneration,
+        attempted: crate::ids::RaftGeneration,
+    },
+
+    /// Peer is not the current Raft leader.
+    #[error("not leader (hint: {hint:?})")]
+    NotLeader { hint: Option<NodeId> },
+
+    /// RPC to a peer not in the routing table.
+    #[error("unknown peer: {0}")]
+    UnknownPeer(NodeId),
+
+    /// openraft library failure.
+    #[error("raft error: {0}")]
+    Raft(String),
+
     /// Write rejected: this node is not in the current replica set.
     #[error("not a replica: {node_id:?}")]
     NotAReplica { node_id: NodeId },
-
-    /// Write rejected by a remote replica. Bundles the *real* replica-side
-    /// rejection error (`source`, e.g. `HlcCutoff` / `NotAReplica`) with the
-    /// replica's current `RaftState`, so the quorum coordinator can track config
-    /// changes on rejections while the underlying error is preserved exactly.
-    #[error(transparent)]
-    WriteRejected(Box<WriteRejected>),
-
-    /// Feature not yet implemented.
-    #[error("not yet implemented: {0}")]
-    NotYetImplemented(String),
 
     /// The leader refused to admit (or keep) this node because its `server_name`
     /// is not in the cluster's `config.peers`. The node has been evicted on
@@ -219,18 +240,27 @@ pub enum Error {
     #[error("raft membership denied: node {node_id:?} is not in config.peers")]
     MembershipDenied { node_id: NodeId },
 
-    #[error("node shutting down")]
-    Shutdown,
+    #[error(transparent)]
+    SubscriptionEnded(Box<SubscriptionEnded>),
+}
 
-    /// The node is running but cannot serve client reads or writes: it is not
-    /// in the voter set, so its view of replicated state has stopped
-    /// advancing. Serving from it would return a snapshot that silently ceases
-    /// to move.
+error_union! {
+    /// Crate-wide error type: one variant per leaf error, named after its group.
     ///
-    /// Retryable. A node in this state stays up deliberately — being removed by
-    /// the group is not grounds for the process to terminate itself.
-    #[error("node is not ready to serve clients: {0}")]
-    NotReady(String),
+    /// Every fallible public API returns `Result<T, Error>`. Clone is derived so
+    /// the same error can fan out to multiple waiters (e.g. quorum-read debouncer).
+    /// `Serialize`/`Deserialize` let an `Error` cross the RPC boundary and be
+    /// reconstructed *exactly* on the caller side (no lossy string flattening).
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+    pub Error {
+        Lifecycle(LifecycleError),
+        Config(ConfigError),
+        Clock(ClockError),
+        Log(LogError),
+        Snapshot(SnapshotError),
+        Net(NetError),
+        Consensus(ConsensusError),
+    }
 }
 
 // ── Boxed variant payloads ────────────────────────────────────────────────────
@@ -241,9 +271,12 @@ pub enum Error {
 // paid ~143 B/slot for 88 B of useful payload, purely because one variant
 // inlined an 80-byte `RaftStateError`.
 //
-// So the bar is `size_of::<Error>() <= size_of::<DataId>()`, pinned by
-// `error_is_no_larger_than_a_data_id`, and any variant whose payload would push
-// past it boxes that payload here. Errors are rare by construction, so the extra
+// So the bar is `size_of::<Error>() <= size_of::<DataId>() + 8`, pinned by
+// `error_is_within_the_size_bar`, and any variant whose payload would push
+// past it boxes that payload here. The `+ 8` is the union's own tag: every
+// leaf enum is a `DataId` wide (24 bytes of `String` plus its tag) and
+// `Error` wraps one, so a `DataId`-sized bar is not reachable without
+// boxing every `String` payload. Errors are rare by construction, so the extra
 // allocation lands only on paths that were already exceptional — whereas the
 // size is paid by every slot of every ring, occupied or not.
 //
@@ -284,21 +317,13 @@ pub struct SubscriptionEnded {
     pub reason: String,
 }
 
-/// Payload of [`Error::WriteRejected`].
-#[derive(Debug, Clone, PartialEq, thiserror::Error, Serialize, Deserialize)]
-#[error("write rejected by {node_id:?}: {source}")]
-pub struct WriteRejected {
-    pub node_id: NodeId,
-    #[source]
-    pub source: Error,
-    pub raft_state: Arc<crate::meta::RaftState>,
-}
-
 impl Error {
     /// Build [`Error::UnexpectedNodeId`].
     #[must_use]
     pub(crate) fn unexpected_node_id(expected: NodeId, actual: NodeId) -> Self {
-        Self::UnexpectedNodeId(Box::new(UnexpectedNodeId { expected, actual }))
+        Self::Consensus(ConsensusError::UnexpectedNodeId(Box::new(
+            UnexpectedNodeId { expected, actual },
+        )))
     }
 
     /// Build [`Error::StaleStateWrite`].
@@ -308,11 +333,11 @@ impl Error {
         expected: crate::ids::RaftGeneration,
         current: crate::ids::RaftGeneration,
     ) -> Self {
-        Self::StaleStateWrite(Box::new(StaleStateWrite {
+        Self::Consensus(ConsensusError::StaleStateWrite(Box::new(StaleStateWrite {
             context: context.into(),
             expected,
             current,
-        }))
+        })))
     }
 
     /// Build [`Error::InvalidRaftState`].
@@ -321,19 +346,23 @@ impl Error {
         context: impl Into<String>,
         source: crate::raft::RaftStateError,
     ) -> Self {
-        Self::InvalidRaftState(Box::new(InvalidRaftState {
-            context: context.into(),
-            source,
-        }))
+        Self::Consensus(ConsensusError::InvalidRaftState(Box::new(
+            InvalidRaftState {
+                context: context.into(),
+                source,
+            },
+        )))
     }
 
     /// Build [`Error::SubscriptionEnded`].
     #[must_use]
     pub(crate) fn subscription_ended(peer_id: NodeId, reason: impl Into<String>) -> Self {
-        Self::SubscriptionEnded(Box::new(SubscriptionEnded {
-            peer_id,
-            reason: reason.into(),
-        }))
+        Self::Consensus(ConsensusError::SubscriptionEnded(Box::new(
+            SubscriptionEnded {
+                peer_id,
+                reason: reason.into(),
+            },
+        )))
     }
 }
 
@@ -345,43 +374,39 @@ impl Error {
     #[must_use]
     pub fn kind(&self) -> &'static str {
         match self {
-            Error::InvalidConfiguration(_) => "invalid_configuration",
-            Error::Observability(_) => "observability",
-            Error::HlcCutoff(_) => "hlc_cutoff",
-            Error::HlcDriftTooLarge { .. } => "hlc_drift_too_large",
-            Error::UnexpectedNodeId { .. } => "unexpected_node_id",
-            Error::ClockSkewTooLarge { .. } => "clock_skew_too_large",
-            Error::QuorumUnreachable => "quorum_unreachable",
-            Error::StaleStateWrite { .. } => "stale_state_write",
-            Error::InvalidRaftState { .. } => "invalid_raft_state",
-            Error::QuorumReadTimeout { .. } => "quorum_read_timeout",
-            Error::StateRegression { .. } => "state_regression",
-            Error::NotLeader { .. } => "not_leader",
-            Error::Storage(_) => "storage",
-            Error::StableLogBehindManifest { .. } => "stable_log_behind_manifest",
-            Error::StableLogGap(_) => "stable_log_gap",
-            Error::ObjectStore(_) => "object_store",
-            Error::Rpc(_) => "rpc",
-            Error::UnknownPeer(_) => "unknown_peer",
-            Error::SubscriptionEnded { .. } => "subscription_ended",
-            Error::SubscriptionStreamEnded { .. } => "subscription_stream_ended",
-            Error::Raft(_) => "raft",
-            Error::Codec(_) => "codec",
-            Error::Compression(_) => "compression",
-            Error::Cancelled => "cancelled",
-            Error::StartupCancelled => "startup_cancelled",
-            Error::HardCrashDataLoss => "hard_crash_data_loss",
-            Error::StreamTruncated { .. } => "stream_truncated",
-            Error::WriteTimeout { .. } => "write_timeout",
-            Error::NotAReplica { .. } => "not_a_replica",
-            // The wire-bundled rejection: classify by the *underlying* error so
-            // a write rejected for an HLC cutoff is counted as `hlc_cutoff`,
-            // not lumped under a generic `write_rejected`.
-            Error::WriteRejected(w) => w.source.kind(),
-            Error::NotYetImplemented(_) => "not_yet_implemented",
-            Error::MembershipDenied { .. } => "membership_denied",
-            Error::Shutdown => "shutdown",
-            Error::NotReady(_) => "not_ready",
+            Error::Config(ConfigError::InvalidConfiguration(_)) => "invalid_configuration",
+            Error::Config(ConfigError::Observability(_)) => "observability",
+            Error::Clock(ClockError::HlcCutoff(_)) => "hlc_cutoff",
+            Error::Clock(ClockError::HlcDriftTooLarge { .. }) => "hlc_drift_too_large",
+            Error::Consensus(ConsensusError::UnexpectedNodeId { .. }) => "unexpected_node_id",
+            Error::Clock(ClockError::ClockSkewTooLarge { .. }) => "clock_skew_too_large",
+            Error::Consensus(ConsensusError::QuorumUnreachable) => "quorum_unreachable",
+            Error::Consensus(ConsensusError::StaleStateWrite { .. }) => "stale_state_write",
+            Error::Consensus(ConsensusError::InvalidRaftState { .. }) => "invalid_raft_state",
+            Error::Log(LogError::QuorumReadTimeout { .. }) => "quorum_read_timeout",
+            Error::Consensus(ConsensusError::StateRegression { .. }) => "state_regression",
+            Error::Consensus(ConsensusError::NotLeader { .. }) => "not_leader",
+            Error::Log(LogError::Storage(_)) => "storage",
+            Error::Log(LogError::StableLogBehindManifest { .. }) => "stable_log_behind_manifest",
+            Error::Log(LogError::StableLogGap(_)) => "stable_log_gap",
+            Error::Snapshot(SnapshotError::ObjectStore(_)) => "object_store",
+            Error::Net(NetError::Rpc(_)) => "rpc",
+            Error::Consensus(ConsensusError::UnknownPeer(_)) => "unknown_peer",
+            Error::Consensus(ConsensusError::SubscriptionEnded { .. }) => "subscription_ended",
+            Error::Log(LogError::SubscriptionStreamEnded { .. }) => "subscription_stream_ended",
+            Error::Consensus(ConsensusError::Raft(_)) => "raft",
+            Error::Log(LogError::Codec(_)) => "codec",
+            Error::Snapshot(SnapshotError::Compression(_)) => "compression",
+            Error::Lifecycle(LifecycleError::Cancelled) => "cancelled",
+            Error::Lifecycle(LifecycleError::StartupCancelled) => "startup_cancelled",
+            Error::Lifecycle(LifecycleError::HardCrashDataLoss) => "hard_crash_data_loss",
+            Error::Log(LogError::StreamTruncated { .. }) => "stream_truncated",
+            Error::Log(LogError::WriteTimeout { .. }) => "write_timeout",
+            Error::Consensus(ConsensusError::NotAReplica { .. }) => "not_a_replica",
+            Error::Lifecycle(LifecycleError::NotYetImplemented(_)) => "not_yet_implemented",
+            Error::Consensus(ConsensusError::MembershipDenied { .. }) => "membership_denied",
+            Error::Lifecycle(LifecycleError::Shutdown) => "shutdown",
+            Error::Lifecycle(LifecycleError::NotReady(_)) => "not_ready",
         }
     }
 
@@ -392,12 +417,15 @@ impl Error {
     pub(crate) fn snapshot_state(&self) -> crate::metrics::SnapshotState {
         use crate::metrics::SnapshotState;
         match self {
-            Error::StaleStateWrite { .. } => SnapshotState::FailureStaleGeneration,
-            Error::QuorumUnreachable | Error::QuorumReadTimeout { .. } => {
-                SnapshotState::FailureQuorumTimeout
+            Error::Consensus(ConsensusError::StaleStateWrite { .. }) => {
+                SnapshotState::FailureStaleGeneration
             }
-            Error::ObjectStore(_) => SnapshotState::FailureObjectStore,
-            Error::StableLogBehindManifest { .. } => SnapshotState::WaitingForStableLog,
+            Error::Consensus(ConsensusError::QuorumUnreachable)
+            | Error::Log(LogError::QuorumReadTimeout { .. }) => SnapshotState::FailureQuorumTimeout,
+            Error::Snapshot(SnapshotError::ObjectStore(_)) => SnapshotState::FailureObjectStore,
+            Error::Log(LogError::StableLogBehindManifest { .. }) => {
+                SnapshotState::WaitingForStableLog
+            }
             // HLC-cutoff rejection comes from a replica RPC error; the
             // leader sees it as a fan-out failure. Everything else counts
             // as a storage-side failure.
@@ -410,68 +438,68 @@ impl From<rocksdb_kit::StorageError> for Error {
     fn from(e: rocksdb_kit::StorageError) -> Self {
         match e {
             rocksdb_kit::StorageError::InvalidConfiguration(msg) => {
-                Error::InvalidConfiguration(msg)
+                Error::Config(ConfigError::InvalidConfiguration(msg))
             }
-            rocksdb_kit::StorageError::Storage(msg) => Error::Storage(msg),
+            rocksdb_kit::StorageError::Storage(msg) => Error::Log(LogError::Storage(msg)),
         }
     }
 }
 
 impl From<shutdown::Stopped> for Error {
     fn from(_: shutdown::Stopped) -> Self {
-        Error::Shutdown
+        Error::Lifecycle(LifecycleError::Shutdown)
     }
 }
 
 impl From<framing::FrameError> for Error {
     fn from(e: framing::FrameError) -> Self {
-        Error::Codec(e.to_string())
+        Error::Log(LogError::Codec(e.to_string()))
     }
 }
 
 impl From<bytesize::OutOfRange> for Error {
     fn from(e: bytesize::OutOfRange) -> Self {
-        Error::InvalidConfiguration(e.to_string())
+        Error::Config(ConfigError::InvalidConfiguration(e.to_string()))
     }
 }
 
 pub(crate) trait ToRpc<T> {
-    fn to_rpc(self, context: &str) -> Result<T, Error>;
+    fn to_rpc(self, context: &str) -> Result<T, NetError>;
 }
 
 impl<T, E: std::fmt::Display> ToRpc<T> for Result<T, E> {
-    fn to_rpc(self, context: &str) -> Result<T, Error> {
-        self.map_err(|e| Error::Rpc(format!("{context}: {e}")))
+    fn to_rpc(self, context: &str) -> Result<T, NetError> {
+        self.map_err(|e| NetError::Rpc(format!("{context}: {e}")))
     }
 }
 
 pub(crate) trait ToStorage<T> {
-    fn to_storage(self, context: &str) -> Result<T, Error>;
+    fn to_storage(self, context: &str) -> Result<T, LogError>;
 }
 
 impl<T, E: std::fmt::Display> ToStorage<T> for Result<T, E> {
-    fn to_storage(self, context: &str) -> Result<T, Error> {
-        self.map_err(|e| Error::Storage(format!("{context}: {e}")))
+    fn to_storage(self, context: &str) -> Result<T, LogError> {
+        self.map_err(|e| LogError::Storage(format!("{context}: {e}")))
     }
 }
 
 pub(crate) trait ToRaft<T> {
-    fn to_raft(self, context: &str) -> Result<T, Error>;
+    fn to_raft(self, context: &str) -> Result<T, ConsensusError>;
 }
 
 impl<T, E: std::fmt::Display> ToRaft<T> for Result<T, E> {
-    fn to_raft(self, context: &str) -> Result<T, Error> {
-        self.map_err(|e| Error::Raft(format!("{context}: {e}")))
+    fn to_raft(self, context: &str) -> Result<T, ConsensusError> {
+        self.map_err(|e| ConsensusError::Raft(format!("{context}: {e}")))
     }
 }
 
 pub(crate) trait ToCodec<T> {
-    fn to_codec(self, context: &str) -> Result<T, Error>;
+    fn to_codec(self, context: &str) -> Result<T, LogError>;
 }
 
 impl<T, E: std::fmt::Display> ToCodec<T> for Result<T, E> {
-    fn to_codec(self, context: &str) -> Result<T, Error> {
-        self.map_err(|e| Error::Codec(format!("{context}: {e}")))
+    fn to_codec(self, context: &str) -> Result<T, LogError> {
+        self.map_err(|e| LogError::Codec(format!("{context}: {e}")))
     }
 }
 
@@ -490,16 +518,17 @@ mod tests {
     /// ring pre-allocates `capacity` slots, so the *error* arm sets the slot
     /// stride for queues that are empty in the common case. A `DataId` (32 B) is
     /// the largest thing the payload arm genuinely needs; an error has no claim
-    /// to be bigger than that. Errors are rare, so any variant that would push
+    /// to be much bigger than that — the 8 bytes over are the union's tag over
+    /// a leaf enum that is itself a `DataId` wide. Errors are rare, so any variant that would push
     /// past the bar boxes its payload — boxing costs an allocation on a path
     /// that is already exceptional.
     #[test]
-    fn error_is_no_larger_than_a_data_id() {
+    fn error_is_within_the_size_bar() {
         let error = size_of::<Error>();
-        let data_id = size_of::<crate::ids::DataId>();
+        let bar = size_of::<crate::ids::DataId>() + 8;
         assert!(
-            error <= data_id,
-            "size_of::<Error>() == {error}, over the {data_id}-byte bar. \
+            error <= bar,
+            "size_of::<Error>() == {error}, over the {bar}-byte bar. \
              Box the payload of whichever variant grew instead of raising this.",
         );
     }
@@ -514,26 +543,59 @@ mod tests {
     fn display_messages_carry_context() {
         let node = NodeId::new_v4();
         let cases: Vec<(Error, &str)> = vec![
-            (Error::InvalidConfiguration("bad skew".into()), "bad skew"),
-            (Error::QuorumUnreachable, "quorum unreachable"),
-            (Error::NotLeader { hint: Some(node) }, "not leader"),
-            (Error::Storage("disk".into()), "disk"),
-            (Error::StableLogGap("hole at 7".into()), "gap"),
-            (Error::ObjectStore("s3".into()), "s3"),
-            (Error::Rpc("timeout".into()), "timeout"),
-            (Error::Raft("election".into()), "election"),
-            (Error::Codec("postcard".into()), "postcard"),
-            (Error::Compression("zstd".into()), "zstd"),
-            (Error::Cancelled, "cancelled"),
-            (Error::HardCrashDataLoss, "data loss"),
-            (Error::NotAReplica { node_id: node }, "not a replica"),
-            (Error::NotYetImplemented("M5b".to_owned()), "m5b"),
             (
-                Error::MembershipDenied { node_id: node },
+                Error::Config(ConfigError::InvalidConfiguration("bad skew".into())),
+                "bad skew",
+            ),
+            (
+                Error::Consensus(ConsensusError::QuorumUnreachable),
+                "quorum unreachable",
+            ),
+            (
+                Error::Consensus(ConsensusError::NotLeader { hint: Some(node) }),
+                "not leader",
+            ),
+            (Error::Log(LogError::Storage("disk".into())), "disk"),
+            (
+                Error::Log(LogError::StableLogGap("hole at 7".into())),
+                "gap",
+            ),
+            (
+                Error::Snapshot(SnapshotError::ObjectStore("s3".into())),
+                "s3",
+            ),
+            (Error::Net(NetError::Rpc("timeout".into())), "timeout"),
+            (
+                Error::Consensus(ConsensusError::Raft("election".into())),
+                "election",
+            ),
+            (Error::Log(LogError::Codec("postcard".into())), "postcard"),
+            (
+                Error::Snapshot(SnapshotError::Compression("zstd".into())),
+                "zstd",
+            ),
+            (Error::Lifecycle(LifecycleError::Cancelled), "cancelled"),
+            (
+                Error::Lifecycle(LifecycleError::HardCrashDataLoss),
+                "data loss",
+            ),
+            (
+                Error::Consensus(ConsensusError::NotAReplica { node_id: node }),
+                "not a replica",
+            ),
+            (
+                Error::Lifecycle(LifecycleError::NotYetImplemented("M5b".to_owned())),
+                "m5b",
+            ),
+            (
+                Error::Consensus(ConsensusError::MembershipDenied { node_id: node }),
                 "membership denied",
             ),
-            (Error::Shutdown, "shutting down"),
-            (Error::NotReady("not a voter".to_owned()), "not ready"),
+            (Error::Lifecycle(LifecycleError::Shutdown), "shutting down"),
+            (
+                Error::Lifecycle(LifecycleError::NotReady("not a voter".to_owned())),
+                "not ready",
+            ),
         ];
         for (err, needle) in cases {
             let msg = err.to_string();
@@ -547,7 +609,7 @@ mod tests {
 
     #[test]
     fn error_is_clone() {
-        let e = Error::Storage("x".into());
+        let e = Error::Log(LogError::Storage("x".into()));
         let c = e.clone();
         assert_eq!(e.to_string(), c.to_string());
     }
@@ -559,7 +621,7 @@ mod tests {
         let r: Result<(), std::io::Error> = Err(std::io::Error::other("boom"));
         let mapped = r.to_storage("opening db");
         match mapped {
-            Err(Error::Storage(msg)) => {
+            Err(LogError::Storage(msg)) => {
                 assert!(msg.contains("opening db"));
                 assert!(msg.contains("boom"));
             }
@@ -571,14 +633,14 @@ mod tests {
     fn to_rpc_wraps_with_context() {
         let r: Result<(), std::io::Error> = Err(std::io::Error::other("net"));
         assert!(
-            matches!(r.to_rpc("send"), Err(Error::Rpc(m)) if m.contains("send") && m.contains("net"))
+            matches!(r.to_rpc("send"), Err(NetError::Rpc(m)) if m.contains("send") && m.contains("net"))
         );
     }
 
     #[test]
     fn to_raft_wraps_with_context() {
         let r: Result<(), std::io::Error> = Err(std::io::Error::other("raft"));
-        assert!(matches!(r.to_raft("init"), Err(Error::Raft(m)) if m.contains("init")));
+        assert!(matches!(r.to_raft("init"), Err(ConsensusError::Raft(m)) if m.contains("init")));
     }
 
     #[test]
@@ -596,10 +658,10 @@ mod tests {
         use crate::ids::LogIndex;
         use crate::metrics::SnapshotState;
 
-        let e = Error::StableLogBehindManifest {
+        let e = Error::Log(LogError::StableLogBehindManifest {
             end_index: Some(LogIndex(41)),
             manifest_end_index: LogIndex(99),
-        };
+        });
         assert_eq!(e.snapshot_state(), SnapshotState::WaitingForStableLog);
         assert_eq!(e.kind(), "stable_log_behind_manifest");
     }

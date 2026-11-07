@@ -14,6 +14,7 @@
     clippy::result_large_err,
     reason = "test code"
 )]
+use crate::error::ClockError;
 use crate::test_stream::ChannelTestExt as _;
 use std::time::Duration;
 
@@ -330,7 +331,7 @@ async fn hlc_cutoff_persists_across_restart() {
         .await
         .expect_err("write below cutoff must be rejected");
     assert!(
-        matches!(err, Error::HlcCutoff(_)),
+        matches!(err, Error::Clock(ClockError::HlcCutoff(_))),
         "expected HlcCutoff, got {err:?}",
     );
 

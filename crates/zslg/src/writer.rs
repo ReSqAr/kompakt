@@ -22,6 +22,7 @@
 //! the coordinator learns to reap the entry and free its permit — so every
 //! per-write resource here is released by `Drop`, not by the success path.
 
+use crate::error::{ConfigError, ConsensusError, LogError};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -43,9 +44,9 @@ pub(crate) struct WriterConfig {
 impl WriterConfig {
     pub(crate) fn validate(&self) -> Result<(), Error> {
         if self.write_timeout.is_zero() {
-            return Err(Error::InvalidConfiguration(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(
                 "write_timeout must be > 0".to_owned(),
-            ));
+            )));
         }
         Ok(())
     }
@@ -95,16 +96,16 @@ impl crate::api::Writer for WriterService {
             // A dropped sender is either backpressure at submit or a departed
             // coordinator; neither is distinguishable here, and both mean the
             // write never reached a quorum.
-            Ok(Err(_)) => Err(Error::QuorumUnreachable),
+            Ok(Err(_)) => Err(Error::Consensus(ConsensusError::QuorumUnreachable)),
             Err(_) => {
                 warn!(
                     node_id = ?self.node_id,
                     limit_s = self.write_timeout.as_secs(),
                     "write exceeded its hard deadline (quorum stalled)"
                 );
-                Err(Error::WriteTimeout {
+                Err(Error::Log(LogError::WriteTimeout {
                     elapsed: self.write_timeout,
-                })
+                }))
             }
         };
         probe.finish(OpState::from_ok(out.is_ok()));
@@ -122,6 +123,9 @@ mod tests {
             node_id: crate::ids::NodeId::new_v4(),
             write_timeout: Duration::ZERO,
         };
-        assert!(matches!(c.validate(), Err(Error::InvalidConfiguration(_))));
+        assert!(matches!(
+            c.validate(),
+            Err(Error::Config(ConfigError::InvalidConfiguration(_)))
+        ));
     }
 }

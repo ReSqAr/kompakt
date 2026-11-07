@@ -14,6 +14,7 @@
     clippy::result_large_err,
     reason = "test code"
 )]
+use crate::error::LogError;
 use crate::test_stream::ChannelTestExt as _;
 use std::sync::Arc;
 use std::time::Duration;
@@ -148,7 +149,7 @@ async fn snapshot_refuses_to_commit_an_aborted_window() {
         .await
         .expect_err("an aborted window must fail the snapshot");
     assert!(
-        matches!(err, Error::StreamTruncated { ref what } if what == "truncated window"),
+        matches!(err, Error::Log(LogError::StreamTruncated { ref what }) if what == "truncated window"),
         "expected StreamTruncated, got: {err:?}"
     );
 

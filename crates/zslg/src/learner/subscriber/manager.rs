@@ -1,3 +1,4 @@
+use crate::error::ConsensusError;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -175,8 +176,9 @@ fn next_backoff(current: Duration, records_retired: u64) -> Duration {
 fn end_reason(e: &Error) -> crate::metrics::SubscriptionEndReason {
     use crate::metrics::SubscriptionEndReason as R;
     match e {
-        Error::UnexpectedNodeId { .. } | Error::UnknownPeer { .. } => R::PeerGone,
-        Error::SubscriptionEnded { .. } => R::Ended,
+        Error::Consensus(ConsensusError::UnexpectedNodeId { .. })
+        | Error::Consensus(ConsensusError::UnknownPeer { .. }) => R::PeerGone,
+        Error::Consensus(ConsensusError::SubscriptionEnded { .. }) => R::Ended,
         _ => R::Failed,
     }
 }
@@ -219,8 +221,9 @@ async fn subscriber_loop(
         if let Err(e) = outcome.result {
             crate::metrics::subscription_ended(end_reason(&e));
             backoff = next_backoff(backoff, outcome.records_retired);
-            let is_expected_transient = matches!(e, Error::UnexpectedNodeId { .. })
-                || matches!(&e, Error::UnknownPeer { .. });
+            let is_expected_transient =
+                matches!(e, Error::Consensus(ConsensusError::UnexpectedNodeId { .. }))
+                    || matches!(&e, Error::Consensus(ConsensusError::UnknownPeer { .. }));
             if is_expected_transient {
                 tracing::debug!(
                     error = %e,

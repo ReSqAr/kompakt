@@ -27,6 +27,7 @@
 //! `Rejoin` and `JoinExisting` both end at the same gate ([`wait_for_raft_recent`]):
 //! the node is not "started" until it has reached a quorum and caught up to
 //! that quorum's applied generation.
+use crate::error::{ConsensusError, LifecycleError};
 use futures::FutureExt as _;
 use std::collections::BTreeSet;
 use std::future::Future;
@@ -345,7 +346,7 @@ pub(crate) async fn run_raft_startup(
                  and restart with a new NodeId (CLAUDE.md §8); reusing the old id is \
                  a safety violation",
             );
-            Err(Error::HardCrashDataLoss)
+            Err(Error::Lifecycle(LifecycleError::HardCrashDataLoss))
         }
     };
     outcome.map(|()| eviction)
@@ -413,7 +414,7 @@ async fn wait_for_raft_recent(
                 loop {
                     tokio::select! {
                         res = &mut wait_fut => {
-                            res.map_err(|e| Error::Raft(format!("startup catch-up: {e}")))?;
+                            res.map_err(|e| Error::Consensus(ConsensusError::Raft(format!("startup catch-up: {e}"))))?;
                             break;
                         }
                         _ = warn_tick.tick() => warn!(
@@ -460,7 +461,7 @@ async fn quorum_applied_generation(
         .await;
         match result {
             Ok((state, _)) => return Ok(state.generation),
-            Err(Error::QuorumUnreachable) => {
+            Err(Error::Consensus(ConsensusError::QuorumUnreachable)) => {
                 debug!(?backoff, "raft catchup: quorum unreachable, retrying");
                 if last_warn.elapsed() >= STARTUP_WARN_INTERVAL {
                     last_warn = Instant::now();
@@ -513,7 +514,7 @@ async fn wait_for_replica_set(
         }
         tokio::select! {
             changed = rx.changed() => if changed.is_err() {
-                return Err(Error::Shutdown);
+                return Err(Error::Lifecycle(LifecycleError::Shutdown));
             },
             _ = warn_tick.tick() => warn!(
                 elapsed_s = started.elapsed().as_secs(),
@@ -555,7 +556,11 @@ async fn bootstrap_single_node_cluster(
             .current_leader(node_id, "bootstrap: wait for self-election")
             .boxed()
             .await
-            .map_err(|e| Error::Raft(format!("bootstrap: wait for self-election: {e}")))?;
+            .map_err(|e| {
+                Error::Consensus(ConsensusError::Raft(format!(
+                    "bootstrap: wait for self-election: {e}"
+                )))
+            })?;
 
         let initial: BTreeSet<NodeId> = [node_id].into_iter().collect();
         raft.inner()
@@ -574,7 +579,11 @@ async fn bootstrap_single_node_cluster(
         Ok::<(), Error>(())
     })
     .await
-    .map_err(|e| Error::Raft(format!("bootstrap: single-node init task panicked: {e}")))?
+    .map_err(|e| {
+        Error::Consensus(ConsensusError::Raft(format!(
+            "bootstrap: single-node init task panicked: {e}"
+        )))
+    })?
 }
 
 async fn join_existing(
@@ -603,7 +612,9 @@ async fn join_existing(
                 return Ok(());
             }
             JoinAttempt::Denied => {
-                return Err(Error::MembershipDenied { node_id });
+                return Err(Error::Consensus(ConsensusError::MembershipDenied {
+                    node_id,
+                }));
             }
             JoinAttempt::Retry => {
                 if last_warn.elapsed() >= STARTUP_WARN_INTERVAL {
@@ -663,7 +674,7 @@ pub(in crate::raft) async fn attempt_join_once(
             Ok(Ok(AddMemberOutcome::Rejected { state })) => {
                 debug!(server_name = %peer_addr.server_name, ?node_id, leader_node_id = ?state.leader, "RaftAddMember rejected; will retry");
             }
-            Ok(Err(Error::MembershipDenied { .. })) => {
+            Ok(Err(Error::Consensus(ConsensusError::MembershipDenied { .. }))) => {
                 // `debug`, not `warn`: this fires on every call once denied, and
                 // `RejoinMonitor::run` is a continuous retry loop (never fatal —
                 // see its module doc) that calls this every
@@ -788,10 +799,13 @@ mod tests {
         assert!(matches!(ok, Ok(7)));
 
         let err: Result<u32, Error> = run_phase("p", Duration::from_secs(30), async {
-            Err(Error::QuorumUnreachable)
+            Err(Error::Consensus(ConsensusError::QuorumUnreachable))
         })
         .await;
-        assert!(matches!(err, Err(Error::QuorumUnreachable)));
+        assert!(matches!(
+            err,
+            Err(Error::Consensus(ConsensusError::QuorumUnreachable))
+        ));
     }
 
     #[tokio::test(start_paused = true)]

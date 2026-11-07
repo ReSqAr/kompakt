@@ -20,6 +20,7 @@
     reason = "expects on Mutex::lock() (no poison) and bounded conversions"
 )]
 
+use crate::error::ConfigError;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
@@ -77,9 +78,9 @@ impl MembershipChangeManager {
     /// force this collapses instead, which drops nobody and needs no bound.
     pub(in crate::leader) async fn initiate(&self, new: BTreeSet<NodeId>) -> Result<(), Error> {
         if new.is_empty() {
-            return Err(Error::InvalidConfiguration(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(
                 "membership change: new_replica_set must not be empty".into(),
-            ));
+            )));
         }
 
         let state = self.inputs.raft_state.snapshot();

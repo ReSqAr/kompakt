@@ -18,6 +18,7 @@
 //! promotion and demotion move no tasks.
 
 use crate::database::NODE_ID_CF;
+use crate::error::{ConfigError, LifecycleError};
 use crate::learner::{LOCAL_STORE_CURSORS_CF, LOCAL_STORE_DATA_CF, STABLE_LOG_CF};
 use crate::replica::REPLICA_LOG_CF;
 use futures::FutureExt as _;
@@ -561,9 +562,9 @@ impl ReplicaNodeConfig {
         self.learner_config().validate()?;
         self.router_config().validate()?;
         if self.peers.is_empty() {
-            return Err(Error::InvalidConfiguration(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(
                 "peers must not be empty".to_owned(),
-            ));
+            )));
         }
         // Distinct from the group removing this node from the voter set, which
         // is NOT fatal (see `raft::startup::rejoin`). This is the other
@@ -574,7 +575,7 @@ impl ReplicaNodeConfig {
             .iter()
             .any(|p| p.server_name == self.network_server_name)
         {
-            return Err(Error::InvalidConfiguration(format!(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(format!(
                 "peers must include this node's own server_name {:?}; \
                  configured peers: {:?}",
                 self.network_server_name,
@@ -582,13 +583,13 @@ impl ReplicaNodeConfig {
                     .iter()
                     .map(|p| &p.server_name)
                     .collect::<Vec<_>>()
-            )));
+            ))));
         }
         self.writer_config(dummy).validate()?;
         if self.db_path.as_os_str().is_empty() {
-            return Err(Error::InvalidConfiguration(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(
                 "db_path must not be empty".to_owned(),
-            ));
+            )));
         }
         self.stable_log_config().validate()?;
         self.storage_config().validate()?;
@@ -597,24 +598,24 @@ impl ReplicaNodeConfig {
         // snapshot cutoff timeout. Lives here — the node config is where both
         // subsystems' knobs meet.
         if self.hlc_max_clock_skew < self.snapshot_cutoff_timeout {
-            return Err(Error::InvalidConfiguration(format!(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(format!(
                 "hlc_max_clock_skew ({:?}) must be >= snapshot_cutoff_timeout ({:?})",
                 self.hlc_max_clock_skew, self.snapshot_cutoff_timeout
-            )));
+            ))));
         }
 
         if self.drain_timeout.is_zero() {
-            return Err(Error::InvalidConfiguration(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(
                 "drain_timeout must be non-zero".to_owned(),
-            ));
+            )));
         }
 
         // Cross-field: cleanup_retention must be >= purge_grace_period
         if self.snapshot_cleanup_retention < self.replica_log_purge_grace_period {
-            return Err(Error::InvalidConfiguration(format!(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(format!(
                 "cleanup_retention ({:?}) must be >= purge_grace_period ({:?})",
                 self.snapshot_cleanup_retention, self.replica_log_purge_grace_period
-            )));
+            ))));
         }
 
         // Cross-field (replica purge vs quorum read): a quorum read waits for
@@ -625,11 +626,11 @@ impl ReplicaNodeConfig {
         // within one read. The read is bounded by its timeout, hence the floor.
         // It does not cover a manifest catching up in one jump after a stall.
         if self.replica_log_purge_grace_period < self.learner_quorum_read_timeout {
-            return Err(Error::InvalidConfiguration(format!(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(format!(
                 "replica_log_purge_grace_period ({:?}) must be >= \
                  learner_quorum_read_timeout ({:?})",
                 self.replica_log_purge_grace_period, self.learner_quorum_read_timeout
-            )));
+            ))));
         }
 
         Ok(())
@@ -857,7 +858,7 @@ impl InitialisingReplicaNode {
             ).boxed() => res,
             () = cancelled.cancelled() => {
                 info!("raft startup cancelled — node stopped before it became ready");
-                Err(Error::StartupCancelled)
+                Err(Error::Lifecycle(LifecycleError::StartupCancelled))
             }
         };
         let eviction = match startup {
@@ -1331,7 +1332,10 @@ mod tests {
         let mut c = ok_config();
         c.replica_log_purge_grace_period = Duration::from_secs(120);
         c.snapshot_cleanup_retention = Duration::from_secs(60);
-        assert!(matches!(c.validate(), Err(Error::InvalidConfiguration(_))));
+        assert!(matches!(
+            c.validate(),
+            Err(Error::Config(ConfigError::InvalidConfiguration(_)))
+        ));
     }
 
     #[test]
@@ -1376,7 +1380,10 @@ mod tests {
     fn rejects_empty_db_path() {
         let mut c = ok_config();
         c.db_path = PathBuf::new();
-        assert!(matches!(c.validate(), Err(Error::InvalidConfiguration(_))));
+        assert!(matches!(
+            c.validate(),
+            Err(Error::Config(ConfigError::InvalidConfiguration(_)))
+        ));
     }
 
     // Cross-field (moved here from SnapshotConfig::validate): the HLC skew bound
@@ -1386,7 +1393,10 @@ mod tests {
         let mut c = ok_config();
         c.snapshot_cutoff_timeout = Duration::from_secs(1);
         c.hlc_max_clock_skew = Duration::from_millis(500);
-        assert!(matches!(c.validate(), Err(Error::InvalidConfiguration(_))));
+        assert!(matches!(
+            c.validate(),
+            Err(Error::Config(ConfigError::InvalidConfiguration(_)))
+        ));
     }
 
     #[test]
@@ -1420,7 +1430,7 @@ mod tests {
 
         let err = cfg.validate().expect_err("must reject");
         assert!(
-            matches!(err, Error::InvalidConfiguration(ref m) if m.contains("node-a")),
+            matches!(err, Error::Config(ConfigError::InvalidConfiguration(ref m)) if m.contains("node-a")),
             "the error must name the missing server name: {err:?}"
         );
     }

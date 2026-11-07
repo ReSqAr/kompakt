@@ -23,6 +23,7 @@
 //! Ordering is crash-safety-critical: the cutoff appears in both the opening
 //! proposal and the committing one, so a crash between them is safe.
 
+use crate::error::{ConsensusError, LogError};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, warn};
@@ -123,7 +124,7 @@ pub(in crate::leader) async fn create_snapshot_entry(
         Some(f) => f
             .raw()
             .checked_add(1)
-            .ok_or_else(|| Error::Storage("global index overflow".into()))?,
+            .ok_or_else(|| Error::Log(LogError::Storage("global index overflow".into())))?,
     };
 
     let snapshot_id = SnapshotId::open(LogIndex(next_index_start));
@@ -147,17 +148,17 @@ pub(in crate::leader) async fn create_snapshot_entry(
             Ok(Err(e)) => return Err(e),
             Err(crossbeam_combinators::End::Complete) => return Ok(None),
             Err(crossbeam_combinators::End::Aborted { reason }) => {
-                return Err(Error::StreamTruncated {
+                return Err(Error::Log(LogError::StreamTruncated {
                     what: reason.label().to_owned(),
-                });
+                }));
             }
         };
 
         if last_manifest_end.is_some_and(|last| stable_end_index.is_none_or(|f| f < last)) {
-            return Err(Error::StableLogBehindManifest {
+            return Err(Error::Log(LogError::StableLogBehindManifest {
                 end_index: stable_end_index,
                 manifest_end_index: last_manifest_end.unwrap_or(LogIndex(0)),
-            });
+            }));
         }
 
         let start_hlc = first.data_id.hlc();
@@ -194,9 +195,9 @@ pub(in crate::leader) async fn create_snapshot_entry(
         .await?;
     let entry_count = written.count;
     let Some(last) = written.last else {
-        return Err(Error::Storage(
+        return Err(Error::Log(LogError::Storage(
             "snapshot write reported no last entry after a non-empty peek".into(),
-        ));
+        )));
     };
     let end_hlc = last.hlc;
     let new_watermark = if entry_count < cap.get() {
@@ -373,7 +374,7 @@ async fn await_quorum_ready(inputs: &SnapshotInputs<'_>, new_cutoff: Hlc) -> Res
                 timeout = ?inputs.quorum_wait_timeout,
                 "replica quorum not reached within timeout",
             );
-            Err(Error::QuorumUnreachable)
+            Err(Error::Consensus(ConsensusError::QuorumUnreachable))
         }
     }
 }

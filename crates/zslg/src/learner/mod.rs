@@ -37,6 +37,7 @@ mod stable_archive;
 mod stable_log;
 mod subscriber;
 
+use crate::error::ConfigError;
 pub(crate) use local_store::LocalStore;
 #[cfg(test)]
 pub(crate) use local_store::open_test_local_store;
@@ -68,18 +69,20 @@ pub(crate) struct LearnerConfig {
 impl LearnerConfig {
     pub(crate) fn validate(&self) -> Result<(), crate::error::Error> {
         if self.quorum_read_timeout.is_zero() {
-            return Err(crate::error::Error::InvalidConfiguration(
-                "quorum_read_timeout must be > 0".to_owned(),
+            return Err(crate::error::Error::Config(
+                ConfigError::InvalidConfiguration("quorum_read_timeout must be > 0".to_owned()),
             ));
         }
         if self.fetch_sweep_interval.is_zero() {
-            return Err(crate::error::Error::InvalidConfiguration(
-                "fetch_sweep_interval must be > 0".to_owned(),
+            return Err(crate::error::Error::Config(
+                ConfigError::InvalidConfiguration("fetch_sweep_interval must be > 0".to_owned()),
             ));
         }
         if self.local_store_flush_interval.is_zero() {
-            return Err(crate::error::Error::InvalidConfiguration(
-                "local_store_flush_interval must be > 0".to_owned(),
+            return Err(crate::error::Error::Config(
+                ConfigError::InvalidConfiguration(
+                    "local_store_flush_interval must be > 0".to_owned(),
+                ),
             ));
         }
         // Kept as a call rather than inlined `Ok(())`: the local store's own

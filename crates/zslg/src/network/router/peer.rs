@@ -20,6 +20,7 @@ use crate::api::{
     AddMemberOutcome, LivenessProbe, RaftMembership, RaftTransport, Replica, ReplicaClient, Router,
     StampedWrite, WriteOutcome,
 };
+use crate::error::LifecycleError;
 use crate::ids::{LogIndex, NodeId, PeerAddr};
 use crate::meta::ReplicaStatus;
 use crate::raft::TypeConfig;
@@ -90,7 +91,7 @@ impl Replica for ErrorTransport {
             .map(|stamped| {
                 Ok(WriteOutcome::Failed {
                     data_id: stamped.data.data_id,
-                    error: Error::Shutdown,
+                    error: Error::Lifecycle(LifecycleError::Shutdown),
                 })
             })
             .chain(Channel::aborted("router shutting down"))
@@ -102,13 +103,13 @@ impl Replica for ErrorTransport {
     }
 
     async fn fetch_status(&self) -> Result<ReplicaStatus, crate::Error> {
-        Err(Error::Shutdown)
+        Err(Error::Lifecycle(LifecycleError::Shutdown))
     }
 
     async fn subscribe_status(
         &self,
     ) -> Result<BoxStream<'static, Result<ReplicaStatus, crate::Error>>, crate::Error> {
-        Err(Error::Shutdown)
+        Err(Error::Lifecycle(LifecycleError::Shutdown))
     }
 }
 
@@ -120,14 +121,14 @@ impl RaftTransport for ErrorTransport {
         &self,
         _rpc: AppendEntriesRequest<TypeConfig>,
     ) -> Result<Result<AppendEntriesResponse<NodeId>, RaftError<NodeId>>, Error> {
-        Err(Error::Shutdown)
+        Err(Error::Lifecycle(LifecycleError::Shutdown))
     }
 
     async fn vote(
         &self,
         _rpc: VoteRequest<NodeId>,
     ) -> Result<Result<VoteResponse<NodeId>, RaftError<NodeId>>, Error> {
-        Err(Error::Shutdown)
+        Err(Error::Lifecycle(LifecycleError::Shutdown))
     }
 
     async fn install_snapshot(
@@ -137,7 +138,7 @@ impl RaftTransport for ErrorTransport {
         Result<InstallSnapshotResponse<NodeId>, RaftError<NodeId, InstallSnapshotError>>,
         Error,
     > {
-        Err(Error::Shutdown)
+        Err(Error::Lifecycle(LifecycleError::Shutdown))
     }
 }
 
@@ -148,13 +149,13 @@ impl RaftMembership for ErrorTransport {
         _node_id: NodeId,
         _peer_addr: PeerAddr,
     ) -> Result<AddMemberOutcome, Error> {
-        Err(Error::Shutdown)
+        Err(Error::Lifecycle(LifecycleError::Shutdown))
     }
 }
 
 #[async_trait::async_trait]
 impl LivenessProbe for ErrorTransport {
     async fn probe(&self) -> Result<(), Error> {
-        Err(Error::Shutdown)
+        Err(Error::Lifecycle(LifecycleError::Shutdown))
     }
 }

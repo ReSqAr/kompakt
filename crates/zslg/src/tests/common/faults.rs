@@ -2,6 +2,7 @@
 /// integration tests. Two modes, matching what the tests need:
 /// `fail_next(n)` (the next n calls error like a dropped RPC) and
 /// `wedge()`/`unwedge()` (calls hang until released — a slow replica).
+use crate::error::{LogError, NetError};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -78,7 +79,7 @@ impl FaultyReplica {
         wedged
             .wait_for(|w| !*w)
             .await
-            .map_err(|_| Error::Rpc("fault handle dropped while wedged".into()))?;
+            .map_err(|_| Error::Net(NetError::Rpc("fault handle dropped while wedged".into())))?;
         let injected = self
             .faults
             .fail_next
@@ -86,7 +87,7 @@ impl FaultyReplica {
             .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
             .is_ok();
         if injected {
-            return Err(Error::Rpc("injected fault".into()));
+            return Err(Error::Net(NetError::Rpc("injected fault".into())));
         }
         Ok(())
     }
@@ -140,7 +141,9 @@ impl Replica for FaultyReplica {
                 if waited.is_err() {
                     let _ = out_tx.send(Ok(WriteOutcome::Failed {
                         data_id,
-                        error: Error::Rpc("fault handle dropped while wedged".into()),
+                        error: Error::Net(NetError::Rpc(
+                            "fault handle dropped while wedged".into(),
+                        )),
                     }));
                     continue;
                 }
@@ -152,7 +155,7 @@ impl Replica for FaultyReplica {
                     out_tx
                         .send(Ok(WriteOutcome::Failed {
                             data_id,
-                            error: Error::Rpc("injected fault".into()),
+                            error: Error::Net(NetError::Rpc("injected fault".into())),
                         }))
                         .is_ok()
                 } else {
@@ -588,8 +591,11 @@ impl ReplicaServiceHarness {
         clock: &Arc<HlcClock>,
         peer_addrs: Vec<PeerAddr>,
     ) -> Result<Self, Error> {
-        let dir = tempfile::tempdir()
-            .map_err(|e| Error::Storage(format!("tempdir for ReplicaServiceHarness: {e}")))?;
+        let dir = tempfile::tempdir().map_err(|e| {
+            Error::Log(LogError::Storage(format!(
+                "tempdir for ReplicaServiceHarness: {e}"
+            )))
+        })?;
         let (store, flush) = ReplicaLogStore::open_with_flush(
             dir.path().join("replica-log"),
             tokio_util::sync::CancellationToken::new(),

@@ -27,6 +27,7 @@
 //! round trip, so concurrent callers coalesce into one batch and batches are
 //! spaced by `deadtime`. Every waiter of a batch gets that batch's result.
 
+use crate::error::{LifecycleError, LogError};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -133,7 +134,7 @@ async fn wait_for_stable_caught_up(
         .watermark()
         .wait_for(|wm| wm.is_some_and(|hlc| hlc >= target))
         .await
-        .map_err(|_| Error::Shutdown)?;
+        .map_err(|_| Error::Lifecycle(LifecycleError::Shutdown))?;
     if waiting {
         tracing::debug!(
             ?target,
@@ -214,9 +215,9 @@ impl ReplicaPoller {
                 );
             }
             integrated.changed().await.map_err(|_| {
-                Error::Storage(format!(
+                Error::Log(LogError::Storage(format!(
                     "quorum check: local store closed before {target:?} caught up"
-                ))
+                )))
             })?;
         }
     }
@@ -365,9 +366,9 @@ impl<'a> DebounceBatch<'a> {
                     Ok(result) => result,
                     Err(_) => {
                         crate::metrics::read_token_wait_timeout();
-                        Err(Error::QuorumReadTimeout {
+                        Err(Error::Log(LogError::QuorumReadTimeout {
                             timeout: check_timeout,
-                        })
+                        }))
                     }
                 };
                 *last_check.lock() = Some(tokio::time::Instant::now());
@@ -378,7 +379,9 @@ impl<'a> DebounceBatch<'a> {
         }
 
         let probe = crate::metrics::read_token_wait_probe();
-        let result = rx.await.map_err(|_| Error::Cancelled);
+        let result = rx
+            .await
+            .map_err(|_| Error::Lifecycle(LifecycleError::Cancelled));
         probe.finish(OpState::from_ok(result.is_ok()));
         result?
     }

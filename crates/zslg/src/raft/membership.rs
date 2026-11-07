@@ -2,6 +2,7 @@
 //! deficit ([`SpareSelectionStrategy`]) and the cluster-shape knobs
 //! ([`MembershipConfig`]) — how many replica nodes to maintain and how long a
 //! Raft voter may be absent from `config.peers` before eviction.
+use crate::error::ConfigError;
 use std::time::Duration;
 
 use crate::api::{CandidateInfo, SpareSelector};
@@ -67,10 +68,12 @@ impl Default for MembershipConfig {
 impl MembershipConfig {
     pub(crate) fn validate(&self) -> Result<(), crate::error::Error> {
         if self.replica_node_count < 1 {
-            return Err(crate::error::Error::InvalidConfiguration(format!(
-                "replica_node_count must be >= 1 (got {})",
-                self.replica_node_count
-            )));
+            return Err(crate::error::Error::Config(
+                ConfigError::InvalidConfiguration(format!(
+                    "replica_node_count must be >= 1 (got {})",
+                    self.replica_node_count
+                )),
+            ));
         }
         Ok(())
     }
@@ -94,7 +97,10 @@ mod tests {
             replica_node_count: 0,
             ..MembershipConfig::default()
         };
-        assert!(matches!(c.validate(), Err(Error::InvalidConfiguration(_))));
+        assert!(matches!(
+            c.validate(),
+            Err(Error::Config(ConfigError::InvalidConfiguration(_)))
+        ));
     }
 
     #[test]

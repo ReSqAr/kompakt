@@ -21,6 +21,7 @@
 /// monitor logs (throttled) and survives rather than treats as fatal
 /// (`raft::startup::rejoin`; group removal is the group's decision, ending the
 /// process is the orchestrator's).
+use crate::error::ConsensusError;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -122,7 +123,7 @@ async fn add_member_denied_for_server_name_not_in_config_peers() {
     )
     .await
     {
-        Err(Error::MembershipDenied { .. }) => {}
+        Err(Error::Consensus(ConsensusError::MembershipDenied { .. })) => {}
         other => panic!("expected Denied error, got {other:?}"),
     }
 

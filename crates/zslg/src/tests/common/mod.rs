@@ -30,6 +30,7 @@ pub(crate) use snapshot::{SnapshotHarness, boot_snapshot_harness, commit_snapsho
 mod cutoff_observer;
 pub(crate) use cutoff_observer::CutoffObserver;
 
+use crate::error::NetError;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -356,12 +357,14 @@ pub(crate) async fn replica_write<R: Replica + ?Sized>(
     // reactor.
     let first = tokio::task::spawn_blocking(move || outcomes.recv())
         .await
-        .map_err(|e| Error::Rpc(format!("write stream join: {e}")))?;
+        .map_err(|e| Error::Net(NetError::Rpc(format!("write stream join: {e}"))))?;
     match first {
         Ok(Ok(WriteOutcome::Accepted { raft_state, .. })) => Ok(raft_state),
         Ok(Ok(WriteOutcome::Rejected { error, .. } | WriteOutcome::Failed { error, .. }))
         | Ok(Err(error)) => Err(error),
-        Err(_) => Err(Error::Rpc("replica dropped write outcome".into())),
+        Err(_) => Err(Error::Net(NetError::Rpc(
+            "replica dropped write outcome".into(),
+        ))),
     }
 }
 

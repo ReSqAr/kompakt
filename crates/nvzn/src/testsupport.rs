@@ -332,9 +332,9 @@ impl zslg::Reader for FailingSyncReader {
             failing
         };
         if failing {
-            return Err(zslg::Error::QuorumReadTimeout {
+            return Err(zslg::Error::Log(zslg::LogError::QuorumReadTimeout {
                 timeout: std::time::Duration::from_millis(1),
-            });
+            }));
         }
         self.inner.sync().await
     }

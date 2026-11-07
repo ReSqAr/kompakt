@@ -10,6 +10,7 @@
 //! truncated away, because a length prefix promising bytes that never arrive
 //! would desynchronize the peer's stream permanently.
 
+use crate::error::LogError;
 use std::sync::Arc;
 
 use futures::FutureExt as _;
@@ -102,7 +103,7 @@ impl<W> FrameSink<W> {
             // Drop the half-written frame — a partial body must never reach the
             // wire behind a length prefix that promises more.
             self.pending.truncate(start);
-            return Err(Error::Codec(format!("encode envelope: {e}")));
+            return Err(Error::Log(LogError::Codec(format!("encode envelope: {e}"))));
         }
 
         append_crc32_from(&mut self.pending, body_start);
@@ -112,9 +113,9 @@ impl<W> FrameSink<W> {
         if body_len > MAX_FRAME_LEN {
             self.pending.truncate(start);
             shrink_drained(&mut self.pending);
-            return Err(Error::Codec(format!(
+            return Err(Error::Log(LogError::Codec(format!(
                 "rpc frame of {body_len} bytes exceeds the {MAX_FRAME_LEN}-byte limit"
-            )));
+            ))));
         }
         let prefix = u32::try_from(body_len).to_codec("frame length")?;
         self.pending[start..body_start].copy_from_slice(&prefix.to_be_bytes());
@@ -162,7 +163,11 @@ impl<W: AsyncWrite + Unpin + Send> FrameSink<W> {
             self.pending.clear();
             shrink_drained(&mut self.pending);
         }
-        self.write.flush().await.to_rpc("stream flush")
+        self.write
+            .flush()
+            .await
+            .to_rpc("stream flush")
+            .map_err(Into::into)
     }
 
     /// Feed one frame and flush it immediately.
@@ -205,6 +210,9 @@ impl<W: std::io::Write> FrameSink<W> {
             self.pending.clear();
             shrink_drained(&mut self.pending);
         }
-        self.write.flush().to_rpc("stream flush")
+        self.write
+            .flush()
+            .to_rpc("stream flush")
+            .map_err(Into::into)
     }
 }

@@ -35,6 +35,7 @@
 //! open rather than repairing itself by discarding; wipe and rejoin under a new
 //! `NodeId` is the operator procedure.
 
+use crate::error::LogError;
 use rocksdb_kit::ColumnFamily;
 use std::sync::{Arc, Weak};
 
@@ -144,10 +145,10 @@ fn decode_value(bytes: &[u8]) -> Option<(DataId, &[u8])> {
 }
 
 fn undecodable(key: &[u8]) -> Error {
-    Error::Storage(format!(
+    Error::Log(LogError::Storage(format!(
         "undecodable replica log key ({} bytes): {key:02x?}",
         key.len()
-    ))
+    )))
 }
 
 /// A live key whose value is missing. Unreachable through RocksDB's iterator
@@ -155,10 +156,10 @@ fn undecodable(key: &[u8]) -> Error {
 /// substituting an empty payload — would broadcast an empty `Data` to
 /// subscribers rather than fail. §20: never serve garbage silently.
 fn missing_value(key: &[u8]) -> Error {
-    Error::Storage(format!(
+    Error::Log(LogError::Storage(format!(
         "replica log key with no value ({} bytes): {key:02x?}",
         key.len()
-    ))
+    )))
 }
 
 /// A live key whose value is present but shorter than `VALUE_PREFIX_WIDTH` —
@@ -168,10 +169,10 @@ fn missing_value(key: &[u8]) -> Error {
 /// writer bug in the value encoding, which is worth telling apart when
 /// diagnosing without re-running (CLAUDE.md §5).
 fn truncated_value(key: &[u8], len: usize) -> Error {
-    Error::Storage(format!(
+    Error::Log(LogError::Storage(format!(
         "replica log value too short to hold a data_id ({len} bytes) for key ({} bytes): {key:02x?}",
         key.len()
-    ))
+    )))
 }
 
 // ── storage access ──────────────────────────────────────────────────────────
@@ -193,8 +194,11 @@ fn newest_live_entry(storage: &Storage) -> Result<Option<(LogIndex, Hlc)>, Error
         // Decode here; the borrow must not cross an `.await` or a batch commit.
         return decode_key(key).map(Some).ok_or_else(|| undecodable(key));
     }
-    it.status()
-        .map_err(|e| Error::Storage(format!("rocksdb reverse scan (replica log): {e}")))?;
+    it.status().map_err(|e| {
+        Error::Log(LogError::Storage(format!(
+            "rocksdb reverse scan (replica log): {e}"
+        )))
+    })?;
     Ok(None)
 }
 
@@ -220,8 +224,11 @@ fn purge_boundary(storage: &Storage, threshold: Hlc) -> Result<Option<LogIndex>,
         boundary = Some(LogIndex::next_after(Some(index)));
         it.next();
     }
-    it.status()
-        .map_err(|e| Error::Storage(format!("rocksdb purge-boundary scan (replica log): {e}")))?;
+    it.status().map_err(|e| {
+        Error::Log(LogError::Storage(format!(
+            "rocksdb purge-boundary scan (replica log): {e}"
+        )))
+    })?;
     Ok(boundary)
 }
 
@@ -257,8 +264,11 @@ fn for_each_entry(
         }
         it.next();
     }
-    it.status()
-        .map_err(|e| Error::Storage(format!("rocksdb scan (replica log): {e}")))
+    it.status().map_err(|e| {
+        Error::Log(LogError::Storage(format!(
+            "rocksdb scan (replica log): {e}"
+        )))
+    })
 }
 
 /// Test-only seam that widens the historic→live handover window.
@@ -413,7 +423,7 @@ impl BatchBuilder {
         let mut staged = Vec::with_capacity(self.max_batch);
         let mut completions = Vec::with_capacity(self.max_batch);
         let cap: u64 = u64::try_from(self.max_batch)
-            .map_err(|_| Error::Storage("max_batch too large".into()))?;
+            .map_err(|_| Error::Log(LogError::Storage("max_batch too large".into())))?;
         let mut batch_count: u64 = 0;
         let mut pending = Some(first);
         while batch_count < cap {
@@ -433,10 +443,10 @@ impl BatchBuilder {
                     .completion
                     .try_send((
                         pw.data.data_id,
-                        Err(Error::Codec(format!(
+                        Err(Error::Log(LogError::Codec(format!(
                             "payload of {} bytes exceeds the replica log frame cap",
                             pw.data.blob.len(),
-                        ))),
+                        )))),
                     ))
                     .is_err()
                 {
@@ -448,12 +458,12 @@ impl BatchBuilder {
                 start_index
                     .raw()
                     .checked_add(batch_count)
-                    .ok_or_else(|| Error::Storage("batch index overflow".into()))?,
+                    .ok_or_else(|| Error::Log(LogError::Storage("batch index overflow".into())))?,
             );
             let guard = pw
                 .guard
                 .take()
-                .ok_or_else(|| Error::Storage("guard already extracted".into()))?;
+                .ok_or_else(|| Error::Log(LogError::Storage("guard already extracted".into())))?;
             staged.push((index, pw.data, guard));
             completions.push(pw.completion);
             batch_count = batch_count.saturating_add(1);
@@ -502,7 +512,11 @@ impl Committer {
                         std::io::IoSlice::new(&data.blob),
                     ],
                 )
-                .map_err(|e| Error::Storage(format!("rocksdb vectored put (replica log): {e}")))?;
+                .map_err(|e| {
+                    Error::Log(LogError::Storage(format!(
+                        "rocksdb vectored put (replica log): {e}"
+                    )))
+                })?;
         }
         storage.write(batch)?; // atomic across the batch
         storage.fence()?; // durable — the §8 commit fence
@@ -661,7 +675,9 @@ impl ReplicaLogStore {
             // hears back (the HlcGuard drops with the PendingWrite here).
             let _ = pending.completion.send((
                 data_id,
-                Err(Error::Storage("replica log store shut down".into())),
+                Err(Error::Log(LogError::Storage(
+                    "replica log store shut down".into(),
+                ))),
             ));
         }
     }
@@ -734,12 +750,19 @@ impl ReplicaLogStore {
         tokio::task::spawn_blocking(move || {
             let res = cb_rx
                 .recv()
-                .map_err(|_| Error::Storage("flush task exited before committing write".into()))
+                .map_err(|_| {
+                    Error::Log(LogError::Storage(
+                        "flush task exited before committing write".into(),
+                    ))
+                })
                 .and_then(|(_, inner)| inner);
             let _ = tx.send(res);
         });
-        rx.await
-            .map_err(|_| Error::Storage("flush task exited before committing write".into()))?
+        rx.await.map_err(|_| {
+            Error::Log(LogError::Storage(
+                "flush task exited before committing write".into(),
+            ))
+        })?
     }
 
     /// Retire everything whose running-max secondary is at or below
@@ -977,14 +1000,16 @@ fn flush_one_batch_blocking(
             let postcommit_probe = metrics::replica_append_postcommit_probe();
 
             let Some((last_index, _, _)) = batch.staged.last() else {
-                return Err(Error::Storage("internal: empty staged batch".into()));
+                return Err(Error::Log(LogError::Storage(
+                    "internal: empty staged batch".into(),
+                )));
             };
             // Every staged entry is folded in `append_and_flush` (it is what the
             // key carries), so a non-empty batch always yields a running max.
             let Some(running_max) = committed_max else {
-                return Err(Error::Storage(
+                return Err(Error::Log(LogError::Storage(
                     "internal: non-empty batch produced no running max".into(),
-                ));
+                )));
             };
             store.frontier.advance(*last_index, running_max);
 
@@ -1023,7 +1048,10 @@ fn flush_one_batch_blocking(
             let msg = format!("replica log append failed: {e}");
             for (i, (_, data, _)) in batch.staged.iter().enumerate() {
                 if batch.completions[i]
-                    .try_send((data.data_id, Err(Error::Storage(msg.clone()))))
+                    .try_send((
+                        data.data_id,
+                        Err(Error::Log(LogError::Storage(msg.clone()))),
+                    ))
                     .is_err()
                 {
                     metrics::replica_outcome_dropped();
@@ -1145,8 +1173,11 @@ mod tests {
             out.push(decode_key(key).ok_or_else(|| undecodable(key))?);
             it.next();
         }
-        it.status()
-            .map_err(|e| Error::Storage(format!("rocksdb key scan (replica log): {e}")))?;
+        it.status().map_err(|e| {
+            Error::Log(LogError::Storage(format!(
+                "rocksdb key scan (replica log): {e}"
+            )))
+        })?;
         Ok(out)
     }
 
@@ -1309,7 +1340,7 @@ mod tests {
 
         let err = bad.expect_err("over-cap write must be rejected");
         assert!(
-            matches!(err, Error::Codec(ref m) if m.contains("exceeds the replica log frame cap")),
+            matches!(err, Error::Log(LogError::Codec(ref m)) if m.contains("exceeds the replica log frame cap")),
             "got: {err:?}"
         );
         let a = ok_a.expect("neighbouring write must still commit");

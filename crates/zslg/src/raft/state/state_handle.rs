@@ -9,6 +9,7 @@
 //! (a value rejection) and again pre-flight at the leader's propose site
 //! (`raft_storage::validate_replicated_state`). [`apply_replicated`] only
 //! guards the generation, which must never regress.
+use crate::error::ConsensusError;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -93,10 +94,12 @@ impl RaftStateHandle {
                     attempted_generation = ?generation,
                     "raft state generation went backwards; rejecting apply",
                 );
-                outcome = Err(crate::error::Error::StateRegression {
-                    current: prev.generation,
-                    attempted: generation,
-                });
+                outcome = Err(crate::error::Error::Consensus(
+                    ConsensusError::StateRegression {
+                        current: prev.generation,
+                        attempted: generation,
+                    },
+                ));
                 return false;
             }
             *slot = Arc::new(RaftState {
@@ -441,10 +444,10 @@ mod tests {
             .expect_err("backwards must be rejected");
         assert!(matches!(
             err,
-            crate::Error::StateRegression {
+            crate::Error::Consensus(ConsensusError::StateRegression {
                 current: RaftGeneration(5),
                 attempted: RaftGeneration(4),
-            }
+            })
         ));
         assert_eq!(s.snapshot().generation, make_gen(5), "state unchanged");
     }

@@ -10,6 +10,7 @@
 //! durable state to protect, so there is nothing to recover and no reason to
 //! persist an id.
 
+use crate::error::ConfigError;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
@@ -257,17 +258,17 @@ impl WriterNodeConfig {
     pub fn validate(&self) -> Result<(), Error> {
         self.router_config().validate()?;
         if self.peers.is_empty() {
-            return Err(Error::InvalidConfiguration(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(
                 "peers must not be empty".to_owned(),
-            ));
+            )));
         }
         // Dummy identity — validation doesn't need a real node_id, just tunings.
         self.writer_config(NodeId::new_v4()).validate()?;
         self.raft_tracker_config().validate()?;
         if self.drain_timeout.is_zero() {
-            return Err(Error::InvalidConfiguration(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(
                 "drain_timeout must be non-zero".to_owned(),
-            ));
+            )));
         }
         Ok(())
     }

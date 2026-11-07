@@ -25,6 +25,7 @@
 )]
 
 use std::net::SocketAddr;
+use zslg::ConfigError;
 
 use metrics_exporter_prometheus::PrometheusBuilder;
 use tracing_subscriber::EnvFilter;
@@ -71,10 +72,11 @@ pub fn init_tracing() -> Result<(), Error> {
     } else {
         fmt_layer.with_filter(filter).boxed()
     };
-    registry
-        .with(fmt_layer)
-        .try_init()
-        .map_err(|e| Error::Observability(format!("tracing init failed: {e}")))?;
+    registry.with(fmt_layer).try_init().map_err(|e| {
+        Error::Config(ConfigError::Observability(format!(
+            "tracing init failed: {e}"
+        )))
+    })?;
 
     install_panic_logger();
     Ok(())
@@ -115,7 +117,11 @@ pub fn init_prometheus(addr: SocketAddr) -> Result<(), Error> {
     let builder = PrometheusBuilder::new().with_http_listener(addr);
     zslg::configure_prometheus(builder)?
         .install()
-        .map_err(|e| Error::Observability(format!("prometheus exporter install failed: {e}")))?;
+        .map_err(|e| {
+            Error::Config(ConfigError::Observability(format!(
+                "prometheus exporter install failed: {e}"
+            )))
+        })?;
     zslg::describe_metrics();
     Ok(())
 }

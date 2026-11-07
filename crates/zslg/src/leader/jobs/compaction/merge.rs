@@ -29,6 +29,7 @@
 //! the manifest, which holds because a bucket, once closed, stays closed — so
 //! keys are monotone in age and cannot interleave.
 
+use crate::error::LogError;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
@@ -135,7 +136,7 @@ async fn compact_inner<'a>(
             IntentOutcome::Applied { .. } => {
                 total_merges = total_merges
                     .checked_add(1)
-                    .ok_or_else(|| Error::Storage("merge count overflow".into()))?;
+                    .ok_or_else(|| Error::Log(LogError::Storage("merge count overflow".into())))?;
             }
             // Another compaction already merged these; the object we just
             // wrote is left for `jobs::cleanup`.

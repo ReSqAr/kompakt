@@ -26,6 +26,7 @@
 //! Premises are per intent, not per batch: one rejected intent does not sink the
 //! others drained with it.
 
+use crate::error::{ConsensusError, LifecycleError};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -134,8 +135,9 @@ impl IntentSubmitter {
         self.tx
             .send(IntentRequest { intent, reply })
             .await
-            .map_err(|_| Error::Shutdown)?;
-        rx.await.map_err(|_| Error::Shutdown)?
+            .map_err(|_| Error::Lifecycle(LifecycleError::Shutdown))?;
+        rx.await
+            .map_err(|_| Error::Lifecycle(LifecycleError::Shutdown))?
     }
 }
 
@@ -237,7 +239,8 @@ impl Integrator {
                 // `EntryPayload::Normal`, written only here and serially, so a
                 // lost fence means the epoch changed — and a deposed leader
                 // re-proposing is the wrong response. The job re-derives.
-                let state = if matches!(e, Error::StaleStateWrite { .. }) {
+                let state = if matches!(e, Error::Consensus(ConsensusError::StaleStateWrite { .. }))
+                {
                     IntentState::StaleFence
                 } else {
                     IntentState::Failed
@@ -1004,7 +1007,10 @@ mod tests {
             .expect_err("a lost fence must fail the batch");
 
         assert!(
-            matches!(err, Error::StaleStateWrite { .. }),
+            matches!(
+                err,
+                Error::Consensus(ConsensusError::StaleStateWrite { .. })
+            ),
             "the submitter must see the replicator's real error: {err:?}"
         );
         assert_eq!(
@@ -1058,7 +1064,7 @@ mod tests {
                 .submit(RaftIntent::AdvanceCutoff { cutoff: Hlc(200) })
                 .await
             {
-                Err(Error::Shutdown) => break,
+                Err(Error::Lifecycle(LifecycleError::Shutdown)) => break,
                 other => {
                     assert!(
                         tokio::time::Instant::now() < deadline,

@@ -21,6 +21,7 @@ console-subscriber = { workspace = true, optional = true }
 crossbeam-channel = { workspace = true }
 crossbeam-combinators = { workspace = true, features = ["tokio"] }
 dashmap = { workspace = true }
+error-union = { workspace = true }
 framing = { workspace = true }
 futures = { workspace = true }
 metrics = { workspace = true }

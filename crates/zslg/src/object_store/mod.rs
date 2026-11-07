@@ -15,6 +15,7 @@ mod framing;
 mod snapshot_store;
 
 use crate::Error;
+use crate::error::{ConfigError, SnapshotError};
 use object_store::ObjectStore;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -80,8 +81,12 @@ impl ObjectStoreConfig {
         match self {
             Self::InMemory => Ok(Arc::new(object_store::memory::InMemory::new())),
             Self::LocalFs { root } => {
-                let store = object_store::local::LocalFileSystem::new_with_prefix(root)
-                    .map_err(|e| Error::ObjectStore(format!("local fs at {root:?}: {e}")))?;
+                let store =
+                    object_store::local::LocalFileSystem::new_with_prefix(root).map_err(|e| {
+                        Error::Snapshot(SnapshotError::ObjectStore(format!(
+                            "local fs at {root:?}: {e}"
+                        )))
+                    })?;
                 Ok(std::sync::Arc::new(store))
             }
             #[cfg(feature = "s3")]
@@ -105,7 +110,7 @@ impl ObjectStoreConfig {
                     .with_allow_http(*allow_http)
                     .with_virtual_hosted_style_request(false)
                     .build()
-                    .map_err(|e| Error::ObjectStore(format!("s3: {e}")))?;
+                    .map_err(|e| Error::Snapshot(SnapshotError::ObjectStore(format!("s3: {e}"))))?;
                 Ok(Arc::new(store))
             }
         }
@@ -142,10 +147,10 @@ impl CompressionLevel {
     /// `Err(Error::InvalidConfiguration)` above [`Self::MAX`].
     pub fn new(level: u8) -> Result<Self, Error> {
         if level > Self::MAX {
-            return Err(Error::InvalidConfiguration(format!(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(format!(
                 "compression zstd level must be 0–{}, got {level}",
                 Self::MAX
-            )));
+            ))));
         }
         Ok(Self(level))
     }

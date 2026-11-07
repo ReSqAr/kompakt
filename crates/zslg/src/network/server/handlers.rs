@@ -7,6 +7,7 @@
 //! every arm through one await so the whole match does not sum into a single
 //! poll frame and trip `large_stack_frames` (CLAUDE.md §2).
 
+use crate::error::{LifecycleError, NetError};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -62,10 +63,12 @@ impl RpcHandlers for DispatchHandler {
             }
             RpcRequest::Replica(req) => self.dispatch_replica(req, sink).boxed().await,
             RpcRequest::Raft(req) => self.dispatch_raft(*req, sink).boxed().await,
-            RpcRequest::Reserved => Err(Error::NotYetImplemented("Reserved".to_owned())),
-            RpcRequest::Stream(_) => Err(Error::Rpc(
+            RpcRequest::Reserved => Err(Error::Lifecycle(LifecycleError::NotYetImplemented(
+                "Reserved".to_owned(),
+            ))),
+            RpcRequest::Stream(_) => Err(Error::Net(NetError::Rpc(
                 "Stream handshake on unary dispatch path".to_owned(),
-            )),
+            ))),
         }
     }
 
@@ -98,10 +101,10 @@ impl DispatchHandler {
             // Writes travel only on the persistent `ReplicaWrite` stream
             // (`stream_handler::run_write`) — there is no unary write path.
             RpcReplicaRequest::Write { data } => {
-                return Err(Error::Rpc(format!(
+                return Err(Error::Net(NetError::Rpc(format!(
                     "unary write for {:?} rejected: writes must use the ReplicaWrite stream",
                     data.data_id
-                )));
+                ))));
             }
             RpcReplicaRequest::FetchStatus => {
                 let status = self.client.fetch_status().await?;

@@ -11,6 +11,7 @@
 //! A `Direct` (join-time) client is the one asymmetry: dialed before the peer's
 //! `NodeId` is known, it can carry membership and status but not writes.
 
+use crate::error::NetError;
 use std::sync::Arc;
 
 use crate::api::{
@@ -98,10 +99,10 @@ impl RaftMembership for TcpPeerClient {
                 added: false,
                 state,
             }) => Ok(AddMemberOutcome::Rejected { state }),
-            Ok(other) => Err(Error::Rpc(format!(
+            Ok(other) => Err(Error::Net(NetError::Rpc(format!(
                 "unexpected raft frame on add_member to {:?}: {other:?}",
                 self.target,
-            ))),
+            )))),
             Err(e) => Err(e),
         }
     }
@@ -129,9 +130,9 @@ impl Replica for TcpPeerClient {
             Target::Direct(addr) => {
                 // A direct-dialed peer (join-time transport, before its NodeId is
                 // known) never accepts writes: yield one terminal error.
-                Channel::once(Err(Error::Rpc(format!(
+                Channel::once(Err(Error::Net(NetError::Rpc(format!(
                     "direct-dialed peer {addr:?} does not accept writes (join-time transport)"
-                ))))
+                )))))
                 .chain(Channel::aborted("direct-dialed peer"))
             }
         }
@@ -153,10 +154,10 @@ impl Replica for TcpPeerClient {
             .await?;
         match frame {
             RpcReplicaFrame::FetchStatus { status } => Ok(status),
-            other => Err(Error::Rpc(format!(
+            other => Err(Error::Net(NetError::Rpc(format!(
                 "unexpected frame on FetchStatus from {:?}: {other:?}",
                 self.target,
-            ))),
+            )))),
         }
     }
 
@@ -184,9 +185,9 @@ impl Replica for TcpPeerClient {
                     }
                     Some(Ok(RpcFrame::Error(e))) => Some((Err(e), (fs, true))),
                     Some(Ok(other)) => Some((
-                        Err(Error::Rpc(format!(
+                        Err(Error::Net(NetError::Rpc(format!(
                             "unexpected frame in subscribe_status: {other:?}"
-                        ))),
+                        )))),
                         (fs, true),
                     )),
                     Some(Err(e)) => Some((Err(e), (fs, true))),
@@ -209,10 +210,10 @@ impl RaftTransport for TcpPeerClient {
             .await?;
         match frame {
             RpcRaftFrame::AppendEntries { response } => Ok(response),
-            other => Err(Error::Rpc(format!(
+            other => Err(Error::Net(NetError::Rpc(format!(
                 "unexpected frame on append_entries to {:?}: {other:?}",
                 self.target,
-            ))),
+            )))),
         }
     }
 
@@ -226,10 +227,10 @@ impl RaftTransport for TcpPeerClient {
             .await?;
         match frame {
             RpcRaftFrame::Vote { response } => Ok(response),
-            other => Err(Error::Rpc(format!(
+            other => Err(Error::Net(NetError::Rpc(format!(
                 "unexpected frame on vote to {:?}: {other:?}",
                 self.target,
-            ))),
+            )))),
         }
     }
 
@@ -249,10 +250,10 @@ impl RaftTransport for TcpPeerClient {
             .await?;
         match frame {
             RpcRaftFrame::InstallSnapshot { response } => Ok(response),
-            other => Err(Error::Rpc(format!(
+            other => Err(Error::Net(NetError::Rpc(format!(
                 "unexpected frame on install_snapshot to {:?}: {other:?}",
                 self.target,
-            ))),
+            )))),
         }
     }
 }

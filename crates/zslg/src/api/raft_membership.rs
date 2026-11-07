@@ -15,6 +15,7 @@
 //! [`RaftTransport`](crate::api::RaftTransport) (steady-state Raft RPCs) and
 //! [`RaftConsensus`](crate::api::RaftConsensus) (the server applying the change).
 
+use crate::error::ConsensusError;
 use crate::ids::{NodeId, PeerAddr};
 use crate::meta::RaftState;
 
@@ -57,8 +58,10 @@ impl<T: crate::api::RaftConsensus + crate::api::RaftStateView + ?Sized> RaftMemb
             Ok(()) => Ok(AddMemberOutcome::Accepted { state }),
             // Denied is the one answer no retry can improve: everything else
             // becomes Rejected, which the joiner retries elsewhere.
-            Err(crate::Error::MembershipDenied { .. }) => {
-                Err(crate::Error::MembershipDenied { node_id })
+            Err(crate::Error::Consensus(ConsensusError::MembershipDenied { .. })) => {
+                Err(crate::Error::Consensus(ConsensusError::MembershipDenied {
+                    node_id,
+                }))
             }
             Err(_) => Ok(AddMemberOutcome::Rejected { state }),
         }

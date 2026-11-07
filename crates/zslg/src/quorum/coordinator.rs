@@ -30,6 +30,7 @@
 //! [`crate::writer::WriterService`] drops, `fans` drops with the coordinator,
 //! each replica input disconnects, and the loops cascade out.
 
+use crate::error::ConsensusError;
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
@@ -333,7 +334,9 @@ impl PendingWrites {
         };
         if dead {
             if let Some((_, e)) = self.map.remove(&id) {
-                let _ = e.resp.send(Err(Error::QuorumUnreachable));
+                let _ = e
+                    .resp
+                    .send(Err(Error::Consensus(ConsensusError::QuorumUnreachable)));
             }
         } else {
             self.reap_if_abandoned(id);
@@ -489,6 +492,7 @@ fn fanout_state(outcome: &WriteOutcome) -> FanoutResponseState {
     reason = "test code"
 )]
 mod tests {
+    use crate::error::NetError;
     use crossbeam_combinators::{Finite, Infinite};
     use std::collections::BTreeMap;
     use std::sync::Arc;
@@ -546,12 +550,12 @@ mod tests {
                         },
                         Resp::Reject(s) => WriteOutcome::Rejected {
                             data_id,
-                            error: Error::Rpc("rejected".into()),
+                            error: Error::Net(NetError::Rpc("rejected".into())),
                             raft_state: s.clone(),
                         },
                         Resp::Down => WriteOutcome::Failed {
                             data_id,
-                            error: Error::Rpc("down".into()),
+                            error: Error::Net(NetError::Rpc("down".into())),
                         },
                         Resp::Silent => continue,
                     };
@@ -663,7 +667,10 @@ mod tests {
             .await
             .expect("recv")
             .expect_err("no quorum");
-        assert!(matches!(err, Error::QuorumUnreachable));
+        assert!(matches!(
+            err,
+            Error::Consensus(ConsensusError::QuorumUnreachable)
+        ));
     }
 
     #[tokio::test]
@@ -683,7 +690,10 @@ mod tests {
             .await
             .expect("recv")
             .expect_err("1 ack of 3 is not quorum");
-        assert!(matches!(err, Error::QuorumUnreachable));
+        assert!(matches!(
+            err,
+            Error::Consensus(ConsensusError::QuorumUnreachable)
+        ));
     }
 
     #[tokio::test]

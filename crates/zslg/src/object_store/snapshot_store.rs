@@ -30,6 +30,7 @@
 //! Object names are injective in the [`SnapshotId`] and never reused, since with
 //! no CAS available that is the only thing preventing an overwrite.
 
+use crate::error::{LogError, SnapshotError};
 use std::collections::BTreeSet;
 use std::io;
 use std::sync::Arc;
@@ -187,11 +188,11 @@ impl RemoteSnapshotStore {
         mut entries: Channel<Result<SnapshotEntry, Error>, crossbeam_combinators::Finite>,
         compression: CompressionLevel,
     ) -> Result<SnapshotWrite, Error> {
-        let upload = self
-            .store
-            .put_multipart(path)
-            .await
-            .map_err(|e| Error::ObjectStore(format!("put_multipart {path}: {e}")))?;
+        let upload = self.store.put_multipart(path).await.map_err(|e| {
+            Error::Snapshot(SnapshotError::ObjectStore(format!(
+                "put_multipart {path}: {e}"
+            )))
+        })?;
 
         let cancel = self.cancel.clone();
         let worker = tokio::task::spawn_blocking(move || {
@@ -205,7 +206,9 @@ impl RemoteSnapshotStore {
                 compression,
                 || {
                     if cancel.is_cancelled() {
-                        return Some(Err(Error::Storage("snapshot write cancelled".into())));
+                        return Some(Err(Error::Log(LogError::Storage(
+                            "snapshot write cancelled".into(),
+                        ))));
                     }
                     match entries.recv() {
                         Ok(item) => {
@@ -221,9 +224,9 @@ impl RemoteSnapshotStore {
                         // No declared completion, so this prefix must not be
                         // finalized as if it were the whole snapshot (§20).
                         Err(crossbeam_combinators::End::Aborted { reason }) => {
-                            Some(Err(Error::StreamTruncated {
+                            Some(Err(Error::Log(LogError::StreamTruncated {
                                 what: reason.label().to_owned(),
-                            }))
+                            })))
                         }
                     }
                 },
@@ -237,14 +240,17 @@ impl RemoteSnapshotStore {
         match encoded {
             Ok((count, uncompressed)) => {
                 let mw = mw_opt.ok_or_else(|| {
-                    Error::Storage("snapshot encode succeeded but returned no writer".into())
+                    Error::Log(LogError::Storage(
+                        "snapshot encode succeeded but returned no writer".into(),
+                    ))
                 })?;
                 // `finish(self)` consumes it, so read the count first.
                 let stored = mw.stored_bytes;
-                mw.write
-                    .finish()
-                    .await
-                    .map_err(|e| Error::ObjectStore(format!("multipart finish {path}: {e}")))?;
+                mw.write.finish().await.map_err(|e| {
+                    Error::Snapshot(SnapshotError::ObjectStore(format!(
+                        "multipart finish {path}: {e}"
+                    )))
+                })?;
                 Ok(SnapshotWrite {
                     count,
                     last,
@@ -298,11 +304,10 @@ impl SnapshotStore for RemoteSnapshotStore {
         let path = snapshot_path(id);
 
         let probe = metrics::object_store_request_probe(ObjectStoreOp::Get);
-        let result = self
-            .store
-            .get(&path)
-            .await
-            .map_err(|e| Error::ObjectStore(format!("get {path}: {e}")));
+        let result =
+            self.store.get(&path).await.map_err(|e| {
+                Error::Snapshot(SnapshotError::ObjectStore(format!("get {path}: {e}")))
+            });
         probe.finish(OpState::from_ok(result.is_ok()));
         let get_result = result?;
         let byte_len = get_result.meta.size;
@@ -324,10 +329,14 @@ impl SnapshotStore for RemoteSnapshotStore {
                     // Send first, *then* check for cancellation: the blocking send is
                     // the backpressure, and checking before it would spin.
                     if feed.send(Ok(entry)).is_err() {
-                        return Err(Error::Storage("snapshot read: consumer dropped".into()));
+                        return Err(Error::Log(LogError::Storage(
+                            "snapshot read: consumer dropped".into(),
+                        )));
                     }
                     if cancel.is_cancelled() {
-                        return Err(Error::Storage("snapshot read cancelled".into()));
+                        return Err(Error::Log(LogError::Storage(
+                            "snapshot read cancelled".into(),
+                        )));
                     }
                     Ok(())
                 });
@@ -352,7 +361,9 @@ impl SnapshotStore for RemoteSnapshotStore {
         let result = match self.store.head(&path).await {
             Ok(_) => Ok(true),
             Err(object_store::Error::NotFound { .. }) => Ok(false),
-            Err(e) => Err(Error::ObjectStore(format!("head {path}: {e}"))),
+            Err(e) => Err(Error::Snapshot(SnapshotError::ObjectStore(format!(
+                "head {path}: {e}"
+            )))),
         };
         probe.finish(OpState::from_ok(result.is_ok()));
         result
@@ -372,7 +383,7 @@ impl SnapshotStore for RemoteSnapshotStore {
             .put(&path, body.into())
             .await
             .map(|_put_result| ())
-            .map_err(|e| Error::ObjectStore(format!("put {path}: {e}")));
+            .map_err(|e| Error::Snapshot(SnapshotError::ObjectStore(format!("put {path}: {e}"))));
         let ok = result.is_ok();
         probe.finish(OpState::from_ok(ok));
         if ok {
@@ -439,7 +450,11 @@ async fn list_orphans(
     let mut orphans = Vec::new();
     let mut stream = store.list(Some(prefix));
     while let Some(item) = stream.next().await {
-        let meta = item.map_err(|e| Error::ObjectStore(format!("list under {prefix}: {e}")))?;
+        let meta = item.map_err(|e| {
+            Error::Snapshot(SnapshotError::ObjectStore(format!(
+                "list under {prefix}: {e}"
+            )))
+        })?;
         if keep.contains(&meta.location) {
             continue;
         }
@@ -591,8 +606,10 @@ mod tests {
         // writer-recovery + abort).
         let (tx, rx) = crossbeam_channel::bounded(2);
         tx.try_send(Ok(entry(0))).unwrap();
-        tx.try_send(Err(Error::Storage("injected mid-write failure".into())))
-            .unwrap();
+        tx.try_send(Err(Error::Log(LogError::Storage(
+            "injected mid-write failure".into(),
+        ))))
+        .unwrap();
         drop(tx);
 
         let result = store

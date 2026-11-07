@@ -12,6 +12,7 @@
 //! cross-module contracts that justify their values — startup is unbounded
 //! (`startup_phase_timeout`) and the client-write backstop must outlast an
 //! election (`client_write_timeout`) — see the field docs.
+use crate::error::ConfigError;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -180,43 +181,55 @@ impl RaftConfig {
 
     pub(crate) fn validate(&self) -> Result<(), crate::error::Error> {
         if self.heartbeat_interval.is_zero() {
-            return Err(crate::error::Error::InvalidConfiguration(
-                "raft_heartbeat_interval must be > 0".to_owned(),
+            return Err(crate::error::Error::Config(
+                ConfigError::InvalidConfiguration("raft_heartbeat_interval must be > 0".to_owned()),
             ));
         }
         if self.election_timeout_min.is_zero() {
-            return Err(crate::error::Error::InvalidConfiguration(
-                "raft_election_timeout_min must be > 0".to_owned(),
+            return Err(crate::error::Error::Config(
+                ConfigError::InvalidConfiguration(
+                    "raft_election_timeout_min must be > 0".to_owned(),
+                ),
             ));
         }
         if self.election_timeout_max.is_zero() {
-            return Err(crate::error::Error::InvalidConfiguration(
-                "raft_election_timeout_max must be > 0".to_owned(),
+            return Err(crate::error::Error::Config(
+                ConfigError::InvalidConfiguration(
+                    "raft_election_timeout_max must be > 0".to_owned(),
+                ),
             ));
         }
         if self.election_timeout_min >= self.election_timeout_max {
-            return Err(crate::error::Error::InvalidConfiguration(format!(
-                "raft_election_timeout_min ({:?}) must be < raft_election_timeout_max ({:?})",
-                self.election_timeout_min, self.election_timeout_max
-            )));
+            return Err(crate::error::Error::Config(
+                ConfigError::InvalidConfiguration(format!(
+                    "raft_election_timeout_min ({:?}) must be < raft_election_timeout_max ({:?})",
+                    self.election_timeout_min, self.election_timeout_max
+                )),
+            ));
         }
         if self.startup_phase_timeout.is_zero() {
-            return Err(crate::error::Error::InvalidConfiguration(
-                "raft_startup_phase_timeout must be > 0".to_owned(),
+            return Err(crate::error::Error::Config(
+                ConfigError::InvalidConfiguration(
+                    "raft_startup_phase_timeout must be > 0".to_owned(),
+                ),
             ));
         }
         // Above the election window, not merely non-zero: a write issued while
         // the cluster is electing must survive the election, or the backstop
         // fires on the one case it is not meant to catch.
         if self.client_write_timeout <= self.election_timeout_max {
-            return Err(crate::error::Error::InvalidConfiguration(format!(
-                "raft_client_write_timeout ({:?}) must be > raft_election_timeout_max ({:?})",
-                self.client_write_timeout, self.election_timeout_max
-            )));
+            return Err(crate::error::Error::Config(
+                ConfigError::InvalidConfiguration(format!(
+                    "raft_client_write_timeout ({:?}) must be > raft_election_timeout_max ({:?})",
+                    self.client_write_timeout, self.election_timeout_max
+                )),
+            ));
         }
         if self.snapshot_logs_since_last == 0 {
-            return Err(crate::error::Error::InvalidConfiguration(
-                "raft_snapshot_logs_since_last must be > 0".to_owned(),
+            return Err(crate::error::Error::Config(
+                ConfigError::InvalidConfiguration(
+                    "raft_snapshot_logs_since_last must be > 0".to_owned(),
+                ),
             ));
         }
         Ok(())
@@ -238,8 +251,11 @@ impl RaftConfig {
             max_in_snapshot_log_to_keep: self.max_in_snapshot_log_to_keep,
             ..Default::default()
         };
-        cfg.validate()
-            .map_err(|e| crate::error::Error::InvalidConfiguration(format!("raft config: {e}")))
+        cfg.validate().map_err(|e| {
+            crate::error::Error::Config(ConfigError::InvalidConfiguration(format!(
+                "raft config: {e}"
+            )))
+        })
     }
 }
 
@@ -263,21 +279,30 @@ mod config_tests {
     fn rejects_raft_heartbeat_interval_zero() {
         let mut c = ok_raft_config();
         c.heartbeat_interval = Duration::ZERO;
-        assert!(matches!(c.validate(), Err(Error::InvalidConfiguration(_))));
+        assert!(matches!(
+            c.validate(),
+            Err(Error::Config(ConfigError::InvalidConfiguration(_)))
+        ));
     }
 
     #[test]
     fn rejects_raft_election_timeout_min_zero() {
         let mut c = ok_raft_config();
         c.election_timeout_min = Duration::ZERO;
-        assert!(matches!(c.validate(), Err(Error::InvalidConfiguration(_))));
+        assert!(matches!(
+            c.validate(),
+            Err(Error::Config(ConfigError::InvalidConfiguration(_)))
+        ));
     }
 
     #[test]
     fn rejects_raft_election_timeout_max_zero() {
         let mut c = ok_raft_config();
         c.election_timeout_max = Duration::ZERO;
-        assert!(matches!(c.validate(), Err(Error::InvalidConfiguration(_))));
+        assert!(matches!(
+            c.validate(),
+            Err(Error::Config(ConfigError::InvalidConfiguration(_)))
+        ));
     }
 
     #[test]
@@ -285,7 +310,10 @@ mod config_tests {
         let mut c = ok_raft_config();
         c.election_timeout_min = Duration::from_millis(4000);
         c.election_timeout_max = Duration::from_millis(4000);
-        assert!(matches!(c.validate(), Err(Error::InvalidConfiguration(_))));
+        assert!(matches!(
+            c.validate(),
+            Err(Error::Config(ConfigError::InvalidConfiguration(_)))
+        ));
     }
 
     #[test]
@@ -301,7 +329,10 @@ mod config_tests {
     fn rejects_zero_startup_phase_timeout() {
         let mut c = ok_raft_config();
         c.startup_phase_timeout = Duration::ZERO;
-        assert!(matches!(c.validate(), Err(Error::InvalidConfiguration(_))));
+        assert!(matches!(
+            c.validate(),
+            Err(Error::Config(ConfigError::InvalidConfiguration(_)))
+        ));
     }
 
     #[test]
@@ -319,7 +350,10 @@ mod config_tests {
     fn rejects_client_write_timeout_at_or_below_the_election_window() {
         let mut c = ok_raft_config();
         c.client_write_timeout = c.election_timeout_max;
-        assert!(matches!(c.validate(), Err(Error::InvalidConfiguration(_))));
+        assert!(matches!(
+            c.validate(),
+            Err(Error::Config(ConfigError::InvalidConfiguration(_)))
+        ));
 
         c.client_write_timeout = c.election_timeout_max + Duration::from_millis(1);
         assert!(c.validate().is_ok());
@@ -329,7 +363,10 @@ mod config_tests {
     fn rejects_zero_snapshot_logs_since_last() {
         let mut c = ok_raft_config();
         c.snapshot_logs_since_last = 0;
-        assert!(matches!(c.validate(), Err(Error::InvalidConfiguration(_))));
+        assert!(matches!(
+            c.validate(),
+            Err(Error::Config(ConfigError::InvalidConfiguration(_)))
+        ));
     }
 
     #[test]

@@ -13,6 +13,7 @@
 //! check was removed: it conflated in-flight queueing latency with clock skew and
 //! collapsed throughput under load — see designdoc "Error propagation".)
 
+use crate::error::ClockError;
 use std::time::Duration;
 
 use crate::api::Clock;
@@ -37,7 +38,7 @@ async fn peer_clock_diverged_beyond_drift_limit_fails_integrate() {
         .integrate(diverged_peer)
         .expect_err("wildly diverged peer must be rejected by integrate");
     assert!(
-        matches!(err, Error::HlcDriftTooLarge { .. }),
+        matches!(err, Error::Clock(ClockError::HlcDriftTooLarge { .. })),
         "expected HlcDriftTooLarge, got {err:?}",
     );
 }

@@ -17,6 +17,7 @@
 //! Contrast [`super::Coordinator`], which does the same job for writes over
 //! long-lived streams. This one owns its tasks and ends with the operation.
 
+use crate::error::ConsensusError;
 use std::collections::BTreeSet;
 use std::future::Future;
 use std::sync::Arc;
@@ -52,7 +53,7 @@ where
     Fut: Future<Output = Result<FanOutResponse, Error>> + Send + 'static,
 {
     if initial_state.replica.current().is_empty() {
-        return Err(Error::QuorumUnreachable);
+        return Err(Error::Consensus(ConsensusError::QuorumUnreachable));
     }
 
     let op = Arc::new(op);
@@ -75,7 +76,7 @@ where
         }
 
         let Some(joined) = join_set.join_next().await else {
-            return Err(Error::QuorumUnreachable);
+            return Err(Error::Consensus(ConsensusError::QuorumUnreachable));
         };
 
         let (node_id, result) = match joined {
@@ -146,6 +147,7 @@ fn dispatch_to_new<F, Fut>(
     reason = "test code"
 )]
 mod tests {
+    use crate::error::NetError;
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::sync::Mutex;
@@ -211,7 +213,9 @@ mod tests {
                 match kind {
                     Some(ResponseKind::Ready(s)) => Ok(FanOutResponse::Ready(s)),
                     Some(ResponseKind::Failed) | None => Ok(FanOutResponse::Failed),
-                    Some(ResponseKind::Error) => Err(Error::Rpc("simulated hard error".into())),
+                    Some(ResponseKind::Error) => {
+                        Err(Error::Net(NetError::Rpc("simulated hard error".into())))
+                    }
                     Some(ResponseKind::Panic) => panic!("simulated op panic"),
                 }
             }
@@ -247,14 +251,20 @@ mod tests {
         plan.insert(nid(3), ResponseKind::Failed);
 
         let (_, _, fut) = run_with(s.clone(), plan);
-        assert!(matches!(fut.await, Err(Error::QuorumUnreachable)));
+        assert!(matches!(
+            fut.await,
+            Err(Error::Consensus(ConsensusError::QuorumUnreachable))
+        ));
     }
 
     #[tokio::test]
     async fn empty_replica_set_is_immediately_unreachable() {
         let s = state(1, &[], None);
         let (_, contacted, fut) = run_with(s.clone(), BTreeMap::new());
-        assert!(matches!(fut.await, Err(Error::QuorumUnreachable)));
+        assert!(matches!(
+            fut.await,
+            Err(Error::Consensus(ConsensusError::QuorumUnreachable))
+        ));
         assert!(contacted.lock().expect("lock").is_empty());
     }
 
@@ -298,7 +308,10 @@ mod tests {
         plan.insert(nid(5), ResponseKind::Failed);
 
         let (_, _, fut) = run_with(s.clone(), plan);
-        assert!(matches!(fut.await, Err(Error::QuorumUnreachable)));
+        assert!(matches!(
+            fut.await,
+            Err(Error::Consensus(ConsensusError::QuorumUnreachable))
+        ));
     }
 
     #[tokio::test]
@@ -368,6 +381,9 @@ mod tests {
             plan.insert(nid(n), ResponseKind::Panic);
         }
         let (_, _, fut) = run_with(s.clone(), plan);
-        assert!(matches!(fut.await, Err(Error::QuorumUnreachable)));
+        assert!(matches!(
+            fut.await,
+            Err(Error::Consensus(ConsensusError::QuorumUnreachable))
+        ));
     }
 }

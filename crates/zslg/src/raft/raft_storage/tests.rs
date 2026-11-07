@@ -25,6 +25,7 @@ where
     crate::raft::Raft::new(node_id, config, network, log_store, sm)
         .await
         .to_raft("Raft::new (test)")
+        .map_err(Into::into)
 }
 
 /// Open a [`Storage`] rooted at `dir` for a raft store on its own — the test

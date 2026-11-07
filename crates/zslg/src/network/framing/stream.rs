@@ -22,6 +22,7 @@
 //! frame can fail just that one. [`FrameStream::next_frame`] is the fail-fast
 //! default.
 
+use crate::error::{LogError, NetError};
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -145,12 +146,12 @@ impl<R> FrameStream<R> {
         };
         let prefix: [u8; LEN_PREFIX] = prefix
             .try_into()
-            .map_err(|_| Error::Codec("frame length prefix".into()))?;
+            .map_err(|_| Error::Log(LogError::Codec("frame length prefix".into())))?;
         let body_len = usize::try_from(u32::from_be_bytes(prefix)).to_codec("frame length")?;
         if body_len > MAX_FRAME_LEN {
-            return Err(Error::Codec(format!(
+            return Err(Error::Log(LogError::Codec(format!(
                 "rpc frame of {body_len} bytes exceeds the {MAX_FRAME_LEN}-byte limit"
-            )));
+            ))));
         }
         Ok(Some(body_len))
     }
@@ -233,13 +234,13 @@ impl<R: AsyncRead + Unpin + Send> FrameStream<R> {
                 // frame is a truncated stream, not a normal end.
                 Ok(0) if self.scratch.is_empty() => return None,
                 Ok(0) => {
-                    return Some(Err(Error::Rpc(format!(
+                    return Some(Err(Error::Net(NetError::Rpc(format!(
                         "stream read: eof mid-frame with {} buffered bytes",
                         self.scratch.len()
-                    ))));
+                    )))));
                 }
                 Ok(_) => {}
-                Err(e) => return Some(Err(Error::Rpc(format!("stream read: {e}")))),
+                Err(e) => return Some(Err(Error::Net(NetError::Rpc(format!("stream read: {e}"))))),
             }
         }
     }
@@ -287,15 +288,15 @@ impl<R: std::io::Read> FrameStream<R> {
                     if self.scratch.is_empty() {
                         return None;
                     }
-                    return Some(Err(Error::Rpc(format!(
+                    return Some(Err(Error::Net(NetError::Rpc(format!(
                         "stream read: eof mid-frame with {} buffered bytes",
                         self.scratch.len()
-                    ))));
+                    )))));
                 }
                 Ok(n) => self.scratch.truncate(base.saturating_add(n)),
                 Err(e) => {
                     self.scratch.truncate(base);
-                    return Some(Err(Error::Rpc(format!("stream read: {e}"))));
+                    return Some(Err(Error::Net(NetError::Rpc(format!("stream read: {e}")))));
                 }
             }
         }

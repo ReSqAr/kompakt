@@ -28,6 +28,7 @@
     reason = "test code"
 )]
 
+use crate::error::LifecycleError;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -296,7 +297,7 @@ async fn cancelling_the_shutdown_token_stops_a_node_that_never_becomes_ready() {
         .expect("the startup task must not panic")
         .expect_err("a cancelled startup cannot yield a ready node");
     assert!(
-        matches!(err, Error::StartupCancelled),
+        matches!(err, Error::Lifecycle(LifecycleError::StartupCancelled)),
         "an operator-requested stop must be distinguishable from a startup fault; got {err:?}",
     );
 }

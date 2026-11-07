@@ -12,6 +12,7 @@
 //! (CLAUDE.md §8): the row is durable — and safe to hand to a caller — only
 //! after [`Storage::fence`] returns, never before.
 
+use crate::error::LogError;
 use rocksdb_kit::Batch;
 use rocksdb_kit::ColumnFamily;
 use uuid::Uuid;
@@ -28,10 +29,11 @@ const KEY: &[u8] = b"node_id";
 pub(crate) fn load_or_create_node_id(storage: &Storage) -> Result<NodeId, Error> {
     let cf = storage.cf(NODE_ID_CF)?;
     if let Some(bytes) = storage.get_pinned(&cf, KEY).to_storage("node id read")? {
-        let raw: [u8; 16] = bytes
-            .as_ref()
-            .try_into()
-            .map_err(|_| Error::Storage("node id record corrupt: wrong length".to_owned()))?;
+        let raw: [u8; 16] = bytes.as_ref().try_into().map_err(|_| {
+            Error::Log(LogError::Storage(
+                "node id record corrupt: wrong length".to_owned(),
+            ))
+        })?;
         return Ok(NodeId(Uuid::from_bytes(raw)));
     }
 

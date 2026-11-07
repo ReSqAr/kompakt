@@ -14,6 +14,7 @@
     clippy::result_large_err,
     reason = "test code"
 )]
+use crate::error::LogError;
 use crate::test_stream::ChannelTestExt as _;
 /// Leadership churn against an in-flight snapshot (EXPERT_REVIEW Appendix
 /// B.4): a real 3-node raft cluster, a snapshot pipeline stalled between
@@ -294,7 +295,7 @@ fn spawn_snapshot(
         let build = build_snapshot(&inputs, clock.now).await?;
         let intent = build
             .commit_intent()
-            .ok_or_else(|| Error::Storage("snapshot window was empty".into()))?;
+            .ok_or_else(|| Error::Log(LogError::Storage("snapshot window was empty".into())))?;
         let (intents, _cancel) = crate::leader::Integrator::spawn_for_test(
             Arc::new(RaftNode::new(
                 raft.clone(),

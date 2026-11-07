@@ -26,6 +26,7 @@
     reason = "HLC arithmetic invariants on bounded values (physical_ms ≤ 2^48)"
 )]
 
+use crate::error::ClockError;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use parking_lot::Mutex as SyncMutex;
@@ -116,10 +117,10 @@ impl HlcClock {
                 physical_ms: pt_ms.min(HLC_MAX_PHYSICAL_MS),
                 logical: 0,
             });
-            return Err(Error::HlcDriftTooLarge {
+            return Err(Error::Clock(ClockError::HlcDriftTooLarge {
                 peer,
                 local: local_now,
-            });
+            }));
         }
 
         let mut inner = self.inner.lock();
@@ -372,7 +373,10 @@ mod tests {
             logical: 0,
         });
         let err = clock.integrate(peer).expect_err("drift must reject");
-        assert!(matches!(err, Error::HlcDriftTooLarge { .. }));
+        assert!(matches!(
+            err,
+            Error::Clock(ClockError::HlcDriftTooLarge { .. })
+        ));
         // last_hlc must not be polluted by the rejected peer.
         assert!(clock.last_hlc().parts().physical_ms < 5_000);
     }

@@ -15,6 +15,7 @@
 //! drift: bounding them turns a pile-up into backpressure instead of a tripped
 //! skew guard.
 
+use crate::error::NetError;
 use std::time::Duration;
 
 use socket2::{SockRef, TcpKeepalive};
@@ -108,10 +109,10 @@ pub(in crate::network) async fn dial(
         .await
         .map_err(|_| {
             crate::metrics::rpc_connect_failed(ConnectFailure::Timeout);
-            Error::Rpc(format!(
+            Error::Net(NetError::Rpc(format!(
                 "connect to {} timed out after {connect_timeout:?}",
                 peer_addr.addr
-            ))
+            )))
         })?
         .inspect_err(|e| {
             crate::metrics::rpc_connect_failed(ConnectFailure::classify(e));
@@ -177,7 +178,7 @@ mod tests {
         let start = std::time::Instant::now();
         let res = dial(&peer, Duration::from_secs(5), &test_opts()).await;
         assert!(
-            matches!(res, Err(Error::Rpc(_))),
+            matches!(res, Err(Error::Net(NetError::Rpc(_)))),
             "expected Rpc err: {res:?}"
         );
         // RST comes back well under the connect timeout.

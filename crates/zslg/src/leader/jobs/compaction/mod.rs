@@ -11,6 +11,7 @@
 //! group as a splice rather than a whole manifest is what lets a snapshot
 //! committed mid-merge keep its place. Bucketing is in [`merge`].
 
+use crate::error::LifecycleError;
 use std::time::Duration;
 
 use tokio::time::{MissedTickBehavior, interval};
@@ -92,7 +93,7 @@ impl CompactionJob {
                 "compaction merged snapshots"
             ),
             Ok(_) => debug!("compaction: nothing to merge"),
-            Err(Error::Shutdown) => {}
+            Err(Error::Lifecycle(LifecycleError::Shutdown)) => {}
             Err(e) => warn!(error = %e, "compaction failed; will retry next tick"),
         }
     }

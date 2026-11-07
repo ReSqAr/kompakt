@@ -31,6 +31,7 @@
 //! the connection onto dedicated blocking threads, since it is the only hot
 //! path. Subscribes stay async.
 
+use crate::error::{ConfigError, ConsensusError, NetError};
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -99,35 +100,35 @@ pub(crate) struct RpcClientConfig {
 impl RpcClientConfig {
     pub(crate) fn validate(&self) -> Result<(), Error> {
         if self.tcp_keepalive_retries == 0 {
-            return Err(Error::InvalidConfiguration(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(
                 "tcp_keepalive_retries must be >= 1".to_owned(),
-            ));
+            )));
         }
         if self.max_unary_conns_per_peer == 0 {
-            return Err(Error::InvalidConfiguration(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(
                 "max_unary_connections_per_peer must be >= 1".to_owned(),
-            ));
+            )));
         }
         if self.max_idle_unary_conns_per_peer == 0 {
-            return Err(Error::InvalidConfiguration(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(
                 "max_idle_unary_connections_per_peer must be >= 1".to_owned(),
-            ));
+            )));
         }
         if self.socket_buffer_size.as_u64() == 0 {
-            return Err(Error::InvalidConfiguration(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(
                 "socket_buffer_size must be > 0".to_owned(),
-            ));
+            )));
         }
         if self.connect_timeout > self.unary_timeout {
-            return Err(Error::InvalidConfiguration(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(
                 "connect_timeout must be <= unary_timeout".to_owned(),
-            ));
+            )));
         }
         #[cfg(target_os = "linux")]
         if self.tcp_user_timeout <= self.tcp_keepalive_interval {
-            return Err(Error::InvalidConfiguration(
+            return Err(Error::Config(ConfigError::InvalidConfiguration(
                 "tcp_user_timeout must be > tcp_keepalive_interval".to_owned(),
-            ));
+            )));
         }
         Ok(())
     }
@@ -155,7 +156,7 @@ impl AddrBook {
                     .addrs
                     .get(peer)
                     .map(|e| e.clone())
-                    .ok_or(Error::UnknownPeer(*peer))?;
+                    .ok_or(Error::Consensus(ConsensusError::UnknownPeer(*peer)))?;
                 Ok((addr, Some(*peer)))
             }
             Target::Direct(addr) => Ok((addr.clone(), None)),
@@ -206,7 +207,9 @@ impl UnaryConn {
         match self.stream.next_frame::<RpcFrame>().await {
             Some(Ok(frame)) => Ok(frame),
             Some(Err(e)) => Err(e),
-            None => Err(Error::Rpc("stream closed without response".into())),
+            None => Err(Error::Net(NetError::Rpc(
+                "stream closed without response".into(),
+            ))),
         }
     }
 }
@@ -287,7 +290,7 @@ impl UnaryPoolStore {
             .permits
             .acquire()
             .await
-            .map_err(|_| Error::Rpc("unary pool closed".into()))?;
+            .map_err(|_| Error::Net(NetError::Rpc("unary pool closed".into())))?;
 
         let frame = self
             .exchange_with_retry(&pool, &addr, expected, request)
@@ -481,7 +484,7 @@ impl RpcClient {
             self.rpc.send_unary(addr, expected, request),
         )
         .await
-        .map_err(|_| Error::Rpc(format!("unary rpc to {target:?} timed out")))?
+        .map_err(|_| Error::Net(NetError::Rpc(format!("unary rpc to {target:?} timed out"))))?
     }
 
     /// Send one replica request and receive the response as `RpcReplicaFrame`.
@@ -496,9 +499,9 @@ impl RpcClient {
         {
             RpcFrame::Replica(frame) => Ok(frame),
             RpcFrame::Error(e) => Err(e),
-            other => Err(Error::Rpc(format!(
+            other => Err(Error::Net(NetError::Rpc(format!(
                 "unexpected frame in replica response from {target:?}: {other:?}"
-            ))),
+            )))),
         }
     }
 
@@ -515,9 +518,9 @@ impl RpcClient {
         {
             RpcFrame::Raft(frame) => Ok(frame),
             RpcFrame::Error(e) => Err(e),
-            other => Err(Error::Rpc(format!(
+            other => Err(Error::Net(NetError::Rpc(format!(
                 "unexpected frame in raft response from {target:?}: {other:?}"
-            ))),
+            )))),
         }
     }
 
@@ -529,7 +532,9 @@ impl RpcClient {
         {
             RpcFrame::Echo => Ok(()),
             RpcFrame::Error(e) => Err(e),
-            other => Err(Error::Rpc(format!("echo: unexpected frame {other:?}"))),
+            other => Err(Error::Net(NetError::Rpc(format!(
+                "echo: unexpected frame {other:?}"
+            )))),
         }
     }
 
@@ -643,24 +648,36 @@ mod tests {
     fn rejects_zero_keepalive_retries() {
         let mut c = ok_client_config();
         c.tcp_keepalive_retries = 0;
-        assert!(matches!(c.validate(), Err(Error::InvalidConfiguration(_))));
+        assert!(matches!(
+            c.validate(),
+            Err(Error::Config(ConfigError::InvalidConfiguration(_)))
+        ));
     }
 
     #[test]
     fn rejects_connect_timeout_above_unary_timeout() {
         let mut c = ok_client_config();
         c.connect_timeout = Duration::from_secs(11);
-        assert!(matches!(c.validate(), Err(Error::InvalidConfiguration(_))));
+        assert!(matches!(
+            c.validate(),
+            Err(Error::Config(ConfigError::InvalidConfiguration(_)))
+        ));
     }
 
     #[test]
     fn rejects_zero_unary_connection_caps() {
         let mut c = ok_client_config();
         c.max_unary_conns_per_peer = 0;
-        assert!(matches!(c.validate(), Err(Error::InvalidConfiguration(_))));
+        assert!(matches!(
+            c.validate(),
+            Err(Error::Config(ConfigError::InvalidConfiguration(_)))
+        ));
         let mut c = ok_client_config();
         c.max_idle_unary_conns_per_peer = 0;
-        assert!(matches!(c.validate(), Err(Error::InvalidConfiguration(_))));
+        assert!(matches!(
+            c.validate(),
+            Err(Error::Config(ConfigError::InvalidConfiguration(_)))
+        ));
     }
 
     /// F-29: a peer whose handler is wedged (connection alive, request read, no
