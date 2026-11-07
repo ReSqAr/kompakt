@@ -70,7 +70,6 @@ pub(crate) const METRIC_PREFIX: &str = "zslg_";
 // ---------------------------------------------------------------------------
 
 const LABEL_STEP: &str = "step";
-const LABEL_REASON: &str = "reason";
 const LABEL_OUTCOME: &str = "outcome";
 const LABEL_PEER_ID: &str = "peer_id";
 /// Peer identity (`NodeId::to_string()`). High-cardinality but bounded by cluster
@@ -95,7 +94,6 @@ const LABEL_CF: &str = "cf";
 const ALL_LABEL_KEYS: &[&str] = &[
     LABEL_STATE,
     LABEL_STEP,
-    LABEL_REASON,
     LABEL_OUTCOME,
     LABEL_PEER_ID,
     LABEL_NODE_ID,
@@ -279,20 +277,6 @@ pub(crate) fn writer_inflight_permits_set(held: usize) {
 // ── write path (replica side) + HLC cutoff ──────────────────────────────────
 
 metrics!("zslg_", write_path_replica; {
-    labeled_counter replica_write_request REPLICA_WRITE_REQUESTS_TOTAL
-        "replica_write_requests_total"
-        "Replica-side write requests by outcome. fail_hlc_cutoff spikes are \
-         expected briefly after snapshot cutoffs. (Wall-clock skew is \
-         enforced at ingress as hlc_drift_too_large on the fresh per-RPC \
-         HLC, not here.)"
-        (state: ReplicaWriteState) [LABEL_STATE => state.as_str()];
-    hist_duration server_dispatch_wait SERVER_DISPATCH_WAIT_SECONDS
-        "server_dispatch_wait_seconds"
-        "Time a replicated write sat in the follower's server -> raft-append \
-         dispatch channel (frame received -> the raft submit picks it up). \
-         Directly timestamped on the queued object; grows under follower \
-         backpressure."
-        (elapsed: Duration);
 });
 
 // ── write path (replica side) + HLC cutoff: hand-written emission helpers ───
@@ -317,15 +301,6 @@ metrics!("zslg_", logs; {
 // shedding behaviour.
 
 metrics!("zslg_", subscription; {
-    gauge   subscription_catchup_backlog LOG_SUBSCRIPTION_CATCHUP_BACKLOG_ENTRIES
-        "log_subscription_catchup_backlog_entries" Count
-        "Entries a subscriber had to replay at its most recent connect \
-         (serving replica side): the replica's frontier minus the \
-         subscriber's resume cursor. Rising across successive connects \
-         means the deficit is diverging — shedding is no longer just \
-         protecting the node, it is preventing catch-up. Flat or falling \
-         means shedding is working as intended."
-        (entries: u64);
 });
 
 // ── subscription load shedding: hand-written emission helpers ───────────────
@@ -461,62 +436,6 @@ etc.)."] WriteRpcOutcome {
 // `log_index_frontier{log_type}`. Engine-level behavior is on the storage_* series.
 
 metrics!("zslg_", storage; {
-    hist_duration replica_log_commit_elapsed REPLICA_LOG_COMMIT_SECONDS
-        "replica_log_commit_seconds"
-        "Segment-WAL append + fsync latency per replica-log flush batch \
-         (the engine's own durability fence). High values point at the \
-         disk, not at compaction."
-        (elapsed: Duration);
-    probe replica_log_flush_cycle REPLICA_LOG_FLUSH_CYCLE_SECONDS
-        "replica_log_flush_cycle_seconds"
-        "Total time of one flush_one_batch_blocking body — batch build + \
-         append/fsync + fanout + completions. The flush thread's serial \
-         per-batch cost; the write-path serialization suspect."
-        ;
-    probe replica_log_batch_build REPLICA_LOG_BATCH_BUILD_SECONDS
-        "replica_log_batch_build_seconds"
-        "Time to drain + encode one batch (BatchBuilder::build). The phase \
-         of the flush cycle no metric covered before."
-        ;
-    hist_duration replica_append_queue_wait REPLICA_APPEND_QUEUE_WAIT_SECONDS
-        "replica_append_queue_wait_seconds"
-        "Time a write waited in the mpsc channel from append() enqueue to \
-         flush-loop dequeue (the batching wait). The non-storage part of \
-         replica_log_append_duration_seconds."
-        (elapsed: Duration);
-    hist    replica_log_flush_bytes REPLICA_LOG_FLUSH_BYTES
-        "replica_log_flush_bytes" Bytes
-        "Payload bytes per replica-log flush (one engine append batch). \
-         _sum is byte throughput, _count the number of flushes."
-        (bytes: usize);
-    hist    replica_log_flush_entries REPLICA_LOG_FLUSH_ENTRIES
-        "replica_log_flush_entries" Count
-        "Entries batched into one replica-log flush. Distribution near 1 \
-         under load = batching starvation; near the cap = healthy batching."
-        (count: usize);
-    labeled_counter replica_log_flush_trigger REPLICA_LOG_FLUSH_TRIGGER_TOTAL
-        "replica_log_flush_trigger_total"
-        "Replica-log flushes by trigger reason (batch_full vs idle). A high \
-         idle share under load = the writer is starving the batch."
-        (reason: FlushTrigger) [LABEL_REASON => reason.as_str()];
-    gauge_usize replica_log_queue_depth REPLICA_LOG_QUEUE_DEPTH
-        "replica_log_queue_depth" Count
-        "Pending writes queued to the replica-log flush loop. Sustained \
-         growth = the flush loop cannot keep up (durability backpressure)."
-        (depth: usize);
-    custom  replica_log_flushed REPLICA_LOG_LAST_FLUSH_TIMESTAMP_SECONDS
-        "replica_log_last_flush_timestamp_seconds" Gauge Seconds
-        "Unix timestamp of the last replica-log flush. Grafana shows \
-         'time since last flush' as time() minus this; a stall = stuck writer.";
-    counter replica_outcome_dropped REPLICA_OUTCOME_DROPPED_TOTAL
-        "replica_outcome_dropped_total"
-        "Write outcomes the flush loop could not hand back because the \
-         connection's outcome channel was full. The write IS durable — \
-         the writer resends it on reconnect and the downstream dedups by \
-         data_id — so this costs a resend, never correctness. Non-zero \
-         means a connection's consumer stalled a full in-flight window \
-         deep, or its outcome channel is sized below the client's \
-         in-flight cap.";
     // RocksDB engine-state gauges. Per-CF: a node has one DB, so `cf`
     // (Subsystem::cf_name()) is the only axis that distinguishes one
     // memtable/SST/compaction reading from another.
@@ -565,10 +484,6 @@ metrics!("zslg_", storage; {
 
 // ── storage write paths: hand-written emission helpers ───────────────────────
 // (custom rows above; each fn below emits the metrics named in its row)
-
-pub(crate) fn replica_log_flushed() {
-    set_gauge(REPLICA_LOG_LAST_FLUSH_TIMESTAMP_SECONDS, unix_now_secs());
-}
 
 /// `rocksdb.num-immutable-mem-table` for one column family.
 pub(crate) fn storage_num_immutable_memtable(cf: &'static str, value: u64) {
@@ -630,13 +545,6 @@ label_enum!(#[doc = "`job` label of the `leader_job_*` metrics — one value per
     Integrator => "integrator",
 });
 
-label_enum!(#[doc = "`state` label of [`REPLICA_WRITE_REQUESTS_TOTAL`]."] ReplicaWriteState {
-    Success => "success",
-    FailHlcCutoff => "fail_hlc_cutoff",
-    FailNotReplica => "fail_not_replica",
-    FailStorage => "fail_storage",
-});
-
 label_enum!(#[doc = "`state` label of [`SNAPSHOT_CREATION_TOTAL`]."] SnapshotState {
     Success => "success",
     /// The (watermark, cutoff] window was empty — nothing to snapshot.
@@ -659,13 +567,6 @@ label_enum!(#[doc = "`step` label of [`SNAPSHOT_CREATION_DURATION_SECONDS`]."] S
     WriteObject => "write_object",
     Commit => "commit",
     Total => "total",
-});
-
-label_enum!(#[doc = "`reason` label of the per-store flush-trigger counters: why a flush ran."] FlushTrigger {
-    /// The pending batch reached the max batch size.
-    BatchFull => "batch_full",
-    /// The flush ran because the channel went idle (fewer than a full batch).
-    Idle => "idle",
 });
 
 // ---------------------------------------------------------------------------
@@ -822,17 +723,9 @@ pub(crate) fn jemalloc_stats(s: &JemallocStats) {
 // (`object_store_request_probe`, `rpc_conn_reuse`) are hand-written below.
 
 metrics!("zslg_", probes; {
-    probe_unlabeled replica_append_postcommit_probe REPLICA_APPEND_POSTCOMMIT_SECONDS
-        "replica_append_postcommit_seconds"
-        "Post-fsync work per replica-log flush: frontier update, broadcast, \
-         oneshot ACKs, guard drop.";
     probe   write_duration_probe WRITE_DURATION_SECONDS "write_duration_seconds"
         "End-to-end client write latency: fan-out start to quorum \
          resolution. Count per state doubles as the writes counter.";
-    probe   replica_log_append_probe REPLICA_LOG_APPEND_DURATION_SECONDS
-        "replica_log_append_duration_seconds"
-        "ReplicaLogStore::append latency by outcome (enqueue to durable + \
-         broadcast). _count doubles as the append throughput.";
 });
 
 // ── probes: hand-written emission helpers ──────────────────────────────────
@@ -843,6 +736,9 @@ metrics!("zslg_", probes; {
 // ---------------------------------------------------------------------------
 
 const ALL_METRICS: &[&[MetricDef]] = &[
+    // --- replica log and service (zslg-replica-log, zslg-replica-service) ---
+    zslg_replica_log::metrics::METRICS,
+    zslg_replica_service::metrics::METRICS,
     // --- reader (zslg-reader) ---
     zslg_reader::metrics::METRICS,
     // --- replication subscriber (zslg-subscriber) ---

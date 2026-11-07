@@ -412,3 +412,8 @@ impl<T: HasHlc, E> crossbeam_combinators::Key<Result<T, E>> for Hlc {
         item.as_ref().ok().and_then(HasHlc::hlc)
     }
 }
+
+/// What admits a write: held until the write is durable, then dropped to release
+/// the admission. Opaque on purpose — the gate that issues it and the log that
+/// holds it need not know each other's types.
+pub type Admission = Box<dyn std::any::Any + Send>;

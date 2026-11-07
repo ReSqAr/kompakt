@@ -4508,6 +4508,8 @@ dependencies = [
  "zslg-raft-storage",
  "zslg-raft-tracker",
  "zslg-reader",
+ "zslg-replica-log",
+ "zslg-replica-service",
  "zslg-snapshot",
  "zslg-snapshot-types",
  "zslg-stable-archive",
@@ -4632,6 +4634,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "crossbeam-channel",
  "crossbeam-combinators",
  "error-union",
  "futures",
@@ -5042,6 +5045,58 @@ dependencies = [
  "tracing",
  "zslg-consensus",
  "zslg-consensus-fake",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-quorum-read",
+ "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-replica-log"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "bytesize",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "error-union",
+ "metrics-kit",
+ "parking_lot 0.13.0",
+ "proptest",
+ "rocksdb-kit",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-log-fake",
+ "zslg-net",
+ "zslg-quorum-read",
+ "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-replica-service"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "error-union",
+ "futures",
+ "metrics-kit",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "warn-throttle",
+ "zslg-consensus",
  "zslg-lifecycle-types",
  "zslg-log",
  "zslg-net",

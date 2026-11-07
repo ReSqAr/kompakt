@@ -609,7 +609,7 @@ pub(crate) struct ReplicaServiceHarness {
     /// drive cutoff advances (and so the watch isn't closed from the start).
     pub(crate) cutoff_tx: tokio::sync::watch::Sender<Option<zslg_time_types::Hlc>>,
     _dir: tempfile::TempDir,
-    _flush: tokio::task::JoinHandle<Result<(), Error>>,
+    _flush: tokio::task::JoinHandle<Result<(), zslg_replica_log::Error>>,
 }
 
 impl ReplicaServiceHarness {
@@ -638,7 +638,7 @@ impl ReplicaServiceHarness {
             )))
         })?;
         let (store, flush) = ReplicaLogStore::open_with_flush(
-            dir.path().join("replica-log"),
+            crate::database::open_for_test(&dir.path().join("replica-log"))?,
             tokio_util::sync::CancellationToken::new(),
         )
         .await?;

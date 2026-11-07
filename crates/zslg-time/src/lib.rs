@@ -9,11 +9,13 @@ use zslg_net_types::NetError;
 use zslg_snapshot_types::SnapshotError;
 
 mod clock;
+mod write_gate;
 
 pub use clock::Clock;
+pub use write_gate::WriteGate;
 pub use zslg_time_types::{
-    ClockError, CutoffError, HLC_MAX_PHYSICAL_MS, HasHlc, Hlc, HlcParts, duration_as_ms_clamped,
-    hlc_subtract,
+    Admission, ClockError, CutoffError, HLC_MAX_PHYSICAL_MS, HasHlc, Hlc, HlcParts,
+    duration_as_ms_clamped, hlc_subtract,
 };
 
 error_union! {

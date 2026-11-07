@@ -13,6 +13,7 @@ mod local_store_mut;
 mod local_store_view;
 mod reader;
 mod replica;
+mod replica_log;
 mod stable_archive;
 mod stable_log;
 mod writer;
@@ -21,6 +22,7 @@ pub use local_store_mut::LocalStoreMut;
 pub use local_store_view::{LocalStoreStream, LocalStoreView};
 pub use reader::{Reader, StableStream};
 pub use replica::{Replica, ReplicaStream, StampedWrite, WriteOutcome};
+pub use replica_log::{Completion, ReplicaLog};
 pub use stable_archive::{ArchiveBounds, ArchiveStream, ArchiveUpperBound, StableArchiveReader};
 pub use stable_log::StableLogSnapshot;
 pub use writer::Writer;
@@ -29,6 +31,7 @@ pub use zslg_log_types::{
     Data, DataId, LogError, LogIndex, SnapshotEntry, StableLogEvent, ToCodec, ToStorage,
     UnstableEvent,
 };
+pub use zslg_time_types::Admission;
 
 error_union! {
     /// What the ports of this crate can fail with. Holds every leaf error for

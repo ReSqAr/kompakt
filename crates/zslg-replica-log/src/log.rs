@@ -37,24 +37,25 @@
 
 use rocksdb_kit::ColumnFamily;
 use std::sync::{Arc, Weak};
-use zslg_log_types::LogError;
+use zslg_log::LogError;
 
 use rocksdb_kit::Batch as RocksBatch;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
-use crate::error::Error;
-use crate::metrics::{self, FlushTrigger, OpState};
+use crate::Error;
+use crate::metrics::{self, FlushTrigger};
 use crossbeam_combinators::{
     Channel, Fanout, FanoutConfig, OverflowPolicy, Registry, Seam, Segment, broadcast,
 };
+use metrics_kit::OpState;
 use rocksdb_kit::Storage;
-use zslg_hlc_gate::HlcGuard;
+use zslg_log::Data;
 use zslg_log::ToStorage;
 use zslg_log::metrics::LogType;
-use zslg_log_types::Data;
-use zslg_log_types::{DataId, LogIndex};
-use zslg_time_types::Hlc;
+use zslg_log::{Admission, Completion, ReplicaLog};
+use zslg_log::{DataId, LogIndex};
+use zslg_time::Hlc;
 
 /// Fallback sizing for [`ReplicaLogStore::open_with_flush`], the
 /// directory-shaped entry point used by the test constructors. Production goes
@@ -62,11 +63,11 @@ use zslg_time_types::Hlc;
 /// values from `ReplicaLogConfig`. Kept in step with `ReplicaLogConfig::for_test`
 /// by `open_engine_defaults_match_the_config_defaults`.
 /// This replica's dense local log.
-pub(crate) const REPLICA_LOG_CF: ColumnFamily = ColumnFamily::new("replica_log");
+pub const REPLICA_LOG_CF: ColumnFamily = ColumnFamily::new("replica_log");
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 const DEFAULT_SUBSCRIBE_CHANNEL_CAPACITY: usize = 1024;
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 const DEFAULT_MAX_FLUSH_BATCH: usize = 1024;
 
 /// Headroom for the non-payload part of a record (the 16-byte key, the value's
@@ -78,8 +79,6 @@ const FRAME_OVERHEAD_SLACK: u64 = 1024;
 /// Per-record payload cap. RocksDB has no frame cap of its own, so the limit is
 /// stated here.
 const MAX_PAYLOAD_BYTES: u64 = 64 * 1024 * 1024;
-
-type Completion = Arc<crossbeam_channel::Sender<(DataId, Result<LogIndex, Error>)>>;
 
 // ── key codec ───────────────────────────────────────────────────────────────
 //
@@ -294,7 +293,7 @@ fn subscribe_handoff_pause() {
     }
 }
 
-pub(in crate::replica) struct PendingWrite {
+pub struct PendingWrite {
     data: Data,
     /// Where to send the assigned `LogIndex` (or storage error) after the batch is
     /// durable. An `Arc<Sender>` instead of a per-write `Box<dyn FnOnce>` — the
@@ -303,7 +302,7 @@ pub(in crate::replica) struct PendingWrite {
     /// Mapping to `WriteOutcome` happens upstream, at the caller's consumer.
     /// The `data_id` the caller needs to build a `WriteOutcome` downstream.
     completion: Completion,
-    guard: Option<HlcGuard>,
+    guard: Option<Admission>,
     /// When `submit()` enqueued this write — used to measure the channel batching
     /// wait (enqueue → flush-loop dequeue).
     enqueued_at: std::time::Instant,
@@ -383,7 +382,7 @@ struct Batch {
     /// The accepted writes, in assigned-index order. This **is** the batch: the
     /// `WriteBatch` is built straight off it at commit time, so there is no
     /// second copy of the records and no second ordering to keep in step.
-    staged: Vec<(LogIndex, Data, HlcGuard)>,
+    staged: Vec<(LogIndex, Data, Admission)>,
     completions: Vec<Completion>,
 }
 
@@ -446,7 +445,7 @@ impl BatchBuilder {
                     .completion
                     .try_send((
                         pw.data.data_id,
-                        Err(Error::Log(LogError::Codec(format!(
+                        Err(zslg_log::Error::Log(LogError::Codec(format!(
                             "payload of {} bytes exceeds the replica log frame cap",
                             pw.data.blob.len(),
                         )))),
@@ -491,7 +490,7 @@ impl Committer {
     /// written INTO each key — see the key-codec comment.
     fn append_and_flush(
         storage: &Storage,
-        staged: &[(LogIndex, Data, HlcGuard)],
+        staged: &[(LogIndex, Data, Admission)],
         start_max: Option<Hlc>,
     ) -> Result<Option<Hlc>, Error> {
         let cf = storage.cf(REPLICA_LOG_CF)?;
@@ -530,7 +529,7 @@ impl Committer {
 /// The replica's append-only log. The single writer task (`flush_loop`) holds
 /// a `Weak<ReplicaLogStore>` and upgrades only while committing a batch, so
 /// dropping the last strong handle frees the store promptly.
-pub(crate) struct ReplicaLogStore {
+pub struct ReplicaLogStore {
     storage: Arc<Storage>,
     frontier: Frontier,
     batch_builder: BatchBuilder,
@@ -541,7 +540,7 @@ pub(crate) struct ReplicaLogStore {
     /// from blocking threads and never `.await`s the enqueue.
     write_tx: crossbeam_channel::Sender<PendingWrite>,
     /// Live-tail depth handed to each subscriber. See
-    /// [`ReplicaLogConfig::subscribe_channel_capacity`](crate::replica::ReplicaLogConfig::subscribe_channel_capacity)
+    /// [`ReplicaLogConfig::subscribe_channel_capacity`](crate::ReplicaLogConfig::subscribe_channel_capacity)
     /// — it must stay >= `max_flush_batch` or one batch sheds every
     /// subscriber, which `ReplicaLogConfig::validate` enforces.
     subscribe_channel_capacity: usize,
@@ -550,10 +549,10 @@ pub(crate) struct ReplicaLogStore {
 }
 
 impl ReplicaLogStore {
-    pub(in crate::replica) async fn open(
+    pub async fn open(
         storage: Arc<Storage>,
         write_tx: crossbeam_channel::Sender<PendingWrite>,
-        config: &crate::replica::ReplicaLogConfig,
+        config: &crate::ReplicaLogConfig,
     ) -> Result<Self, Error> {
         Self::open_sized(
             storage,
@@ -615,21 +614,19 @@ impl ReplicaLogStore {
         })
     }
 
-    /// Open the store (as an `Arc`, so the flush loop can hold a `Weak`) and
-    /// spawn the flush-loop background task. A [`Storage`] of this store's own
-    /// is opened at `dir` rather than injected, so every test constructor keeps
-    /// the directory-shaped signature it had.
-    #[cfg(test)]
-    pub(crate) async fn open_with_flush(
-        dir: std::path::PathBuf,
+    /// Open the store (as an `Arc`, so the flush loop can hold a `Weak`) on
+    /// `storage` and spawn the flush-loop background task. For harnesses that
+    /// run a store without the node's `Shutdown`.
+    #[cfg(any(test, feature = "testing"))]
+    pub async fn open_with_flush(
+        storage: Arc<Storage>,
         cancel: CancellationToken,
     ) -> Result<(Arc<Self>, tokio::task::JoinHandle<Result<(), Error>>), Error> {
         let (write_tx, write_rx) = crossbeam_channel::bounded(
-            crate::replica::ReplicaLogConfig::for_test(zslg_node_types::NodeId::new_v4())
+            crate::ReplicaLogConfig::for_test(zslg_consensus::NodeId::new_v4())
                 .write_channel_capacity
                 .get(),
         );
-        let storage = crate::database::open_for_test(&dir)?;
         let store = Arc::new(
             Self::open_sized(
                 storage,
@@ -642,61 +639,6 @@ impl ReplicaLogStore {
         let weak = Arc::downgrade(&store);
         let handle = tokio::spawn(flush_loop(weak, write_rx, cancel));
         Ok((store, handle))
-    }
-
-    #[must_use]
-    pub(in crate::replica) fn frontier(&self) -> Option<LogIndex> {
-        self.frontier.index()
-    }
-
-    /// Upper bound on the HLC of every entry in this log — the membership drain
-    /// bound (see `ReplicaStatus::max_hlc`). Updated before a write is
-    /// acknowledged, so any HLC a writer has seen acked is included.
-    #[must_use]
-    pub(in crate::replica) fn max_hlc(&self) -> Option<Hlc> {
-        self.frontier.max_hlc()
-    }
-
-    /// Submit a write into the flush loop **synchronously** (no `.await`): enqueue
-    /// the record + its `HlcGuard` + the sender to route the result to, and return.
-    /// The flush loop sends the assigned `LogIndex` (or a storage error) to
-    /// `completion` after the batch is durable + broadcast. Blocks only on channel
-    /// backpressure (bounded, cap `ReplicaLogConfig::write_channel_capacity`);
-    /// safe to call from
-    /// any thread (a sync channel, not tokio). If the store has shut down, the
-    /// error is sent inline to `completion`.
-    pub(in crate::replica) fn submit(&self, record: Data, guard: HlcGuard, completion: Completion) {
-        let data_id = record.data_id;
-        let pending = PendingWrite {
-            data: record,
-            completion,
-            guard: Some(guard),
-            enqueued_at: std::time::Instant::now(),
-        };
-        if let Err(crossbeam_channel::SendError(pending)) = self.write_tx.send(pending) {
-            // Shutdown: the flush loop is gone. Resolve inline so the caller still
-            // hears back (the HlcGuard drops with the PendingWrite here).
-            let _ = pending.completion.send((
-                data_id,
-                Err(Error::Log(LogError::Storage(
-                    "replica log store shut down".into(),
-                ))),
-            ));
-        }
-    }
-
-    pub(in crate::replica) fn subscribe_from(
-        self: &Arc<Self>,
-        from: Option<LogIndex>,
-    ) -> zslg_log::ReplicaStream {
-        let seam = ReplicaSeam {
-            log: Arc::clone(self),
-            from,
-        };
-        (Segment::open(&seam)
-            .chain()
-            .ordered(from, "replica subscription"))
-        .err_into()
     }
 
     /// An empty historic phase: complete by construction — the window *was*
@@ -740,11 +682,7 @@ impl ReplicaLogStore {
     /// Test-only async wrapper around [`submit`](Self::submit) that awaits the
     /// assigned `LogIndex` — keeps the existing `log.rs` unit tests unchanged.
     #[cfg(test)]
-    pub(in crate::replica) async fn append(
-        &self,
-        record: Data,
-        guard: HlcGuard,
-    ) -> Result<LogIndex, Error> {
+    pub async fn append(&self, record: Data, guard: Admission) -> Result<LogIndex, Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         // Bridge: use a crossbeam pair to get the result from the flush-loop thread
         // into the test. A plain crossbeam `recv()` would block the test's tokio
@@ -759,7 +697,7 @@ impl ReplicaLogStore {
                         "flush task exited before committing write".into(),
                     ))
                 })
-                .and_then(|(_, inner)| inner);
+                .and_then(|(_, inner)| inner.map_err(Error::from));
             let _ = tx.send(res);
         });
         rx.await.map_err(|_| {
@@ -767,6 +705,52 @@ impl ReplicaLogStore {
                 "flush task exited before committing write".into(),
             ))
         })?
+    }
+}
+
+impl ReplicaLog for ReplicaLogStore {
+    fn frontier(&self) -> Option<LogIndex> {
+        self.frontier.index()
+    }
+
+    fn max_hlc(&self) -> Option<Hlc> {
+        self.frontier.max_hlc()
+    }
+
+    /// Submit a write into the flush loop **synchronously** (no `.await`): enqueue
+    /// the record + its `HlcGuard` + the sender to route the result to, and return.
+    /// The flush loop sends the assigned `LogIndex` (or a storage error) to
+    /// `completion` after the batch is durable + broadcast. Blocks only on channel
+    /// backpressure (bounded, cap `ReplicaLogConfig::write_channel_capacity`);
+    /// safe to call from
+    /// any thread (a sync channel, not tokio). If the store has shut down, the
+    /// error is sent inline to `completion`.
+    fn submit(&self, record: Data, admission: Admission, completion: Completion) {
+        let data_id = record.data_id;
+        let pending = PendingWrite {
+            data: record,
+            completion,
+            guard: Some(admission),
+            enqueued_at: std::time::Instant::now(),
+        };
+        if let Err(crossbeam_channel::SendError(pending)) = self.write_tx.send(pending) {
+            // Shutdown: the flush loop is gone. Resolve inline so the caller still
+            // hears back (the HlcGuard drops with the PendingWrite here).
+            let _ = pending.completion.send((
+                data_id,
+                Err(zslg_log::Error::Log(LogError::Storage(
+                    "replica log store shut down".into(),
+                ))),
+            ));
+        }
+    }
+
+    fn subscribe_from(self: Arc<Self>, from: Option<LogIndex>) -> zslg_log::ReplicaStream {
+        let seam = ReplicaSeam { log: self, from };
+        (Segment::open(&seam)
+            .chain()
+            .ordered(from, "replica subscription"))
+        .err_into()
     }
 
     /// Retire everything whose running-max secondary is at or below
@@ -778,7 +762,13 @@ impl ReplicaLogStore {
     /// the durable record of `next_index` stays recoverable (CLAUDE.md §8).
     /// Without the clamp, an idle log whose watermark passed every entry's HLC
     /// would purge the frontier and restart at index 0.
-    pub(in crate::replica) fn set_purge_threshold(&self, threshold: Hlc) -> Result<(), Error> {
+    fn set_purge_threshold(&self, threshold: Hlc) -> Result<(), zslg_log::Error> {
+        self.purge_threshold_in(threshold).map_err(Into::into)
+    }
+}
+
+impl ReplicaLogStore {
+    fn purge_threshold_in(&self, threshold: Hlc) -> Result<(), Error> {
         let Some(clamped) = self.frontier.clamp_threshold(threshold) else {
             return Ok(());
         };
@@ -865,7 +855,7 @@ impl Seam for ReplicaSeam {
 /// spawn sites and tests are unchanged. A plain crossbeam `Receiver` (not
 /// `crossbeam_combinators::Channel`): the loop only recv/try_recv-batches — no transforms
 /// — so the `Channel` combinators would add nothing.
-pub(in crate::replica) async fn flush_loop(
+pub async fn flush_loop(
     weak: Weak<ReplicaLogStore>,
     rx: crossbeam_channel::Receiver<PendingWrite>,
     cancel: CancellationToken,
@@ -1054,7 +1044,7 @@ fn flush_one_batch_blocking(
                 if batch.completions[i]
                     .try_send((
                         data.data_id,
-                        Err(Error::Log(LogError::Storage(msg.clone()))),
+                        Err(zslg_log::Error::Log(LogError::Storage(msg.clone()))),
                     ))
                     .is_err()
                 {
@@ -1084,19 +1074,16 @@ mod tests {
 
     use super::*;
 
-    use zslg_hlc_gate::HlcGate;
-    use zslg_log_types::{DataId, LogIndex};
-    use zslg_node_types::NodeId;
-    use zslg_time_types::Hlc;
+    use zslg_consensus::NodeId;
+    use zslg_log::{DataId, LogIndex};
+    use zslg_time::Hlc;
 
     use tokio_util::sync::CancellationToken;
 
     /// Create a guard for a test HLC. A fresh `HlcGate` has no cutoff, so
     /// `check_hlc` always succeeds.
-    fn test_guard(hlc: Hlc) -> HlcGuard {
-        HlcGate::new()
-            .check_hlc(hlc)
-            .expect("fresh cutoff admits any HLC")
+    fn test_guard(_hlc: Hlc) -> Admission {
+        Box::new(())
     }
 
     /// Open a store at `dir` with its flush loop, at the default sizing —
@@ -1112,7 +1099,11 @@ mod tests {
         ),
         Error,
     > {
-        ReplicaLogStore::open_with_flush(dir, CancellationToken::new()).await
+        ReplicaLogStore::open_with_flush(
+            crate::testutil::open_for_test(&dir)?,
+            CancellationToken::new(),
+        )
+        .await
     }
 
     /// A point read, for the tests that assert the raw stored shape. Production
@@ -1164,7 +1155,7 @@ mod tests {
         Ok(out)
     }
 
-    use crate::tests::make_data;
+    use zslg_log_fake::make_data;
 
     async fn fresh_store() -> (TempDir, Arc<ReplicaLogStore>) {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1197,7 +1188,7 @@ mod tests {
         const WRITERS: u8 = 24;
 
         let (_dir, store) = fresh_store().await;
-        let mut ch = store.subscribe_from(None);
+        let mut ch = Arc::clone(&store).subscribe_from(None);
 
         // Keep the completion receivers alive so an ACK is not counted dropped.
         let mut keep = Vec::new();
@@ -1585,7 +1576,7 @@ mod tests {
     #[tokio::test]
     async fn broadcast_fires_after_commit() {
         let (_dir, store) = fresh_store().await;
-        let mut ch = store.subscribe_from(None);
+        let mut ch = Arc::clone(&store).subscribe_from(None);
 
         let record = make_data(42, u64::from(42u8) * 100, b"broadcast");
         let expected = record.clone();
@@ -1629,7 +1620,7 @@ mod tests {
         }
         let frontier = store.frontier().expect("frontier");
 
-        let mut ch = store.subscribe_from(Some(frontier));
+        let mut ch = Arc::clone(&store).subscribe_from(Some(frontier));
 
         // Nothing historic to replay; the next append arrives on the live tail.
         let record = make_data(9, 900, b"after");
@@ -1680,7 +1671,7 @@ mod tests {
         SUBSCRIBE_HANDOFF_PAUSE_MS.store(PAUSE_MS, std::sync::atomic::Ordering::Relaxed);
         let subscribing = {
             let store = Arc::clone(&store);
-            tokio::task::spawn_blocking(move || store.subscribe_from(None))
+            tokio::task::spawn_blocking(move || Arc::clone(&store).subscribe_from(None))
         };
 
         // Land squarely inside the paused window, then commit index 3 there.
@@ -1731,7 +1722,7 @@ mod tests {
     /// they must not drift from the values operators actually get.
     #[test]
     fn open_engine_defaults_match_the_config_defaults() {
-        let cfg = crate::replica::ReplicaLogConfig::for_test(zslg_node_types::NodeId::new_v4());
+        let cfg = crate::ReplicaLogConfig::for_test(zslg_consensus::NodeId::new_v4());
         assert_eq!(
             cfg.subscribe_channel_capacity.get(),
             DEFAULT_SUBSCRIBE_CHANNEL_CAPACITY
@@ -1746,7 +1737,7 @@ mod tests {
     #[tokio::test]
     async fn full_flush_batch_does_not_shed_a_draining_subscriber() {
         let (_dir, store) = fresh_store().await;
-        let mut ch = store.subscribe_from(None);
+        let mut ch = Arc::clone(&store).subscribe_from(None);
 
         // One batch's worth of records, appended before anything is drained.
         let batch = DEFAULT_MAX_FLUSH_BATCH;
@@ -1783,7 +1774,7 @@ mod tests {
                 .await
                 .expect("ok");
         }
-        let ch = store.subscribe_from(None);
+        let ch = Arc::clone(&store).subscribe_from(None);
         let entries: Vec<_> = ch
             .into_channel()
             .items()
@@ -1836,7 +1827,7 @@ mod tests {
         {
             // `subscribe_from(Some(LogIndex(3)))` → start = 4: entries 4..=8
             // survive (5). The live tail is infinite, so bound the drain.
-            let ch = store.subscribe_from(Some(LogIndex(3)));
+            let ch = Arc::clone(&store).subscribe_from(Some(LogIndex(3)));
             let entries: Vec<_> = ch
                 .into_channel()
                 .items()
@@ -1858,7 +1849,7 @@ mod tests {
         let store = store_at(&path).await;
         assert_eq!(store.frontier(), Some(LogIndex(8)));
         {
-            let ch = store.subscribe_from(Some(LogIndex(3)));
+            let ch = Arc::clone(&store).subscribe_from(Some(LogIndex(3)));
             let entries: Vec<_> = ch
                 .into_channel()
                 .items()
@@ -1875,7 +1866,7 @@ mod tests {
         assert_eq!(store.frontier(), Some(LogIndex(8)));
         {
             // start = 8 (next_after 7): only the frontier entry survives.
-            let ch = store.subscribe_from(Some(LogIndex(7)));
+            let ch = Arc::clone(&store).subscribe_from(Some(LogIndex(7)));
             let entries: Vec<_> = ch
                 .into_channel()
                 .items()
@@ -1915,7 +1906,7 @@ mod tests {
     async fn max_hlc_folds_every_entry_of_one_batch() {
         let dir = tempfile::tempdir().expect("tempdir");
         let storage =
-            crate::database::open_for_test(&dir.path().join("replica-log")).expect("storage");
+            crate::testutil::open_for_test(&dir.path().join("replica-log")).expect("storage");
         let (tx, rx) = crossbeam_channel::bounded(4);
         let store = Arc::new(
             ReplicaLogStore::open_sized(storage, tx.clone(), 16, 16)
@@ -2037,7 +2028,7 @@ mod tests {
                 let frontier = store.frontier();
                 let keys = scan_keys(&store.storage).expect("key scan");
                 let mut entries: Vec<(LogIndex, Data)> = Vec::new();
-                let mut ch = store.subscribe_from(None);
+                let mut ch = Arc::clone(&store).subscribe_from(None);
                 for _ in 0..count {
                     let (idx, data) = ch.recv().unwrap().unwrap();
                     entries.push((idx, data));
@@ -2080,10 +2071,12 @@ mod tests {
         let path = dir.path().join("replica-log");
 
         {
-            let (store, flush) =
-                ReplicaLogStore::open_with_flush(path.clone(), CancellationToken::new())
-                    .await
-                    .expect("open_for_test");
+            let (store, flush) = ReplicaLogStore::open_with_flush(
+                crate::testutil::open_for_test(&path).expect("storage"),
+                CancellationToken::new(),
+            )
+            .await
+            .expect("open_for_test");
             for i in 1..=5u8 {
                 store
                     .append(
@@ -2097,9 +2090,12 @@ mod tests {
             let _ = flush.await;
         }
 
-        let (store, _flush) = ReplicaLogStore::open_with_flush(path, CancellationToken::new())
-            .await
-            .expect("open_for_test");
+        let (store, _flush) = ReplicaLogStore::open_with_flush(
+            crate::testutil::open_for_test(&path).expect("storage"),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("open_for_test");
         assert_eq!(store.frontier(), Some(LogIndex(4)));
 
         let appended = store

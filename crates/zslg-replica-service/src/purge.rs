@@ -29,18 +29,18 @@ use zslg_consensus::RaftStateView;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
-use crate::error::Error;
-use crate::replica::ReplicaLogStore;
-use zslg_time_types::{Hlc, hlc_subtract};
+use crate::Error;
+use zslg_log::ReplicaLog;
+use zslg_time::{Hlc, hlc_subtract};
 
 /// Don't hand over a new purge threshold more than once per interval even if
 /// the watermark advances faster. The handoff walks the newly covered prefix
 /// and commits a range delete, so it is cheap but not free.
 const PURGE_MIN_INTERVAL: Duration = Duration::from_secs(30);
 
-pub(in crate::replica) async fn run_purge_worker(
+pub async fn run_purge_worker(
     raft_state: Arc<dyn RaftStateView>,
-    replica_log: Arc<ReplicaLogStore>,
+    replica_log: Arc<dyn ReplicaLog>,
     grace: Duration,
     cancel: CancellationToken,
 ) -> Result<(), Error> {
@@ -77,14 +77,16 @@ pub(in crate::replica) async fn run_purge_worker(
 /// and this worker's loop is an async task — calling it inline would block a
 /// runtime worker thread on disk I/O.
 async fn purge_once_blocking(
-    replica_log: &Arc<ReplicaLogStore>,
+    replica_log: &Arc<dyn ReplicaLog>,
     watermark: Option<Hlc>,
     grace: Duration,
     last: Option<Hlc>,
 ) -> Option<Hlc> {
     let replica_log = Arc::clone(replica_log);
-    match tokio::task::spawn_blocking(move || purge_once(&replica_log, watermark, grace, last))
-        .await
+    match tokio::task::spawn_blocking(move || {
+        purge_once(replica_log.as_ref(), watermark, grace, last)
+    })
+    .await
     {
         Ok(new_last) => new_last,
         // The blocking task panicked — leave `last` unchanged so the next
@@ -108,7 +110,7 @@ fn replica_purge_threshold(watermark: Option<Hlc>, grace: Duration) -> Option<Hl
 }
 
 fn purge_once(
-    replica_log: &ReplicaLogStore,
+    replica_log: &dyn ReplicaLog,
     watermark: Option<Hlc>,
     grace: Duration,
     last: Option<Hlc>,
@@ -138,7 +140,7 @@ fn purge_once(
 )]
 mod tests {
     use super::*;
-    use zslg_time_types::HlcParts;
+    use zslg_time::HlcParts;
 
     /// Build an HLC with the given physical milliseconds and a zero logical
     /// component — `hlc_subtract` always zeroes the logical part, so this makes

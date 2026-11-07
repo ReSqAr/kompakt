@@ -46,6 +46,8 @@ error_union! {
     from zslg_quorum_read::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_object_store_config::Error { Snapshot }
     from zslg_node_id::Error { Config, Log }
+    from zslg_replica_log::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_replica_service::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_reader::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_subscriber::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_stable_archive::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }

@@ -177,6 +177,12 @@ impl HlcGate {
     }
 }
 
+impl zslg_time::WriteGate for HlcGate {
+    fn check_hlc(&self, hlc: Hlc) -> Result<zslg_time::Admission, CutoffError> {
+        Self::check_hlc(self, hlc).map(|guard| Box::new(guard) as zslg_time::Admission)
+    }
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,

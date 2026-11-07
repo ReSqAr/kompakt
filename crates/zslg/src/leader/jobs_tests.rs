@@ -117,7 +117,7 @@ async fn build_per_node() -> PerNode {
 
     let stable_log = crate::tests::stable_log_at(&tempdir.path().join("stable.db")).await;
     let (replica_log, _flush) = ReplicaLogStore::open_with_flush(
-        tempdir.path().join("replica-log"),
+        crate::database::open_for_test(&tempdir.path().join("replica-log")).expect("storage"),
         CancellationToken::new(),
     )
     .await
