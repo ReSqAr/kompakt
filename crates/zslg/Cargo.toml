@@ -52,6 +52,7 @@ zslg-net-wire = { workspace = true }
 zslg-net-types = { workspace = true }
 zslg-node-types = { workspace = true }
 zslg-quorum-read = { workspace = true }
+zslg-object-store-config = { workspace = true }
 zslg-raft = { workspace = true }
 zslg-raft-types = { workspace = true }
 zslg-snapshot = { workspace = true }
@@ -80,7 +81,7 @@ tokio-metrics = { workspace = true }
 
 [features]
 default = []
-s3 = ["object_store/aws"]
+s3 = ["zslg-object-store-config/s3"]
 prometheus = ["dep:metrics-exporter-prometheus"]
 tokio-console = ["dep:console-subscriber"]
 jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]

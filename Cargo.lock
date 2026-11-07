@@ -4472,6 +4472,7 @@ dependencies = [
  "zslg-net-types",
  "zslg-net-wire",
  "zslg-node-types",
+ "zslg-object-store-config",
  "zslg-quorum-read",
  "zslg-raft",
  "zslg-raft-types",
@@ -4616,6 +4617,16 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "uuid",
+]
+
+[[package]]
+name = "zslg-object-store-config"
+version = "0.1.0"
+dependencies = [
+ "error-union",
+ "object_store",
+ "serde",
+ "zslg-snapshot-types",
 ]
 
 [[package]]

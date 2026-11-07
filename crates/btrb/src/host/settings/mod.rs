@@ -954,9 +954,10 @@ fn object_store(
     temp: &mut Vec<TempDir>,
 ) -> Result<Arc<dyn object_store::ObjectStore>, ConfigError> {
     let (config, prefix) = object_store_config(var, raw, temp)?;
-    let store = config
-        .build()
-        .map_err(|source| ConfigError::Rejected { var, source })?;
+    let store = config.build().map_err(|source| ConfigError::Rejected {
+        var,
+        source: source.into(),
+    })?;
     Ok(with_prefix(store, &prefix))
 }
 

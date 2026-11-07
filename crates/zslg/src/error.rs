@@ -46,6 +46,7 @@ error_union! {
     from zslg_net::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_net_wire::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_quorum_read::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_object_store_config::Error { Snapshot }
 }
 
 /// Bring a value that carries a port crate's error back to zslg's own `Error`:

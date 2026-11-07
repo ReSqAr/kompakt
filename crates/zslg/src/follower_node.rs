@@ -37,7 +37,6 @@ use crate::hlc::{HlcClock, run_clock_gauges};
 use crate::learner::LearnerConfig;
 use crate::learner::{LearnerService, StableLog, spawn_learner, spawn_stable_store};
 use crate::network::setup_router;
-use crate::object_store::IntoArcObjectStore;
 use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use crate::raft::{RaftTrackerConfig, spawn_raft_tracker_streamer};
 use crate::writer::WriterService;
@@ -45,6 +44,7 @@ use rocksdb_kit::{CfSpec, Storage, StorageConfig};
 use shutdown::Shutdown;
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
+use zslg_object_store_config::IntoArcObjectStore;
 
 /// Configuration for a follower node.
 ///

@@ -67,7 +67,6 @@ pub use crate::error::Error;
 pub use crate::follower_node::{FollowerNode, FollowerNodeConfig};
 pub use crate::hlc::HlcClock;
 pub use crate::learner_node::{LearnerNode, LearnerNodeConfig};
-pub use crate::object_store::{IntoArcObjectStore, ObjectStoreConfig};
 #[cfg(feature = "prometheus")]
 pub use crate::observability::configure_prometheus;
 pub use crate::observability::{METRIC_NAMESPACE, describe_metrics, histogram_buckets};
@@ -84,6 +83,7 @@ pub use zslg_log::{Error as LogApiError, Reader, StableStream, Writer};
 pub use zslg_log_types::{Data, DataId, LogError, LogIndex, StableLogEvent, UnstableEvent};
 pub use zslg_net_types::{HostPort, NetError, PeerAddr, ServerName};
 pub use zslg_node_types::NodeId;
+pub use zslg_object_store_config::{IntoArcObjectStore, ObjectStoreConfig};
 pub use zslg_snapshot_types::{
     CompactionTier, CompressionLevel, SnapshotError, SnapshotId, SnapshotMetadata,
 };
