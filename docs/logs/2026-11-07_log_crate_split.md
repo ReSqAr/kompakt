@@ -21,8 +21,25 @@ crates (zslg-api, zslg-local-store, ...), one per subfolder at least?"
 
 ## Settled
 
-(none yet)
+### D1. Driver: layering first, build time a welcome side effect
+
+Goal A (enforced layering, reviewability); B (build/test time) only if it falls
+out. Target: a correct layering that yields several small, targeted,
+non-reusable crates. Moving code and introducing new boundaries/traits to
+decouple is explicitly allowed. Rejected: C (separate release/rev pins) — nlnr
+pins one rev.
+
+### D2. Foundation is types + api, implementations above, never below
+
+The cycles are four misplaced items, not a redesign: `TypeConfig` (raft/),
+`RaftStateError`/`CutoffError` (raft/, hlc/), `CompressionLevel` (object_store/),
+`Clock`/`RaftStateView` (api/ implemented by hlc/). `api/` is already a set of
+ports. Rule: implementation crates depend on the ports/types, never the reverse.
+Rejected: one fat `core` crate (becomes a dumping ground).
+User refinement: not one types crate and one api crate but **several**, grouped
+logically by domain; the grouping shows up in the import pattern.
 
 ## Open
 
-- Q1: what is the split for (goal / driver)?
+- Q3: which domain groups, and where do the mixed files (`meta.rs`, `error.rs`)
+  split?

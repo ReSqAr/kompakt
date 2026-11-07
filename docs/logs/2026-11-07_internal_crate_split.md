@@ -4,7 +4,7 @@ Working document for the IAIC interview. Current model only.
 
 ## Where we are
 
-Interview started; asked Q1 (driver of the split). No design doc yet.
+Q1, Q2 settled (D1, D2). Asked Q3 (domain groups for the types+api layer). No design doc yet.
 
 ## Model of the problem
 
@@ -12,7 +12,8 @@ Interview started; asked Q1 (driver of the split). No design doc yet.
 today      zslg (one crate)  <- nvzn
              module graph has cycles; layering is by convention only
 
-candidate  step 0: break cycles inside zslg (no new crates), enforce layering
+candidate  foundation = several domain crates, each types+traits (time, log, consensus, snapshot, net)
+           step 0: break cycles inside zslg (no new crates), enforce layering
            step 1: cut bottom-up: core -> database/object-store -> raft+network
                    -> learner -> leader -> zslg facade (re-exports, *_node, tests)
 ```
