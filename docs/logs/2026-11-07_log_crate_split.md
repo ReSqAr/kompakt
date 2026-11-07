@@ -120,8 +120,22 @@ implementations depending on each other's concrete types (deep chains, any raft
 change rebuilds leader/learner/replica, layering only enforced at the
 foundation).
 
+### D9. Test support splits by kind
+
+Three kinds, three homes: fakes of ports (own crate(s), foundation-only
+deps, dev-dependencies of implementation crates); the 11 fault-injection hooks
+(`testing` feature on the owning implementation crate, enabled by facade
+tests); the whole-system harness (`tests/common`, integration tests) stays in
+the facade. Hooks that no port can express are candidates for new ports in the
+design doc. Granularity of the fakes crate(s) left to Q10 (user asked whether a
+fake can be its own crate next to the real implementation).
+
+Evidence for shared fakes: `RaftLeadership` is faked twice
+(`FakeLeadership`, `StaticLeadership`), `LivenessQuery` twice (both named
+`StaticLiveness`), `Replica` twice, `StateReplicator` twice (`FakeRaft`,
+`NoopReplicator`), plus nvzn already ships `nvzn::testing`.
+
 ## Open
 
-- Q9: test support — 11 `_for_test` fault-injection fns and 33
-  `cfg(test) pub(crate)` items are used across modules, plus ~5k lines of
-  integration tests and a cluster harness. Where do shared fakes and hooks live?
+- Q10: fakes as one `zslg-testing` crate, one fake crate per foundation group
+  (next to the group), or one per port?
