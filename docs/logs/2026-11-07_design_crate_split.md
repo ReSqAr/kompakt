@@ -24,7 +24,7 @@ convention the module graph already violates — is enforced by Cargo.
   assemblies    nodes (writer, learner, follower, replica) ─> learner, leader,
                 raft-setup, observability                     (wiring, no logic)
                                               │
-  implementations   database · object-store · raft-* · net-* · stable-log ·
+  implementations   node-id · object-store · raft-* · net-* · stable-log ·
   (siblings)        reader · replica-* · leader-* ...    one port each, no edges
                                               │
   procedures        quorum-read · net-wire     (shared logic over the foundation)
