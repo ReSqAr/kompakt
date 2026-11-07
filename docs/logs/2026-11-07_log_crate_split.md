@@ -153,7 +153,29 @@ nlnr uses only `zslg::Hlc` and `zslg::ObjectStoreConfig` and never matches on
 `ReplicaNode::start` in btrb. So after D8 nvzn can depend on the foundation
 groups alone, without RocksDB or raft; btrb is the composition root.
 
+### D11. The layering is an implementation detail; `zslg` is the only public surface
+
+Consumers (nvzn, btrb, nlnr) import only from the `zslg` facade, which
+re-exports the public API under today's paths. Group, implementation and fake
+crates are internal (`publish = false`), imported by each other and by the
+facade, never by consumers. nvzn keeps one dependency on `zslg`. Consequence for
+D4: `zslg::Error` stays the public error type consumers see; the per-group
+errors are how it is built. Rejected: nvzn importing group crates directly
+(would make the layering a public contract; the Cargo.toml benefit is not worth
+it).
+
+## Finding: nvzn's module graph is already acyclic
+
+```text
+ids, events, view, projection (types)   no internal deps
+store (Store port + rocksdb/inmemory/overlay)  2.4k, uses ids, metrics
+resultset (query ops)                   0.7k, no internal deps
+dispatcher (log -> store folds)         2.2k, uses projection, store, ids, metrics
+live (wait for projections)             1.7k, uses dispatcher, projection, events
+reader                                  0.7k, uses dispatcher, live, projection
+```
+
 ## Open
 
-- Q11: do consumers import from the group crates directly (nvzn -> log/time),
-  or only through `zslg` facade re-exports?
+- Q12: scope — does nvzn get the same treatment in this design, a second phase,
+  or is it left alone?
