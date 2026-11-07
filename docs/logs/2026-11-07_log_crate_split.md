@@ -371,3 +371,18 @@ wires to the one open. Each node crate has a golden test of its list, so
 on-disk names cannot change silently. Rejected: a shared `Subsystem` enum in a
 types crate (central vocabulary every storage change edits, the pattern D5
 rejected).
+
+### D20. `rocksdb-kit` gets an engine-neutral API; the KV trait is deferred
+
+User asked whether a database trait should decouple the rest from RocksDB.
+Finding: the rest already is — only the five storage adapters (stable-log,
+local-store, replica-log, raft-storage, node-id) touch RocksDB, and everything
+above sees domain ports with fakes. Their RocksDB surface is a small ordered-KV
+set (batch put/delete/delete_range, fenced write, snapshot, bounded raw
+iterator, pinned get). Decision: `rocksdb-kit` exposes its own concrete,
+engine-neutral types (`Db`, `ColumnFamily`, `Batch`, `Snapshot`, `Scan`); the
+adapters stop naming `rust_rocksdb`. The trait is deferred: the adapters' tests
+prove durability, which an in-memory KV fake would not model, there is no
+second engine, and a trait introduced now risks growing RocksDB-shaped or
+acquiring back doors. Introducing it later only touches `rocksdb-kit`.
+Follow-up candidate, not in scope: `nvzn-store-rocksdb` onto the same kit.

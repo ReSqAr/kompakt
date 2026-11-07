@@ -389,6 +389,16 @@ its list, so the on-disk names cannot change silently; they are today's
 constant rather than an ad-hoc string, and the set of values per node is the
 golden list.
 
+`rocksdb-kit` has its own small, engine-neutral API (D20): `Db`,
+`ColumnFamily`, `Batch` (`put`, `delete`, `delete_range`), a durable `write`,
+`Snapshot`, `Scan` (ordered, bounded) and `get`. The five adapters never name
+`rust_rocksdb`; today each storage directory imports `rust_rocksdb::WriteBatch`.
+No trait yet: the adapters' tests keep running on a real RocksDB in a temp dir,
+because what they prove is durability (fences, snapshot reads, `delete_range`,
+write-once identity), which an in-memory KV would not model. If a second
+engine or a KV fake is ever needed, the trait is introduced inside
+`rocksdb-kit` and the adapters do not move.
+
 The test stays: anything used by two implementations is a library if it knows
 no domain, a procedure if it works over the foundation, otherwise a missing
 port — and then I ask.
@@ -556,6 +566,10 @@ implementations (§7.3).
   `heap-profiling`) live in the owning crate; the facade forwards them.
 - `pub(crate)` ports become `pub` in internal crates; the facade's `pub use`
   list is unchanged.
+- `rocksdb-kit`'s API must cover what the adapters use today (batch put/delete/
+  delete_range, fenced write, snapshot, bounded raw scans, pinned gets, the
+  engine-property gauges). Anything an adapter needs beyond it is a stop-and-ask
+  (§8.1), not a `pub` escape hatch to `rust_rocksdb`.
 - Hot-path functions on `Hlc`, `LogIndex`, `DataId` get `#[inline]`; loadgen
   before/after catches a regression.
 
