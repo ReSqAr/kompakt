@@ -35,7 +35,7 @@ convention the module graph already violates — is enforced by Cargo.
   types             zslg-<group>-types: lifecycle · time · log · snapshot · consensus · raft · net
                                               │
   libraries         bytesize · warn-throttle · lifecycle · shutdown · framing ·
-                    metrics-kit · database · error-union
+                    metrics-kit · error-union · rocksdb-kit
   fakes             zslg-<group>-fake, next to each ports crate
 ```
 
@@ -88,7 +88,7 @@ normal dependencies; dev-dependencies follow §7.3.
 
 | role | names | contents | may depend on |
 |---|---|---|---|
-| library | unprefixed, workspace-wide (D18): `bytesize`, `warn-throttle`, `shutdown`, `framing`, `metrics-kit`, `error-union`; like `crossbeam-combinators` | code that knows no domain of any family | other libraries; never a `zslg-*`/`nvzn-*` crate |
+| library | unprefixed, workspace-wide (D18): `bytesize`, `warn-throttle`, `shutdown`, `framing`, `metrics-kit`, `error-union`, `rocksdb-kit`; like `crossbeam-combinators` | code that knows no domain of any family | other libraries; never a `zslg-*`/`nvzn-*` crate |
 | types | `zslg-<group>-types` | data, invariants over it, shared cells, the group's leaf error, label enums | libraries, lower types |
 | ports | `zslg-<group>` | traits, the crate's error union; re-exports its group's types | types, lower ports, libraries |
 | procedure | `zslg-quorum-read`, `zslg-net-wire` | shared logic over the foundation, implements no port | ports, types, libraries |
@@ -296,7 +296,7 @@ Source paths are under `crates/zslg/src`.
 
 | crate | source | lines | implements |
 |---|---|---|---|
-| `zslg-database` | `database/` | 1.3k | **open** (§5.5) |
+| `zslg-node-id` | `database/node_id.rs` | 0.1k | write-once node identity (§5.5) |
 | `zslg-object-store` | `object_store/{mod,snapshot_store}.rs` | 1.1k | `SnapshotStore`; owns `s3` |
 | `zslg-object-format` | `object_store/framing.rs` | 0.4k | candidate (§5.6) |
 | `zslg-hlc-clock` | `hlc/clock.rs` | 0.6k | `Clock` |
@@ -360,23 +360,34 @@ move to `zslg-net-fake`. `zslg-replica-service` calls the replica log through
 a small submit/fence port in `zslg-log`, shaped by what `replica/mod.rs` calls
 today.
 
-### 5.5 The node's RocksDB: domain-free engine, domain schema (open)
+### 5.5 The node's RocksDB: domain-free engine, per-owner schema (D19)
 
-`database/` is used by raft-storage, stable-log, local-store and replica-log,
-so it must be a library or a procedure. The first draft called it a library;
-the general rule of D18 (a library knows no domain of any family) shows it is
-not: `Subsystem` enumerates zslg's column families (`StableLog`, `ReplicaLog`,
-`LocalStoreData`, `LocalStoreCursors`, `RaftLog`, `RaftMeta`, `NodeId`), and
-`node_id.rs` is zslg's write-once node identity. The mechanism itself
-(`storage.rs`, 1.1k: one explicit open, the caller states root, memory budget
-and the complete column-family list — "the descriptor list is the schema") is
-domain-free.
+`database/` is shared by raft-storage, stable-log, local-store and
+replica-log, but it is not domain-free: `Subsystem` enumerates zslg's column
+families and `node_id.rs` is zslg's write-once node identity. Only the
+mechanism is generic. It splits three ways:
 
-So it splits: an unprefixed `rocksdb-kit` (the open, budget, block cache,
-typed column-family handles), `zslg-node-id` (an implementation), and the
-schema. Where the schema lives is open — a shared `Subsystem` enum in a types
-crate, or each storage implementation declaring its own column family with
-the assembly listing them (the D5 pattern). To be decided with the user.
+```text
+rocksdb-kit       storage.rs + create_storage_root: one explicit open; the caller
+(library)         states root, memory budget and the complete CF list; typed CF
+                  handles; the per-CF engine gauges (label `cf`)
+zslg-node-id      node_id.rs: the write-once identity row
+(implementation)
+owners            each declares its own column families:
+                    zslg-stable-log      cf("stable_log")
+                    zslg-replica-log     cf("replica_log")
+                    zslg-local-store     cf("local_store_data"), cf("local_store_cursors")
+                    zslg-raft-storage    cf("raft_log"), cf("raft_meta")
+                    zslg-node-id         cf("node_id")
+node assembly     passes the list of what it wires to rocksdb-kit's one open
+```
+
+"The descriptor list is the schema" stays true; the list lives in the node
+assembly, where the open already happens. Each node crate has a golden test of
+its list, so the on-disk names cannot change silently; they are today's
+`cf_name()` strings. The engine gauges keep the label value from a declared
+constant rather than an ad-hoc string, and the set of values per node is the
+golden list.
 
 The test stays: anything used by two implementations is a library if it knows
 no domain, a procedure if it works over the foundation, otherwise a missing
@@ -586,13 +597,13 @@ first.
 ```text
  1  layering test (roles from names; passes trivially on today's two crates)
  2  libraries: metrics-kit (namespace argument, generic conversion row), bytesize,
-    warn-throttle, shutdown, framing, error-union, rocksdb-kit (pending §5.5)
+    warn-throttle, shutdown, framing, error-union, rocksdb-kit
  3  types: lifecycle, time, log, snapshot, consensus, raft, net  (+ the four moves of §4.3)
  4  ports: time, log, snapshot, consensus (+ ClusterBootstrap), net
  5  fakes: time, log (+ TestLog), snapshot, consensus, net
  ── checkpoint: foundation enforced; one big implementation crate left; all green
  6  procedures: quorum-read, net-wire
- 7  object-store, hlc-clock, hlc-gate
+ 7  node-id, object-store, hlc-clock, hlc-gate
  8  net-client, net-server, net-router
  9  raft-storage, raft-rpc, raft-state, raft-tracker, raft, raft-startup
 10  local-store, stable-log, stable-archive, subscriber, reader

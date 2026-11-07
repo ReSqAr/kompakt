@@ -360,3 +360,14 @@ What the rule changed when applied:
   Proposed split: `rocksdb-kit` + `zslg-node-id` + the schema. Open: schema as
   a shared `Subsystem` enum in a types crate, or per-implementation column
   family declarations listed by the assembly (D5 pattern).
+
+### D19. RocksDB schema: per-implementation column families
+
+Resolves D18's open point. `rocksdb-kit` (library) holds the one explicit
+open, budget, typed CF handles and the per-CF engine gauges; `zslg-node-id` is
+an implementation; each storage implementation declares its own column
+families (today's `cf_name()` strings); the node assembly passes the list it
+wires to the one open. Each node crate has a golden test of its list, so
+on-disk names cannot change silently. Rejected: a shared `Subsystem` enum in a
+types crate (central vocabulary every storage change edits, the pattern D5
+rejected).
