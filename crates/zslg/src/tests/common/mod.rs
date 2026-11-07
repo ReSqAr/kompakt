@@ -40,7 +40,6 @@ use zslg_raft::RaftTransport;
 use crate::Error;
 
 use crate::learner::LocalStore;
-use crate::raft::build_raft_for_test;
 use crossbeam_combinators::{Channel, Finite, Infinite};
 use dashmap::DashMap;
 use futures::stream::BoxStream;
@@ -60,6 +59,7 @@ use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
+use zslg_raft_storage::build_raft_for_test;
 use zslg_raft_types::{NodeInfo, Raft, TypeConfig};
 // ── fault injection: pairwise partitions ─────────────────────────────
 
@@ -253,9 +253,15 @@ pub(crate) async fn start_cluster_with_partition(
         };
         let tempdir = tempfile::tempdir()?;
         let raft_state = RaftStateHandle::new();
-        let raft = build_raft_for_test(id, cfg.clone(), router, tempdir.path(), raft_state.clone())
-            .await
-            .map_err(|e| format!("Raft::new: {e}"))?;
+        let raft = build_raft_for_test(
+            id,
+            cfg.clone(),
+            router,
+            crate::database::open_for_test(tempdir.path())?,
+            raft_state.clone(),
+        )
+        .await
+        .map_err(|e| format!("Raft::new: {e}"))?;
         shared_nodes.insert(id, raft.clone());
         nodes.insert(
             id,

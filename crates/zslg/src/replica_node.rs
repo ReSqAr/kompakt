@@ -397,7 +397,7 @@ impl ReplicaNodeConfig {
     /// used still costs the ones that are.
     #[must_use]
     pub(crate) fn column_families(&self) -> Vec<CfSpec> {
-        let mut cfs = Vec::from(crate::raft::raft_cf_specs());
+        let mut cfs = Vec::from(zslg_raft_storage::raft_cf_specs());
         cfs.extend([
             // Compression is a per-store footprint/CPU trade, never a
             // durability one — the block CRC is what protects a record.

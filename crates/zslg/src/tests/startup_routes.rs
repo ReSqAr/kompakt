@@ -283,6 +283,7 @@ async fn hard_crash_restart_surfaces_fresh_node_id_error() {
 async fn rewrite_membership_to_other_id(
     storage_root: std::path::PathBuf,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    crate::raft::seed_foreign_membership_for_test(storage_root).await?;
+    let storage = crate::database::open_for_test(&storage_root)?;
+    zslg_raft_storage::seed_foreign_membership_for_test(&storage).await?;
     Ok(())
 }

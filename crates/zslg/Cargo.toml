@@ -59,6 +59,7 @@ zslg-hlc-gate = { workspace = true }
 zslg-net-client = { workspace = true }
 zslg-net-server = { workspace = true }
 zslg-net-router = { workspace = true }
+zslg-raft-storage = { workspace = true }
 zslg-raft = { workspace = true }
 zslg-raft-types = { workspace = true }
 zslg-snapshot = { workspace = true }
@@ -67,6 +68,7 @@ zslg-time = { workspace = true }
 zslg-time-types = { workspace = true }
 
 [dev-dependencies]
+zslg-raft-storage = { workspace = true, features = ["testing"] }
 crossbeam-combinators = { workspace = true, features = ["testing"] }
 uuid = { workspace = true, features = ["serde"] }
 zslg-net-wire = { workspace = true, features = ["testing"] }

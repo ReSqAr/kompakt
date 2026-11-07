@@ -86,6 +86,7 @@ zslg-hlc-gate = { path = "crates/zslg-hlc-gate" }
 zslg-net-client = { path = "crates/zslg-net-client" }
 zslg-net-server = { path = "crates/zslg-net-server" }
 zslg-net-router = { path = "crates/zslg-net-router" }
+zslg-raft-storage = { path = "crates/zslg-raft-storage" }
 zslg-raft = { path = "crates/zslg-raft" }
 zslg-raft-types = { path = "crates/zslg-raft-types" }
 zslg-snapshot = { path = "crates/zslg-snapshot" }

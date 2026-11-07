@@ -31,4 +31,4 @@ error_union! {
     }
 }
 
-pub use zslg_raft_types::TypeConfig;
+pub use zslg_raft_types::{FencedStateWrite, NodeInfo, Raft, RaftResponse, TypeConfig};

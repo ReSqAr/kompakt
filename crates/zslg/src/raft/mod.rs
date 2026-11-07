@@ -21,7 +21,6 @@ use zslg_net::Router;
 use raft_kit::storage::Adaptor;
 
 use crate::error::Error;
-use crate::raft::raft_storage::RocksRaftStorage;
 use crate::raft::rpc::NetworkFactory;
 use crate::raft::rpc::PeerRegistrationWatcher;
 use crate::raft::state::RaftStatePublisher;
@@ -31,11 +30,11 @@ use zslg_consensus::ToRaft;
 use zslg_consensus_types::RaftStateHandle;
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
+use zslg_raft_storage::RocksRaftStorage;
 use zslg_raft_types::NodeInfo;
 
 mod membership;
 mod node;
-mod raft_storage;
 mod rpc;
 mod startup;
 mod state;
@@ -50,14 +49,6 @@ pub(crate) use startup::{RaftStartupConfig, run_raft_startup};
 pub(crate) use tracker::{
     NoOpRaftViewer, RaftTracker, RaftTrackerConfig, spawn_raft_tracker_streamer,
 };
-
-#[cfg(test)]
-pub(crate) use raft_storage::build_raft_for_test;
-pub(crate) use raft_storage::raft_cf_specs;
-#[cfg(test)]
-pub(crate) use raft_storage::seed_foreign_membership_for_test;
-#[cfg(test)]
-pub(crate) use raft_storage::{RAFT_LOG_CF, RAFT_META_CF};
 
 #[must_use]
 fn membership_map<I>(members: I) -> BTreeMap<NodeId, NodeInfo>

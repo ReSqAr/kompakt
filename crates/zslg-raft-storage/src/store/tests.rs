@@ -1,70 +1,27 @@
 use super::*;
-use crate::raft::RAFT_META_CF;
-use zslg_consensus_types::RaftStateError;
-use zslg_snapshot_types::SnapshotMetadata;
+use zslg_consensus::RaftStateError;
+use zslg_snapshot::SnapshotMetadata;
 
-/// Test-only bridge: builds a `Raft` instance backed by RocksDB storage under
-/// `dir`, generic over the network factory so the in-crate test harness
-/// (`crate::tests::common`) can supply its in-memory router — the one entry
-/// point the broader test suite uses to reach raft storage.
-#[cfg(test)]
-pub(crate) async fn build_raft_for_test<NF>(
-    node_id: NodeId,
-    config: Arc<raft_kit::Config>,
-    network: NF,
-    dir: &std::path::Path,
-    raft_state: RaftStateHandle,
-) -> Result<zslg_raft_types::Raft, Error>
-where
-    NF: raft_kit::RaftNetworkFactory<TypeConfig>,
-{
-    use zslg_consensus::ToRaft as _;
-    let (log_store, sm) = RocksRaftStorage::open(raft_state, open_test_storage(dir)?)
-        .await?
-        .into_adaptor();
-    zslg_raft_types::Raft::new(node_id, config, network, log_store, sm)
-        .await
-        .to_raft("Raft::new (test)")
-        .map_err(Into::into)
+/// A [`Storage`] carrying just this store's two column families.
+fn open_test_storage(dir: &std::path::Path) -> Result<Arc<Storage>, Error> {
+    let cfs = raft_cf_specs();
+    Ok(Storage::open(
+        dir,
+        rocksdb_kit::StorageConfig::new(bytesize::ByteSize::from_mib(16)),
+        &cfs,
+    )?)
 }
 
-/// Open a [`Storage`] rooted at `dir` for a raft store on its own — the test
-/// mirror of the node's one open at boot, whose column-family list is a
-/// superset of this store's two.
-#[cfg(test)]
-pub(crate) fn open_test_storage(dir: &std::path::Path) -> Result<Arc<Storage>, Error> {
-    crate::database::open_for_test(dir)
+fn nid(byte: u8) -> NodeId {
+    let mut bytes = [0u8; 16];
+    bytes[15] = byte;
+    NodeId::from_uuid(uuid::Uuid::from_bytes(bytes))
 }
-
-/// Test-only: overwrite the persisted membership + vote with a FOREIGN node id
-/// (simulates on-disk raft state written by a different node — the hard-crash
-/// rejoin scenario). Writes straight into the raft-meta family.
-#[cfg(test)]
-pub(crate) async fn seed_foreign_membership_for_test(
-    storage_root: std::path::PathBuf,
-) -> Result<(), Error> {
-    use raft_kit::Membership;
-    let other = NodeId::new_v4();
-    let voters: std::collections::BTreeSet<NodeId> = [other].into_iter().collect();
-    let membership: Membership<NodeId, NodeInfo> =
-        Membership::new(vec![voters.clone()], Some(voters));
-    let stored = StoredMembership::new(None::<LogId<NodeId>>, membership);
-    let vote = Vote::<NodeId>::new(1, other);
-    let storage = open_test_storage(&storage_root)?;
-    let cf = storage.cf(RAFT_META_CF)?;
-    let mut batch = Batch::new();
-    put_meta(&mut batch, &cf, RaftMetaSlot::LastMembership, &stored)?;
-    put_meta(&mut batch, &cf, RaftMetaSlot::Vote, &vote)?;
-    storage.write(batch)?;
-    storage.fence().map_err(Into::into)
-}
-
-use crate::tests::nid;
 use raft_kit::CommittedLeaderId;
-use zslg_consensus_types::Exit;
-use zslg_log_types::LogIndex;
-use zslg_snapshot_types::SnapshotId;
-use zslg_time_types::Hlc;
+use zslg_consensus::Exit;
+use zslg_log::LogIndex;
+use zslg_snapshot::SnapshotId;
+use zslg_time::Hlc;
 
 #[tokio::test]
 async fn vote_round_trips_across_reopen() {
@@ -270,9 +227,9 @@ fn fenced_entry(
 ) -> Entry<TypeConfig> {
     Entry {
         log_id: LogId::new(leader, idx),
-        payload: EntryPayload::Normal(zslg_raft_types::FencedStateWrite {
+        payload: EntryPayload::Normal(zslg_raft::FencedStateWrite {
             expected_generation,
-            state: zslg_consensus_types::ReplicatedRaftState {
+            state: zslg_consensus::ReplicatedRaftState {
                 replica: ReplicaMembership::single(replicas.iter().copied().collect()),
                 manifest: Vec::new(),
                 manifest_watermark: None,
@@ -281,7 +238,7 @@ fn fenced_entry(
                 // set can no longer serve that role — `Single -> Single`
                 // must be an identity, so every entry in a run carries the
                 // same set.
-                hlc_cutoff: Some(zslg_time_types::Hlc(idx)),
+                hlc_cutoff: Some(zslg_time::Hlc(idx)),
             },
         }),
     }
@@ -306,9 +263,9 @@ fn malformed_manifest_entry(
 ) -> Entry<TypeConfig> {
     Entry {
         log_id: LogId::new(leader, idx),
-        payload: EntryPayload::Normal(zslg_raft_types::FencedStateWrite {
+        payload: EntryPayload::Normal(zslg_raft::FencedStateWrite {
             expected_generation,
-            state: zslg_consensus_types::ReplicatedRaftState {
+            state: zslg_consensus::ReplicatedRaftState {
                 replica: ReplicaMembership::single([nid(1)].into_iter().collect()),
                 manifest: vec![snapshot_meta(5, 9)],
                 manifest_watermark: Some(Hlc(9)),
@@ -365,8 +322,8 @@ fn replicated(
     manifest: Vec<SnapshotMetadata>,
     watermark: Option<Hlc>,
     cutoff: Option<Hlc>,
-) -> zslg_consensus_types::ReplicatedRaftState {
-    zslg_consensus_types::ReplicatedRaftState {
+) -> zslg_consensus::ReplicatedRaftState {
+    zslg_consensus::ReplicatedRaftState {
         replica: ReplicaMembership::single([nid(1)].into_iter().collect()),
         manifest,
         manifest_watermark: watermark,
@@ -387,8 +344,8 @@ fn set(seeds: &[u8]) -> std::collections::BTreeSet<NodeId> {
 fn with_membership(
     replica: ReplicaMembership,
     watermark: Option<Hlc>,
-) -> zslg_consensus_types::ReplicatedRaftState {
-    zslg_consensus_types::ReplicatedRaftState {
+) -> zslg_consensus::ReplicatedRaftState {
+    zslg_consensus::ReplicatedRaftState {
         replica,
         manifest: Vec::new(),
         manifest_watermark: watermark,
@@ -534,8 +491,8 @@ fn joint_exit_bound_may_not_regress() {
     assert!(matches!(
         rearm(499),
         Err(RaftStateError::ExitHlcRegressed {
-            previous: zslg_consensus_types::Exit::WatermarkAbove(Hlc(500)),
-            proposed: zslg_consensus_types::Exit::WatermarkAbove(Hlc(499))
+            previous: zslg_consensus::Exit::WatermarkAbove(Hlc(500)),
+            proposed: zslg_consensus::Exit::WatermarkAbove(Hlc(499))
         })
     ));
 }
@@ -647,7 +604,7 @@ fn evaluate_fence_rejects_early_joint_exit_as_value() {
     // A committed-but-illegal transition must be a *value* rejection, never
     // an `Err` — an `Err` here halts the state machine on an already
     // committed entry (see `evaluate_fence`).
-    let write = zslg_raft_types::FencedStateWrite {
+    let write = zslg_raft::FencedStateWrite {
         expected_generation: RaftGeneration::ZERO,
         state: with_membership(ReplicaMembership::single(set(&[3, 4, 5])), Some(Hlc(10))),
     };
@@ -673,7 +630,7 @@ fn evaluate_fence_rejects_early_joint_exit_as_value() {
 
 #[test]
 fn drain_satisfied_boundaries() {
-    use zslg_consensus_types::{Exit, drain_satisfied};
+    use zslg_consensus::{Exit, drain_satisfied};
     // "Nothing to drain" is satisfied even before any snapshot.
     assert!(drain_satisfied(None, Exit::AnyTime));
     assert!(drain_satisfied(Some(Hlc(1)), Exit::AnyTime));
@@ -741,7 +698,7 @@ fn invariant_committed_cutoff_may_not_regress() {
 /// on the apply path, never a fatal `Err` (see the module header).
 #[test]
 fn evaluate_fence_rejects_a_regressed_cutoff_as_value() {
-    let write = zslg_raft_types::FencedStateWrite {
+    let write = zslg_raft::FencedStateWrite {
         expected_generation: RaftGeneration::ZERO,
         state: replicated(vec![], None, Some(Hlc(50))),
     };
@@ -762,7 +719,7 @@ fn evaluate_fence_rejects_a_regressed_cutoff_as_value() {
 
 #[test]
 fn evaluate_fence_rejects_watermark_above_cutoff_as_value() {
-    let write = zslg_raft_types::FencedStateWrite {
+    let write = zslg_raft::FencedStateWrite {
         expected_generation: RaftGeneration::ZERO,
         state: replicated(vec![], Some(Hlc(100)), Some(Hlc(50))),
     };
@@ -954,10 +911,7 @@ async fn fenced_apply_rejects_stale_generation() {
         RaftGeneration(1),
         "rejected write must not apply"
     );
-    assert_eq!(
-        snap.manifest_state.hlc_cutoff,
-        Some(zslg_time_types::Hlc(1))
-    );
+    assert_eq!(snap.manifest_state.hlc_cutoff, Some(zslg_time::Hlc(1)));
 
     // Entry 3 with the CORRECT fence (1) → applied, generation 3.
     let r = s
@@ -967,10 +921,7 @@ async fn fenced_apply_rejects_stale_generation() {
     assert!(matches!(r[0], RaftResponse::Applied));
     let snap = raft_state.snapshot();
     assert_eq!(snap.generation, RaftGeneration(3));
-    assert_eq!(
-        snap.manifest_state.hlc_cutoff,
-        Some(zslg_time_types::Hlc(3))
-    );
+    assert_eq!(snap.manifest_state.hlc_cutoff, Some(zslg_time::Hlc(3)));
 }
 
 #[tokio::test]
@@ -1002,7 +953,7 @@ async fn reopen_replays_fence_verdicts_deterministically() {
     assert_eq!(snap.generation, RaftGeneration(3));
     assert_eq!(
         snap.manifest_state.hlc_cutoff,
-        Some(zslg_time_types::Hlc(3)),
+        Some(zslg_time::Hlc(3)),
         "replayed state must reflect entries 1+3, never the rejected entry 2"
     );
 }
@@ -1038,10 +989,7 @@ async fn reopen_with_unpurged_log_entries_below_snapshot_is_clean() {
     let _s = storage_at(&path, restored.clone()).await;
     let snap = restored.snapshot();
     assert_eq!(snap.generation, RaftGeneration(2));
-    assert_eq!(
-        snap.manifest_state.hlc_cutoff,
-        Some(zslg_time_types::Hlc(2))
-    );
+    assert_eq!(snap.manifest_state.hlc_cutoff, Some(zslg_time::Hlc(2)));
 }
 
 /// F-14 invariant: a corrupt raft snapshot blob must fail `from_db`

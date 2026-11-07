@@ -44,13 +44,14 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
 use crate::error::Error;
-use crate::metrics::{self, FlushTrigger, LogType, OpState};
+use crate::metrics::{self, FlushTrigger, OpState};
 use crossbeam_combinators::{
     Channel, Fanout, FanoutConfig, OverflowPolicy, Registry, Seam, Segment, broadcast,
 };
 use rocksdb_kit::Storage;
 use zslg_hlc_gate::HlcGuard;
 use zslg_log::ToStorage;
+use zslg_log::metrics::LogType;
 use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};
 use zslg_time_types::Hlc;
@@ -587,7 +588,7 @@ impl ReplicaLogStore {
             .to_storage("frontier recovery panicked")??;
         info!(frontier = ?frontier, "replica log initialized from disk");
         if let Some((idx, _)) = frontier {
-            metrics::log_index_frontier(LogType::Replica, idx.raw());
+            zslg_log::metrics::log_index_frontier(LogType::Replica, idx.raw());
         }
 
         let (recovered_index, recovered_max_hlc) = match frontier {
@@ -1016,8 +1017,8 @@ fn flush_one_batch_blocking(
             };
             store.frontier.advance(*last_index, running_max);
 
-            metrics::log_writes(LogType::Replica, flush_entries);
-            metrics::log_index_frontier(LogType::Replica, last_index.raw());
+            zslg_log::metrics::log_writes(LogType::Replica, flush_entries);
+            zslg_log::metrics::log_index_frontier(LogType::Replica, last_index.raw());
             metrics::replica_log_flush_bytes(flush_bytes);
             metrics::replica_log_flush_entries(flush_entries);
             metrics::replica_log_flushed();

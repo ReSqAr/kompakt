@@ -162,6 +162,7 @@ pub enum UnstableEvent {
     Watermark(Hlc),
 }
 
+pub mod metrics;
 mod serde_bytes_compat {
     use bytes::Bytes;
     use serde::de::{Error, Visitor};

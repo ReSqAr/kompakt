@@ -60,9 +60,9 @@ async fn build_node(node_id: NodeId, raft_config: Arc<Config>) -> ClusterNode {
 
     let tempdir = tempfile::tempdir().expect("tempdir");
     let raft_state = RaftStateHandle::new();
-    let storage = crate::raft::raft_storage::RocksRaftStorage::open(
+    let storage = zslg_raft_storage::RocksRaftStorage::open(
         raft_state.clone(),
-        crate::raft::raft_storage::open_test_storage(tempdir.path()).expect("open storage"),
+        crate::database::open_for_test(tempdir.path()).expect("open storage"),
     )
     .await
     .expect("open raft storage");

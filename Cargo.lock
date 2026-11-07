@@ -4490,6 +4490,7 @@ dependencies = [
  "zslg-object-store-config",
  "zslg-quorum-read",
  "zslg-raft",
+ "zslg-raft-storage",
  "zslg-raft-types",
  "zslg-snapshot",
  "zslg-snapshot-types",
@@ -4590,6 +4591,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "crossbeam-combinators",
+ "metrics-kit",
  "postcard",
  "serde",
  "thiserror 2.0.21",
@@ -4809,6 +4811,32 @@ dependencies = [
  "zslg-raft-types",
  "zslg-snapshot-types",
  "zslg-time-types",
+]
+
+[[package]]
+name = "zslg-raft-storage"
+version = "0.1.0"
+dependencies = [
+ "bytesize",
+ "error-union",
+ "metrics-kit",
+ "parking_lot 0.13.0",
+ "postcard",
+ "proptest",
+ "raft-kit",
+ "rocksdb-kit",
+ "serde",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
+ "zslg-consensus",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
 ]
 
 [[package]]

@@ -77,7 +77,6 @@ pub(crate) const METRIC_PREFIX: &str = "zslg_";
 // Label keys
 // ---------------------------------------------------------------------------
 
-const LABEL_LOG_TYPE: &str = "log_type";
 const LABEL_STEP: &str = "step";
 const LABEL_SOURCE: &str = "source";
 const LABEL_REASON: &str = "reason";
@@ -105,7 +104,6 @@ const LABEL_CF: &str = "cf";
 #[cfg(test)]
 const ALL_LABEL_KEYS: &[&str] = &[
     LABEL_STATE,
-    LABEL_LOG_TYPE,
     LABEL_STEP,
     LABEL_SOURCE,
     LABEL_REASON,
@@ -137,8 +135,6 @@ metrics!("zslg_", raft; {
         "1 if this node currently observes an elected leader." (has_leader: bool);
     gauge   raft_term        RAFT_TERM        "raft_term" None
         "Current raft term as observed by this node." (term: u64);
-    gauge   raft_applied_log_index RAFT_APPLIED_LOG_INDEX "raft_applied_log_index" None
-        "Last applied raft log index. Spread across nodes = apply lag." (index: u64);
     counter raft_leader_change RAFT_LEADER_CHANGES_TOTAL "raft_leader_changes_total"
         "Leader changes observed by this node. Sustained rate = election churn.";
     flag    raft_in_joint_config RAFT_IN_JOINT_CONFIG "raft_in_joint_config"
@@ -397,13 +393,6 @@ metrics!("zslg_", write_path_replica; {
 // ── logs and replication ────────────────────────────────────────────────────
 
 metrics!("zslg_", logs; {
-    custom  log_writes  LOG_WRITES_TOTAL  "log_writes_total"  Counter None
-        "Entries appended/integrated, by log (replica = single-writer \
-         replica log, local = learner local store).";
-    custom  log_index_frontier  LOG_INDEX_FRONTIER  "log_index_frontier"
-        Gauge None
-        "Highest log index per log type. replica-vs-local spread on a \
-         learner = replication lag in entries.";
     counter subscription_reconnect LOG_SUBSCRIPTION_RECONNECTS_TOTAL
         "log_subscription_reconnects_total"
         "Subscription reconnects (learner side). Sustained rate = flaky \
@@ -417,25 +406,6 @@ metrics!("zslg_", logs; {
 
 // ── logs and replication: hand-written emission helpers ─────────────────────
 // (custom rows above; each fn below emits the metrics named in its row)
-
-pub(crate) fn log_writes(log_type: LogType, count: usize) {
-    if count == 0 {
-        return;
-    }
-    metrics::counter!(
-        LOG_WRITES_TOTAL,
-        LABEL_LOG_TYPE => log_type.as_str(),
-    )
-    .increment(u64::try_from(count).expect("log write count fits u64"));
-}
-
-pub(crate) fn log_index_frontier(log_type: LogType, index: u64) {
-    metrics::gauge!(
-        LOG_INDEX_FRONTIER,
-        LABEL_LOG_TYPE => log_type.as_str(),
-    )
-    .set(lossy_f64(index));
-}
 
 pub(crate) fn subscription_messages(count: usize) {
     if count == 0 {
@@ -508,8 +478,6 @@ pub(crate) fn subscription_records_retired(records: u64) {
 // ── snapshots / leader background tasks ─────────────────────────────────────
 
 metrics!("zslg_", snapshots; {
-    custom  purged_entries  PURGED_ENTRIES_TOTAL  "purged_entries_total"  Counter None
-        "Entries removed by purge workers, by log type.";
     labeled_counter snapshot_creation SNAPSHOT_CREATION_TOTAL "snapshot_creation_total"
         "Snapshot creation attempts by outcome (see SnapshotState). \
          waiting_for_stable_log is backpressure, not failure: the leader's \
@@ -535,17 +503,6 @@ metrics!("zslg_", snapshots; {
 
 // ── snapshots / leader background tasks: hand-written emission helpers ──────
 // (custom rows above; each fn below emits the metrics named in its row)
-
-pub(crate) fn purged_entries(log_type: LogType, purged: usize) {
-    if purged == 0 {
-        return;
-    }
-    metrics::counter!(
-        PURGED_ENTRIES_TOTAL,
-        LABEL_LOG_TYPE => log_type.as_str(),
-    )
-    .increment(u64::try_from(purged).expect("purge count fits u64"));
-}
 
 pub(crate) fn snapshot_creation_step(step: SnapshotStep, elapsed: Duration) {
     metrics::histogram!(
@@ -632,16 +589,6 @@ pub(crate) fn read_request(source: ReadSource) {
 // ── RPC server ───────────────────────────────────────────────────────────────
 
 metrics!("zslg_", rpc_server; {
-    counter raft_log_read_empty_range RAFT_LOG_READ_EMPTY_RANGE_TOTAL
-        "raft_log_read_empty_range_total"
-        "Raft-log reads for a non-empty index range that returned no \
-         entries, i.e. the whole range was already purged. openraft's \
-         DEFAULT limited_get_log_entries would unwrap that empty result \
-         and abort the process (our release profile sets panic=abort); \
-         we override it to return a StorageError instead, so openraft \
-         falls back to snapshot replication. Non-zero therefore means \
-         that fallback is being exercised — a follower fell behind the \
-         purge floor — not that anything crashed.";
 });
 
 // ── RPC server: hand-written emission helpers ────────────────────────────────
@@ -1026,14 +973,6 @@ label_enum!(#[doc = "`state` label of [`REPLICA_WRITE_REQUESTS_TOTAL`]."] Replic
     FailStorage => "fail_storage",
 });
 
-label_enum!(#[doc = "`log_type` label ([`LOG_WRITES_TOTAL`], [`LOG_INDEX_FRONTIER`], \
-[`PURGED_ENTRIES_TOTAL`])."] LogType {
-    Local => "local",
-    Replica => "replica",
-    Stable => "stable",
-    Raft => "raft",
-});
-
 label_enum!(#[doc = "`state` label of [`SNAPSHOT_CREATION_TOTAL`]."] SnapshotState {
     Success => "success",
     /// The (watermark, cutoff] window was empty — nothing to snapshot.
@@ -1248,21 +1187,6 @@ pub(crate) fn jemalloc_stats(s: &JemallocStats) {
 // (`object_store_request_probe`, `rpc_conn_reuse`) are hand-written below.
 
 metrics!("zslg_", probes; {
-    probe_unlabeled raft_log_append_probe RAFT_LOG_APPEND_DURATION_SECONDS
-        "raft_log_append_duration_seconds"
-        "Raft append_to_log latency (encode + batch + commit + fsync). \
-         Slow values delay replication to followers.";
-    probe_unlabeled raft_apply_probe RAFT_APPLY_DURATION_SECONDS "raft_apply_duration_seconds"
-        "Raft apply_to_state_machine latency (membership writes + commit + \
-         fsync). The hottest I/O path after the replica log.";
-    probe_unlabeled raft_build_snapshot_probe RAFT_BUILD_SNAPSHOT_DURATION_SECONDS
-        "raft_build_snapshot_duration_seconds"
-        "Raft build_snapshot latency (read all meta + encode payload + \
-         commit + fsync). The most expensive single storage operation.";
-    probe_unlabeled raft_install_snapshot_probe RAFT_INSTALL_SNAPSHOT_DURATION_SECONDS
-        "raft_install_snapshot_duration_seconds"
-        "Raft install_snapshot latency (decode + batch write + commit + \
-         fsync). Snapshot transfer cost on the receiving side.";
     probe_unlabeled stable_log_commit_probe STABLE_LOG_COMMIT_SECONDS
         "stable_log_commit_seconds"
         "Segment-WAL append + fsync latency inside StableLog::append \
@@ -1300,6 +1224,10 @@ metrics!("zslg_", probes; {
 // ---------------------------------------------------------------------------
 
 const ALL_METRICS: &[&[MetricDef]] = &[
+    // --- raft storage (zslg-raft-storage) ---
+    zslg_raft_storage::metrics::METRICS,
+    // --- shared log metrics (zslg-log) ---
+    zslg_log::metrics::METRICS,
     // --- HLC clock and gate (zslg-hlc-clock, zslg-hlc-gate) ---
     zslg_hlc_clock::metrics::METRICS,
     zslg_hlc_gate::metrics::METRICS,

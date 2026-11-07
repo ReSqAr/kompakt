@@ -33,8 +33,8 @@ pub(crate) fn open_for_test(root: &Path) -> Result<Arc<Storage>, Error> {
         crate::learner::STABLE_LOG_CF,
         crate::learner::LOCAL_STORE_DATA_CF,
         crate::learner::LOCAL_STORE_CURSORS_CF,
-        crate::raft::RAFT_LOG_CF,
-        crate::raft::RAFT_META_CF,
+        zslg_raft_storage::RAFT_LOG_CF,
+        zslg_raft_storage::RAFT_META_CF,
         NODE_ID_CF,
     ]
     .into_iter()

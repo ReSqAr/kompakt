@@ -36,10 +36,8 @@ use std::fmt::Debug;
 use std::io::Cursor;
 use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
-use zslg_consensus_types::{
-    validate_cutoff_advance, validate_replicated_state, validate_transition,
-};
-use zslg_log_types::LogError;
+use zslg_consensus::{validate_cutoff_advance, validate_replicated_state, validate_transition};
+use zslg_log::LogError;
 
 use rocksdb_kit::{Batch, Cf};
 
@@ -63,25 +61,26 @@ use raft_kit::storage::Adaptor;
 use rocksdb_kit::{CfSpec, Storage};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use zslg_raft_types::NodeInfo;
+use zslg_raft::NodeInfo;
 
-use crate::error::Error;
-use crate::metrics::{self, LogType};
-use zslg_consensus_types::RaftGeneration;
-use zslg_consensus_types::RaftLogIndex;
-use zslg_consensus_types::RaftStateHandle;
-use zslg_consensus_types::ReplicaMembership;
+use crate::Error;
+use crate::metrics::{self};
+use zslg_consensus::NodeId;
+use zslg_consensus::RaftGeneration;
+use zslg_consensus::RaftLogIndex;
+use zslg_consensus::RaftStateHandle;
+use zslg_consensus::ReplicaMembership;
+use zslg_log::ToCodec;
 use zslg_log::ToStorage;
-use zslg_log_types::ToCodec;
-use zslg_node_types::NodeId;
-use zslg_raft_types::{RaftResponse, TypeConfig};
-use zslg_time_types::Hlc;
+use zslg_log::metrics::LogType;
+use zslg_raft::{RaftResponse, TypeConfig};
+use zslg_time::Hlc;
 
 /// The raft log.
-pub(crate) const RAFT_LOG_CF: ColumnFamily = ColumnFamily::new("raft_log");
+pub const RAFT_LOG_CF: ColumnFamily = ColumnFamily::new("raft_log");
 
 /// The raft meta singletons.
-pub(crate) const RAFT_META_CF: ColumnFamily = ColumnFamily::new("raft_meta");
+pub const RAFT_META_CF: ColumnFamily = ColumnFamily::new("raft_meta");
 
 #[cfg(test)]
 #[allow(
@@ -93,15 +92,15 @@ pub(crate) const RAFT_META_CF: ColumnFamily = ColumnFamily::new("raft_meta");
 )]
 mod tests;
 
-#[cfg(test)]
-pub(crate) use self::tests::{
-    build_raft_for_test, open_test_storage, seed_foreign_membership_for_test,
-};
+#[cfg(feature = "testing")]
+mod testing;
+#[cfg(feature = "testing")]
+pub use self::testing::{build_raft_for_test, seed_foreign_membership_for_test};
 
 /// The two column families this store owns. Both are committed raft state at
 /// low volume, so compression is worth its CPU on both.
 #[must_use]
-pub(crate) fn raft_cf_specs() -> [CfSpec; 2] {
+pub fn raft_cf_specs() -> [CfSpec; 2] {
     [
         CfSpec {
             cf: RAFT_LOG_CF,
@@ -205,7 +204,7 @@ impl RaftMetaSlot {
 }
 
 #[derive(Debug)]
-pub(in crate::raft) struct RocksRaftStorage {
+pub struct RocksRaftStorage {
     inner: Arc<SyncMutex<Inner>>,
 }
 
@@ -225,7 +224,7 @@ impl std::fmt::Debug for Inner {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub(in crate::raft) struct SnapshotPayload {
+pub(crate) struct SnapshotPayload {
     last_applied: Option<LogId<NodeId>>,
     last_membership: StoredMembership<NodeId, NodeInfo>,
     apply: RaftStateHandle,
@@ -233,7 +232,7 @@ pub(in crate::raft) struct SnapshotPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(in crate::raft) struct StoredSnapshot {
+pub(crate) struct StoredSnapshot {
     meta: SnapshotMeta<NodeId, NodeInfo>,
     data: Vec<u8>,
 }
@@ -243,10 +242,7 @@ impl RocksRaftStorage {
     /// replay the raft log from disk. The DB is already open; this only reads
     /// it. Blocking I/O runs inside `spawn_blocking` — safe to call from an
     /// async context.
-    pub(in crate::raft) async fn open(
-        raft_state: RaftStateHandle,
-        storage: Arc<Storage>,
-    ) -> Result<Self, Error> {
+    pub async fn open(raft_state: RaftStateHandle, storage: Arc<Storage>) -> Result<Self, Error> {
         tokio::task::spawn_blocking(move || {
             let mut snapshot_index = 0u64;
             if let Some(idx) = read_meta::<u64>(&storage, RaftMetaSlot::SnapshotIndex)? {
@@ -310,7 +306,7 @@ impl RocksRaftStorage {
 
     /// Check whether durable raft state exists (vote or log entries).
     /// All blocking I/O runs inside `spawn_blocking`.
-    pub(in crate::raft) async fn has_durable_state(&self) -> Result<bool, Error> {
+    pub async fn has_durable_state(&self) -> Result<bool, Error> {
         let inner = self.inner.clone();
         tokio::task::spawn_blocking(move || {
             let inner = inner
@@ -336,9 +332,7 @@ impl RocksRaftStorage {
     /// serialises through an `RwLock`, which is free at the doc's ≤100 writes/s
     /// target.
     #[must_use]
-    pub(in crate::raft) fn into_adaptor(
-        self,
-    ) -> (Adaptor<TypeConfig, Self>, Adaptor<TypeConfig, Self>) {
+    pub fn into_adaptor(self) -> (Adaptor<TypeConfig, Self>, Adaptor<TypeConfig, Self>) {
         Adaptor::new(self)
     }
 }
@@ -640,7 +634,10 @@ impl RaftStorage<TypeConfig> for RocksRaftStorage {
                 .next()
                 .raw()
                 .saturating_sub(prev_floor.raw());
-            metrics::purged_entries(LogType::Raft, usize::try_from(purged).unwrap_or(usize::MAX));
+            zslg_log::metrics::purged_entries(
+                LogType::Raft,
+                usize::try_from(purged).unwrap_or(usize::MAX),
+            );
             Ok(())
         })
         .await
@@ -699,8 +696,7 @@ impl RaftStorage<TypeConfig> for RocksRaftStorage {
             // entry N is validated against entry N-1's state, not the stale
             // applied one.
             let mut next_cutoff = applied.manifest_state.hlc_cutoff;
-            let mut staged: Vec<(zslg_consensus_types::ReplicatedRaftState, RaftGeneration)> =
-                Vec::new();
+            let mut staged: Vec<(zslg_consensus::ReplicatedRaftState, RaftGeneration)> = Vec::new();
             let mut last_applied: Option<LogId<NodeId>> = None;
             let mut last_membership: Option<StoredMembership<NodeId, NodeInfo>> = None;
             for entry in &entries {
@@ -937,7 +933,7 @@ fn evaluate_fence(
     current: RaftGeneration,
     previous_replica: &ReplicaMembership,
     previous_cutoff: Option<Hlc>,
-    write: &zslg_raft_types::FencedStateWrite,
+    write: &zslg_raft::FencedStateWrite,
     log_index: RaftLogIndex,
 ) -> RaftResponse {
     if write.expected_generation != current {
@@ -974,7 +970,7 @@ fn evaluate_fence(
 
 fn apply_normal_fenced(
     raft_state: &RaftStateHandle,
-    write: &zslg_raft_types::FencedStateWrite,
+    write: &zslg_raft::FencedStateWrite,
     log_index: RaftLogIndex,
 ) -> Result<RaftResponse, Error> {
     let applied = raft_state.snapshot();

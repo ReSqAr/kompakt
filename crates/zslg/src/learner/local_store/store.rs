@@ -44,9 +44,10 @@ use tokio_util::sync::CancellationToken;
 use tracing::error;
 
 use crate::error::{Error, Home};
-use crate::metrics::{self, LocalWriteKind, LogType, OpState};
+use crate::metrics::{self, LocalWriteKind, OpState};
 use zslg_log::StableLogSnapshot;
 use zslg_log::ToStorage;
+use zslg_log::metrics::LogType;
 use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};
 use zslg_node_types::NodeId;
@@ -182,7 +183,7 @@ impl LocalStore {
     /// cleared" edge relies on this).
     fn apply_post_fence(&self, outcome: BatchOutcome) {
         if outcome.total_records > 0 {
-            metrics::log_writes(LogType::Local, outcome.total_records);
+            zslg_log::metrics::log_writes(LogType::Local, outcome.total_records);
         }
 
         if outcome.had_integrate_or_fetch {

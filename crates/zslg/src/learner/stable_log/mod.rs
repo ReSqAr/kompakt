@@ -120,13 +120,14 @@ use rocksdb_kit::Batch;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::error::{Error, Home};
-use crate::metrics::{self, LogType, OpState};
+use crate::metrics::{self, OpState};
 use crossbeam_combinators::{
     Channel, Fanout, FanoutConfig, Finite, Infinite, Level, LevelSetter, OverflowPolicy, Registry,
     broadcast,
 };
 use rocksdb_kit::Storage;
 use zslg_log::ToStorage;
+use zslg_log::metrics::LogType;
 use zslg_log_types::LogIndex;
 use zslg_log_types::ToCodec;
 use zslg_log_types::{Data, SnapshotEntry, StableLogEvent};
@@ -442,7 +443,7 @@ impl StableLog {
         // otherwise only set on writes — see the replica log's open for the
         // restart-shows-zero artifact this avoids).
         if let Some(idx) = end_index {
-            metrics::log_index_frontier(LogType::Stable, idx.raw());
+            zslg_log::metrics::log_index_frontier(LogType::Stable, idx.raw());
         }
 
         let (events, events_registry) = broadcast(
@@ -605,12 +606,12 @@ impl BatchAppender {
             let new_watermark = watermark.filter(|&wm| prev_watermark.is_none_or(|prev| wm > prev));
             if let Some(f) = frontier {
                 *self.end_index.lock() = Some(f);
-                metrics::log_index_frontier(LogType::Stable, f.raw());
+                zslg_log::metrics::log_index_frontier(LogType::Stable, f.raw());
             }
             if frontier_entry_hlc.is_some() {
                 *self.frontier_hlc.lock() = frontier_entry_hlc;
             }
-            metrics::log_writes(LogType::Stable, n);
+            zslg_log::metrics::log_writes(LogType::Stable, n);
             // `Stopped` only while the log is being dropped: no subscriber is
             // left to miss these.
             for (index, data) in committed {

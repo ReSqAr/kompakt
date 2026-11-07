@@ -1,0 +1,44 @@
+[package]
+name = "zslg-raft-storage"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "openraft storage over RocksDB column families"
+publish = false
+
+[dependencies]
+error-union = { workspace = true }
+metrics-kit = { workspace = true }
+parking_lot = { workspace = true }
+postcard = { workspace = true, features = ["alloc", "use-std"] }
+raft-kit = { workspace = true }
+rocksdb-kit = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["rt", "sync", "macros"] }
+tracing = { workspace = true }
+zslg-consensus = { workspace = true }
+zslg-lifecycle-types = { workspace = true }
+zslg-log = { workspace = true }
+zslg-net = { workspace = true }
+zslg-raft = { workspace = true }
+zslg-snapshot = { workspace = true }
+zslg-time = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+bytesize = { workspace = true }
+rocksdb-kit = { workspace = true, features = ["testing"] }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
+uuid = { workspace = true }
+
+[features]
+# `build_raft_for_test` and friends, for the tests of the crates that run a raft node.
+testing = []
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "implementation"

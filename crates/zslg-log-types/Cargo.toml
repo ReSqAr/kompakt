@@ -10,6 +10,7 @@ publish = false
 [dependencies]
 bytes = { workspace = true }
 crossbeam-combinators = { workspace = true }
+metrics-kit = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 uuid = { workspace = true }

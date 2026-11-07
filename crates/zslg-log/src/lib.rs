@@ -24,6 +24,7 @@ pub use replica::{Replica, ReplicaStream, StampedWrite, WriteOutcome};
 pub use stable_archive::{ArchiveBounds, ArchiveStream, ArchiveUpperBound, StableArchiveReader};
 pub use stable_log::StableLogSnapshot;
 pub use writer::Writer;
+pub use zslg_log_types::metrics;
 pub use zslg_log_types::{
     Data, DataId, LogError, LogIndex, SnapshotEntry, StableLogEvent, ToCodec, ToStorage,
     UnstableEvent,
