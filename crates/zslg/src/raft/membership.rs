@@ -2,8 +2,8 @@
 //! deficit ([`SpareSelectionStrategy`]) and the cluster-shape knobs
 //! ([`MembershipConfig`]) — how many replica nodes to maintain and how long a
 //! Raft voter may be absent from `config.peers` before eviction.
-use crate::error::ConfigError;
 use std::time::Duration;
+use zslg_lifecycle_types::ConfigError;
 
 use crate::api::{CandidateInfo, SpareSelector};
 use crate::ids::NodeId;

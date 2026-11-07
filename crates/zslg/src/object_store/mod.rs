@@ -15,11 +15,12 @@ mod framing;
 mod snapshot_store;
 
 use crate::Error;
-use crate::error::{ConfigError, SnapshotError};
+use crate::error::SnapshotError;
 use object_store::ObjectStore;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
+use zslg_lifecycle_types::ConfigError;
 
 pub(crate) use snapshot_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 

@@ -11,8 +11,8 @@
 //! group as a splice rather than a whole manifest is what lets a snapshot
 //! committed mid-merge keep its place. Bucketing is in [`merge`].
 
-use crate::error::LifecycleError;
 use std::time::Duration;
+use zslg_lifecycle_types::LifecycleError;
 
 use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;

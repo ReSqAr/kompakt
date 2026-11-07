@@ -52,7 +52,6 @@ use crate::api::{
     ArchiveBounds, ArchiveUpperBound, Clock, LocalStoreView, Reader, StableArchiveReader,
     StableLogSnapshot,
 };
-use crate::error::LifecycleError;
 use crate::hlc::Hlc;
 use crate::ids::{LogIndex, NodeId};
 use crate::learner::QuorumReadDebouncer;
@@ -64,6 +63,7 @@ use crossbeam_combinators::{
     Resumable, Seam, StrictlyIncreasing, resync,
 };
 use std::sync::Arc;
+use zslg_lifecycle_types::LifecycleError;
 
 /// Whether this node may serve client reads and writes.
 ///
@@ -666,10 +666,11 @@ impl Reader for ReaderImpl {
     reason = "test code"
 )]
 mod tests {
-    use crate::error::{LifecycleError, SnapshotError};
+    use crate::error::SnapshotError;
     use crate::test_stream::ChannelTestExt as _;
     use std::sync::Arc;
     use std::time::Duration;
+    use zslg_lifecycle_types::LifecycleError;
 
     use crate::api::QuorumCheck;
     use crate::api::{LocalStoreMut, StableLogSnapshot};

@@ -26,9 +26,10 @@
 //! Premises are per intent, not per batch: one rejected intent does not sink the
 //! others drained with it.
 
-use crate::error::{ConsensusError, LifecycleError};
+use crate::error::ConsensusError;
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use zslg_lifecycle_types::LifecycleError;
 
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;

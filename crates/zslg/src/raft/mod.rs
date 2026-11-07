@@ -12,9 +12,9 @@
 //! cross-module contracts that justify their values — startup is unbounded
 //! (`startup_phase_timeout`) and the client-write backstop must outlast an
 //! election (`client_write_timeout`) — see the field docs.
-use crate::error::ConfigError;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use zslg_lifecycle_types::ConfigError;
 
 use openraft::storage::Adaptor;
 

@@ -28,9 +28,10 @@ mod clock_skew_tests;
 #[cfg(test)]
 mod subscribe_status_tests;
 
-use crate::error::{ClockError, ConfigError, ConsensusError, LifecycleError};
+use crate::error::{ClockError, ConsensusError};
 pub(crate) use log::{REPLICA_LOG_CF, ReplicaLogStore};
 use purge::run_purge_worker;
+use zslg_lifecycle_types::{ConfigError, LifecycleError};
 
 use futures::StreamExt as _;
 use futures::stream::BoxStream;

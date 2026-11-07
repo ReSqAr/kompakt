@@ -10,8 +10,8 @@
 //! Responses are keyed by `DataId` on the wire (already unique — 64 random bits +
 //! HLC), so the server may reply in any order.
 
-use crate::error::LifecycleError;
 use std::sync::Weak;
+use zslg_lifecycle_types::LifecycleError;
 
 use crate::api::{StampedWrite, WriteOutcome};
 use crate::error::Error;

@@ -31,10 +31,11 @@
 //! the connection onto dedicated blocking threads, since it is the only hot
 //! path. Subscribes stay async.
 
-use crate::error::{ConfigError, ConsensusError, NetError};
+use crate::error::{ConsensusError, NetError};
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
+use zslg_lifecycle_types::ConfigError;
 
 use dashmap::DashMap;
 use parking_lot::Mutex;

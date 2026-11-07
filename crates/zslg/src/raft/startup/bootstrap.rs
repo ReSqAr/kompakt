@@ -27,13 +27,14 @@
 //! `Rejoin` and `JoinExisting` both end at the same gate ([`wait_for_raft_recent`]):
 //! the node is not "started" until it has reached a quorum and caught up to
 //! that quorum's applied generation.
-use crate::error::{ConsensusError, LifecycleError};
+use crate::error::ConsensusError;
 use futures::FutureExt as _;
 use std::collections::BTreeSet;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
+use zslg_lifecycle_types::LifecycleError;
 
 use super::rejoin::{
     EvictionStatus, REJOIN_LEADERLESS_GRACE, REJOIN_RECONCILE_INTERVAL, RejoinMonitor,

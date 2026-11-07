@@ -37,7 +37,6 @@ mod stable_archive;
 mod stable_log;
 mod subscriber;
 
-use crate::error::ConfigError;
 pub(crate) use local_store::LocalStore;
 #[cfg(test)]
 pub(crate) use local_store::open_test_local_store;
@@ -49,6 +48,7 @@ pub(crate) use read::{GatedReader, can_serve_clients};
 pub(crate) use stable_log::STABLE_LOG_CF;
 pub(crate) use stable_log::StableLogConfig;
 pub(crate) use stable_log::{StableLog, spawn_stable_store};
+use zslg_lifecycle_types::ConfigError;
 
 #[cfg(test)]
 pub(crate) use stable_log::integrate_manifest_for_test;

@@ -15,9 +15,9 @@
 //! from the build. A cutoff keeps advancing while a build sits in its quorum
 //! wait, and the build takes whatever is committed when it next runs.
 
-use crate::error::LifecycleError;
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_lifecycle_types::LifecycleError;
 
 use tokio::time::{Instant, MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;

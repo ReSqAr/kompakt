@@ -16,13 +16,14 @@
 //! [`Writer`] + [`Reader`] traits.
 
 use crate::database::NODE_ID_CF;
-use crate::error::{ConfigError, NetError};
+use crate::error::NetError;
 use crate::learner::{LOCAL_STORE_CURSORS_CF, LOCAL_STORE_DATA_CF, STABLE_LOG_CF};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
+use zslg_lifecycle_types::ConfigError;
 
 use std::num::NonZeroUsize;
 

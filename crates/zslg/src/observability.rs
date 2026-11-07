@@ -20,8 +20,8 @@ use ::metrics::Unit;
 use tokio_util::sync::CancellationToken;
 
 use crate::Error;
-use crate::error::ConfigError;
 use crate::metrics;
+use zslg_lifecycle_types::ConfigError;
 
 /// The namespace every metric this crate owns is exported under.
 pub const METRIC_NAMESPACE: &str = "zslg_";

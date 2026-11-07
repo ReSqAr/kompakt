@@ -27,9 +27,10 @@
 //! round trip, so concurrent callers coalesce into one batch and batches are
 //! spaced by `deadtime`. Every waiter of a batch gets that batch's result.
 
-use crate::error::{LifecycleError, LogError};
+use crate::error::LogError;
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_lifecycle_types::LifecycleError;
 
 use async_trait::async_trait;
 use parking_lot::Mutex as SyncMutex;

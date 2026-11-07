@@ -7,8 +7,9 @@
 //! every arm through one await so the whole match does not sum into a single
 //! poll frame and trip `large_stack_frames` (CLAUDE.md §2).
 
-use crate::error::{LifecycleError, NetError};
+use crate::error::NetError;
 use std::sync::Arc;
+use zslg_lifecycle_types::LifecycleError;
 
 use async_trait::async_trait;
 use futures::FutureExt as _;

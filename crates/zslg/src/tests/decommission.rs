@@ -28,9 +28,9 @@
 //! `raft::startup::rejoin::tests::unreachable_cluster_never_fatal`, which
 //! asserts `EvictionStatus` stays clear through a whole simulated partition).
 
-use crate::error::LifecycleError;
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_lifecycle_types::LifecycleError;
 
 use object_store::memory::InMemory;
 

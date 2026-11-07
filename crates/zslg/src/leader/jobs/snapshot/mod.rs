@@ -14,8 +14,8 @@
 //! so the window stays open and the loop-back drives the next chunk. That
 //! loop-back is load-bearing — see [`SNAPSHOT_LOOP_FLOOR`].
 
-use crate::error::{ConfigError, LifecycleError};
 use std::time::Duration;
+use zslg_lifecycle_types::{ConfigError, LifecycleError};
 
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;

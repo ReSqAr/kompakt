@@ -28,9 +28,9 @@
     reason = "test code"
 )]
 
-use crate::error::LifecycleError;
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_lifecycle_types::LifecycleError;
 
 use bytes::Bytes;
 use object_store::memory::InMemory;

@@ -10,11 +10,11 @@
 //! durable state to protect, so there is nothing to recover and no reason to
 //! persist an id.
 
-use crate::error::ConfigError;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
+use zslg_lifecycle_types::ConfigError;
 
 use std::num::NonZeroUsize;
 

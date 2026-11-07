@@ -14,10 +14,10 @@
     clippy::result_large_err,
     reason = "test code"
 )]
-use crate::error::LifecycleError;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_lifecycle_types::LifecycleError;
 
 use object_store::ObjectStore;
 

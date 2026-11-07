@@ -20,9 +20,9 @@
     reason = "expects on Mutex::lock() (no poison) and bounded conversions"
 )]
 
-use crate::error::ConfigError;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
+use zslg_lifecycle_types::ConfigError;
 
 use async_trait::async_trait;
 use futures::FutureExt as _;

@@ -1,7 +1,8 @@
-use crate::error::{ConfigError, ConsensusError, NetError};
+use crate::error::{ConsensusError, NetError};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_lifecycle_types::ConfigError;
 
 use parking_lot::Mutex as SyncMutex;
 use tokio::sync::watch;

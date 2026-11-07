@@ -18,7 +18,6 @@
 //! promotion and demotion move no tasks.
 
 use crate::database::NODE_ID_CF;
-use crate::error::{ConfigError, LifecycleError};
 use crate::learner::{LOCAL_STORE_CURSORS_CF, LOCAL_STORE_DATA_CF, STABLE_LOG_CF};
 use crate::replica::REPLICA_LOG_CF;
 use futures::FutureExt as _;
@@ -28,6 +27,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
+use zslg_lifecycle_types::{ConfigError, LifecycleError};
 
 use std::num::NonZeroUsize;
 

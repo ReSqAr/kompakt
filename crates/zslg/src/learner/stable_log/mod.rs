@@ -110,9 +110,10 @@ pub(in crate::learner) use snapshot_loader::SnapshotLoader;
 #[cfg(test)]
 pub(crate) use snapshot_loader::integrate_manifest_for_test;
 
-use crate::error::{ConfigError, LogError};
+use crate::error::LogError;
 use rocksdb_kit::ColumnFamily;
 use std::sync::Arc;
+use zslg_lifecycle_types::ConfigError;
 
 use parking_lot::Mutex as SyncMutex;
 use rocksdb_kit::Batch;
