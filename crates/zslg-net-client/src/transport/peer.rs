@@ -23,8 +23,8 @@ use async_trait::async_trait;
 use crossbeam_combinators::Channel;
 use futures::StreamExt;
 use futures::stream::BoxStream;
-use openraft::error::{InstallSnapshotError, RaftError};
-use openraft::raft::{
+use raft_kit::error::{InstallSnapshotError, RaftError};
+use raft_kit::raft::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
     VoteRequest, VoteResponse,
 };
@@ -297,11 +297,11 @@ impl TcpPeerClient {
 impl RaftTransport for TcpPeerClient {
     async fn append_entries(
         &self,
-        rpc: openraft::raft::AppendEntriesRequest<zslg_raft::TypeConfig>,
+        rpc: raft_kit::raft::AppendEntriesRequest<zslg_raft::TypeConfig>,
     ) -> Result<
         Result<
-            openraft::raft::AppendEntriesResponse<zslg_consensus::NodeId>,
-            openraft::error::RaftError<zslg_consensus::NodeId>,
+            raft_kit::raft::AppendEntriesResponse<zslg_consensus::NodeId>,
+            raft_kit::error::RaftError<zslg_consensus::NodeId>,
         >,
         zslg_raft::Error,
     > {
@@ -309,11 +309,11 @@ impl RaftTransport for TcpPeerClient {
     }
     async fn vote(
         &self,
-        rpc: openraft::raft::VoteRequest<zslg_consensus::NodeId>,
+        rpc: raft_kit::raft::VoteRequest<zslg_consensus::NodeId>,
     ) -> Result<
         Result<
-            openraft::raft::VoteResponse<zslg_consensus::NodeId>,
-            openraft::error::RaftError<zslg_consensus::NodeId>,
+            raft_kit::raft::VoteResponse<zslg_consensus::NodeId>,
+            raft_kit::error::RaftError<zslg_consensus::NodeId>,
         >,
         zslg_raft::Error,
     > {
@@ -321,13 +321,13 @@ impl RaftTransport for TcpPeerClient {
     }
     async fn install_snapshot(
         &self,
-        rpc: openraft::raft::InstallSnapshotRequest<zslg_raft::TypeConfig>,
+        rpc: raft_kit::raft::InstallSnapshotRequest<zslg_raft::TypeConfig>,
     ) -> Result<
         Result<
-            openraft::raft::InstallSnapshotResponse<zslg_consensus::NodeId>,
-            openraft::error::RaftError<
+            raft_kit::raft::InstallSnapshotResponse<zslg_consensus::NodeId>,
+            raft_kit::error::RaftError<
                 zslg_consensus::NodeId,
-                openraft::error::InstallSnapshotError,
+                raft_kit::error::InstallSnapshotError,
             >,
         >,
         zslg_raft::Error,

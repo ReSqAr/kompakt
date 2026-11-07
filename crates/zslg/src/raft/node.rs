@@ -1,4 +1,4 @@
-//! The `RaftNode`: a thin owned wrapper around `openraft::Raft` implementing
+//! The `RaftNode`: a thin owned wrapper around `raft_kit::Raft` implementing
 //! the crate's `api` traits — `RaftConsensus` RPC passthroughs, `RaftLeadership`
 //! queries, and `StateReplicator` fenced writes.
 //!
@@ -16,8 +16,8 @@ use zslg_raft::RaftConsensus;
 
 use futures::FutureExt as _;
 
-use openraft::error::{InstallSnapshotError, RaftError};
-use openraft::raft::{
+use raft_kit::error::{InstallSnapshotError, RaftError};
+use raft_kit::raft::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
     VoteRequest, VoteResponse,
 };
@@ -33,7 +33,7 @@ use zslg_node_types::NodeId;
 use zslg_raft_types::{FencedStateWrite, NodeInfo, RaftResponse};
 
 pub(crate) struct RaftNode {
-    inner: openraft::Raft<zslg_raft_types::TypeConfig>,
+    inner: raft_kit::Raft<zslg_raft_types::TypeConfig>,
     gate: Arc<dyn MembershipGate>,
     client_write_timeout: std::time::Duration,
 }
@@ -41,7 +41,7 @@ pub(crate) struct RaftNode {
 impl RaftNode {
     #[must_use]
     pub(crate) fn new(
-        inner: openraft::Raft<zslg_raft_types::TypeConfig>,
+        inner: raft_kit::Raft<zslg_raft_types::TypeConfig>,
         gate: Arc<dyn MembershipGate>,
         client_write_timeout: std::time::Duration,
     ) -> Self {
@@ -53,7 +53,7 @@ impl RaftNode {
     }
 
     #[must_use]
-    pub(in crate::raft) fn inner(&self) -> &openraft::Raft<zslg_raft_types::TypeConfig> {
+    pub(in crate::raft) fn inner(&self) -> &raft_kit::Raft<zslg_raft_types::TypeConfig> {
         &self.inner
     }
 

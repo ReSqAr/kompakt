@@ -43,23 +43,23 @@ use zslg_log_types::LogError;
 
 use rocksdb_kit::{Batch, Cf};
 
-use openraft::Entry;
-use openraft::EntryPayload;
-use openraft::LogId;
-use openraft::LogState;
-use openraft::OptionalSend;
-use openraft::RaftLogId;
-use openraft::RaftLogReader;
-use openraft::RaftSnapshotBuilder;
-use openraft::RaftStorage;
-use openraft::Snapshot;
-use openraft::SnapshotMeta;
-use openraft::StorageError;
-use openraft::StorageIOError;
-use openraft::StoredMembership;
-use openraft::Vote;
-use openraft::storage::Adaptor;
 use parking_lot::Mutex as SyncMutex;
+use raft_kit::Entry;
+use raft_kit::EntryPayload;
+use raft_kit::LogId;
+use raft_kit::LogState;
+use raft_kit::OptionalSend;
+use raft_kit::RaftLogId;
+use raft_kit::RaftLogReader;
+use raft_kit::RaftSnapshotBuilder;
+use raft_kit::RaftStorage;
+use raft_kit::Snapshot;
+use raft_kit::SnapshotMeta;
+use raft_kit::StorageError;
+use raft_kit::StorageIOError;
+use raft_kit::StoredMembership;
+use raft_kit::Vote;
+use raft_kit::storage::Adaptor;
 use rocksdb_kit::{CfSpec, Storage};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -345,7 +345,7 @@ impl RocksRaftStorage {
 
 #[allow(
     clippy::result_large_err,
-    reason = "openraft::StorageError is inherently large (240+ bytes); we cannot change it"
+    reason = "raft_kit::StorageError is inherently large (240+ bytes); we cannot change it"
 )]
 impl RaftLogReader<TypeConfig> for RocksRaftStorage {
     async fn try_get_log_entries<RB: RangeBounds<u64> + Clone + Debug + OptionalSend>(
@@ -417,7 +417,7 @@ impl RaftLogReader<TypeConfig> for RocksRaftStorage {
 
 #[allow(
     clippy::result_large_err,
-    reason = "openraft::StorageError is inherently large (240+ bytes); we cannot change it"
+    reason = "raft_kit::StorageError is inherently large (240+ bytes); we cannot change it"
 )]
 impl RaftStorage<TypeConfig> for RocksRaftStorage {
     type LogReader = Self;
@@ -853,7 +853,7 @@ impl RaftStorage<TypeConfig> for RocksRaftStorage {
 
 #[allow(
     clippy::result_large_err,
-    reason = "openraft::StorageError is inherently large (240+ bytes); we cannot change it"
+    reason = "raft_kit::StorageError is inherently large (240+ bytes); we cannot change it"
 )]
 impl RaftSnapshotBuilder<TypeConfig> for RocksRaftStorage {
     async fn build_snapshot(&mut self) -> Result<Snapshot<TypeConfig>, StorageError<NodeId>> {

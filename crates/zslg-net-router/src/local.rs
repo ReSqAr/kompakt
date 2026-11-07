@@ -23,8 +23,8 @@ use tokio::sync::watch;
 
 use crossbeam_combinators::Channel;
 use futures::stream::BoxStream;
-use openraft::error::{InstallSnapshotError, RaftError};
-use openraft::raft::{
+use raft_kit::error::{InstallSnapshotError, RaftError};
+use raft_kit::raft::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
     VoteRequest, VoteResponse,
 };

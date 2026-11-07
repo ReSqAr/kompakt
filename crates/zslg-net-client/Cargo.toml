@@ -16,7 +16,7 @@ crossbeam-combinators = { workspace = true, features = ["tokio"] }
 error-union = { workspace = true }
 futures = { workspace = true }
 metrics-kit = { workspace = true }
-openraft = { workspace = true }
+raft-kit = { workspace = true }
 parking_lot = { workspace = true }
 tokio = { workspace = true, features = ["rt", "sync", "time", "net", "io-util", "macros"] }
 tokio-util = { workspace = true }

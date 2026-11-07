@@ -13,7 +13,7 @@ error-union = { workspace = true }
 framing = { workspace = true }
 futures = { workspace = true }
 metrics-kit = { workspace = true }
-openraft = { workspace = true }
+raft-kit = { workspace = true }
 postcard = { workspace = true, features = ["alloc", "use-std"] }
 serde = { workspace = true, features = ["derive"] }
 socket2 = { workspace = true }

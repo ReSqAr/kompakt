@@ -4,7 +4,7 @@
 //! [`RaftNode::add_member`](crate::raft::RaftNode) rather than in the RPC
 //! handler, so there is one enforcement point covering the network and loopback
 //! paths alike — a second gate in the handler would be a second thing to keep in
-//! sync. Bootstrap does not pass through it at all: `openraft::Raft::initialize`
+//! sync. Bootstrap does not pass through it at all: `raft_kit::Raft::initialize`
 //! never calls `add_member`, so the founding set is admitted by construction.
 
 use zslg_net_types::PeerAddr;

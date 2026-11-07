@@ -33,8 +33,8 @@
 //! cannot encode its own reply. Reordering variants silently reinterprets every
 //! message that crosses a version boundary, so new variants go on the end.
 
-use openraft::error::{InstallSnapshotError, RaftError};
-use openraft::raft::{
+use raft_kit::error::{InstallSnapshotError, RaftError};
+use raft_kit::raft::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
     VoteRequest, VoteResponse,
 };

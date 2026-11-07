@@ -13,8 +13,8 @@
 //! (`api::raft_peer`), which is how the self/loopback client presents the same
 //! surface as a remote one.
 
-use openraft::error::{InstallSnapshotError, RaftError};
-use openraft::raft::{
+use raft_kit::error::{InstallSnapshotError, RaftError};
+use raft_kit::raft::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
     VoteRequest, VoteResponse,
 };

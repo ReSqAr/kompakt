@@ -64,6 +64,7 @@ metrics-kit = { path = "crates/metrics-kit" }
 nvzn = { path = "crates/nvzn" }
 objectstorage-cache = { path = "crates/objectstorage-cache" }
 rocksdb-kit = { path = "crates/rocksdb-kit" }
+raft-kit = { path = "crates/raft-kit" }
 shutdown = { path = "crates/shutdown" }
 warn-throttle = { path = "crates/warn-throttle" }
 zslg = { path = "crates/zslg" }

@@ -18,7 +18,7 @@ use zslg_consensus::MembershipGate;
 use zslg_lifecycle_types::ConfigError;
 use zslg_net::Router;
 
-use openraft::storage::Adaptor;
+use raft_kit::storage::Adaptor;
 
 use crate::error::Error;
 use crate::raft::raft_storage::RocksRaftStorage;
@@ -83,7 +83,7 @@ pub(crate) async fn setup_raft(
     let (log_store, state_handle): (Adaptor<_, _>, Adaptor<_, _>) = raft_storage.into_adaptor();
     let network_factory = NetworkFactory::new(router.clone());
     let raft_config = config.to_openraft()?;
-    let raw_raft = openraft::Raft::new(
+    let raw_raft = raft_kit::Raft::new(
         config.node_id,
         Arc::new(raft_config),
         network_factory,
@@ -229,9 +229,9 @@ impl RaftConfig {
         Ok(())
     }
 
-    /// Build an openraft [`openraft::Config`] from this config.
-    pub(in crate::raft) fn to_openraft(&self) -> Result<openraft::Config, crate::error::Error> {
-        let cfg = openraft::Config {
+    /// Build an openraft [`raft_kit::Config`] from this config.
+    pub(in crate::raft) fn to_openraft(&self) -> Result<raft_kit::Config, crate::error::Error> {
+        let cfg = raft_kit::Config {
             heartbeat_interval: zslg_time_types::duration_as_ms_clamped(self.heartbeat_interval),
             election_timeout_min: zslg_time_types::duration_as_ms_clamped(
                 self.election_timeout_min,
@@ -245,7 +245,7 @@ impl RaftConfig {
             // `cfg.validate()` (below) enforces `replication_lag_threshold`
             // (default 5000) > `LogsSinceLast`, so an out-of-range cadence fails
             // loud rather than being silently clamped.
-            snapshot_policy: openraft::SnapshotPolicy::LogsSinceLast(self.snapshot_logs_since_last),
+            snapshot_policy: raft_kit::SnapshotPolicy::LogsSinceLast(self.snapshot_logs_since_last),
             max_in_snapshot_log_to_keep: self.max_in_snapshot_log_to_keep,
             ..Default::default()
         };
@@ -381,7 +381,7 @@ mod config_tests {
             .expect("raft config");
         assert!(matches!(
             raft_cfg.snapshot_policy,
-            openraft::SnapshotPolicy::LogsSinceLast(100)
+            raft_kit::SnapshotPolicy::LogsSinceLast(100)
         ));
         assert_eq!(raft_cfg.max_in_snapshot_log_to_keep, 10);
     }

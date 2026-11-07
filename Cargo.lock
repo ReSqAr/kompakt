@@ -2617,6 +2617,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "raft-kit"
+version = "0.1.0"
+dependencies = [
+ "openraft",
+]
+
+[[package]]
 name = "rand"
 version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4443,11 +4450,11 @@ dependencies = [
  "metrics-kit",
  "metrics-util",
  "object_store",
- "openraft",
  "parking_lot 0.13.0",
  "postcard",
  "pprof",
  "proptest",
+ "raft-kit",
  "rand 0.10.3",
  "rocksdb-kit",
  "serde",
@@ -4623,8 +4630,8 @@ dependencies = [
  "error-union",
  "futures",
  "metrics-kit",
- "openraft",
  "parking_lot 0.13.0",
+ "raft-kit",
  "tokio",
  "tokio-util",
  "tracing",
@@ -4647,7 +4654,7 @@ dependencies = [
  "async-trait",
  "crossbeam-combinators",
  "futures",
- "openraft",
+ "raft-kit",
  "tokio",
  "zslg-consensus",
  "zslg-lifecycle-types",
@@ -4698,8 +4705,8 @@ dependencies = [
  "framing",
  "futures",
  "metrics-kit",
- "openraft",
  "postcard",
+ "raft-kit",
  "serde",
  "socket2",
  "tokio",
@@ -4793,7 +4800,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "error-union",
- "openraft",
+ "raft-kit",
  "zslg-consensus-types",
  "zslg-lifecycle-types",
  "zslg-log-types",
@@ -4808,7 +4815,7 @@ dependencies = [
 name = "zslg-raft-types"
 version = "0.1.0"
 dependencies = [
- "openraft",
+ "raft-kit",
  "serde",
  "zslg-consensus-types",
  "zslg-net-types",

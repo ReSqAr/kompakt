@@ -24,8 +24,8 @@ use std::time::Duration;
 use zslg_consensus_types::ReplicaMembership;
 use zslg_net::Router;
 
-use openraft::Config;
-use openraft::storage::Adaptor;
+use raft_kit::Config;
+use raft_kit::storage::Adaptor;
 
 use crate::network::{LocalReplicaClient, RemoteRouter, RpcServerConfig, SocketOpts};
 use crate::raft::rpc::NetworkFactory;

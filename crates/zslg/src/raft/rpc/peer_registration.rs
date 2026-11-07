@@ -67,7 +67,7 @@ impl PeerRegistrationWatcher {
 
     /// Register every peer address from the current membership. Returns the
     /// number of nodes seen so the caller can detect an empty membership.
-    fn sync(&self, metrics: &openraft::RaftMetrics<NodeId, NodeInfo>) -> usize {
+    fn sync(&self, metrics: &raft_kit::RaftMetrics<NodeId, NodeInfo>) -> usize {
         let mut count = 0usize;
         for (node_id, node) in metrics.membership_config.nodes() {
             self.net.register_peer(*node_id, (**node).clone());

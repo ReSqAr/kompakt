@@ -11,7 +11,7 @@ publish = false
 async-trait = { workspace = true }
 crossbeam-combinators = { workspace = true, features = ["tokio"] }
 futures = { workspace = true }
-openraft = { workspace = true }
+raft-kit = { workspace = true }
 tokio = { workspace = true, features = ["rt", "sync", "time", "net", "io-util", "macros"] }
 zslg-consensus = { workspace = true }
 zslg-lifecycle-types = { workspace = true }

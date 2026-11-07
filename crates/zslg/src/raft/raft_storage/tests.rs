@@ -10,13 +10,13 @@ use zslg_snapshot_types::SnapshotMetadata;
 #[cfg(test)]
 pub(crate) async fn build_raft_for_test<NF>(
     node_id: NodeId,
-    config: Arc<openraft::Config>,
+    config: Arc<raft_kit::Config>,
     network: NF,
     dir: &std::path::Path,
     raft_state: RaftStateHandle,
 ) -> Result<zslg_raft_types::Raft, Error>
 where
-    NF: openraft::RaftNetworkFactory<TypeConfig>,
+    NF: raft_kit::RaftNetworkFactory<TypeConfig>,
 {
     use zslg_consensus::ToRaft as _;
     let (log_store, sm) = RocksRaftStorage::open(raft_state, open_test_storage(dir)?)
@@ -43,7 +43,7 @@ pub(crate) fn open_test_storage(dir: &std::path::Path) -> Result<Arc<Storage>, E
 pub(crate) async fn seed_foreign_membership_for_test(
     storage_root: std::path::PathBuf,
 ) -> Result<(), Error> {
-    use openraft::Membership;
+    use raft_kit::Membership;
     let other = NodeId::new_v4();
     let voters: std::collections::BTreeSet<NodeId> = [other].into_iter().collect();
     let membership: Membership<NodeId, NodeInfo> =
@@ -60,7 +60,7 @@ pub(crate) async fn seed_foreign_membership_for_test(
 }
 
 use crate::tests::nid;
-use openraft::CommittedLeaderId;
+use raft_kit::CommittedLeaderId;
 use zslg_consensus_types::Exit;
 use zslg_log_types::LogIndex;
 use zslg_snapshot_types::SnapshotId;

@@ -9,8 +9,8 @@
 //! and the recovery replay skip the entry without applying it.
 use std::io::Cursor;
 
-use openraft::Entry;
-use openraft::TokioRuntime;
+use raft_kit::Entry;
+use raft_kit::TokioRuntime;
 use serde::{Deserialize, Serialize};
 use zslg_consensus_types::{RaftGeneration, RaftStateError, ReplicatedRaftState};
 use zslg_net_types::PeerAddr;
@@ -74,7 +74,7 @@ impl std::fmt::Display for NodeInfo {
     }
 }
 
-openraft::declare_raft_types!(
+raft_kit::declare_raft_types!(
     pub TypeConfig:
         D            = FencedStateWrite,
         R            = RaftResponse,
@@ -85,4 +85,4 @@ openraft::declare_raft_types!(
         AsyncRuntime = TokioRuntime,
 );
 
-pub type Raft = openraft::Raft<TypeConfig>;
+pub type Raft = raft_kit::Raft<TypeConfig>;

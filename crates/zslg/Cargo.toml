@@ -28,7 +28,7 @@ metrics = { workspace = true }
 metrics-kit = { workspace = true }
 metrics-exporter-prometheus = { workspace = true, optional = true }
 object_store = { workspace = true }
-openraft = { workspace = true }
+raft-kit = { workspace = true }
 parking_lot = { workspace = true }
 postcard = { workspace = true, features = ["alloc", "use-std"] }
 rand = { workspace = true }

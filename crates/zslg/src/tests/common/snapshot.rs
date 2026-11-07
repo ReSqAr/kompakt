@@ -9,7 +9,7 @@ use crate::learner::LocalStore;
 use crate::learner::StableLog;
 use object_store::ObjectStore;
 use object_store::memory::InMemory;
-use openraft::Config;
+use raft_kit::Config;
 use zslg_consensus_types::RaftStateHandle;
 use zslg_consensus_types::ReplicatedRaftState;
 use zslg_hlc_gate::HlcGate;

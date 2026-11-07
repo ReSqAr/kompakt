@@ -44,12 +44,12 @@ use crate::raft::build_raft_for_test;
 use crossbeam_combinators::{Channel, Finite, Infinite};
 use dashmap::DashMap;
 use futures::stream::BoxStream;
-use openraft::Config;
-use openraft::RaftNetwork;
-use openraft::RaftNetworkFactory;
-use openraft::error::{InstallSnapshotError, RPCError, RaftError, RemoteError, Unreachable};
-use openraft::network::RPCOption;
-use openraft::raft::{
+use raft_kit::Config;
+use raft_kit::RaftNetwork;
+use raft_kit::RaftNetworkFactory;
+use raft_kit::error::{InstallSnapshotError, RPCError, RaftError, RemoteError, Unreachable};
+use raft_kit::network::RPCOption;
+use raft_kit::raft::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
     VoteRequest, VoteResponse,
 };
@@ -539,11 +539,11 @@ impl ReplicaOnly {
 impl RaftTransport for ReplicaOnly {
     async fn append_entries(
         &self,
-        rpc: openraft::raft::AppendEntriesRequest<zslg_raft_types::TypeConfig>,
+        rpc: raft_kit::raft::AppendEntriesRequest<zslg_raft_types::TypeConfig>,
     ) -> Result<
         Result<
-            openraft::raft::AppendEntriesResponse<zslg_node_types::NodeId>,
-            openraft::error::RaftError<zslg_node_types::NodeId>,
+            raft_kit::raft::AppendEntriesResponse<zslg_node_types::NodeId>,
+            raft_kit::error::RaftError<zslg_node_types::NodeId>,
         >,
         zslg_raft::Error,
     > {
@@ -551,11 +551,11 @@ impl RaftTransport for ReplicaOnly {
     }
     async fn vote(
         &self,
-        rpc: openraft::raft::VoteRequest<zslg_node_types::NodeId>,
+        rpc: raft_kit::raft::VoteRequest<zslg_node_types::NodeId>,
     ) -> Result<
         Result<
-            openraft::raft::VoteResponse<zslg_node_types::NodeId>,
-            openraft::error::RaftError<zslg_node_types::NodeId>,
+            raft_kit::raft::VoteResponse<zslg_node_types::NodeId>,
+            raft_kit::error::RaftError<zslg_node_types::NodeId>,
         >,
         zslg_raft::Error,
     > {
@@ -563,13 +563,13 @@ impl RaftTransport for ReplicaOnly {
     }
     async fn install_snapshot(
         &self,
-        rpc: openraft::raft::InstallSnapshotRequest<zslg_raft_types::TypeConfig>,
+        rpc: raft_kit::raft::InstallSnapshotRequest<zslg_raft_types::TypeConfig>,
     ) -> Result<
         Result<
-            openraft::raft::InstallSnapshotResponse<zslg_node_types::NodeId>,
-            openraft::error::RaftError<
+            raft_kit::raft::InstallSnapshotResponse<zslg_node_types::NodeId>,
+            raft_kit::error::RaftError<
                 zslg_node_types::NodeId,
-                openraft::error::InstallSnapshotError,
+                raft_kit::error::InstallSnapshotError,
             >,
         >,
         zslg_raft::Error,
@@ -741,11 +741,11 @@ impl ProbeOnly {
 impl RaftTransport for ProbeOnly {
     async fn append_entries(
         &self,
-        rpc: openraft::raft::AppendEntriesRequest<zslg_raft_types::TypeConfig>,
+        rpc: raft_kit::raft::AppendEntriesRequest<zslg_raft_types::TypeConfig>,
     ) -> Result<
         Result<
-            openraft::raft::AppendEntriesResponse<zslg_node_types::NodeId>,
-            openraft::error::RaftError<zslg_node_types::NodeId>,
+            raft_kit::raft::AppendEntriesResponse<zslg_node_types::NodeId>,
+            raft_kit::error::RaftError<zslg_node_types::NodeId>,
         >,
         zslg_raft::Error,
     > {
@@ -753,11 +753,11 @@ impl RaftTransport for ProbeOnly {
     }
     async fn vote(
         &self,
-        rpc: openraft::raft::VoteRequest<zslg_node_types::NodeId>,
+        rpc: raft_kit::raft::VoteRequest<zslg_node_types::NodeId>,
     ) -> Result<
         Result<
-            openraft::raft::VoteResponse<zslg_node_types::NodeId>,
-            openraft::error::RaftError<zslg_node_types::NodeId>,
+            raft_kit::raft::VoteResponse<zslg_node_types::NodeId>,
+            raft_kit::error::RaftError<zslg_node_types::NodeId>,
         >,
         zslg_raft::Error,
     > {
@@ -765,13 +765,13 @@ impl RaftTransport for ProbeOnly {
     }
     async fn install_snapshot(
         &self,
-        rpc: openraft::raft::InstallSnapshotRequest<zslg_raft_types::TypeConfig>,
+        rpc: raft_kit::raft::InstallSnapshotRequest<zslg_raft_types::TypeConfig>,
     ) -> Result<
         Result<
-            openraft::raft::InstallSnapshotResponse<zslg_node_types::NodeId>,
-            openraft::error::RaftError<
+            raft_kit::raft::InstallSnapshotResponse<zslg_node_types::NodeId>,
+            raft_kit::error::RaftError<
                 zslg_node_types::NodeId,
-                openraft::error::InstallSnapshotError,
+                raft_kit::error::InstallSnapshotError,
             >,
         >,
         zslg_raft::Error,

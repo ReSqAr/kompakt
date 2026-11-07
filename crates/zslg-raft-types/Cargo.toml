@@ -8,7 +8,7 @@ description = "openraft's vocabulary for the cluster: the replicated write, its 
 publish = false
 
 [dependencies]
-openraft = { workspace = true }
+raft-kit = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 zslg-consensus-types = { workspace = true }
 zslg-net-types = { workspace = true }

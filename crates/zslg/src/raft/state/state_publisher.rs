@@ -23,7 +23,7 @@ use zslg_time_types::Hlc;
 /// right answer for every consumer here — a node in either half can vote, so a
 /// node in either half is one the replica set may target.
 fn voters_of(
-    metrics: &openraft::RaftMetrics<NodeId, zslg_raft_types::NodeInfo>,
+    metrics: &raft_kit::RaftMetrics<NodeId, zslg_raft_types::NodeInfo>,
 ) -> BTreeSet<NodeId> {
     metrics.membership_config.membership().voter_ids().collect()
 }
