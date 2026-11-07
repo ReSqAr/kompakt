@@ -32,7 +32,6 @@
 
 mod quorum;
 mod read;
-mod stable_archive;
 mod subscriber;
 
 use quorum::{MultiReplicaQuorumCheck, QuorumReadDebouncer};
@@ -212,9 +211,11 @@ pub(crate) async fn spawn_learner(
     // The shared object-store access path for the stable prefix — used by both
     // the reader (purged-index fallback) and the snapshot loader. Threaded as a
     // trait object so neither sees the object-store/manifest detail.
-    let archive_reader: Arc<dyn zslg_log::StableArchiveReader> = Arc::new(
-        stable_archive::ObjectStoreArchiveReader::new(snapshot_store.clone(), raft_state.clone()),
-    );
+    let archive_reader: Arc<dyn zslg_log::StableArchiveReader> =
+        Arc::new(zslg_stable_archive::ObjectStoreArchiveReader::new(
+            snapshot_store.clone(),
+            raft_state.clone(),
+        ));
 
     let reader = Arc::new(ReaderImpl::new(
         local_store.clone(),

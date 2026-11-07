@@ -728,8 +728,8 @@ mod tests {
     use zslg_log_types::Data;
 
     use super::ReaderImpl;
-    use crate::learner::stable_archive::ObjectStoreArchiveReader;
     use zslg_consensus_types::RaftStateHandle;
+    use zslg_stable_archive::ObjectStoreArchiveReader;
 
     struct NoOpCheck;
 

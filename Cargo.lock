@@ -4509,6 +4509,7 @@ dependencies = [
  "zslg-raft-tracker",
  "zslg-snapshot",
  "zslg-snapshot-types",
+ "zslg-stable-archive",
  "zslg-stable-log",
  "zslg-time",
  "zslg-time-types",
@@ -5052,6 +5053,23 @@ dependencies = [
  "zslg-lifecycle-types",
  "zslg-log-types",
  "zslg-time-types",
+]
+
+[[package]]
+name = "zslg-stable-archive"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-combinators",
+ "error-union",
+ "tokio",
+ "zslg-consensus",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-quorum-read",
+ "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
 ]
 
 [[package]]

@@ -18,7 +18,7 @@ pub(crate) async fn integrate_manifest_for_test(
     stable_log: &dyn StableLogSnapshot,
     manifest_state: &RaftManifestState,
 ) -> Result<(), Error> {
-    let archive = crate::learner::stable_archive::ObjectStoreArchiveReader::new(
+    let archive = zslg_stable_archive::ObjectStoreArchiveReader::new(
         snapshot_store,
         seed_raft_state(manifest_state),
     );
@@ -66,7 +66,6 @@ mod tests {
     use zslg_stable_log::integrate_manifest;
 
     use crate::learner::StableLog;
-    use crate::learner::stable_archive::ObjectStoreArchiveReader;
     use crate::tests::make_data;
     use std::sync::Arc;
     use zslg_log::LogIndex;
@@ -74,6 +73,7 @@ mod tests {
     use zslg_snapshot::CompressionLevel;
     use zslg_snapshot::SnapshotId;
     use zslg_snapshot::SnapshotMetadata;
+    use zslg_stable_archive::ObjectStoreArchiveReader;
     use zslg_time::Hlc;
 
     /// Build the production archive reader over a scripted store, seeded with

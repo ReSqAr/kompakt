@@ -13,20 +13,19 @@ use std::sync::Arc;
 use zslg_consensus::RaftStateView;
 use zslg_snapshot::SnapshotStore;
 
-use crate::error::Error;
 use crossbeam_combinators::{Channel, Contiguous, Finite, NonDecreasing, OrderedChannel};
 use zslg_log::ArchiveStream;
+use zslg_log::LogIndex;
+use zslg_log::SnapshotEntry;
 use zslg_log::{ArchiveBounds, ArchiveUpperBound, StableArchiveReader};
-use zslg_log_types::LogIndex;
-use zslg_log_types::SnapshotEntry;
-use zslg_snapshot_types::SnapshotMetadata;
-use zslg_time_types::Hlc;
+use zslg_snapshot::SnapshotMetadata;
+use zslg_time::Hlc;
 
 /// Reads the archived (purged) prefix of the stable log from object-store
 /// snapshots. Holds the snapshot store (the object-store read point), the raft
 /// state (the source of truth for which snapshots tile the history), and the
 /// runtime the snapshot opens run on.
-pub(in crate::learner) struct ObjectStoreArchiveReader {
+pub struct ObjectStoreArchiveReader {
     snapshot_store: Arc<dyn SnapshotStore>,
     raft_state: Arc<dyn RaftStateView>,
     runtime: tokio::runtime::Handle,
@@ -36,10 +35,7 @@ impl ObjectStoreArchiveReader {
     /// Built inside a runtime: its handle is where the snapshot opens run,
     /// whichever thread later reads the stream.
     #[must_use]
-    pub(in crate::learner) fn new(
-        snapshot_store: Arc<dyn SnapshotStore>,
-        raft_state: Arc<dyn RaftStateView>,
-    ) -> Self {
+    pub fn new(snapshot_store: Arc<dyn SnapshotStore>, raft_state: Arc<dyn RaftStateView>) -> Self {
         Self {
             snapshot_store,
             raft_state,
@@ -102,7 +98,7 @@ impl StableArchiveReader for ObjectStoreArchiveReader {
                         store
                             .read_snapshot(
                                 meta.snapshot_id,
-                                zslg_snapshot_types::ObjectStoreReason::ArchiveRead,
+                                zslg_snapshot::ObjectStoreReason::ArchiveRead,
                             )
                             .await
                             .map(Channel::err_into)
@@ -131,7 +127,7 @@ impl StableArchiveReader for ObjectStoreArchiveReader {
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "test code")]
 mod tests {
     use super::*;
-    use zslg_snapshot_types::SnapshotId;
+    use zslg_snapshot::SnapshotId;
 
     fn meta(start: u64, end: u64) -> SnapshotMetadata {
         SnapshotMetadata {
@@ -218,3 +214,27 @@ mod tests {
         );
     }
 }
+
+error_union::error_union! {
+    /// What this crate can fail with.
+    #[derive(Debug, Clone, PartialEq)]
+    pub Error {
+        Lifecycle(zslg_lifecycle_types::LifecycleError),
+        Config(zslg_lifecycle_types::ConfigError),
+        Clock(zslg_time::ClockError),
+        Log(zslg_log::LogError),
+        Snapshot(zslg_snapshot::SnapshotError),
+        Net(zslg_net::NetError),
+        Consensus(zslg_consensus::ConsensusError),
+    }
+    from zslg_time::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_log::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_snapshot::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_consensus::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_raft::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_net::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_quorum_read::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+}
+
+error_union::error_bridge!(Error => zslg_time::Error, zslg_log::Error, zslg_snapshot::Error, zslg_consensus::Error, zslg_raft::Error, zslg_net::Error, zslg_quorum_read::Error; Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus);
+error_union::error_home!(Error);
