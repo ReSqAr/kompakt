@@ -4468,6 +4468,7 @@ dependencies = [
  "zslg-lifecycle-types",
  "zslg-log-types",
  "zslg-node-types",
+ "zslg-snapshot-types",
  "zslg-time-types",
  "zstd",
 ]
@@ -4500,6 +4501,19 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "uuid",
+]
+
+[[package]]
+name = "zslg-snapshot-types"
+version = "0.1.0"
+dependencies = [
+ "metrics-kit",
+ "rand 0.10.3",
+ "serde",
+ "thiserror 2.0.21",
+ "zslg-lifecycle-types",
+ "zslg-log-types",
+ "zslg-time-types",
 ]
 
 [[package]]

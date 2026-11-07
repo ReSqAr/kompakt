@@ -37,7 +37,7 @@ use zslg_node_types::NodeId;
 
 fn fast_rolling_config() -> ReplicaNodeConfig {
     let snapshot_interval = Duration::from_millis(100);
-    let tier0: crate::leader::CompactionTier = snapshot_interval.into();
+    let tier0: zslg_snapshot_types::CompactionTier = snapshot_interval.into();
     let mut cfg = ReplicaNodeConfig::new(
         "localhost".into(),
         vec![],

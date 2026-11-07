@@ -16,19 +16,11 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{RaftGeneration, ServerName, SnapshotId};
+use crate::ids::{RaftGeneration, ServerName};
 use zslg_log_types::LogIndex;
 use zslg_node_types::NodeId;
+use zslg_snapshot_types::SnapshotMetadata;
 use zslg_time_types::Hlc;
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct SnapshotMetadata {
-    pub start_hlc: Hlc,
-    pub end_hlc: Hlc,
-    pub start_index: LogIndex,
-    pub end_index: LogIndex,
-    pub snapshot_id: SnapshotId,
-}
 
 /// The replica-set membership stage, as committed through Raft.
 ///
@@ -288,6 +280,7 @@ mod tests {
 
     use super::*;
     use crate::ids::RaftGeneration;
+    use zslg_snapshot_types::SnapshotId;
 
     /// `Exit::AnyTime` is satisfied with no snapshot at all.
     ///

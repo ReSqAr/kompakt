@@ -36,39 +36,12 @@ use zslg_log_types::LogError;
 
 use crate::api::{RaftStateView, SnapshotStore};
 use crate::error::Error;
-use crate::ids::SnapshotId;
 use crate::leader::integrator::{IntentOutcome, IntentSubmitter};
-use crate::meta::SnapshotMetadata;
 use crate::metrics::{self, OpState};
-use crate::object_store::CompressionLevel;
 use crossbeam_combinators::{Cancellation, Channel};
-
-/// A time window; snapshots sharing a bucket at this width may merge.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct CompactionTier(Duration);
-
-impl CompactionTier {
-    pub(in crate::leader) fn as_millis(&self) -> u64 {
-        zslg_time_types::duration_as_ms_clamped(self.0)
-    }
-
-    pub(in crate::leader) fn as_duration(&self) -> Duration {
-        self.0
-    }
-}
-
-impl From<Duration> for CompactionTier {
-    fn from(d: Duration) -> Self {
-        Self(d)
-    }
-}
-
-impl std::ops::Add<Duration> for CompactionTier {
-    type Output = Self;
-    fn add(self, rhs: Duration) -> Self {
-        Self(self.0.saturating_add(rhs))
-    }
-}
+use zslg_snapshot_types::SnapshotId;
+use zslg_snapshot_types::SnapshotMetadata;
+use zslg_snapshot_types::{CompactionTier, CompressionLevel};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::leader) struct CompactionOutcome {
@@ -246,7 +219,7 @@ async fn merge_group(
         let store = Arc::clone(snapshot_store);
         Channel::defer_async(&runtime, move || async move {
             store
-                .read_snapshot(id, crate::metrics::ObjectStoreReason::Compaction)
+                .read_snapshot(id, zslg_snapshot_types::ObjectStoreReason::Compaction)
                 .await
                 .unwrap_or_else(|e| Channel::once(Err(e)))
         })
@@ -258,7 +231,7 @@ async fn merge_group(
             new_id,
             entries_ch,
             compression,
-            crate::metrics::ObjectStoreReason::Compaction,
+            zslg_snapshot_types::ObjectStoreReason::Compaction,
         )
         .await;
     write_result?;
@@ -473,10 +446,10 @@ mod tests {
     use crate::learner::LocalStore;
     use crate::learner::StableLog;
     use crate::learner::integrate_manifest_for_test;
-    use crate::object_store::CompressionLevel;
     use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
     use zslg_log_types::Data;
     use zslg_log_types::DataId;
+    use zslg_snapshot_types::CompressionLevel;
 
     use crate::tests::commit_snapshot_result;
     use crate::tests::fast_raft_config as raft_config;

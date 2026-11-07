@@ -46,6 +46,7 @@ pub(crate) use metrics_kit::OpState;
 #[cfg(test)]
 use metrics_kit::{LABEL_NONE, MetricKind, set_flag};
 
+use zslg_snapshot_types::ObjectStoreReason;
 use zslg_time_types::Hlc;
 
 /// HLC gauges export the physical-millisecond part: the raw `u64` exceeds f64's
@@ -1321,25 +1322,6 @@ label_enum!(#[doc = "`op` label of the object-store metrics."] ObjectStoreOp {
     Put => "put",
     Head => "head",
 });
-
-label_enum!(
-    #[doc = "`reason` label of [`OBJECT_STORE_TRANSFER_BYTES_TOTAL`] — why the \
-             transfer happened, named by the caller rather than inferred. \
-             Snapshot objects are immutable and never GC'd, so the same object \
-             is legitimately read many times; this says by whom."]
-    ObjectStoreReason {
-        /// A snapshot the leader created from a cutoff window.
-        SnapshotCreate => "snapshot_create",
-        /// Manifest compaction: reads the snapshots it merges, writes the merge.
-        /// Both halves land here, so the ratio is readable directly.
-        Compaction => "compaction",
-        /// A read below the stable-log purge floor, served just-in-time from
-        /// the never-GC'd snapshots (`learner/stable_archive`).
-        ArchiveRead => "archive_read",
-        /// The `raft-bootstrap-fence` marker — the cluster-initialized check.
-        Bootstrap => "bootstrap",
-    }
-);
 
 label_enum!(#[doc = "`source` label of [`READS_TOTAL`]."] ReadSource {
     Stable => "stable",

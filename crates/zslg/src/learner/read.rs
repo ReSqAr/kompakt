@@ -667,11 +667,11 @@ impl Reader for ReaderImpl {
     reason = "test code"
 )]
 mod tests {
-    use crate::error::SnapshotError;
     use crate::test_stream::ChannelTestExt as _;
     use std::sync::Arc;
     use std::time::Duration;
     use zslg_lifecycle_types::LifecycleError;
+    use zslg_snapshot_types::SnapshotError;
 
     use crate::Reader;
     use crate::api::QuorumCheck;
@@ -766,12 +766,19 @@ mod tests {
     #[derive(Default)]
     struct ScriptedSnapshotStore {
         snapshots: std::sync::Mutex<
-            std::collections::HashMap<crate::ids::SnapshotId, Vec<zslg_log_types::SnapshotEntry>>,
+            std::collections::HashMap<
+                zslg_snapshot_types::SnapshotId,
+                Vec<zslg_log_types::SnapshotEntry>,
+            >,
         >,
     }
 
     impl ScriptedSnapshotStore {
-        fn script(&self, id: crate::ids::SnapshotId, entries: Vec<zslg_log_types::SnapshotEntry>) {
+        fn script(
+            &self,
+            id: zslg_snapshot_types::SnapshotId,
+            entries: Vec<zslg_log_types::SnapshotEntry>,
+        ) {
             self.snapshots.lock().expect("lock").insert(id, entries);
         }
     }
@@ -780,20 +787,20 @@ mod tests {
     impl crate::api::SnapshotStore for ScriptedSnapshotStore {
         async fn write_snapshot(
             &self,
-            _id: crate::ids::SnapshotId,
+            _id: zslg_snapshot_types::SnapshotId,
             _entries: crossbeam_combinators::Channel<
                 Result<zslg_log_types::SnapshotEntry, crate::Error>,
                 Finite,
             >,
-            _compression: crate::object_store::CompressionLevel,
-            _reason: crate::metrics::ObjectStoreReason,
+            _compression: zslg_snapshot_types::CompressionLevel,
+            _reason: zslg_snapshot_types::ObjectStoreReason,
         ) -> Result<crate::api::SnapshotWrite, crate::Error> {
             unimplemented!("reader tests never write snapshots")
         }
         async fn read_snapshot(
             &self,
-            id: crate::ids::SnapshotId,
-            _reason: crate::metrics::ObjectStoreReason,
+            id: zslg_snapshot_types::SnapshotId,
+            _reason: zslg_snapshot_types::ObjectStoreReason,
         ) -> Result<
             crossbeam_combinators::Channel<
                 Result<zslg_log_types::SnapshotEntry, crate::Error>,
@@ -827,7 +834,7 @@ mod tests {
         }
         async fn cleanup_snapshots(
             &self,
-            _live: std::collections::BTreeSet<crate::ids::SnapshotId>,
+            _live: std::collections::BTreeSet<zslg_snapshot_types::SnapshotId>,
             _retention: Duration,
         ) -> Result<crate::api::CleanupReport, crate::Error> {
             unimplemented!()
@@ -1013,9 +1020,10 @@ mod tests {
     /// scan yields, not by reading a separate purge-floor value.
     #[tokio::test]
     async fn stable_tail_serves_purged_prefix_from_object_store() {
-        use crate::ids::SnapshotId;
-        use crate::meta::{RaftManifestState, SnapshotMetadata};
+        use crate::meta::RaftManifestState;
         use zslg_log_types::SnapshotEntry;
+        use zslg_snapshot_types::SnapshotId;
+        use zslg_snapshot_types::SnapshotMetadata;
 
         let dir = tempfile::tempdir().expect("tempdir");
         let stable_log = crate::tests::stable_log_at(&dir.path().join("stable.db")).await;
@@ -1460,8 +1468,12 @@ mod tests {
         )
     }
 
-    fn covering_manifest(snap_id: crate::ids::SnapshotId, end: u64) -> crate::meta::RaftState {
-        use crate::meta::{RaftManifestState, SnapshotMetadata};
+    fn covering_manifest(
+        snap_id: zslg_snapshot_types::SnapshotId,
+        end: u64,
+    ) -> crate::meta::RaftState {
+        use crate::meta::RaftManifestState;
+        use zslg_snapshot_types::SnapshotMetadata;
         let end_hlc = Hlc(end.saturating_add(100));
         let mut rs = crate::meta::RaftState::empty();
         rs.manifest_state = RaftManifestState {
@@ -1485,8 +1497,8 @@ mod tests {
     /// floor cannot serve this; discovering the gap from the data can.
     #[tokio::test]
     async fn stable_tail_fills_interior_hole_from_object_store() {
-        use crate::ids::SnapshotId;
         use zslg_log_types::SnapshotEntry;
+        use zslg_snapshot_types::SnapshotId;
 
         let local: Vec<(LogIndex, Data)> = [(0u64, 100u64), (1, 101), (4, 104), (5, 105)]
             .into_iter()
@@ -1540,8 +1552,8 @@ mod tests {
     /// than silently jumping the gap: the served prefix stops and errors.
     #[tokio::test]
     async fn stable_tail_errors_when_archive_cannot_fill_hole() {
-        use crate::ids::SnapshotId;
         use zslg_log_types::SnapshotEntry;
+        use zslg_snapshot_types::SnapshotId;
 
         let local: Vec<(LogIndex, Data)> = [(0u64, 100u64), (1, 101), (4, 104), (5, 105)]
             .into_iter()

@@ -15,8 +15,6 @@ use std::net::SocketAddr;
 
 use serde::{Deserialize, Serialize};
 
-use zslg_log_types::LogIndex;
-
 /// Stable identity string for a peer (e.g. its Kubernetes hostname). A newtype
 /// wrapper around `String` used consistently through config, RPC messages, and
 /// the connection pool. It is the peer's logical name — the membership gate
@@ -115,89 +113,6 @@ impl std::fmt::Display for PeerAddr {
     }
 }
 
-/// Snapshot identifier: the first global index the snapshot covers, the last
-/// one when it was known at mint time, and a 64-bit random suffix.
-///
-/// The indices are there for whoever browses the bucket — the object name
-/// renders them (`object_store::snapshot_store::snapshot_name`), so the store
-/// reads as a tiling of the stable log. A freshly created snapshot has no
-/// `end_index`: its id is minted before the window is streamed, so its length
-/// is not yet known. A compaction-merged one does, since it replaces a known run
-/// of manifest entries. Either way the manifest's [`crate::meta::SnapshotMetadata`]
-/// is the authority on what a snapshot covers; the id only names it.
-///
-/// The random suffix is what makes every minted id globally unique: two
-/// leaders racing over the same window (a crashed or deposed one included)
-/// mint the same start index, and the no-CAS, immutable, never-overwrite object
-/// store (CLAUDE.md §11) must not let the loser clobber the committed object.
-///
-/// Ordering is `(start_index, end_index, random)`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
-pub struct SnapshotId {
-    start_index: LogIndex,
-    end_index: Option<LogIndex>,
-    random: u64,
-}
-
-impl SnapshotId {
-    /// Assemble from explicit parts.
-    #[must_use]
-    pub(crate) fn from_parts(
-        start_index: LogIndex,
-        end_index: Option<LogIndex>,
-        random: u64,
-    ) -> Self {
-        Self {
-            start_index,
-            end_index,
-            random,
-        }
-    }
-
-    /// A fresh id for a snapshot whose extent is known only from its start —
-    /// the snapshot-creation path, which mints before streaming the window.
-    #[must_use]
-    pub(crate) fn open(start_index: LogIndex) -> Self {
-        Self::from_parts(start_index, None, rand::random())
-    }
-
-    /// A fresh id for a snapshot covering exactly `start_index..=end_index` —
-    /// the compaction-merge path.
-    #[must_use]
-    pub(crate) fn closed(start_index: LogIndex, end_index: LogIndex) -> Self {
-        Self::from_parts(start_index, Some(end_index), rand::random())
-    }
-
-    /// The first global index the snapshot covers.
-    #[must_use]
-    pub(crate) fn start_index(self) -> LogIndex {
-        self.start_index
-    }
-
-    /// The last global index the snapshot covers, if known when it was minted.
-    #[must_use]
-    pub(crate) fn end_index(self) -> Option<LogIndex> {
-        self.end_index
-    }
-
-    /// The random suffix.
-    #[must_use]
-    pub(crate) fn random(self) -> u64 {
-        self.random
-    }
-
-    /// Test shorthand: the high 64 bits become the start index, the low 64 the
-    /// random suffix, with no end index.
-    #[must_use]
-    #[cfg(test)]
-    #[allow(clippy::expect_used, reason = "each half of a u128 fits u64")]
-    pub(crate) fn from_u128(val: u128) -> Self {
-        let high = u64::try_from(val >> 64).expect("high half fits u64");
-        let low = u64::try_from(val & u128::from(u64::MAX)).expect("low half fits u64");
-        Self::from_parts(LogIndex(high), None, low)
-    }
-}
-
 /// Monotonic Raft membership generation (quorum trusts the highest).
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize,
@@ -227,40 +142,10 @@ impl RaftGeneration {
 mod tests {
     use super::*;
     use zslg_log_types::DataId;
+    use zslg_log_types::LogIndex;
     use zslg_node_types::NodeId;
+    use zslg_snapshot_types::SnapshotId;
     use zslg_time_types::Hlc;
-
-    // ── SnapshotId ──────────────────────────────────────────────────────
-
-    #[test]
-    fn snapshot_id_fresh_ids_are_unique() {
-        // The random suffix means two ids minted over the *same* range differ —
-        // this is what keeps two leaders racing over one window (or one merge
-        // group) from ever writing the same object (the no-CAS overwrite hazard).
-        assert_ne!(SnapshotId::open(LogIndex(0)), SnapshotId::open(LogIndex(0)));
-        assert_ne!(
-            SnapshotId::closed(LogIndex(4), LogIndex(9)),
-            SnapshotId::closed(LogIndex(4), LogIndex(9))
-        );
-    }
-
-    #[test]
-    fn snapshot_id_parts_roundtrip() {
-        let id = SnapshotId::from_parts(LogIndex(7), Some(LogIndex(11)), 0xcafe_babe_dead_beef);
-        assert_eq!(id.start_index(), LogIndex(7));
-        assert_eq!(id.end_index(), Some(LogIndex(11)));
-        assert_eq!(id.random(), 0xcafe_babe_dead_beef);
-        let open = SnapshotId::open(LogIndex(3));
-        assert_eq!(open.start_index(), LogIndex(3));
-        assert_eq!(open.end_index(), None);
-    }
-
-    #[test]
-    fn snapshot_id_ordering_follows_start_index() {
-        let a = SnapshotId::from_parts(LogIndex(1), Some(LogIndex(u64::MAX)), u64::MAX);
-        let b = SnapshotId::from_parts(LogIndex(2), None, 0);
-        assert!(a < b);
-    }
 
     // ── RaftGeneration ──────────────────────────────────────────────────
 

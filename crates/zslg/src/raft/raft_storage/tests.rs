@@ -1,7 +1,7 @@
 use super::*;
-use crate::meta::SnapshotMetadata;
 use crate::raft::RAFT_META_CF;
 use crate::raft::RaftStateError;
+use zslg_snapshot_types::SnapshotMetadata;
 
 /// Test-only bridge: builds a `Raft` instance backed by RocksDB storage under
 /// `dir`, generic over the network factory so the in-crate test harness
@@ -59,11 +59,11 @@ pub(crate) async fn seed_foreign_membership_for_test(
     storage.fence().map_err(Into::into)
 }
 
-use crate::ids::SnapshotId;
 use crate::meta::Exit;
 use crate::tests::nid;
 use openraft::CommittedLeaderId;
 use zslg_log_types::LogIndex;
+use zslg_snapshot_types::SnapshotId;
 use zslg_time_types::Hlc;
 
 #[tokio::test]

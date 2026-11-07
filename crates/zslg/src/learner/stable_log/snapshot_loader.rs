@@ -199,26 +199,26 @@ impl SnapshotLoader {
     reason = "test code"
 )]
 mod tests {
-    use crate::error::SnapshotError;
     use crate::test_stream::ChannelTestExt as _;
     use std::collections::{BTreeSet, HashMap};
     use std::sync::Mutex;
     use std::time::Duration;
+    use zslg_snapshot_types::SnapshotError;
 
     use async_trait::async_trait;
 
     use super::*;
     use crate::api::{CleanupReport, SnapshotStore};
 
-    use crate::ids::SnapshotId;
     use crate::learner::StableLog;
     use crate::learner::stable_archive::ObjectStoreArchiveReader;
-    use crate::meta::SnapshotMetadata;
-    use crate::object_store::CompressionLevel;
     use crate::tests::make_data;
     use std::sync::Arc;
     use zslg_log_types::LogIndex;
     use zslg_log_types::SnapshotEntry;
+    use zslg_snapshot_types::CompressionLevel;
+    use zslg_snapshot_types::SnapshotId;
+    use zslg_snapshot_types::SnapshotMetadata;
     use zslg_time_types::Hlc;
 
     /// Build the production archive reader over a scripted store, seeded with
@@ -278,7 +278,7 @@ mod tests {
                 crossbeam_combinators::Finite,
             >,
             _compression: CompressionLevel,
-            _reason: crate::metrics::ObjectStoreReason,
+            _reason: zslg_snapshot_types::ObjectStoreReason,
         ) -> Result<crate::api::SnapshotWrite, Error> {
             unimplemented!("loader tests never write snapshots")
         }
@@ -286,7 +286,7 @@ mod tests {
         async fn read_snapshot(
             &self,
             id: SnapshotId,
-            _reason: crate::metrics::ObjectStoreReason,
+            _reason: zslg_snapshot_types::ObjectStoreReason,
         ) -> Result<
             crossbeam_combinators::Channel<
                 Result<SnapshotEntry, Error>,

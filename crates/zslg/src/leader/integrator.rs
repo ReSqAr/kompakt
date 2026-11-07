@@ -37,10 +37,12 @@ use tracing::{debug, info, warn};
 
 use crate::api::{RaftStateView, ReplicatedRaftState, StateReplicator};
 use crate::error::Error;
-use crate::ids::{RaftGeneration, SnapshotId};
-use crate::meta::{RaftState, ReplicaMembership, SnapshotMetadata};
+use crate::ids::RaftGeneration;
+use crate::meta::{RaftState, ReplicaMembership};
 use crate::metrics::IntentState;
 use zslg_log_types::LogIndex;
+use zslg_snapshot_types::SnapshotId;
+use zslg_snapshot_types::SnapshotMetadata;
 use zslg_time_types::Hlc;
 
 /// Queue depth. Every submitter awaits its own reply, so this only has to

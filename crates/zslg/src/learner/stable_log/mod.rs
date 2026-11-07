@@ -1044,9 +1044,9 @@ mod tests {
     #[tokio::test]
     async fn read_snapshot_then_append_matches() {
         use crate::api::SnapshotStore as _;
-        use crate::ids::SnapshotId;
-        use crate::object_store::CompressionLevel;
         use zslg_log_types::SnapshotEntry;
+        use zslg_snapshot_types::CompressionLevel;
+        use zslg_snapshot_types::SnapshotId;
 
         // End-to-end of the production load path: write a snapshot through the
         // public SnapshotStore API, then `read_snapshot` (off-reactor decode →
@@ -1069,7 +1069,7 @@ mod tests {
                 id,
                 Channel::from_vec(entries.into_iter().map(Ok).collect()),
                 CompressionLevel::standard(),
-                crate::metrics::ObjectStoreReason::SnapshotCreate,
+                zslg_snapshot_types::ObjectStoreReason::SnapshotCreate,
             )
             .await
             .expect("write_snapshot");
@@ -1079,7 +1079,7 @@ mod tests {
         let mut rx = log.subscribe_events();
 
         let entries_rx = store
-            .read_snapshot(id, crate::metrics::ObjectStoreReason::ArchiveRead)
+            .read_snapshot(id, zslg_snapshot_types::ObjectStoreReason::ArchiveRead)
             .await
             .expect("read_snapshot");
         let n = log.append(entries_rx).await.expect("append");

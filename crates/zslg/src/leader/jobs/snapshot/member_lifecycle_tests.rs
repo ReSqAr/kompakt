@@ -39,7 +39,6 @@ use crate::leader::jobs::snapshot::create::{
 };
 use crate::learner::LocalStore;
 use crate::learner::StableLog;
-use crate::object_store::CompressionLevel;
 use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use crate::raft::RaftNode;
 use crate::raft::RaftStateHandle;
@@ -50,6 +49,7 @@ use crate::tests::upstream;
 use crate::tests::wait_for_leader;
 use zslg_log_types::LogIndex;
 use zslg_node_types::NodeId;
+use zslg_snapshot_types::CompressionLevel;
 use zslg_time_types::Hlc;
 
 async fn integrate_batch(

@@ -20,11 +20,12 @@ use tracing::{debug, info, warn};
 
 use crate::error::Error;
 use crate::leader::integrator::IntentSubmitter;
-use crate::leader::jobs::compaction::merge::{CompactionTier, compact};
+use crate::leader::jobs::compaction::merge::compact;
 use crate::leader::jobs::{LeaderHandles, is_local_leader};
 use crate::metrics::{self, LeaderJob};
-use crate::object_store::CompressionLevel;
 use zslg_node_types::NodeId;
+use zslg_snapshot_types::CompactionTier;
+use zslg_snapshot_types::CompressionLevel;
 
 pub(in crate::leader) mod merge;
 

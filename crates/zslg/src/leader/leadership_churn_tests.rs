@@ -41,11 +41,11 @@ use std::sync::Arc;
 use std::time::Duration;
 use zslg_log_types::LogError;
 
-use crate::object_store::CompressionLevel;
 use object_store::ObjectStore;
 use object_store::memory::InMemory;
 use tokio::sync::Notify;
 use tokio::sync::watch;
+use zslg_snapshot_types::CompressionLevel;
 
 use crate::api::ReplicatedRaftState;
 use crate::api::{LocalStoreMut, LocalStoreView, Replica, Router, StableLogSnapshot};
@@ -443,12 +443,12 @@ async fn commit_foreign_snapshot(sys: &TestNode) {
         logical: 0,
     });
     let mut manifest = cur.manifest_state.manifest.clone();
-    manifest.push(crate::meta::SnapshotMetadata {
+    manifest.push(zslg_snapshot_types::SnapshotMetadata {
         start_hlc: hlc,
         end_hlc: hlc,
         start_index: LogIndex(start_index),
         end_index: LogIndex(start_index),
-        snapshot_id: crate::ids::SnapshotId::open(LogIndex(start_index)),
+        snapshot_id: zslg_snapshot_types::SnapshotId::open(LogIndex(start_index)),
     });
     crate::tests::write_state_fenced(
         &sys.raft,

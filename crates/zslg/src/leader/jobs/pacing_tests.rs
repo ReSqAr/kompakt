@@ -28,7 +28,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::api::{LocalStoreView, RaftLeadership, SnapshotStore, StableLogSnapshot};
 use crate::error::Error;
-use crate::ids::{ServerName, SnapshotId};
+use crate::ids::ServerName;
 use crate::leader::integrator::Integrator;
 use crate::leader::jobs::LeaderHandles;
 use crate::leader::jobs::Pace;
@@ -37,12 +37,13 @@ use crate::leader::jobs::membership::{MEMBERSHIP_STEP_FLOOR, MembershipJob};
 use crate::leader::jobs::membership::{MembershipDriver, TickOutcome};
 use crate::leader::jobs::snapshot::{SNAPSHOT_LOOP_FLOOR, SnapshotJob};
 use crate::meta::{RaftManifestState, RaftState, ReplicaMembership};
-use crate::object_store::CompressionLevel;
 use crate::raft::RaftStateHandle;
 use crossbeam_combinators::Channel;
 use zslg_log_types::Data;
 use zslg_log_types::LogIndex;
 use zslg_node_types::NodeId;
+use zslg_snapshot_types::CompressionLevel;
+use zslg_snapshot_types::SnapshotId;
 use zslg_time_types::Hlc;
 
 // ── the pure pacing primitive ────────────────────────────────────────────
@@ -368,14 +369,14 @@ impl SnapshotStore for UnusedSnapshotStore {
             crossbeam_combinators::Finite,
         >,
         _compression: CompressionLevel,
-        _reason: crate::metrics::ObjectStoreReason,
+        _reason: zslg_snapshot_types::ObjectStoreReason,
     ) -> Result<crate::api::SnapshotWrite, Error> {
         unimplemented!("pacing tests never reach the object write")
     }
     async fn read_snapshot(
         &self,
         _id: SnapshotId,
-        _reason: crate::metrics::ObjectStoreReason,
+        _reason: zslg_snapshot_types::ObjectStoreReason,
     ) -> Result<
         Channel<Result<zslg_log_types::SnapshotEntry, Error>, crossbeam_combinators::Finite>,
         Error,

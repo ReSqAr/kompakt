@@ -32,15 +32,15 @@ use zslg_log_types::LogError;
 use crate::api::{LocalStoreView, RaftStateView, Router, SnapshotStore, StableLogSnapshot};
 use crate::error::Error;
 use crate::error::ToStorage;
-use crate::ids::SnapshotId;
 use crate::learner::ReplicaPoller;
-use crate::meta::SnapshotMetadata;
 use crate::metrics::{self, SnapshotState, SnapshotStep};
-use crate::object_store::CompressionLevel;
 use crate::quorum::{FanOutResponse, fan_out_quorum};
 use crossbeam_combinators::{Channel, Finite};
 use zslg_log_types::LogIndex;
 use zslg_log_types::SnapshotEntry;
+use zslg_snapshot_types::CompressionLevel;
+use zslg_snapshot_types::SnapshotId;
+use zslg_snapshot_types::SnapshotMetadata;
 use zslg_time_types::Hlc;
 
 pub(in crate::leader) struct SnapshotEntryInputs<'a> {
@@ -193,7 +193,7 @@ pub(in crate::leader) async fn create_snapshot_entry(
             snapshot_id,
             entries,
             inputs.compression,
-            crate::metrics::ObjectStoreReason::SnapshotCreate,
+            zslg_snapshot_types::ObjectStoreReason::SnapshotCreate,
         )
         .await?;
     let entry_count = written.count;

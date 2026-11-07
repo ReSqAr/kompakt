@@ -15,11 +15,11 @@
     clippy::type_complexity,
     reason = "test code"
 )]
-use crate::object_store::CompressionLevel;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 use zslg_log_types::Data;
+use zslg_snapshot_types::CompressionLevel;
 
 use object_store::ObjectStore;
 use object_store::memory::InMemory;
@@ -34,13 +34,13 @@ use crate::api::{
 use crate::hlc::CutoffApplier;
 use crate::hlc::HlcClock;
 use crate::hlc::HlcGate;
-use crate::ids::{PeerAddr, SnapshotId};
+use crate::ids::PeerAddr;
 use crate::leader::jobs::membership::liveness::LivenessConfig;
-use crate::leader::{CompactionTier, LeaderLoopConfig, SnapshotConfig, spawn_leader_loop};
+use crate::leader::{LeaderLoopConfig, SnapshotConfig, spawn_leader_loop};
 use crate::learner::LocalStore;
 use crate::learner::StableLog;
 use crate::learner::integrate_manifest_for_test;
-use crate::meta::{ReplicaMembership, SnapshotMetadata};
+use crate::meta::ReplicaMembership;
 use crate::network::static_peers;
 use crate::network::{LocalReplicaClient, PeerRouter, RemoteRouter};
 use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
@@ -53,6 +53,9 @@ use shutdown::Shutdown;
 use zslg_log_types::LogIndex;
 use zslg_log_types::SnapshotEntry;
 use zslg_node_types::NodeId;
+use zslg_snapshot_types::CompactionTier;
+use zslg_snapshot_types::SnapshotId;
+use zslg_snapshot_types::SnapshotMetadata;
 use zslg_time_types::{Hlc, HlcParts};
 
 use crate::tests::fast_raft_config as raft_config;
@@ -485,7 +488,7 @@ async fn leader_loop_compacts_manifest() {
                 meta.snapshot_id,
                 crossbeam_combinators::Channel::once(Ok::<_, crate::Error>(entry)),
                 CompressionLevel::fast(),
-                crate::metrics::ObjectStoreReason::SnapshotCreate,
+                zslg_snapshot_types::ObjectStoreReason::SnapshotCreate,
             )
             .await
             .expect("write seeded snapshot file");

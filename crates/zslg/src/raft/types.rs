@@ -11,11 +11,12 @@ use std::collections::BTreeSet;
 use std::io::Cursor;
 
 use crate::api::{ReplicatedRaftState, StateReplicator};
-use crate::ids::{PeerAddr, RaftGeneration, SnapshotId};
+use crate::ids::{PeerAddr, RaftGeneration};
 use openraft::Entry;
 use openraft::TokioRuntime;
 use serde::{Deserialize, Serialize};
 use zslg_node_types::NodeId;
+use zslg_snapshot_types::SnapshotId;
 use zslg_time_types::Hlc;
 
 /// Index into the raft log: openraft's `u64` boundary representation, wrapped

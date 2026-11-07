@@ -221,10 +221,11 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
-    use crate::ids::SnapshotId;
-    use crate::meta::{ReplicaMembership, SnapshotMetadata};
+    use crate::meta::ReplicaMembership;
     use zslg_log_types::LogIndex;
     use zslg_node_types::NodeId;
+    use zslg_snapshot_types::SnapshotId;
+    use zslg_snapshot_types::SnapshotMetadata;
     use zslg_time_types::Hlc;
 
     fn make_gen(n: u64) -> RaftGeneration {

@@ -21,10 +21,10 @@ use object_store::path::Path;
 use tokio_util::sync::CancellationToken;
 
 use crate::Error;
-use crate::ids::SnapshotId;
-use crate::object_store::CompressionLevel;
 use crossbeam_combinators::Channel;
 use zslg_log_types::SnapshotEntry;
+use zslg_snapshot_types::CompressionLevel;
+use zslg_snapshot_types::SnapshotId;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct CleanupReport {
@@ -55,13 +55,13 @@ pub(crate) trait SnapshotStore: Send + Sync {
     ///
     /// `reason` names *why* this transfer happens; it is a metric label, not
     /// behaviour. The caller states it because only the caller knows — see
-    /// [`ObjectStoreReason`](crate::metrics::ObjectStoreReason).
+    /// [`ObjectStoreReason`](zslg_snapshot_types::ObjectStoreReason).
     async fn write_snapshot(
         &self,
         id: SnapshotId,
         entries: Channel<Result<SnapshotEntry, Error>, crossbeam_combinators::Finite>,
         compression: CompressionLevel,
-        reason: crate::metrics::ObjectStoreReason,
+        reason: zslg_snapshot_types::ObjectStoreReason,
     ) -> Result<SnapshotWrite, Error>;
 
     /// Read a snapshot's decoded entries — the only way to get data out of a
@@ -75,7 +75,7 @@ pub(crate) trait SnapshotStore: Send + Sync {
     async fn read_snapshot(
         &self,
         id: SnapshotId,
-        reason: crate::metrics::ObjectStoreReason,
+        reason: zslg_snapshot_types::ObjectStoreReason,
     ) -> Result<Channel<Result<SnapshotEntry, Error>, crossbeam_combinators::Finite>, Error>;
 
     /// The token this store's blocking workers cancel on. A feeder must cancel

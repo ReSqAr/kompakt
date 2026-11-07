@@ -24,13 +24,13 @@ use tracing::{debug, info, warn};
 use crate::error::Error;
 use crate::leader::integrator::{IntentOutcome, IntentSubmitter};
 use crate::leader::jobs::Pace;
-use crate::leader::jobs::compaction::merge::CompactionTier;
 use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
 use crate::leader::jobs::{LeaderHandles, is_local_leader};
 use crate::metrics::{self, LeaderJob, SnapshotStep};
-use crate::object_store::CompressionLevel;
 use warn_throttle::ThrottledWarn;
 use zslg_node_types::NodeId;
+use zslg_snapshot_types::CompactionTier;
+use zslg_snapshot_types::CompressionLevel;
 use zslg_time_types::Hlc;
 
 pub(in crate::leader) mod create;

@@ -15,21 +15,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use zslg_lifecycle_types::{ConfigError, LifecycleError};
 use zslg_log_types::LogError;
+use zslg_snapshot_types::SnapshotError;
 use zslg_time_types::ClockError;
 
 use zslg_node_types::NodeId;
-
-/// Snapshots in object storage: the backend and the compression.
-#[derive(Debug, Clone, PartialEq, Error, Serialize, Deserialize)]
-pub enum SnapshotError {
-    /// Object-store I/O failure.
-    #[error("object store error: {0}")]
-    ObjectStore(String),
-
-    /// zstd compression/decompression failure.
-    #[error("compression error: {0}")]
-    Compression(String),
-}
 
 /// The wire between nodes.
 #[derive(Debug, Clone, PartialEq, Error, Serialize, Deserialize)]

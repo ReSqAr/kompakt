@@ -39,14 +39,13 @@ use crate::hlc::{HlcClock, HlcGate, run_clock_gauges};
 use crate::ids::ServerName;
 use crate::ids::{HostPort, PeerAddr};
 use crate::leader::spawn_leader_loop;
-use crate::leader::{CompactionTier, LivenessConfig, SnapshotConfig};
+use crate::leader::{LivenessConfig, SnapshotConfig};
 use crate::learner::LearnerConfig;
 use crate::learner::{LearnerService, spawn_learner, spawn_stable_store};
 use crate::network::PeersMembershipGate;
 use crate::network::{
     LocalReplicaClient, PeerRouter, RpcClientConfig, RpcServerConfig, SocketOpts, setup_router,
 };
-use crate::object_store::CompressionLevel;
 use crate::object_store::IntoArcObjectStore;
 use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use crate::raft::{
@@ -62,6 +61,8 @@ use rocksdb_kit::ColumnFamily;
 use rocksdb_kit::{CfSpec, Storage, StorageConfig};
 use shutdown::Shutdown;
 use zslg_node_types::NodeId;
+use zslg_snapshot_types::CompactionTier;
+use zslg_snapshot_types::CompressionLevel;
 
 #[derive(Debug, Clone)]
 pub struct ReplicaNodeConfig {

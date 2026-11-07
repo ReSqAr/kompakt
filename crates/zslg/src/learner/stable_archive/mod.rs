@@ -15,10 +15,10 @@ use crate::api::ArchiveStream;
 use crate::api::{
     ArchiveBounds, ArchiveUpperBound, RaftStateView, SnapshotStore, StableArchiveReader,
 };
-use crate::meta::SnapshotMetadata;
 use crossbeam_combinators::{Channel, Contiguous, NonDecreasing};
 use zslg_log_types::LogIndex;
 use zslg_log_types::SnapshotEntry;
+use zslg_snapshot_types::SnapshotMetadata;
 use zslg_time_types::Hlc;
 
 /// Reads the archived (purged) prefix of the stable log from object-store
@@ -99,7 +99,7 @@ impl StableArchiveReader for ObjectStoreArchiveReader {
                 store
                     .read_snapshot(
                         meta.snapshot_id,
-                        crate::metrics::ObjectStoreReason::ArchiveRead,
+                        zslg_snapshot_types::ObjectStoreReason::ArchiveRead,
                     )
                     .await
                     .unwrap_or_else(|e| Channel::once(Err(e)))
@@ -121,7 +121,7 @@ impl StableArchiveReader for ObjectStoreArchiveReader {
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "test code")]
 mod tests {
     use super::*;
-    use crate::ids::SnapshotId;
+    use zslg_snapshot_types::SnapshotId;
 
     fn meta(start: u64, end: u64) -> SnapshotMetadata {
         SnapshotMetadata {

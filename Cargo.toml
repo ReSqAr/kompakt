@@ -70,6 +70,7 @@ zslg = { path = "crates/zslg" }
 zslg-lifecycle-types = { path = "crates/zslg-lifecycle-types" }
 zslg-log-types = { path = "crates/zslg-log-types" }
 zslg-node-types = { path = "crates/zslg-node-types" }
+zslg-snapshot-types = { path = "crates/zslg-snapshot-types" }
 zslg-time-types = { path = "crates/zslg-time-types" }
 
 [workspace.lints.clippy]

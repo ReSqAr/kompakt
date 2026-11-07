@@ -20,10 +20,10 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use crate::error::Error;
-use crate::ids::SnapshotId;
 use crate::leader::jobs::{LeaderHandles, is_local_leader};
 use crate::metrics::{self, LeaderJob};
 use zslg_node_types::NodeId;
+use zslg_snapshot_types::SnapshotId;
 
 /// Spawn `leader:cleanup` on the shutdown tree. Writes no Raft state, so it
 /// never touches `handles.intents`.

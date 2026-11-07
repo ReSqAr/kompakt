@@ -803,7 +803,10 @@ fn open_files(var: &'static str, raw: &str) -> Result<i32, ConfigError> {
 
 fn compression(var: &'static str, raw: &str) -> Result<zslg::CompressionLevel, ConfigError> {
     let level: u8 = parse::integer(var, raw, "a zstd level, 0–22")?;
-    zslg::CompressionLevel::new(level).map_err(|source| ConfigError::Rejected { var, source })
+    zslg::CompressionLevel::new(level).map_err(|source| ConfigError::Rejected {
+        var,
+        source: source.into(),
+    })
 }
 
 fn spare_selection(var: &'static str, raw: &str) -> Result<SpareSelectionStrategy, ConfigError> {

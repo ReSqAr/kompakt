@@ -15,12 +15,11 @@ mod framing;
 mod snapshot_store;
 
 use crate::Error;
-use crate::error::SnapshotError;
 use object_store::ObjectStore;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
-use zslg_lifecycle_types::ConfigError;
+use zslg_snapshot_types::SnapshotError;
 
 pub(crate) use snapshot_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 
@@ -115,57 +114,6 @@ impl ObjectStoreConfig {
                 Ok(Arc::new(store))
             }
         }
-    }
-}
-
-/// How hard zstd works on a snapshot object. The *algorithm* is not a choice —
-/// snapshot objects are always one streaming zstd frame — so this carries only
-/// the level, `0..=22`, rising from cheapest to densest.
-///
-/// The range is checked once, here, so every downstream consumer can hand the
-/// value straight to zstd without re-validating.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CompressionLevel(u8);
-
-impl CompressionLevel {
-    /// zstd's densest setting. Levels above this are rejected by the library.
-    pub const MAX: u8 = 22;
-
-    /// Level 1 — the cheapest setting that actually compresses. Note that level
-    /// *0* is not faster: zstd reads it as "use the library default", which is
-    /// [`Self::standard`].
-    #[must_use]
-    pub const fn fast() -> Self {
-        Self(1)
-    }
-
-    /// Level 3 — zstd's own default, and ours.
-    #[must_use]
-    pub const fn standard() -> Self {
-        Self(3)
-    }
-
-    /// `Err(Error::InvalidConfiguration)` above [`Self::MAX`].
-    pub fn new(level: u8) -> Result<Self, Error> {
-        if level > Self::MAX {
-            return Err(Error::Config(ConfigError::InvalidConfiguration(format!(
-                "compression zstd level must be 0–{}, got {level}",
-                Self::MAX
-            ))));
-        }
-        Ok(Self(level))
-    }
-
-    /// The level in zstd's own signed representation. Widening is infallible.
-    #[must_use]
-    pub fn get(self) -> i32 {
-        i32::from(self.0)
-    }
-}
-
-impl Default for CompressionLevel {
-    fn default() -> Self {
-        Self::standard()
     }
 }
 

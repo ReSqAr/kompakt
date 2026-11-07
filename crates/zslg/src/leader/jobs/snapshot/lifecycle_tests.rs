@@ -31,7 +31,6 @@ use crate::learner::LocalStore;
 use crate::learner::StableLog;
 use crate::learner::integrate_manifest_for_test;
 use crate::meta::ReplicaMembership;
-use crate::object_store::CompressionLevel;
 use crate::object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use crate::raft::Raft;
 use crate::raft::RaftNode;
@@ -39,6 +38,7 @@ use crate::raft::RaftStateHandle;
 use zslg_log_types::Data;
 use zslg_log_types::{DataId, LogIndex};
 use zslg_node_types::NodeId;
+use zslg_snapshot_types::CompressionLevel;
 use zslg_time_types::Hlc;
 
 use crate::tests::make_data;
@@ -580,11 +580,12 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
     use crate::api::Replica;
     use crate::api::{LocalStoreView, Router};
     use crate::error::Error;
-    use crate::ids::{RaftGeneration, SnapshotId};
+    use crate::ids::RaftGeneration;
     use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
-    use crate::meta::SnapshotMetadata;
     use zslg_log_types::LogIndex;
     use zslg_node_types::NodeId;
+    use zslg_snapshot_types::SnapshotId;
+    use zslg_snapshot_types::SnapshotMetadata;
     use zslg_time_types::{Hlc, HlcParts};
 
     use crate::tests::{FixedClock, ReadyReplica};
@@ -887,11 +888,11 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
     use crate::api::{RaftLeadership, SnapshotStore};
     use crate::error::Error;
     use crate::ids::ServerName;
-    use crate::ids::SnapshotId;
     use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
     use crate::tests::ReadyReplica;
     use crossbeam_combinators::Channel;
     use zslg_log_types::SnapshotEntry;
+    use zslg_snapshot_types::SnapshotId;
 
     /// Replica stub: always drained, no end_index — quorum checks pass instantly.
     struct OnePeerRouter {
@@ -976,7 +977,7 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
             id: SnapshotId,
             entries: Channel<Result<SnapshotEntry, Error>, crossbeam_combinators::Finite>,
             compression: CompressionLevel,
-            _reason: crate::metrics::ObjectStoreReason,
+            _reason: zslg_snapshot_types::ObjectStoreReason,
         ) -> Result<crate::api::SnapshotWrite, Error> {
             self.writes.fetch_add(1, Ordering::Relaxed);
             self.inner
@@ -984,7 +985,7 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
                     id,
                     entries,
                     compression,
-                    crate::metrics::ObjectStoreReason::SnapshotCreate,
+                    zslg_snapshot_types::ObjectStoreReason::SnapshotCreate,
                 )
                 .await
         }
@@ -992,11 +993,11 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
         async fn read_snapshot(
             &self,
             id: SnapshotId,
-            _reason: crate::metrics::ObjectStoreReason,
+            _reason: zslg_snapshot_types::ObjectStoreReason,
         ) -> Result<Channel<Result<SnapshotEntry, Error>, crossbeam_combinators::Finite>, Error>
         {
             self.inner
-                .read_snapshot(id, crate::metrics::ObjectStoreReason::ArchiveRead)
+                .read_snapshot(id, zslg_snapshot_types::ObjectStoreReason::ArchiveRead)
                 .await
         }
 

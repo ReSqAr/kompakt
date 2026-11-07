@@ -30,12 +30,12 @@
 //! Object names are injective in the [`SnapshotId`] and never reused, since with
 //! no CAS available that is the only thing preventing an overwrite.
 
-use crate::error::SnapshotError;
 use std::collections::BTreeSet;
 use std::io;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use zslg_log_types::LogError;
+use zslg_snapshot_types::SnapshotError;
 
 use bytes::Bytes;
 use futures::TryStreamExt as _;
@@ -50,14 +50,14 @@ use tracing::{debug, info, warn};
 use crate::Error;
 use crate::api::{CleanupReport, EntryMeta, SnapshotStore, SnapshotWrite};
 use crate::error::ToStorage as _;
-use crate::ids::SnapshotId;
 #[cfg(test)]
 use crate::meta::ReplicaMembership;
 use crate::metrics::{self, ObjectStoreOp, OpState};
-use crate::object_store::CompressionLevel;
 use crate::object_store::framing;
 use crossbeam_combinators::Channel;
 use zslg_log_types::SnapshotEntry;
+use zslg_snapshot_types::CompressionLevel;
+use zslg_snapshot_types::SnapshotId;
 
 const SNAPSHOT_PREFIX: &str = "snapshots";
 
@@ -282,7 +282,7 @@ impl SnapshotStore for RemoteSnapshotStore {
         id: SnapshotId,
         entries: Channel<Result<SnapshotEntry, Error>, crossbeam_combinators::Finite>,
         compression: CompressionLevel,
-        reason: crate::metrics::ObjectStoreReason,
+        reason: zslg_snapshot_types::ObjectStoreReason,
     ) -> Result<SnapshotWrite, Error> {
         let path = snapshot_path(id);
 
@@ -300,7 +300,7 @@ impl SnapshotStore for RemoteSnapshotStore {
     async fn read_snapshot(
         &self,
         id: SnapshotId,
-        reason: crate::metrics::ObjectStoreReason,
+        reason: zslg_snapshot_types::ObjectStoreReason,
     ) -> Result<Channel<Result<SnapshotEntry, Error>, crossbeam_combinators::Finite>, Error> {
         let path = snapshot_path(id);
 
@@ -390,7 +390,7 @@ impl SnapshotStore for RemoteSnapshotStore {
         if ok {
             metrics::object_store_transfer_bytes(
                 ObjectStoreOp::Put,
-                crate::metrics::ObjectStoreReason::Bootstrap,
+                zslg_snapshot_types::ObjectStoreReason::Bootstrap,
                 byte_len,
             );
         }
@@ -491,10 +491,10 @@ mod tests {
     use object_store::memory::InMemory;
 
     use super::*;
-    use crate::meta::SnapshotMetadata;
-    use crate::object_store::CompressionLevel;
     use crate::raft::RaftStateHandle;
     use zslg_log_types::LogIndex;
+    use zslg_snapshot_types::CompressionLevel;
+    use zslg_snapshot_types::SnapshotMetadata;
     use zslg_time_types::Hlc;
 
     /// Retention for the cleanup tests below. `cleanup_snapshots` takes it
@@ -543,13 +543,13 @@ mod tests {
                 id,
                 entries_channel(records.clone()),
                 CompressionLevel::fast(),
-                crate::metrics::ObjectStoreReason::SnapshotCreate,
+                zslg_snapshot_types::ObjectStoreReason::SnapshotCreate,
             )
             .await
             .expect("write");
         assert_eq!(n.count, records.len());
         let rx = store
-            .read_snapshot(id, crate::metrics::ObjectStoreReason::ArchiveRead)
+            .read_snapshot(id, zslg_snapshot_types::ObjectStoreReason::ArchiveRead)
             .await
             .expect("read");
         let got: Vec<SnapshotEntry> = rx.items().filter_map(|r| r.ok()).collect();
@@ -566,13 +566,13 @@ mod tests {
                 id,
                 entries_channel(records.clone()),
                 CompressionLevel::fast(),
-                crate::metrics::ObjectStoreReason::SnapshotCreate,
+                zslg_snapshot_types::ObjectStoreReason::SnapshotCreate,
             )
             .await
             .expect("write");
         assert_eq!(n.count, records.len());
         let rx = store
-            .read_snapshot(id, crate::metrics::ObjectStoreReason::ArchiveRead)
+            .read_snapshot(id, zslg_snapshot_types::ObjectStoreReason::ArchiveRead)
             .await
             .expect("read");
         let got: Vec<SnapshotEntry> = rx.items().filter_map(|r| r.ok()).collect();
@@ -588,7 +588,7 @@ mod tests {
                 SnapshotId::from_u128(3),
                 entries_channel(records),
                 CompressionLevel::fast(),
-                crate::metrics::ObjectStoreReason::SnapshotCreate,
+                zslg_snapshot_types::ObjectStoreReason::SnapshotCreate,
             )
             .await
             .expect("write");
@@ -618,7 +618,7 @@ mod tests {
                 id,
                 Channel::closed(rx),
                 CompressionLevel::standard(),
-                crate::metrics::ObjectStoreReason::SnapshotCreate,
+                zslg_snapshot_types::ObjectStoreReason::SnapshotCreate,
             )
             .await;
         assert!(
@@ -629,7 +629,7 @@ mod tests {
         // Upload aborted (not finished) → no snapshot object remains at the path.
         assert!(
             store
-                .read_snapshot(id, crate::metrics::ObjectStoreReason::ArchiveRead)
+                .read_snapshot(id, zslg_snapshot_types::ObjectStoreReason::ArchiveRead)
                 .await
                 .is_err(),
             "no object should remain after an aborted write"
@@ -656,7 +656,7 @@ mod tests {
                 id,
                 entries_channel(records),
                 CompressionLevel::fast(),
-                crate::metrics::ObjectStoreReason::SnapshotCreate,
+                zslg_snapshot_types::ObjectStoreReason::SnapshotCreate,
             )
             .await
             .expect("write");
@@ -665,7 +665,7 @@ mod tests {
         // delivered entry and must terminate the stream with an Err item.
         cancel.cancel();
         let mut rx = store
-            .read_snapshot(id, crate::metrics::ObjectStoreReason::ArchiveRead)
+            .read_snapshot(id, zslg_snapshot_types::ObjectStoreReason::ArchiveRead)
             .await
             .expect("read opens");
         let mut saw_err = false;
@@ -689,7 +689,7 @@ mod tests {
         let result = store
             .read_snapshot(
                 SnapshotId::from_u128(999),
-                crate::metrics::ObjectStoreReason::ArchiveRead,
+                zslg_snapshot_types::ObjectStoreReason::ArchiveRead,
             )
             .await;
         assert!(result.is_err());
@@ -819,7 +819,7 @@ mod tests {
                 sid,
                 entries_channel(vec![entry(0)]),
                 CompressionLevel::fast(),
-                crate::metrics::ObjectStoreReason::SnapshotCreate,
+                zslg_snapshot_types::ObjectStoreReason::SnapshotCreate,
             )
             .await
             .expect("write");
@@ -850,7 +850,7 @@ mod tests {
                 orphan_sid,
                 entries_channel(vec![entry(0)]),
                 CompressionLevel::fast(),
-                crate::metrics::ObjectStoreReason::SnapshotCreate,
+                zslg_snapshot_types::ObjectStoreReason::SnapshotCreate,
             )
             .await
             .expect("write orphan");
@@ -861,7 +861,7 @@ mod tests {
                 live_sid,
                 entries_channel(vec![entry(1)]),
                 CompressionLevel::fast(),
-                crate::metrics::ObjectStoreReason::SnapshotCreate,
+                zslg_snapshot_types::ObjectStoreReason::SnapshotCreate,
             )
             .await
             .expect("write live");
@@ -874,7 +874,10 @@ mod tests {
         assert_eq!(report.snapshots_deleted, vec![snapshot_path(orphan_sid)]);
         // Live snapshot still reachable.
         let _ = store
-            .read_snapshot(live_sid, crate::metrics::ObjectStoreReason::ArchiveRead)
+            .read_snapshot(
+                live_sid,
+                zslg_snapshot_types::ObjectStoreReason::ArchiveRead,
+            )
             .await
             .expect("live snapshot kept");
     }
@@ -894,7 +897,7 @@ mod tests {
                 orphan_sid,
                 entries_channel(vec![entry(0)]),
                 CompressionLevel::fast(),
-                crate::metrics::ObjectStoreReason::SnapshotCreate,
+                zslg_snapshot_types::ObjectStoreReason::SnapshotCreate,
             )
             .await
             .expect("write orphan");

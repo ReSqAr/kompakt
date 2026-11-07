@@ -726,7 +726,7 @@ impl Cluster {
 
 pub(crate) fn default_fast_config() -> ReplicaNodeConfig {
     let snapshot_interval = Duration::from_millis(500);
-    let tier0: crate::leader::CompactionTier = snapshot_interval.into();
+    let tier0: zslg_snapshot_types::CompactionTier = snapshot_interval.into();
     // Placeholder identity/storage — every real node replaces these in
     // build_config().
     let mut cfg = ReplicaNodeConfig::new(

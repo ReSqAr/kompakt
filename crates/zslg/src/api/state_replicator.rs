@@ -13,8 +13,9 @@
 //! validates again at apply (CLAUDE.md §12).
 
 use crate::ids::RaftGeneration;
-use crate::meta::{ReplicaMembership, SnapshotMetadata};
+use crate::meta::ReplicaMembership;
 use serde::{Deserialize, Serialize};
+use zslg_snapshot_types::SnapshotMetadata;
 use zslg_time_types::Hlc;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
