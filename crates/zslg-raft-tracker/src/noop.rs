@@ -3,13 +3,13 @@ use std::sync::Arc;
 use tokio::sync::watch;
 use zslg_consensus::{RaftStateTracker, RaftStateView};
 
-use zslg_consensus_types::RaftState;
+use zslg_consensus::RaftState;
 
-pub(crate) struct NoOpRaftViewer(Arc<dyn RaftStateView>);
+pub struct NoOpRaftViewer(Arc<dyn RaftStateView>);
 
 impl NoOpRaftViewer {
     #[must_use]
-    pub(crate) fn new(inner: Arc<dyn RaftStateView>) -> Self {
+    pub fn new(inner: Arc<dyn RaftStateView>) -> Self {
         Self(inner)
     }
 }

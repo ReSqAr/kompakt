@@ -5,32 +5,32 @@
 use std::sync::Arc;
 use std::time::Duration;
 use zslg_net::Router;
+use zslg_raft::RaftMetricsSource;
 
 use tokio_util::sync::CancellationToken;
 
-use crate::error::Error;
-use zslg_node_types::NodeId;
-use zslg_raft_types::NodeInfo;
+use zslg_consensus::NodeId;
+use zslg_raft::NodeInfo;
 
 /// Cadence for re-checking (and `warn!`ing about) empty raft membership. The
 /// first tick lands one interval in, giving a natural startup grace before the
 /// first "no peer routes" warning.
 const EMPTY_MEMBERSHIP_WARN_INTERVAL: Duration = Duration::from_secs(5);
 
-pub(in crate::raft) struct PeerRegistrationWatcher {
-    raft: Arc<crate::raft::RaftNode>,
+pub struct PeerRegistrationWatcher {
+    raft: Arc<dyn RaftMetricsSource>,
     net: Arc<dyn Router>,
 }
 
 impl PeerRegistrationWatcher {
     #[must_use]
-    pub(in crate::raft) fn new(raft: Arc<crate::raft::RaftNode>, net: Arc<dyn Router>) -> Self {
+    pub fn new(raft: Arc<dyn RaftMetricsSource>, net: Arc<dyn Router>) -> Self {
         Self { raft, net }
     }
 
-    pub(in crate::raft) async fn run(self, cancel: CancellationToken) -> Result<(), Error> {
+    pub async fn run<E>(self, cancel: CancellationToken) -> Result<(), E> {
         tracing::info!("peer registration watcher: starting");
-        let mut rx = self.raft.inner().metrics();
+        let mut rx = self.raft.metrics();
         self.sync(&rx.borrow());
 
         // Periodic re-check so an *empty* membership (no peer routes registered)

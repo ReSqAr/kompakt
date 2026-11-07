@@ -259,7 +259,7 @@ async fn subscriber_loop(
             }
         }
 
-        let jittered = crate::jitter(backoff);
+        let jittered = backoff_kit::jitter(backoff);
         tokio::select! {
             () = task_cancel.cancelled() => break,
             () = tokio::time::sleep(jittered) => {}

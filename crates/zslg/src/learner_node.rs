@@ -4,7 +4,7 @@
 //! with none of the consensus responsibilities: it joins no Raft, owns no replica
 //! log, and never binds a server. It subscribes to the replica cluster's log
 //! streams to build a local data cache, tracks the cluster's `RaftState` via
-//! streaming subscriptions (see [`crate::raft::spawn_raft_tracker_streamer`]),
+//! streaming subscriptions (see [`zslg_raft_tracker::spawn_raft_tracker_streamer`]),
 //! and serves the [`Reader`](crate::Reader) API.
 //!
 //! Its identity is persistent — a [`NodeId`], one write-once row of the
@@ -32,7 +32,6 @@ use crate::error::Error;
 use crate::learner::LearnerConfig;
 use crate::learner::{LearnerService, StableLog, spawn_learner, spawn_stable_store};
 use crate::network::setup_router;
-use crate::raft::{RaftTrackerConfig, spawn_raft_tracker_streamer};
 use rocksdb_kit::{CfSpec, Storage, StorageConfig};
 use shutdown::Shutdown;
 use zslg_hlc_clock::{HlcClock, run_clock_gauges};
@@ -40,6 +39,7 @@ use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use zslg_object_store_config::IntoArcObjectStore;
+use zslg_raft_tracker::{RaftTrackerConfig, spawn_raft_tracker_streamer};
 
 /// Configuration for a free-standing learner node.
 ///
@@ -222,7 +222,7 @@ impl LearnerNodeConfig {
     /// Produce the persistent peers watcher from the flat peer list.
     #[must_use]
     pub(crate) fn peers_watcher(&self) -> Arc<dyn zslg_net::PeersWatcher> {
-        crate::network::static_peers(self.peers.clone())
+        zslg_peers::static_peers(self.peers.clone())
     }
 
     /// Produce the learner subsystem config: the learner tunables plus the
@@ -334,7 +334,7 @@ pub struct LearnerNode {
     config: LearnerNodeConfig,
     node_id: NodeId,
     hlc_clock: Arc<HlcClock>,
-    raft_tracker: Arc<crate::raft::RaftTracker>,
+    raft_tracker: Arc<zslg_raft_tracker::RaftTracker>,
     router: Arc<dyn zslg_net::Router>,
     learner: Arc<LearnerService>,
     stable_log: Arc<StableLog>,

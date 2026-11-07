@@ -10,11 +10,10 @@ use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
-use crate::error::Error;
-use crate::metrics;
-use zslg_consensus_types::RaftStateHandle;
-use zslg_node_types::NodeId;
-use zslg_time_types::Hlc;
+use zslg_consensus::NodeId;
+use zslg_consensus::RaftStateHandle;
+use zslg_raft::RaftMetricsSource;
+use zslg_time::Hlc;
 
 /// The voter set as openraft's metrics report it.
 ///
@@ -22,22 +21,20 @@ use zslg_time_types::Hlc;
 /// config, `voter_ids` yields the union of both of its configs, which is the
 /// right answer for every consumer here — a node in either half can vote, so a
 /// node in either half is one the replica set may target.
-fn voters_of(
-    metrics: &raft_kit::RaftMetrics<NodeId, zslg_raft_types::NodeInfo>,
-) -> BTreeSet<NodeId> {
+fn voters_of(metrics: &raft_kit::RaftMetrics<NodeId, zslg_raft::NodeInfo>) -> BTreeSet<NodeId> {
     metrics.membership_config.membership().voter_ids().collect()
 }
 
-pub(in crate::raft) struct RaftStatePublisher {
+pub struct RaftStatePublisher {
     raft_state: RaftStateHandle,
-    raft: Arc<crate::raft::RaftNode>,
+    raft: Arc<dyn RaftMetricsSource>,
     self_node_id: NodeId,
 }
 
 impl RaftStatePublisher {
-    pub(in crate::raft) fn new(
+    pub fn new(
         raft_state: RaftStateHandle,
-        raft: Arc<crate::raft::RaftNode>,
+        raft: Arc<dyn RaftMetricsSource>,
         self_node_id: NodeId,
     ) -> Self {
         Self {
@@ -47,9 +44,9 @@ impl RaftStatePublisher {
         }
     }
 
-    pub(in crate::raft) async fn run(self, cancel: CancellationToken) -> Result<(), Error> {
+    pub async fn run<E>(self, cancel: CancellationToken) -> Result<(), E> {
         tracing::info!("raft state publisher: starting");
-        let mut metrics_rx = self.raft.inner().metrics();
+        let mut metrics_rx = self.raft.metrics();
         let mut state_rx = self.raft_state.subscribe();
         let mut prev_leader = metrics_rx.borrow().current_leader;
         {
@@ -102,7 +99,7 @@ impl RaftStatePublisher {
     }
 
     fn emit_leadership_gauges(&self, prev_leader: &mut Option<NodeId>) {
-        let current_leader = self.raft.inner().metrics().borrow().current_leader;
+        let current_leader = self.raft.metrics().borrow().current_leader;
         if current_leader != *prev_leader {
             // Leadership transition. The `zslg_raft_has_leader` gauge shows *current*
             // state across the fleet; these logs give the transition + timing so
@@ -129,15 +126,15 @@ impl RaftStatePublisher {
             // Preserve the existing metric semantics: only count a change away
             // from a previously-known leader.
             if prev_leader.is_some() {
-                metrics::raft_leader_change();
+                crate::metrics::raft_leader_change();
             }
         }
         *prev_leader = current_leader;
 
         let is_leader = current_leader == Some(self.self_node_id);
-        metrics::raft_is_leader(is_leader);
-        metrics::raft_has_leader(current_leader.is_some());
-        metrics::leader_tasks_active(is_leader);
+        crate::metrics::raft_is_leader(is_leader);
+        crate::metrics::raft_has_leader(current_leader.is_some());
+        crate::metrics::leader_tasks_active(is_leader);
     }
 
     #[allow(
@@ -154,32 +151,32 @@ impl RaftStatePublisher {
                 .replica
                 .next()
                 .is_some_and(|s| s.contains(&self.self_node_id));
-        metrics::raft_is_member(is_member);
-        metrics::raft_term(state.raft_term);
-        metrics::raft_config_generation(state.generation.raw());
-        metrics::raft_in_joint_config(state.replica.is_joint());
-        metrics::membership_joint_exit_hlc_physical_ms(state.replica.exit());
+        crate::metrics::raft_is_member(is_member);
+        crate::metrics::raft_term(state.raft_term);
+        crate::metrics::raft_config_generation(state.generation.raw());
+        crate::metrics::raft_in_joint_config(state.replica.is_joint());
+        crate::metrics::membership_joint_exit_hlc_physical_ms(state.replica.exit());
         let replica_count: u64 = {
             let all = state.replica.current().len();
             let new = state.replica.next().map_or(0, |s| s.len());
             u64::try_from(if all >= new { all } else { new }).expect("usize ≤ u64")
         };
-        metrics::replica_nodes_count(replica_count);
+        crate::metrics::replica_nodes_count(replica_count);
 
         // Manifest / cutoff / watermark
-        metrics::manifest_entries_count(
+        crate::metrics::manifest_entries_count(
             u64::try_from(state.manifest_state.manifest.len()).expect("manifest len ≤ u64"),
         );
         if let Some(cutoff) = state.manifest_state.hlc_cutoff {
-            metrics::hlc_cutoff_physical_ms(cutoff);
+            crate::metrics::hlc_cutoff_physical_ms(cutoff);
         }
         if let Some(watermark) = state.manifest_state.manifest_watermark {
-            metrics::manifest_end_hlc_physical_ms(watermark);
+            crate::metrics::manifest_end_hlc_physical_ms(watermark);
             // Stamp the snapshot-age gauge only on a genuine advance (a snapshot
             // committed + replicated). Grafana reads it as
             // `time() - zslg_manifest_watermark_advanced_timestamp_seconds`.
             if prev_watermark.is_none_or(|prev| watermark > prev) {
-                metrics::manifest_watermark_advanced();
+                crate::metrics::manifest_watermark_advanced();
                 *prev_watermark = Some(watermark);
             }
         }

@@ -281,7 +281,7 @@ fn spawn_snapshot(
         );
         let leadership: Arc<dyn zslg_consensus::RaftLeadership> = Arc::new(RaftNode::new(
             raft.clone(),
-            crate::network::permissive_gate(),
+            zslg_consensus_fake::permissive_gate(),
             std::time::Duration::from_secs(30),
         ));
         let inputs = SnapshotInputs {
@@ -308,7 +308,7 @@ fn spawn_snapshot(
         let (intents, _cancel) = crate::leader::Integrator::spawn_for_test(
             Arc::new(RaftNode::new(
                 raft.clone(),
-                crate::network::permissive_gate(),
+                zslg_consensus_fake::permissive_gate(),
                 std::time::Duration::from_secs(30),
             )),
             Arc::new(raft_state.clone()),

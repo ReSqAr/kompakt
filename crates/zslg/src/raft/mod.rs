@@ -21,24 +21,20 @@ use zslg_net::Router;
 use raft_kit::storage::Adaptor;
 
 use crate::error::Error;
-use crate::raft::rpc::NetworkFactory;
-use crate::raft::rpc::PeerRegistrationWatcher;
-use crate::raft::state::RaftStatePublisher;
 use rocksdb_kit::Storage;
 use shutdown::Shutdown;
 use zslg_consensus::ToRaft;
 use zslg_consensus_types::RaftStateHandle;
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
+use zslg_raft_rpc::{NetworkFactory, PeerRegistrationWatcher};
+use zslg_raft_state::RaftStatePublisher;
 use zslg_raft_storage::RocksRaftStorage;
 use zslg_raft_types::NodeInfo;
 
 mod membership;
 mod node;
-mod rpc;
 mod startup;
-mod state;
-mod tracker;
 
 #[cfg(test)]
 mod tests;
@@ -46,9 +42,6 @@ mod tests;
 pub(crate) use membership::MembershipConfig;
 pub(crate) use node::RaftNode;
 pub(crate) use startup::{RaftStartupConfig, run_raft_startup};
-pub(crate) use tracker::{
-    NoOpRaftViewer, RaftTracker, RaftTrackerConfig, spawn_raft_tracker_streamer,
-};
 
 #[must_use]
 fn membership_map<I>(members: I) -> BTreeMap<NodeId, NodeInfo>

@@ -260,7 +260,7 @@ fn run_replica(weak: Weak<Coordinator>, node: NodeId, mut ids_rx: Receiver<DataI
         ids_rx = this.streams.ensure(node);
         drop(this);
 
-        std::thread::sleep(crate::jitter(backoff));
+        std::thread::sleep(backoff_kit::jitter(backoff));
         backoff = backoff.saturating_mul(2).min(MAX_REOPEN_BACKOFF);
     }
 }

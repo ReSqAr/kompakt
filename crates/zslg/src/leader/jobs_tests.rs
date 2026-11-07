@@ -35,7 +35,6 @@ use crate::leader::{LeaderLoopConfig, SnapshotConfig, spawn_leader_loop};
 use crate::learner::LocalStore;
 use crate::learner::StableLog;
 use crate::learner::integrate_manifest_for_test;
-use crate::network::static_peers;
 use crate::network::{LocalReplicaClient, PeerRouter, RemoteRouter};
 use crate::raft::MembershipConfig;
 use crate::raft::RaftNode;
@@ -54,6 +53,7 @@ use zslg_log_types::SnapshotEntry;
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
+use zslg_peers::static_peers;
 use zslg_snapshot_types::CompactionTier;
 use zslg_snapshot_types::SnapshotId;
 use zslg_snapshot_types::SnapshotMetadata;
@@ -207,14 +207,14 @@ fn spawn_loop(
         Arc::new(sys.raft_state.clone()),
         drained_cutoff_rx.clone(),
         bytesize::nonzero(2048),
-        crate::network::static_peers(Vec::new()),
+        zslg_peers::static_peers(Vec::new()),
     ));
     let mut server_shutdown = Shutdown::new();
     let self_client: Arc<dyn zslg_net::ReplicaClient> = Arc::new(LocalReplicaClient::new(
         replica.clone(),
         Arc::new(RaftNode::new(
             sys.raft.clone(),
-            crate::network::permissive_gate(),
+            zslg_consensus_fake::permissive_gate(),
             std::time::Duration::from_secs(30),
         )),
         Arc::new(sys.raft_state.clone()),
@@ -246,12 +246,12 @@ fn spawn_loop(
     ));
     let leadership: Arc<dyn RaftLeadership> = Arc::new(RaftNode::new(
         sys.raft.clone(),
-        crate::network::permissive_gate(),
+        zslg_consensus_fake::permissive_gate(),
         std::time::Duration::from_secs(30),
     ));
     let state_replicator: Arc<dyn StateReplicator> = Arc::new(RaftNode::new(
         sys.raft.clone(),
-        crate::network::permissive_gate(),
+        zslg_consensus_fake::permissive_gate(),
         std::time::Duration::from_secs(30),
     ));
 
@@ -741,12 +741,12 @@ async fn a_wedged_snapshot_build_does_not_block_the_other_jobs() {
 
     let leadership: Arc<dyn RaftLeadership> = Arc::new(RaftNode::new(
         n1_raft.clone(),
-        crate::network::permissive_gate(),
+        zslg_consensus_fake::permissive_gate(),
         std::time::Duration::from_secs(30),
     ));
     let state_replicator: Arc<dyn StateReplicator> = Arc::new(RaftNode::new(
         n1_raft.clone(),
-        crate::network::permissive_gate(),
+        zslg_consensus_fake::permissive_gate(),
         std::time::Duration::from_secs(30),
     ));
     let mut leader_shutdown = Shutdown::new();

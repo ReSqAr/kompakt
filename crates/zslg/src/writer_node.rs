@@ -22,12 +22,12 @@ use crate::ByteSize;
 use crate::Error;
 
 use crate::network::setup_router;
-use crate::raft::{RaftTracker, RaftTrackerConfig, spawn_raft_tracker_streamer};
 use crate::writer::WriterService;
 use shutdown::Shutdown;
 use zslg_hlc_clock::{HlcClock, run_clock_gauges};
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
+use zslg_raft_tracker::{RaftTracker, RaftTrackerConfig, spawn_raft_tracker_streamer};
 
 pub struct WriterNode {
     config: WriterNodeConfig,
@@ -244,7 +244,7 @@ impl WriterNodeConfig {
     /// Produce the persistent peers watcher from the flat peer list.
     #[must_use]
     pub(crate) fn peers_watcher(&self) -> Arc<dyn zslg_net::PeersWatcher> {
-        crate::network::static_peers(self.peers.clone())
+        zslg_peers::static_peers(self.peers.clone())
     }
 
     /// Produce the writer constructor config.

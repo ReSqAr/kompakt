@@ -307,7 +307,7 @@ async fn full_lifecycle_bootstrap_snapshot_churn_failure() {
         let (intents, integrator_cancel) = crate::leader::Integrator::spawn_for_test(
             Arc::new(RaftNode::new(
                 leader_raft.clone(),
-                crate::network::permissive_gate(),
+                zslg_consensus_fake::permissive_gate(),
                 std::time::Duration::from_secs(30),
             )),
             Arc::new(nodes.get(&n1).expect("n1").raft_state.clone()),
@@ -318,7 +318,7 @@ async fn full_lifecycle_bootstrap_snapshot_churn_failure() {
             intents,
             leadership: Arc::new(RaftNode::new(
                 leader_raft.clone(),
-                crate::network::permissive_gate(),
+                zslg_consensus_fake::permissive_gate(),
                 std::time::Duration::from_secs(30),
             )),
             raft_state: Arc::new(nodes.get(&n1).expect("n1").raft_state.clone()),

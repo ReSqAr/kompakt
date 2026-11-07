@@ -654,7 +654,7 @@ impl ReplicaServiceHarness {
             Arc::new(raft_state.clone()),
             rx,
             bytesize::nonzero(2048),
-            crate::network::static_peers(peer_addrs),
+            zslg_peers::static_peers(peer_addrs),
         ));
         Ok(Self {
             replica,

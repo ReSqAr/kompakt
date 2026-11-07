@@ -41,12 +41,11 @@ use crate::leader::spawn_leader_loop;
 use crate::leader::{LivenessConfig, SnapshotConfig};
 use crate::learner::LearnerConfig;
 use crate::learner::{LearnerService, spawn_learner, spawn_stable_store};
-use crate::network::PeersMembershipGate;
 use crate::network::{
     LocalReplicaClient, PeerRouter, RpcClientConfig, RpcServerConfig, SocketOpts, setup_router,
 };
 use crate::raft::{MembershipConfig, RaftConfig};
-use crate::raft::{NoOpRaftViewer, RaftNode, run_raft_startup, setup_raft};
+use crate::raft::{RaftNode, run_raft_startup, setup_raft};
 use crate::replica::ReplicaLogConfig;
 use crate::replica::{ReplicaService, spawn_replica};
 use crate::writer::WriterService;
@@ -64,6 +63,8 @@ use zslg_net_types::{HostPort, PeerAddr};
 use zslg_node_types::NodeId;
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use zslg_object_store_config::IntoArcObjectStore;
+use zslg_peers::PeersMembershipGate;
+use zslg_raft_tracker::NoOpRaftViewer;
 use zslg_snapshot_types::CompactionTier;
 use zslg_snapshot_types::CompressionLevel;
 
@@ -364,7 +365,7 @@ impl ReplicaNodeConfig {
     /// Produce the persistent peers watcher from the flat peer list.
     #[must_use]
     pub(crate) fn peers_watcher(&self) -> Arc<dyn PeersWatcher> {
-        crate::network::static_peers(self.peers.clone())
+        zslg_peers::static_peers(self.peers.clone())
     }
 
     /// Produce the RPC server bind config, including the TCP socket tuning and

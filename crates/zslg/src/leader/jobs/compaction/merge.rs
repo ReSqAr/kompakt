@@ -590,7 +590,7 @@ mod tests {
         let (intents, _integrator_cancel) = crate::leader::Integrator::spawn_for_test(
             Arc::new(crate::raft::RaftNode::new(
                 leader.raft.clone(),
-                crate::network::permissive_gate(),
+                zslg_consensus_fake::permissive_gate(),
                 std::time::Duration::from_secs(30),
             )),
             Arc::new(leader.raft_state.clone()),
@@ -733,7 +733,7 @@ mod tests {
         let (intents, _integrator_cancel) = crate::leader::Integrator::spawn_for_test(
             Arc::new(crate::raft::RaftNode::new(
                 leader.raft.clone(),
-                crate::network::permissive_gate(),
+                zslg_consensus_fake::permissive_gate(),
                 std::time::Duration::from_secs(30),
             )),
             Arc::new(leader.raft_state.clone()),

@@ -21,8 +21,8 @@ use raft_kit::raft::InstallSnapshotResponse;
 use raft_kit::raft::VoteRequest;
 use raft_kit::raft::VoteResponse;
 
-use zslg_node_types::NodeId;
-use zslg_raft_types::{NodeInfo, TypeConfig};
+use zslg_consensus::NodeId;
+use zslg_raft::{NodeInfo, TypeConfig};
 
 #[derive(Debug)]
 struct UnreachableMsg(String);
@@ -36,13 +36,13 @@ impl std::fmt::Display for UnreachableMsg {
 impl std::error::Error for UnreachableMsg {}
 
 #[derive(Clone)]
-pub(in crate::raft) struct NetworkFactory {
+pub struct NetworkFactory {
     net: Arc<dyn Router>,
 }
 
 impl NetworkFactory {
     #[must_use]
-    pub(in crate::raft) fn new(net: Arc<dyn Router>) -> Self {
+    pub fn new(net: Arc<dyn Router>) -> Self {
         Self { net }
     }
 }
@@ -63,7 +63,7 @@ impl RaftNetworkFactory<TypeConfig> for NetworkFactory {
     }
 }
 
-pub(in crate::raft) struct Network {
+pub struct Network {
     transport: Arc<dyn RaftTransport>,
     target: NodeId,
 }

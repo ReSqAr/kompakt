@@ -180,7 +180,7 @@ fn build_inputs_with_replica_count(
     // every pre-existing test keeps its original meaning.
     let leadership = Arc::new(RaftNode::new(
         sys.raft.clone(),
-        crate::network::permissive_gate(),
+        zslg_consensus_fake::permissive_gate(),
         std::time::Duration::from_secs(30),
     ));
     build_inputs_with_leadership(self_id, sys, observer, live, replica_node_count, leadership)
@@ -199,7 +199,7 @@ fn build_inputs_with_leadership(
     let (intents, integrator_cancel) = crate::leader::Integrator::spawn_for_test(
         Arc::new(RaftNode::new(
             sys.raft.clone(),
-            crate::network::permissive_gate(),
+            zslg_consensus_fake::permissive_gate(),
             std::time::Duration::from_secs(30),
         )),
         Arc::new(sys.raft_state.clone()),

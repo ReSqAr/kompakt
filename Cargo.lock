@@ -248,6 +248,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "backoff-kit"
+version = "0.1.0"
+dependencies = [
+ "rand 0.10.3",
+]
+
+[[package]]
 name = "backtrace"
 version = "0.3.77"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4432,6 +4439,7 @@ name = "zslg"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "backoff-kit",
  "bytes",
  "bytesize",
  "clap",
@@ -4472,6 +4480,7 @@ dependencies = [
  "uuid",
  "warn-throttle",
  "zslg-consensus",
+ "zslg-consensus-fake",
  "zslg-consensus-types",
  "zslg-hlc-clock",
  "zslg-hlc-gate",
@@ -4488,9 +4497,13 @@ dependencies = [
  "zslg-node-types",
  "zslg-object-store",
  "zslg-object-store-config",
+ "zslg-peers",
  "zslg-quorum-read",
  "zslg-raft",
+ "zslg-raft-rpc",
+ "zslg-raft-state",
  "zslg-raft-storage",
+ "zslg-raft-tracker",
  "zslg-raft-types",
  "zslg-snapshot",
  "zslg-snapshot-types",
@@ -4512,6 +4525,14 @@ dependencies = [
  "zslg-node-types",
  "zslg-snapshot-types",
  "zslg-time-types",
+]
+
+[[package]]
+name = "zslg-consensus-fake"
+version = "0.1.0"
+dependencies = [
+ "zslg-consensus",
+ "zslg-net",
 ]
 
 [[package]]
@@ -4779,6 +4800,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "zslg-peers"
+version = "0.1.0"
+dependencies = [
+ "tokio",
+ "tracing",
+ "zslg-consensus",
+ "zslg-net",
+]
+
+[[package]]
 name = "zslg-quorum-read"
 version = "0.1.0"
 dependencies = [
@@ -4803,6 +4834,7 @@ dependencies = [
  "async-trait",
  "error-union",
  "raft-kit",
+ "tokio",
  "zslg-consensus-types",
  "zslg-lifecycle-types",
  "zslg-log-types",
@@ -4811,6 +4843,33 @@ dependencies = [
  "zslg-raft-types",
  "zslg-snapshot-types",
  "zslg-time-types",
+]
+
+[[package]]
+name = "zslg-raft-rpc"
+version = "0.1.0"
+dependencies = [
+ "raft-kit",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-net",
+ "zslg-raft",
+]
+
+[[package]]
+name = "zslg-raft-state"
+version = "0.1.0"
+dependencies = [
+ "metrics-kit",
+ "raft-kit",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-raft",
+ "zslg-time",
 ]
 
 [[package]]
@@ -4835,6 +4894,26 @@ dependencies = [
  "zslg-log",
  "zslg-net",
  "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-raft-tracker"
+version = "0.1.0"
+dependencies = [
+ "backoff-kit",
+ "error-union",
+ "futures",
+ "shutdown",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "zslg-consensus",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
  "zslg-snapshot",
  "zslg-time",
 ]

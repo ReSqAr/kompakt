@@ -88,6 +88,12 @@ impl RaftNode {
     }
 }
 
+impl zslg_raft::RaftMetricsSource for RaftNode {
+    fn metrics(&self) -> tokio::sync::watch::Receiver<raft_kit::RaftMetrics<NodeId, NodeInfo>> {
+        self.inner.metrics()
+    }
+}
+
 impl RaftNode {
     pub(crate) async fn add_member_in(
         &self,

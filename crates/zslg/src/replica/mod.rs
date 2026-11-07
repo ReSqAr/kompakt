@@ -714,7 +714,7 @@ mod tests {
             Arc::new(raft_state.clone()),
             rx,
             bytesize::nonzero(2048),
-            crate::network::static_peers(Vec::new()),
+            zslg_peers::static_peers(Vec::new()),
         ));
         (node, raft_state, dir, flush)
     }

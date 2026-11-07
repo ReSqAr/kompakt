@@ -16,9 +16,10 @@ zslg-log-types = { workspace = true }
 zslg-net-types = { workspace = true }
 zslg-snapshot-types = { workspace = true }
 raft-kit = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+zslg-node-types = { workspace = true }
 zslg-raft-types = { workspace = true }
 zslg-time-types = { workspace = true }
-zslg-node-types = { workspace = true }
 
 [lints]
 workspace = true

@@ -6,14 +6,12 @@
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
-use zslg_consensus::MembershipGate;
-use zslg_consensus_types::ConsensusError;
+use zslg_consensus::{ConsensusError, MembershipGate, NodeId};
 use zslg_net::PeersWatcher;
 
 use tokio::sync::watch;
 
-use zslg_net_types::{PeerAddr, ServerName};
-use zslg_node_types::NodeId;
+use zslg_net::{PeerAddr, ServerName};
 
 /// A static, never-changing implementation of [`PeersWatcher`].
 ///
@@ -38,7 +36,6 @@ impl StaticPeers {
     /// The list must be non-empty (validated by
     /// `RpcClientConfig::validate()`.
     #[must_use]
-    #[allow(dead_code, reason = "constructor used in tests")]
     fn new(peers: Vec<PeerAddr>) -> Self {
         let (tx, _) = watch::channel(peers);
         Self { tx }
@@ -58,7 +55,7 @@ impl PeersWatcher for StaticPeers {
 /// Convenience: convert a `Vec<PeerAddr>` into an
 /// `Arc<dyn PeersWatcher>` backed by [`StaticPeers`].
 #[must_use]
-pub(crate) fn static_peers(peers: Vec<PeerAddr>) -> Arc<dyn PeersWatcher> {
+pub fn static_peers(peers: Vec<PeerAddr>) -> Arc<dyn PeersWatcher> {
     Arc::new(StaticPeers::new(peers))
 }
 
@@ -66,15 +63,15 @@ pub(crate) fn static_peers(peers: Vec<PeerAddr>) -> Arc<dyn PeersWatcher> {
 
 /// [`MembershipGate`] that admits joiners whose `server_name` appears in the
 /// configured peer list. This is the single source of truth for membership
-/// admission: the check lives in [`RaftNode::add_member`](crate::raft::RaftNode),
+/// admission: the check lives in [`RaftNode::add_member`](RaftNode),
 /// not in the network dispatch layer.
-pub(crate) struct PeersMembershipGate {
+pub struct PeersMembershipGate {
     peers: Arc<dyn PeersWatcher>,
 }
 
 impl PeersMembershipGate {
     #[must_use]
-    pub(crate) fn new(peers: Arc<dyn PeersWatcher>) -> Self {
+    pub fn new(peers: Arc<dyn PeersWatcher>) -> Self {
         Self { peers }
     }
 }
@@ -99,23 +96,5 @@ impl MembershipGate for PeersMembershipGate {
                 ConsensusError::MembershipDenied { node_id },
             ))
         }
-    }
-}
-
-/// Permissive gate (admits everything). Used in tests where membership policy
-/// is not under test.
-#[cfg(test)]
-#[must_use]
-pub(crate) fn permissive_gate() -> Arc<dyn MembershipGate> {
-    Arc::new(PermissiveGate)
-}
-
-#[cfg(test)]
-struct PermissiveGate;
-
-#[cfg(test)]
-impl MembershipGate for PermissiveGate {
-    fn admit(&self, _node_id: NodeId, _peer_addr: &PeerAddr) -> Result<(), zslg_consensus::Error> {
-        Ok(())
     }
 }

@@ -28,7 +28,6 @@ use raft_kit::Config;
 use raft_kit::storage::Adaptor;
 
 use crate::network::{LocalReplicaClient, RemoteRouter, RpcServerConfig, SocketOpts};
-use crate::raft::rpc::NetworkFactory;
 use crate::raft::{RaftNode, membership_map};
 use crate::tests::ReadyReplica;
 use crate::tests::fast_raft_config as raft_config;
@@ -38,6 +37,7 @@ use zslg_consensus_types::ReplicatedRaftState;
 use zslg_hlc_clock::HlcClock;
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
+use zslg_raft_rpc::NetworkFactory;
 use zslg_raft_types::Raft;
 
 struct ClusterNode {
@@ -81,7 +81,7 @@ async fn build_node(node_id: NodeId, raft_config: Arc<Config>) -> ClusterNode {
         }),
         Arc::new(RaftNode::new(
             raft.clone(),
-            crate::network::permissive_gate(),
+            zslg_consensus_fake::permissive_gate(),
             std::time::Duration::from_secs(30),
         )),
         Arc::new(raft_state.clone()),

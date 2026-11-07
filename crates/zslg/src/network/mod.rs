@@ -22,8 +22,6 @@
 //! hands back a [`Router`], so the rest of the crate names peers by `NodeId` and
 //! cannot reach the wire directly.
 
-mod peers;
-
 use std::sync::Arc;
 use zslg_net::{ReplicaClient, Router};
 
@@ -31,10 +29,6 @@ use tokio_util::sync::CancellationToken;
 
 use crate::Error;
 
-pub(crate) use peers::PeersMembershipGate;
-#[cfg(test)]
-pub(crate) use peers::permissive_gate;
-pub(crate) use peers::static_peers;
 use shutdown::Shutdown;
 pub(crate) use zslg_net_client::RemoteRouter;
 use zslg_net_client::RpcClient;

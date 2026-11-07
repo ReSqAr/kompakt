@@ -4,7 +4,7 @@
 //! replica log, yet both need the current replica set + generation — the writer
 //! to route `fan_out_quorum` writes, the learner to gate quorum reads.
 //! [`RaftTracker`] is the non-Raft counterpart to the replica's
-//! [`RaftStateHandle`](zslg_consensus_types::RaftStateHandle): instead of being fed by
+//! [`RaftStateHandle`](zslg_consensus::RaftStateHandle): instead of being fed by
 //! consensus apply, it is fed by the per-peer stream workers
 //! ([`super::streamer`]) and by write ACKs, integrating the highest generation
 //! seen. The "integrate an observed state" logic lives here, next to the
@@ -15,39 +15,39 @@ use std::sync::Arc;
 use std::time::Duration;
 use zslg_consensus::RaftStateView;
 use zslg_lifecycle_types::ConfigError;
+use zslg_net::NetError;
 use zslg_net::PeersWatcher;
-use zslg_net_types::NetError;
 
 use tokio::sync::watch;
 use tracing::debug;
 
 use crate::Error;
 
-use zslg_consensus_types::RaftState;
-use zslg_node_types::NodeId;
+use zslg_consensus::NodeId;
+use zslg_consensus::RaftState;
 
-/// Everything [`spawn_raft_tracker_streamer`](crate::raft::spawn_raft_tracker_streamer)
+/// Everything [`spawn_raft_tracker_streamer`](crate::spawn_raft_tracker_streamer)
 /// needs beyond the ambient shutdown + router: the peer-set watcher plus the
 /// per-peer failure backoff and startup readiness bound. Assembled by the owning
 /// node config's `raft_tracker_config()` producer.
 #[derive(Debug, Clone)]
-pub(crate) struct RaftTrackerConfig {
+pub struct RaftTrackerConfig {
     /// The expected replica-set watcher; one stream worker is run per peer it
     /// yields.
-    pub(crate) peers: Arc<dyn PeersWatcher>,
+    pub peers: Arc<dyn PeersWatcher>,
     /// First backoff after a failed `subscribe_status` connect or a dropped
     /// stream that never went live; doubles up to `max_backoff`.
-    pub(crate) min_backoff: Duration,
+    pub min_backoff: Duration,
     /// Upper bound on the per-peer failure backoff.
-    pub(crate) max_backoff: Duration,
+    pub max_backoff: Duration,
     /// How long the streamer blocks for a quorum of write targets to be
     /// discovered before giving up (`wait_for_ready`). Filled from the owning
     /// node config's `startup_timeout`.
-    pub(crate) startup_timeout: Duration,
+    pub startup_timeout: Duration,
 }
 
 impl RaftTrackerConfig {
-    pub(crate) fn validate(&self) -> Result<(), Error> {
+    pub fn validate(&self) -> Result<(), Error> {
         if self.min_backoff > self.max_backoff {
             return Err(Error::Config(ConfigError::InvalidConfiguration(format!(
                 "raft_tracker.min_backoff ({:?}) must be <= max_backoff ({:?})",
@@ -71,7 +71,7 @@ impl RaftTrackerConfig {
 /// A non-Raft node's cache of the cluster's `RaftState`, plus the set of replica
 /// `NodeId`s whose `addr` has been discovered (registered in the router). Fed
 /// by RPC, not consensus.
-pub(crate) struct RaftTracker {
+pub struct RaftTracker {
     discovered_tx: watch::Sender<BTreeSet<NodeId>>,
     /// The integrated state and its change notification in one primitive, so
     /// `subscribe()` callers (e.g. `ReplicationManager`) read the current
@@ -87,7 +87,7 @@ impl Default for RaftTracker {
 
 impl RaftTracker {
     #[must_use]
-    pub(in crate::raft) fn new() -> Self {
+    pub fn new() -> Self {
         let (discovered_tx, _) = watch::channel(BTreeSet::new());
         let (state_tx, _) = watch::channel(Arc::new(RaftState::empty()));
         Self {
@@ -100,7 +100,7 @@ impl RaftTracker {
     /// therefore routable by `NodeId`. Notifies any waiter on
     /// [`wait_for_ready`](Self::wait_for_ready) only when the id was not already
     /// known.
-    pub(in crate::raft::tracker) fn note_discovered(&self, node_id: NodeId) {
+    pub fn note_discovered(&self, node_id: NodeId) {
         self.discovered_tx
             .send_if_modified(|set| set.insert(node_id));
     }
@@ -112,17 +112,17 @@ impl RaftTracker {
     #[must_use]
     fn is_ready(&self) -> bool {
         let snap = self.snapshot();
-        if zslg_consensus_types::all_targets(&snap.replica).is_empty() {
+        if zslg_consensus::all_targets(&snap.replica).is_empty() {
             return false;
         }
         let discovered = self.discovered_tx.borrow();
-        zslg_consensus_types::is_quorum(&snap.replica, &discovered)
+        zslg_consensus::is_quorum(&snap.replica, &discovered)
     }
 
     /// Wait until the tracker reports ready (quorum of targets discovered), or
     /// the `timeout` elapses. Event-driven: sleeps until a peer is noted
     /// discovered, then rechecks — no busy-loop.
-    pub(in crate::raft) async fn wait_for_ready(&self, timeout: Duration) -> Result<(), Error> {
+    pub async fn wait_for_ready(&self, timeout: Duration) -> Result<(), Error> {
         let mut rx = self.discovered_tx.subscribe();
         if self.is_ready() {
             return Ok(());
@@ -193,9 +193,13 @@ mod tests {
     use super::*;
     use zslg_consensus::RaftStateTracker as _;
 
-    use crate::tests::nid;
-    use zslg_consensus_types::RaftGeneration;
-    use zslg_consensus_types::{RaftManifestState, ReplicaMembership};
+    fn nid(byte: u8) -> NodeId {
+        let mut b = [0u8; 16];
+        b[15] = byte;
+        NodeId::from_uuid(uuid::Uuid::from_bytes(b))
+    }
+    use zslg_consensus::RaftGeneration;
+    use zslg_consensus::{RaftManifestState, ReplicaMembership};
 
     fn state(generation: u64, replicas: &[NodeId]) -> RaftState {
         RaftState {
@@ -247,10 +251,23 @@ mod tests {
         assert!(view.is_ready(), "2 of 3 — quorum reached");
     }
 
+    #[derive(Debug)]
+    struct NoPeers;
+
+    impl PeersWatcher for NoPeers {
+        fn subscribe(&self) -> tokio::sync::watch::Receiver<Vec<zslg_net::PeerAddr>> {
+            tokio::sync::watch::channel(Vec::new()).1
+        }
+
+        fn current(&self) -> Vec<zslg_net::PeerAddr> {
+            Vec::new()
+        }
+    }
+
     #[test]
     fn raft_tracker_config_validate() {
         let ok = RaftTrackerConfig {
-            peers: crate::network::static_peers(vec![]),
+            peers: Arc::new(NoPeers),
             min_backoff: Duration::from_millis(200),
             max_backoff: Duration::from_secs(5),
             startup_timeout: Duration::from_secs(30),

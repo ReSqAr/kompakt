@@ -21,28 +21,36 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
-use crate::error::Error;
-use crate::raft::{RaftTracker, RaftTrackerConfig};
+use crate::Error;
+use crate::{RaftTracker, RaftTrackerConfig};
 use shutdown::Shutdown;
-use zslg_net_types::PeerAddr;
+use zslg_net::PeerAddr;
 
 /// Create a fresh [`RaftTracker`], register the stream supervisor with
 /// `shutdown`, and block until a quorum of write targets have been discovered
 /// (or `startup_timeout` elapses). Once this returns the tracker is ready for
 /// use by `spawn_learner`.
-pub(crate) async fn spawn_raft_tracker_streamer(
+pub async fn spawn_raft_tracker_streamer<E>(
     router: Arc<dyn Router>,
     config: RaftTrackerConfig,
-    shutdown: &mut Shutdown<Error>,
-) -> Result<Arc<RaftTracker>, Error> {
+    shutdown: &mut Shutdown<E>,
+) -> Result<Arc<RaftTracker>, E>
+where
+    E: From<Error> + From<shutdown::Stopped> + std::fmt::Display + Send + 'static,
+{
     let raft_tracker = Arc::new(RaftTracker::new());
     let cancel = shutdown.token();
-    shutdown.spawn(
-        "raft:tracker_streamer",
-        run_supervisor(router, raft_tracker.clone(), config.clone(), cancel),
-    );
+    let (tracker, supervisor_config) = (raft_tracker.clone(), config.clone());
+    shutdown.spawn("raft:tracker_streamer", async move {
+        run_supervisor(router, tracker, supervisor_config, cancel)
+            .await
+            .map_err(E::from)
+    });
 
-    raft_tracker.wait_for_ready(config.startup_timeout).await?;
+    raft_tracker
+        .wait_for_ready(config.startup_timeout)
+        .await
+        .map_err(E::from)?;
 
     Ok(raft_tracker)
 }
@@ -206,7 +214,7 @@ async fn run_stream_worker(
         // Back off before retrying.
         let delay = backoff;
         backoff = backoff.saturating_mul(2).min(config.max_backoff);
-        let jittered = crate::jitter(delay);
+        let jittered = backoff_kit::jitter(delay);
         tokio::select! {
             () = cancel.cancelled() => return,
             () = tokio::time::sleep(jittered) => {}

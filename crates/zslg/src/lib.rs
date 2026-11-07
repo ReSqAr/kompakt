@@ -85,13 +85,3 @@ pub use zslg_snapshot_types::{
     CompactionTier, CompressionLevel, SnapshotError, SnapshotId, SnapshotMetadata,
 };
 pub use zslg_time_types::{ClockError, Hlc};
-
-pub(crate) fn jitter(d: std::time::Duration) -> std::time::Duration {
-    let ms = u64::try_from(d.as_millis()).unwrap_or(u64::MAX);
-    let quarter = ms.checked_div(4).unwrap_or(1).max(1);
-    let spread = quarter.saturating_mul(2);
-    let range = spread.saturating_add(1);
-    let delta = rand::random::<u64>().checked_rem(range).unwrap_or(0);
-    let ms = ms.saturating_sub(quarter).saturating_add(delta);
-    std::time::Duration::from_millis(ms)
-}

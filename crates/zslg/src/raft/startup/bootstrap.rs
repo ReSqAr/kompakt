@@ -127,7 +127,7 @@ async fn resolve_bootstrap_fence(snapshot_store: &Arc<dyn SnapshotStore>) -> Res
                     ?backoff,
                     "raft startup: bootstrap-fence check failed (object store not ready?); retrying"
                 );
-                let jittered = crate::jitter(backoff);
+                let jittered = backoff_kit::jitter(backoff);
                 tokio::time::sleep(jittered).await;
                 backoff = backoff.saturating_mul(2).min(JOIN_MAX_BACKOFF);
             }
@@ -479,7 +479,7 @@ async fn quorum_applied_generation(
                         "raft startup: quorum of the replica set unreachable, still retrying"
                     );
                 }
-                let jittered = crate::jitter(backoff);
+                let jittered = backoff_kit::jitter(backoff);
                 tokio::time::sleep(jittered).await;
                 backoff = backoff.saturating_mul(2).min(JOIN_MAX_BACKOFF);
             }
@@ -643,7 +643,7 @@ async fn join_existing(
                     attempt_ms = ?t_attempt.elapsed().as_millis(),
                     "retrying RaftAddMember after backoff",
                 );
-                let jittered = crate::jitter(backoff);
+                let jittered = backoff_kit::jitter(backoff);
                 tokio::time::sleep(jittered).await;
                 backoff = backoff.saturating_mul(2).min(JOIN_MAX_BACKOFF);
             }

@@ -4,7 +4,7 @@
 //!
 //! This exercises the full learner path that has no Raft of its own: the learner
 //! discovers the replica set via streaming `subscribe()` connections (the
-//! [`RaftTracker`](crate::raft::RaftTracker) streamer), replicates data into its
+//! [`RaftTracker`](zslg_raft_tracker::RaftTracker) streamer), replicates data into its
 //! local store, and answers quorum-gated reads including `unstable_tail`.
 
 #![allow(

@@ -10,9 +10,11 @@ use zslg_snapshot_types::SnapshotError;
 use zslg_time_types::ClockError;
 
 mod raft_consensus;
+mod raft_metrics;
 mod raft_transport;
 
 pub use raft_consensus::RaftConsensus;
+pub use raft_metrics::RaftMetricsSource;
 pub use raft_transport::RaftTransport;
 
 error_union! {

@@ -731,7 +731,7 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
     ));
     let leadership: Arc<dyn zslg_consensus::RaftLeadership> = Arc::new(RaftNode::new(
         h.raft.clone(),
-        crate::network::permissive_gate(),
+        zslg_consensus_fake::permissive_gate(),
         std::time::Duration::from_secs(30),
     ));
     let inputs = SnapshotInputs {
@@ -757,7 +757,7 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
     let (intents, _cancel) = crate::leader::Integrator::spawn_for_test(
         Arc::new(RaftNode::new(
             h.raft.clone(),
-            crate::network::permissive_gate(),
+            zslg_consensus_fake::permissive_gate(),
             std::time::Duration::from_secs(30),
         )),
         Arc::new(h.raft_state.clone()),
@@ -860,7 +860,7 @@ async fn snapshot_quorum_tolerates_one_wedged_replica() {
     ));
     let leadership: Arc<dyn zslg_consensus::RaftLeadership> = Arc::new(RaftNode::new(
         h.raft.clone(),
-        crate::network::permissive_gate(),
+        zslg_consensus_fake::permissive_gate(),
         std::time::Duration::from_secs(30),
     ));
     let inputs = SnapshotInputs {

@@ -36,7 +36,6 @@ use crate::error::Error;
 use crate::learner::LearnerConfig;
 use crate::learner::{LearnerService, StableLog, spawn_learner, spawn_stable_store};
 use crate::network::setup_router;
-use crate::raft::{RaftTrackerConfig, spawn_raft_tracker_streamer};
 use crate::writer::WriterService;
 use rocksdb_kit::{CfSpec, Storage, StorageConfig};
 use shutdown::Shutdown;
@@ -45,6 +44,7 @@ use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use zslg_object_store_config::IntoArcObjectStore;
+use zslg_raft_tracker::{RaftTrackerConfig, spawn_raft_tracker_streamer};
 
 /// Configuration for a follower node.
 ///
@@ -223,7 +223,7 @@ impl FollowerNodeConfig {
     /// Produce the persistent peers watcher from the flat peer list.
     #[must_use]
     pub(crate) fn peers_watcher(&self) -> Arc<dyn zslg_net::PeersWatcher> {
-        crate::network::static_peers(self.peers.clone())
+        zslg_peers::static_peers(self.peers.clone())
     }
 
     /// Produce the learner subsystem config: the learner tunables plus the
@@ -345,7 +345,7 @@ pub struct FollowerNode {
     config: FollowerNodeConfig,
     node_id: NodeId,
     hlc_clock: Arc<HlcClock>,
-    raft_tracker: Arc<crate::raft::RaftTracker>,
+    raft_tracker: Arc<zslg_raft_tracker::RaftTracker>,
     router: Arc<dyn zslg_net::Router>,
     writer: Arc<WriterService>,
     learner: Arc<LearnerService>,

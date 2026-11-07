@@ -125,25 +125,6 @@ const ALL_LABEL_KEYS: &[&str] = &[
 // ── raft / consensus ────────────────────────────────────────────────────────
 
 metrics!("zslg_", raft; {
-    flag    raft_is_member   RAFT_IS_MEMBER   "raft_is_member"
-        "1 if this node is a voting member of the raft config, else 0. \
-         Cluster bootstrap alert: sum() staying 0." (is_member: bool);
-    flag    raft_is_leader   RAFT_IS_LEADER   "raft_is_leader"
-        "1 while this node is the raft leader. sum() != 1 for a sustained \
-         period means no (or a split) leader." (is_leader: bool);
-    flag    raft_has_leader  RAFT_HAS_LEADER  "raft_has_leader"
-        "1 if this node currently observes an elected leader." (has_leader: bool);
-    gauge   raft_term        RAFT_TERM        "raft_term" None
-        "Current raft term as observed by this node." (term: u64);
-    counter raft_leader_change RAFT_LEADER_CHANGES_TOTAL "raft_leader_changes_total"
-        "Leader changes observed by this node. Sustained rate = election churn.";
-    flag    raft_in_joint_config RAFT_IN_JOINT_CONFIG "raft_in_joint_config"
-        "1 while the applied membership is a joint config. Stuck at 1 = \
-         membership change wedged (doc: leader must resume from joint)."
-        (in_joint: bool);
-    gauge   raft_config_generation RAFT_CONFIG_GENERATION "raft_config_generation" None
-        "RaftGeneration of the applied state. Spread across nodes = \
-         state-replication lag." (generation: u64);
     counter raft_fenced_write  RAFT_FENCED_WRITES_TOTAL "raft_fenced_writes_total"
         "Fenced state writes rejected by the apply-time generation CAS \
          (StaleStateWrite). Expected around leadership churn; sustained rate \
@@ -154,9 +135,6 @@ metrics!("zslg_", raft; {
          openraft has no deadline of its own, so this is the backstop against a \
          partitioned leader stalling the integrator — and with it every leader \
          job. Any non-zero rate warrants investigation.";
-    gauge   replica_nodes_count REPLICA_NODES_COUNT "replica_nodes_count" Count
-        "Replica nodes in the applied config (both sets counted once under a \
-         joint config)." (count: u64);
     labeled_counter membership_change MEMBERSHIP_CHANGES_TOTAL "membership_changes_total"
         "Completed membership-change attempts by outcome."
         (state: OpState) [LABEL_STATE => state.as_str()];
@@ -183,11 +161,6 @@ metrics!("zslg_", raft; {
     custom  leader_intent_batch LEADER_INTENT_BATCHES_TOTAL "leader_intent_batches_total"
         Counter None "Raft proposals issued by the leader integrator. Divide \
         leader_intents_total{state=\"applied\"} by this for the coalescing factor.";
-    custom  membership_joint_exit_hlc_physical_ms MEMBERSHIP_JOINT_EXIT_HLC_PHYSICAL_MS
-        "membership_joint_exit_hlc_physical_ms" Gauge Milliseconds
-        "Physical-millisecond part of the armed joint-config drain bound (0 = \
-         not draining). A joint config may not collapse until \
-         manifest_end_hlc_physical_ms reaches this.";
     custom  node_rejoin   NODE_REJOINS_TOTAL  "node_rejoins_total"  Counter None
         "Nodes with no local state that joined an existing cluster. Covers \
          initial cluster formation, scale-out, and an operator wiping a node \
@@ -257,25 +230,6 @@ label_enum!(#[doc = "`state` label of [`LEADER_INTENTS_TOTAL`]."] IntentState {
     /// writing `EntryPayload::Normal`.
     StaleFence => "stale_fence",
 });
-
-/// The armed joint-config drain bound, or 0 when not draining. Compare against
-/// `manifest_end_hlc_physical_ms`: while this is non-zero and above the
-/// watermark, the membership change is correctly blocked waiting for the
-/// outgoing replica set to be snapshotted (designdoc §"Membership Change" step
-/// 3). A bound that stays above the watermark for many snapshot intervals means
-/// snapshot creation is stalled, not that membership is stuck.
-pub(crate) fn membership_joint_exit_hlc_physical_ms(exit: Option<zslg_consensus_types::Exit>) {
-    // `AnyTime` reports 0, same as "not draining": both mean the collapse is
-    // not waiting on a snapshot, which is what the gauge is read for.
-    let exit_hlc = match exit {
-        Some(zslg_consensus_types::Exit::WatermarkAbove(h)) => Some(h),
-        Some(zslg_consensus_types::Exit::AnyTime) | None => None,
-    };
-    match exit_hlc {
-        Some(hlc) => set_gauge(MEMBERSHIP_JOINT_EXIT_HLC_PHYSICAL_MS, hlc_physical_ms(hlc)),
-        None => set_gauge(MEMBERSHIP_JOINT_EXIT_HLC_PHYSICAL_MS, 0),
-    }
-}
 
 /// A node with **no local state** joined an existing cluster. Three causes,
 /// indistinguishable from inside the process (all are "empty state, cluster
@@ -489,16 +443,9 @@ metrics!("zslg_", snapshots; {
          write_object, commit) plus total.";
     gauge_usize snapshot_entries SNAPSHOT_ENTRIES_COUNT "snapshot_entries_count" Count
         "Entries in the last successful snapshot." (n: usize);
-    gauge   manifest_entries_count MANIFEST_ENTRIES_COUNT "manifest_entries_count" Count
-        "Snapshot files in the applied manifest. Steady growth without \
-         compaction = compaction wedged." (count: u64);
     labeled_counter compaction_run COMPACTION_RUNS_TOTAL "compaction_runs_total"
         "Manifest compaction runs by outcome."
         (state: OpState) [LABEL_STATE => state.as_str()];
-    flag    leader_tasks_active LEADER_TASKS_ACTIVE "leader_tasks_active"
-        "1 while the leader-only background loop runs on this node. \
-         Disagreement with raft_is_leader = task lifecycle bug \
-         (start-on-promotion / stop-on-demotion)." (active: bool);
 });
 
 // ── snapshots / leader background tasks: hand-written emission helpers ──────
@@ -515,8 +462,6 @@ pub(crate) fn snapshot_creation_step(step: SnapshotStep, elapsed: Duration) {
 // ── HLC / clock ──────────────────────────────────────────────────────────────
 
 metrics!("zslg_", hlc; {
-    gauge_via     hlc_cutoff_physical_ms HLC_CUTOFF_PHYSICAL_MS "hlc_cutoff_physical_ms" Milliseconds
-        "Physical-millisecond part of this replica's HLC cutoff." (cutoff: Hlc => hlc_physical_ms);
 });
 
 // ── HLC / clock: hand-written emission helpers ──────────────────────────────
@@ -525,17 +470,6 @@ metrics!("zslg_", hlc; {
 // ── read path / learner stores ───────────────────────────────────────────────
 
 metrics!("zslg_", read_path; {
-    gauge_via     manifest_end_hlc_physical_ms MANIFEST_END_HLC_PHYSICAL_MS
-        "manifest_end_hlc_physical_ms" Milliseconds
-        "Physical-millisecond part of the stable watermark. Distance to \
-         hlc_now_physical_ms = stabilization lag." (watermark: Hlc => hlc_physical_ms);
-    custom  manifest_watermark_advanced MANIFEST_WATERMARK_ADVANCED_TIMESTAMP_SECONDS
-        "manifest_watermark_advanced_timestamp_seconds" Gauge Seconds
-        "Unix-epoch seconds of the last applied manifest-watermark advance \
-         (a snapshot committed + replicated), emitted by the raft state \
-         publisher on every node. THE snapshot alert per the design doc, \
-         evaluated as `time() - manifest_watermark_advanced_timestamp_seconds`: \
-         individual failure states are expected; that age growing is not.";
     custom  read_request READS_TOTAL "reads_total" Counter None
         "Read requests served, by source (stable vs unstable).";
     counter stable_read_resync STABLE_READ_RESYNCS_TOTAL
@@ -565,18 +499,6 @@ metrics!("zslg_", read_path; {
 
 // ── read path / learner stores: hand-written emission helpers ───────────────
 // (custom rows above; each fn below emits the metrics named in its row)
-
-/// Wall-clock stamp (Unix epoch seconds) of the last time the applied manifest
-/// watermark advanced — i.e. a snapshot committed and replicated. Emitted by the
-/// owner ([`crate::raft::state::state_publisher`]) on every node. The snapshot-age alert
-/// is the PromQL `time() - manifest_watermark_advanced_timestamp_seconds`, which
-/// keeps climbing regardless of whether the emitter is running.
-pub(crate) fn manifest_watermark_advanced() {
-    set_gauge(
-        MANIFEST_WATERMARK_ADVANCED_TIMESTAMP_SECONDS,
-        unix_now_secs(),
-    );
-}
 
 pub(crate) fn read_request(source: ReadSource) {
     metrics::counter!(
@@ -1224,6 +1146,8 @@ metrics!("zslg_", probes; {
 // ---------------------------------------------------------------------------
 
 const ALL_METRICS: &[&[MetricDef]] = &[
+    // --- raft state (zslg-raft-state) ---
+    zslg_raft_state::metrics::METRICS,
     // --- raft storage (zslg-raft-storage) ---
     zslg_raft_storage::metrics::METRICS,
     // --- shared log metrics (zslg-log) ---
@@ -1515,12 +1439,14 @@ mod tests {
         let recorder = metrics_util::debugging::DebuggingRecorder::new();
         let snapshotter = recorder.snapshotter();
         metrics::with_local_recorder(&recorder, || {
-            set_flag(RAFT_IS_LEADER, true);
-            set_gauge(RAFT_TERM, 7);
+            set_flag(zslg_raft_state::metrics::RAFT_IS_LEADER, true);
+            set_gauge(zslg_raft_state::metrics::RAFT_TERM, 7);
         });
         let snap = snapshotter.snapshot();
         let map = snap.into_hashmap();
-        let found = map.keys().any(|ck| ck.key().name() == RAFT_IS_LEADER);
+        let found = map
+            .keys()
+            .any(|ck| ck.key().name() == zslg_raft_state::metrics::RAFT_IS_LEADER);
         assert!(found, "raft_is_leader gauge should be present");
     }
 
@@ -1636,7 +1562,7 @@ mod tests {
         let recorder = metrics_util::debugging::DebuggingRecorder::new();
         let snapshotter = recorder.snapshotter();
         metrics::with_local_recorder(&recorder, || {
-            manifest_watermark_advanced();
+            zslg_raft_state::metrics::manifest_watermark_advanced();
             stable_log_end_advanced();
         });
         let map = snapshotter.snapshot().into_hashmap();
@@ -1653,7 +1579,7 @@ mod tests {
             })
         };
         assert!(
-            is_epoch(MANIFEST_WATERMARK_ADVANCED_TIMESTAMP_SECONDS),
+            is_epoch(zslg_raft_state::metrics::MANIFEST_WATERMARK_ADVANCED_TIMESTAMP_SECONDS),
             "manifest_watermark_advanced should emit a Unix-epoch timestamp"
         );
         assert!(
