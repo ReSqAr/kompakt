@@ -1,44 +1,6 @@
 //! The snapshot loader against the real archive reader and a scripted snapshot
 //! store: the integration of `zslg-stable-log` and the archive implementation.
 
-use std::sync::Arc;
-use zslg_consensus::{RaftManifestState, RaftStateView};
-use zslg_log::StableLogSnapshot;
-use zslg_stable_log::integrate_manifest;
-
-use crate::Error;
-
-/// Test-only ergonomic wrapper: build an [`ObjectStoreArchiveReader`] over a
-/// handle seeded with `manifest_state` (the archive reader selects snapshots
-/// from its raft manifest) and delegate. Lets leader/learner tests drive a load
-/// from a bare snapshot store without constructing the reader themselves.
-#[cfg(test)]
-pub(crate) async fn integrate_manifest_for_test(
-    snapshot_store: Arc<dyn zslg_snapshot::SnapshotStore>,
-    stable_log: &dyn StableLogSnapshot,
-    manifest_state: &RaftManifestState,
-) -> Result<(), Error> {
-    let archive = zslg_stable_archive::ObjectStoreArchiveReader::new(
-        snapshot_store,
-        seed_raft_state(manifest_state),
-    );
-    integrate_manifest(&archive, stable_log, manifest_state)
-        .await
-        .map_err(Error::from)
-}
-
-/// A `RaftStateView` handle whose manifest is `manifest_state` — the archive
-/// reader reads its covering snapshots from here.
-#[cfg(test)]
-fn seed_raft_state(manifest_state: &RaftManifestState) -> Arc<dyn RaftStateView> {
-    let handle = zslg_consensus::RaftStateHandle::default();
-    let mut rs = zslg_consensus::RaftState::empty();
-    rs.manifest_state = manifest_state.clone();
-    handle.replace(rs);
-    Arc::new(handle)
-}
-
-#[cfg(test)]
 #[allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -58,18 +20,18 @@ mod tests {
 
     use async_trait::async_trait;
 
-    use super::seed_raft_state;
+    use crate::testing::seed_raft_state;
     use tokio_util::sync::CancellationToken;
     use zslg_consensus::RaftManifestState;
     use zslg_log::{LogError, StableLogEvent, StableLogSnapshot};
     use zslg_stable_log::Error;
     use zslg_stable_log::integrate_manifest;
 
-    use crate::learner::StableLog;
-    use crate::tests::make_data;
+    use crate::StableLog;
     use std::sync::Arc;
     use zslg_log::LogIndex;
     use zslg_log::SnapshotEntry;
+    use zslg_log_fake::make_data;
     use zslg_snapshot::CompressionLevel;
     use zslg_snapshot::SnapshotId;
     use zslg_snapshot::SnapshotMetadata;
@@ -254,7 +216,7 @@ mod tests {
 
     async fn fresh_stable_log() -> (tempfile::TempDir, StableLog) {
         let dir = tempfile::tempdir().expect("tempdir");
-        let log = crate::tests::stable_log_engine(dir.path().join("stable.stable"))
+        let log = crate::testing::stable_log_engine(dir.path().join("stable.stable"))
             .await
             .expect("from_db");
         (dir, log)
@@ -546,7 +508,7 @@ mod tests {
         let entries: Vec<SnapshotEntry> = (0..5u64)
             .map(|i| SnapshotEntry {
                 global_index: LogIndex(i),
-                data: crate::tests::make_data(1, 100 + i, b"x"),
+                data: zslg_log_fake::make_data(1, 100 + i, b"x"),
             })
             .collect();
         store
@@ -560,7 +522,7 @@ mod tests {
             .expect("write_snapshot");
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let log = crate::tests::stable_log_engine(dir.path().join("s.stable"))
+        let log = crate::testing::stable_log_engine(dir.path().join("s.stable"))
             .await
             .expect("open");
         let mut rx = log.subscribe_events();

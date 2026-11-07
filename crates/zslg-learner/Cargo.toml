@@ -1,0 +1,57 @@
+[package]
+name = "zslg-learner"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Learner assembly: wires the local store, stable log, archive, subscriber and reader"
+publish = false
+
+[dependencies]
+zslg-hlc-clock = { workspace = true }
+crossbeam-combinators = { workspace = true, features = ["tokio"] }
+error-union = { workspace = true }
+rocksdb-kit = { workspace = true }
+shutdown = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "time", "macros"] }
+tracing = { workspace = true }
+zslg-consensus = { workspace = true }
+zslg-lifecycle-types = { workspace = true }
+zslg-local-store = { workspace = true }
+zslg-log = { workspace = true }
+zslg-net = { workspace = true }
+zslg-quorum-read = { workspace = true }
+zslg-raft = { workspace = true }
+zslg-reader = { workspace = true }
+zslg-snapshot = { workspace = true }
+zslg-stable-archive = { workspace = true }
+zslg-stable-log = { workspace = true }
+zslg-subscriber = { workspace = true }
+zslg-time = { workspace = true }
+bytesize = { workspace = true, optional = true }
+tokio-util = { workspace = true, optional = true }
+zslg-log-fake = { workspace = true, optional = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+object_store = { workspace = true }
+crossbeam-channel = { workspace = true }
+zslg-object-store = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }
+tokio-util = { workspace = true }
+bytesize = { workspace = true }
+crossbeam-combinators = { workspace = true, features = ["tokio", "testing"] }
+zslg-consensus-fake = { workspace = true }
+zslg-log-fake = { workspace = true }
+
+[features]
+testing = ["dep:bytesize", "dep:tokio-util", "dep:zslg-log-fake", "zslg-local-store/testing", "zslg-reader/testing"]
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "assembly"

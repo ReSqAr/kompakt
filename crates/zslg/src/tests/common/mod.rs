@@ -32,6 +32,7 @@ pub(crate) use cutoff_observer::CutoffObserver;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+pub(crate) use zslg_learner::testing::{local_store_at, stable_log_at, stable_log_engine};
 pub(crate) use zslg_net_fake::{fn_remote, replica_only};
 use zslg_net_types::NetError;
 
@@ -577,18 +578,6 @@ pub(crate) fn fast_raft_config() -> Arc<Config> {
     )
 }
 
-/// Open a test stable log beside a store path (mirrors
-/// `StorageConfig::stable_log_dir`'s sibling convention) with default sizing.
-pub(crate) async fn stable_log_at(
-    store_path: &std::path::Path,
-) -> std::sync::Arc<crate::learner::StableLog> {
-    std::sync::Arc::new(
-        stable_log_engine(store_path.with_extension("stable"))
-            .await
-            .expect("open stable log"),
-    )
-}
-
 pub(crate) fn make_data(seed: u8, hlc: u64, blob: &[u8]) -> Data {
     Data {
         data_id: make_meta(seed, hlc),
@@ -629,84 +618,4 @@ pub(crate) async fn fresh_local() -> (
         .await
         .expect("from_db");
     (dir, store)
-}
-
-/// A local store with a detached integration worker over a storage root
-/// carrying every column family, for tests that use a fresh root.
-pub(crate) async fn local_store_at(
-    root: std::path::PathBuf,
-) -> Result<std::sync::Arc<crate::learner::LocalStore>, Error> {
-    let (store, _) =
-        local_store_with(root, &zslg_local_store::LocalStoreConfig::for_test()).await?;
-    Ok(store)
-}
-
-/// [`local_store_at`] with a config of the test's choosing, handing back the
-/// stable log (a fake) the store reads its watermark from.
-pub(crate) async fn local_store_with(
-    root: std::path::PathBuf,
-    config: &zslg_local_store::LocalStoreConfig,
-) -> Result<
-    (
-        std::sync::Arc<crate::learner::LocalStore>,
-        std::sync::Arc<zslg_log_fake::FakeStableLog>,
-    ),
-    Error,
-> {
-    let storage = crate::database::open_for_test(&root)?;
-    let stable_log = std::sync::Arc::new(zslg_log_fake::FakeStableLog::new());
-    let watermark_source: std::sync::Arc<dyn zslg_log::StableLogSnapshot> = stable_log.clone();
-    let (store, rx) =
-        zslg_local_store::create_local_store(config, storage, watermark_source).await?;
-    tokio::spawn(zslg_local_store::run_integrate_worker(
-        std::sync::Arc::downgrade(&store),
-        rx,
-        tokio_util::sync::CancellationToken::new(),
-    ));
-    Ok((store, stable_log))
-}
-
-/// The integration worker of an [`open_test_local_store`] store.
-pub(crate) struct TestWorker {
-    cancel: tokio_util::sync::CancellationToken,
-    handle: tokio::task::JoinHandle<Result<(), zslg_local_store::Error>>,
-}
-
-impl TestWorker {
-    /// Cancel and drain — what `Shutdown` does for the production worker. Call
-    /// it after dropping the store, before reopening its root.
-    pub(crate) async fn stop(self) {
-        self.cancel.cancel();
-        let _ = self.handle.await;
-    }
-}
-
-/// A local store whose integration worker can be drained, for tests that
-/// reopen the same root.
-pub(crate) async fn open_test_local_store(
-    root: &std::path::Path,
-) -> Result<(std::sync::Arc<crate::learner::LocalStore>, TestWorker), Error> {
-    let storage = crate::database::open_for_test(root)?;
-    let stable_log: std::sync::Arc<dyn zslg_log::StableLogSnapshot> =
-        std::sync::Arc::new(zslg_log_fake::FakeStableLog::new());
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let (store, rx) = zslg_local_store::create_local_store(
-        &zslg_local_store::LocalStoreConfig::for_test(),
-        storage,
-        stable_log,
-    )
-    .await?;
-    let handle = tokio::spawn(zslg_local_store::run_integrate_worker(
-        std::sync::Arc::downgrade(&store),
-        rx,
-        cancel.clone(),
-    ));
-    Ok((store, TestWorker { cancel, handle }))
-}
-
-/// A stable log on its own storage root carrying every column family.
-pub(crate) async fn stable_log_engine(
-    dir: std::path::PathBuf,
-) -> Result<crate::learner::StableLog, Error> {
-    Ok(crate::learner::StableLog::open_on(crate::database::open_for_test(&dir)?).await?)
 }

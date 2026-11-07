@@ -197,8 +197,10 @@ fn every_dependency_is_allowed_by_the_role_table() {
             if d.dev {
                 allowed.extend_from_slice(k.role.dev_extra());
             }
-            // A facade may use fakes behind a feature (`testing`), never otherwise.
-            if k.role == Role::Facade && to == Role::Fake && d.optional {
+            // An assembly or facade may use fakes behind a feature (`testing`),
+            // never otherwise: the feature is how it exports test support for
+            // the crates above it.
+            if matches!(k.role, Role::Assembly | Role::Facade) && to == Role::Fake && d.optional {
                 continue;
             }
             // The one ports -> ports edge (`ReplicaClient` bundles four groups);

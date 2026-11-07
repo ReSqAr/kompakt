@@ -58,6 +58,7 @@ zslg-raft-tracker = { workspace = true }
 zslg-raft-node = { workspace = true }
 zslg-raft-setup = { workspace = true, features = ["testing"] }
 zslg-raft-startup = { workspace = true }
+zslg-learner = { workspace = true, features = ["testing"] }
 zslg-local-store = { workspace = true }
 zslg-stable-log = { workspace = true }
 zslg-stable-archive = { workspace = true }
@@ -89,7 +90,6 @@ dashmap = { workspace = true }
 zslg-replica-log = { workspace = true, features = ["testing"] }
 zslg-reader = { workspace = true, features = ["testing"] }
 zslg-local-store = { workspace = true, features = ["testing"] }
-zslg-log-fake = { workspace = true }
 zslg-net-fake = { workspace = true }
 zslg-raft-node = { workspace = true, features = ["testing"] }
 zslg-consensus-fake = { workspace = true }

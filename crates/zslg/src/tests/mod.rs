@@ -5,7 +5,7 @@ pub(crate) use common::{
     SkewedClock, SnapshotHarness, TestNode, assert_cluster_invariants,
     assert_cluster_invariants_with_acks, assert_durability_chain_on, boot_snapshot_harness,
     commit_snapshot_result, default_fast_config, fast_raft_config, init_logging, local_store_at,
-    local_store_with, make_data, nid, replica_only, reserve_port, skewed_clock_pair, stable_log_at,
+    make_data, nid, replica_only, reserve_port, skewed_clock_pair, stable_log_at,
     stable_log_engine, start_cluster, start_cluster_with_partition, test_membership_map, upstream,
     wait_for_any_leader, wait_for_leader, wait_until, wait_until_sync, within, write_state_fenced,
     write_state_fenced_via_leader,

@@ -53,6 +53,7 @@ error_union! {
     from zslg_leader_snapshot::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_leader_membership::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_raft_setup::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_learner::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_writer::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_reader::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_subscriber::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }

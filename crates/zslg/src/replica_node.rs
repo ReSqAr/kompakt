@@ -888,7 +888,7 @@ impl InitialisingReplicaNode {
         .await
         {
             Ok(v) => v,
-            Err(e) => return Err(Box::new((shutdown, drain_timeout, raft, e))),
+            Err(e) => return Err(Box::new((shutdown, drain_timeout, raft, e.into()))),
         };
         info!("learner spawned");
 

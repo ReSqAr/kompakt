@@ -12,7 +12,7 @@ use super::*;
     reason = "test code"
 )]
 mod tests {
-    use crate::error::Home as _;
+    use crate::Home as _;
     use crossbeam_combinators::testing::ChannelTestExt as _;
     use std::sync::Arc;
     use std::time::Duration;
@@ -22,13 +22,13 @@ mod tests {
     use zslg_snapshot::{CleanupReport, SnapshotWrite};
     use zslg_snapshot::{CompressionLevel, SnapshotId};
 
-    use crate::Reader;
+    use zslg_log::Reader;
 
     use crossbeam_combinators::{Cancellation, Channel, Finite, Infinite};
     use zslg_log::StableLogEvent;
     use zslg_log::{LocalStoreMut, StableLogSnapshot};
 
-    use crate::learner::{LocalStore, QuorumReadDebouncer};
+    use crate::{LocalStore, QuorumReadDebouncer};
     use zslg_consensus::NodeId;
     use zslg_log::LogIndex;
     use zslg_log_fake::FakeStableLog;
@@ -39,7 +39,7 @@ mod tests {
         Arc::new(zslg_hlc_clock::HlcClock::new(Duration::from_secs(60)))
     }
     use async_trait::async_trait;
-    use futures::StreamExt;
+    use futures::{StreamExt, TryStreamExt as _};
     use zslg_log::Data;
 
     use super::ReaderImpl;
@@ -232,8 +232,8 @@ mod tests {
         }
     }
 
-    use crate::tests::make_data;
-    use crate::tests::upstream;
+    use zslg_consensus_fake::upstream;
+    use zslg_log_fake::make_data;
 
     /// Pre-load a closed `Channel` for the channel-based `append`.
     fn rx_of(
@@ -275,7 +275,7 @@ mod tests {
     async fn hlc_now_is_above_every_hlc_the_node_issued_before() {
         let dir = tempfile::tempdir().expect("tempdir");
         let stable_log = Arc::new(FakeStableLog::new());
-        let local_store = crate::tests::local_store_at(dir.path().join("local.stable"))
+        let local_store = crate::testing::local_store_at(dir.path().join("local.stable"))
             .await
             .expect("from_db");
         let clock = test_clock();
@@ -311,7 +311,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let local_path = dir.path().join("local.db");
         let stable_log = Arc::new(FakeStableLog::new());
-        let local_log = crate::tests::local_store_at(local_path.with_extension("stable"))
+        let local_log = crate::testing::local_store_at(local_path.with_extension("stable"))
             .await
             .expect("from_db");
 
@@ -365,7 +365,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let local_path = dir.path().join("local.db");
         let stable_log = Arc::new(FakeStableLog::new());
-        let local_log = crate::tests::local_store_at(local_path.with_extension("stable"))
+        let local_log = crate::testing::local_store_at(local_path.with_extension("stable"))
             .await
             .expect("from_db");
 
@@ -415,7 +415,7 @@ mod tests {
 
         let dir = tempfile::tempdir().expect("tempdir");
         let stable_log = Arc::new(FakeStableLog::new());
-        let local_log = crate::tests::local_store_at(dir.path().join("local.stable"))
+        let local_log = crate::testing::local_store_at(dir.path().join("local.stable"))
             .await
             .expect("from_db");
 
@@ -853,7 +853,7 @@ mod tests {
         let archive: Arc<dyn zslg_log::StableArchiveReader> =
             Arc::new(ObjectStoreArchiveReader::new(snapshot_store, raft_state));
         let dir = tempfile::tempdir().expect("tempdir");
-        let local_store = crate::tests::local_store_at(dir.path().join("local.stable"))
+        let local_store = crate::testing::local_store_at(dir.path().join("local.stable"))
             .await
             .expect("from_db");
         (
@@ -1030,7 +1030,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let local_path = dir.path().join("local.db");
         let stable_log = Arc::new(FakeStableLog::new());
-        let local_log = crate::tests::local_store_at(local_path.with_extension("stable"))
+        let local_log = crate::testing::local_store_at(local_path.with_extension("stable"))
             .await
             .expect("from_db");
 
@@ -1104,7 +1104,7 @@ mod tests {
         let mut config = zslg_local_store::LocalStoreConfig::for_test();
         config.unstable_subscriber_queue_capacity =
             std::num::NonZeroUsize::new(capacity).expect("capacity > 0");
-        let (local, stable) = crate::tests::local_store_with(dir.path().join("rig"), &config)
+        let (local, stable) = crate::testing::local_store_with(dir.path().join("rig"), &config)
             .await
             .expect("open");
         stable.record_end_hlc(watermark).await.expect("watermark");
@@ -1362,7 +1362,6 @@ mod tests {
     /// watermark current when it was emitted.
     #[test]
     fn proptest_unstable_subscription_delivers_the_unstable_tail() {
-        use futures::TryStreamExt as _;
         use proptest::prelude::*;
 
         proptest!(ProptestConfig::with_cases(24), |(ops in proptest::collection::vec(unstable_op(), 1..40))| {
@@ -1444,7 +1443,7 @@ mod tests {
     async fn subscribe_stable_log_from_replays_history() {
         let dir = tempfile::tempdir().expect("tempdir");
         let stable_log = Arc::new(FakeStableLog::new());
-        let local_log = crate::tests::local_store_at(dir.path().join("local.stable"))
+        let local_log = crate::testing::local_store_at(dir.path().join("local.stable"))
             .await
             .expect("from_db");
 
@@ -1482,7 +1481,7 @@ mod tests {
     async fn shutdown_cancels_a_quiet_stable_log_subscription() {
         let dir = tempfile::tempdir().expect("tempdir");
         let stable_log = Arc::new(FakeStableLog::new());
-        let local_log = crate::tests::local_store_at(dir.path().join("local.stable"))
+        let local_log = crate::testing::local_store_at(dir.path().join("local.stable"))
             .await
             .expect("from_db");
         stable_log
@@ -1525,7 +1524,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let local_path = dir.path().join("local.db");
         let stable_log = Arc::new(FakeStableLog::new());
-        let local_log = crate::tests::local_store_at(local_path.with_extension("stable"))
+        let local_log = crate::testing::local_store_at(local_path.with_extension("stable"))
             .await
             .expect("from_db");
 
@@ -1538,7 +1537,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let local_path = dir.path().join("local.db");
         let stable_log = Arc::new(FakeStableLog::new());
-        let local_log = crate::tests::local_store_at(local_path.with_extension("stable"))
+        let local_log = crate::testing::local_store_at(local_path.with_extension("stable"))
             .await
             .expect("from_db");
 
@@ -1560,10 +1559,8 @@ mod tests {
 
     #[tokio::test]
     async fn unstable_tail_hides_failed_writes_below_watermark() {
-        use futures::TryStreamExt as _;
-
         let dir = tempfile::tempdir().expect("tempdir");
-        let local = crate::tests::local_store_at(dir.path().join("local.stable"))
+        let local = crate::testing::local_store_at(dir.path().join("local.stable"))
             .await
             .expect("from_db");
         let stable = Arc::new(FakeStableLog::new());
