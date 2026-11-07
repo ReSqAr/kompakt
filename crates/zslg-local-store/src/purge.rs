@@ -12,26 +12,29 @@ use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
-use crate::error::Error;
+use crate::Error;
 use shutdown::Shutdown;
 use zslg_log::{LocalStoreMut, StableLogSnapshot};
-use zslg_time_types::{Hlc, hlc_subtract};
+use zslg_time::{Hlc, hlc_subtract};
 
 /// Floor on the gap between two threshold advances, however fast `end_hlc`
 /// moves.
 const PURGE_MIN_INTERVAL: Duration = Duration::from_secs(30);
 
-pub(in crate::learner) fn spawn_local_store_purge_worker(
-    shutdown: &mut Shutdown<Error>,
+pub(crate) fn spawn_local_store_purge_worker<E>(
+    shutdown: &mut Shutdown<E>,
     local_store: Arc<dyn LocalStoreMut>,
     stable_log: Arc<dyn StableLogSnapshot>,
     purge_grace_period: Duration,
-) {
+) where
+    E: From<Error> + From<shutdown::Stopped> + std::fmt::Display + Send + 'static,
+{
     let cancel = shutdown.token();
-    shutdown.spawn(
-        "local_store:purge",
-        run(local_store, stable_log, purge_grace_period, cancel),
-    );
+    shutdown.spawn("local_store:purge", async move {
+        run(local_store, stable_log, purge_grace_period, cancel)
+            .await
+            .map_err(E::from)
+    });
 }
 
 async fn run(

@@ -138,7 +138,7 @@ struct LeaderWorkspace {
 async fn build_workspace(dir: &std::path::Path, id: NodeId) -> LeaderWorkspace {
     LeaderWorkspace {
         local_store: {
-            LocalStore::simple_at(dir.join(format!("local-{id}.stable")))
+            crate::tests::local_store_at(dir.join(format!("local-{id}.stable")))
                 .await
                 .expect("from_db")
         },

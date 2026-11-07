@@ -26,10 +26,21 @@
 //! that trails the stable watermark by a grace period, and the engine clamps
 //! reads at it.
 
+use error_union::{error_bridge, error_union};
+use zslg_consensus::ConsensusError;
+use zslg_lifecycle_types::{ConfigError, LifecycleError};
+use zslg_log::LogError;
+use zslg_net::NetError;
+use zslg_snapshot::SnapshotError;
+use zslg_time::ClockError;
+
 mod key;
+pub mod metrics;
 mod purge;
 mod recent_ids;
 mod store;
+#[cfg(test)]
+mod testutil;
 
 #[cfg(test)]
 mod local_store_proptest;
@@ -38,22 +49,22 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::error::Error;
-use crate::learner::local_store::purge::spawn_local_store_purge_worker;
 use rocksdb_kit::Storage;
 use shutdown::Shutdown;
 use zslg_log::StableLogSnapshot;
 
-pub(in crate::learner::local_store) use recent_ids::Dedup;
-pub(crate) use store::{LOCAL_STORE_CURSORS_CF, LOCAL_STORE_DATA_CF, LocalStore};
+pub use recent_ids::Dedup;
+/// Wiring for harnesses that run a store without the node's `Shutdown`.
+pub use store::{IntegrateItem, create_local_store, run_integrate_worker};
+pub use store::{LOCAL_STORE_CURSORS_CF, LOCAL_STORE_DATA_CF, LocalStore};
 
 /// Everything the local-store subsystem needs, produced by
-/// [`LearnerConfig::local_store_config`](crate::learner::LearnerConfig::local_store_config).
+/// `LearnerConfig::local_store_config`.
 /// Bundling the directory with the tunables means `spawn_local_store` takes one
 /// argument instead of a config plus a slice of it.
-pub(in crate::learner) struct LocalStoreConfig {
-    pub(in crate::learner) flush_interval: Duration,
-    pub(in crate::learner) purge_grace_period: Duration,
+pub struct LocalStoreConfig {
+    pub flush_interval: Duration,
+    pub purge_grace_period: Duration,
     /// Entries in the recent-`DataId` filter, which drops the duplicate copies
     /// of a write that arrive from each replica this node subscribes to.
     /// `None` disables it.
@@ -63,32 +74,32 @@ pub(in crate::learner) struct LocalStoreConfig {
     /// plateau is 10k-50k (+36..39% throughput); 8,192 gives only +28.5% and
     /// 1,024 nothing, while 1,000,000 regresses to +30% on cache locality.
     /// Default 16,384 is roughly 0.5 MB per store.
-    pub(in crate::learner) dedup_ring: Option<NonZeroUsize>,
+    pub dedup_ring: Option<NonZeroUsize>,
     /// Depth of the shared integration channel every subscription forwards
     /// into. Sized for a few batches across all upstreams, so the readers keep
     /// producing while a commit is in flight.
-    pub(in crate::learner) integrate_channel_capacity: NonZeroUsize,
+    pub integrate_channel_capacity: NonZeroUsize,
     /// Depth of each unstable-tail subscriber's own queue — how far behind a
     /// consumer may fall before the fan-out hangs up on it and it rescans the
     /// unstable window. At least one integrate batch, or a single batch would
     /// overrun it.
-    pub(in crate::learner) unstable_subscriber_queue_capacity: NonZeroUsize,
+    pub unstable_subscriber_queue_capacity: NonZeroUsize,
 }
 
-pub(crate) const QUEUE_REFERENCE_PAYLOAD_BYTES: u64 = 2 * 1024;
+pub const QUEUE_REFERENCE_PAYLOAD_BYTES: u64 = 2 * 1024;
 
 /// Default for [`LocalStoreConfig::unstable_subscriber_queue_capacity`]: two
 /// full integrate batches.
-pub(in crate::learner) const DEFAULT_UNSTABLE_SUBSCRIBER_QUEUE_CAPACITY: NonZeroUsize =
+pub const DEFAULT_UNSTABLE_SUBSCRIBER_QUEUE_CAPACITY: NonZeroUsize =
     bytesize::nonzero(2 * store::MAX_BATCH);
 
 impl LocalStoreConfig {
     /// Test-only constructor carrying the production defaults. Production
     /// builds this from the owning node config's flat fields via
-    /// [`LearnerConfig::local_store_config`](crate::learner::LearnerConfig::local_store_config).
-    #[cfg(test)]
+    /// `LearnerConfig::local_store_config`.
+    #[cfg(any(test, feature = "testing"))]
     #[must_use]
-    pub(in crate::learner) fn for_test() -> Self {
+    pub fn for_test() -> Self {
         Self {
             flush_interval: Duration::from_secs(1),
             purge_grace_period: Duration::from_secs(5 * 60),
@@ -99,7 +110,7 @@ impl LocalStoreConfig {
     }
 
     /// Engine sizing is RocksDB's business now; nothing left to validate.
-    pub(in crate::learner) fn validate(&self) -> Result<(), Error> {
+    pub fn validate(&self) -> Result<(), Error> {
         Ok(())
     }
 
@@ -115,13 +126,13 @@ impl LocalStoreConfig {
     /// every id (`recent_ids::RecentIds`) — so its residency is `capacity * 2 *
     /// size_of::<DataId>()`, not a payload figure.
     #[must_use]
-    pub(in crate::learner) fn queue_capacity_bytes(&self) -> u64 {
+    pub fn queue_capacity_bytes(&self) -> u64 {
         // saturating: operator-set usize knobs, so nonsense must read as huge
         // rather than wrap small — the gauge exists to make oversizing visible.
         let integrate = u64::try_from(self.integrate_channel_capacity.get())
             .unwrap_or(u64::MAX)
             .saturating_mul(QUEUE_REFERENCE_PAYLOAD_BYTES);
-        let id_bytes = u64::try_from(std::mem::size_of::<zslg_log_types::DataId>())
+        let id_bytes = u64::try_from(std::mem::size_of::<zslg_log::DataId>())
             .unwrap_or(u64::MAX)
             .saturating_mul(2);
         let ring = self
@@ -132,79 +143,42 @@ impl LocalStoreConfig {
     }
 }
 
-/// A local store, its stable log and its integration worker on one `Storage`
-/// rooted at `root` — plus the handles needed to stop the worker.
-///
-/// Wired here rather than inside the store because production registers the
-/// worker with [`Shutdown`], which cancels and **drains** it before the node's
-/// handles drop. A test that reopens the same root in the same process needs
-/// the same drain: a worker mid-batch holds an upgraded `Arc<LocalStore>`, and
-/// through it the DB's LOCK. A sleep-and-retry reopen ladder is what that looks
-/// like when the drain is missing.
-#[cfg(test)]
-pub(crate) async fn open_test_local_store(
-    root: &std::path::Path,
-) -> Result<(Arc<LocalStore>, TestWorker), Error> {
-    let storage = crate::database::open_for_test(root)?;
-    let stable_log: Arc<dyn StableLogSnapshot> =
-        Arc::new(crate::learner::stable_log::StableLog::open_on(Arc::clone(&storage)).await?);
-    let cancel = tokio_util::sync::CancellationToken::new();
-    let (store, rx) =
-        store::create_local_store(&LocalStoreConfig::for_test(), storage, stable_log).await?;
-    let handle = tokio::spawn(store::run_integrate_worker(
-        Arc::downgrade(&store),
-        rx,
-        cancel.clone(),
-    ));
-    Ok((store, TestWorker { cancel, handle }))
-}
-
-/// The integration worker of an [`open_test_local_store`] store.
-#[cfg(test)]
-pub(crate) struct TestWorker {
-    cancel: tokio_util::sync::CancellationToken,
-    handle: tokio::task::JoinHandle<Result<(), Error>>,
-}
-
-#[cfg(test)]
-impl TestWorker {
-    /// Cancel and drain — what `Shutdown` does for the production worker. Call
-    /// it after dropping the store, before reopening its root.
-    pub(crate) async fn stop(self) {
-        self.cancel.cancel();
-        let _ = self.handle.await;
-    }
-}
-
-pub(in crate::learner) async fn spawn_local_store(
+pub async fn spawn_local_store<E>(
     stable_log: Arc<dyn StableLogSnapshot>,
     storage: Arc<Storage>,
     config: &LocalStoreConfig,
-    shutdown: &mut Shutdown<Error>,
-) -> Result<Arc<LocalStore>, Error> {
+    shutdown: &mut Shutdown<E>,
+) -> Result<Arc<LocalStore>, Error>
+where
+    E: From<Error> + From<shutdown::Stopped> + std::fmt::Display + Send + 'static,
+{
     let (store, integrate_rx) =
         store::create_local_store(config, storage, stable_log.clone()).await?;
 
     // One integration worker per node, fed by every subscription. Registered
     // with `Shutdown` like `replica:log_flush`: a storage failure here means a
     // dying disk, so the node goes down loudly rather than degrading per-peer.
-    shutdown.spawn(
-        "local_store:integrate",
-        store::run_integrate_worker(Arc::downgrade(&store), integrate_rx, shutdown.token()),
-    );
+    let (weak, cancel) = (Arc::downgrade(&store), shutdown.token());
+    shutdown.spawn("local_store:integrate", async move {
+        store::run_integrate_worker(weak, integrate_rx, cancel)
+            .await
+            .map_err(E::from)
+    });
 
     // Periodic fsync of the local store (it needs atomicity, not per-batch
     // durability — see run_local_store_flush_worker / design doc §Local Store).
-    shutdown.spawn(
-        "local_store:flush",
-        store::run_local_store_flush_worker(
-            Arc::downgrade(&store),
-            config.flush_interval,
-            shutdown.token(),
-        ),
+    let (weak, interval, cancel) = (
+        Arc::downgrade(&store),
+        config.flush_interval,
+        shutdown.token(),
     );
+    shutdown.spawn("local_store:flush", async move {
+        store::run_local_store_flush_worker(weak, interval, cancel)
+            .await
+            .map_err(E::from)
+    });
 
-    spawn_local_store_purge_worker(
+    purge::spawn_local_store_purge_worker(
         shutdown,
         store.clone(),
         stable_log.clone(),
@@ -212,4 +186,44 @@ pub(in crate::learner) async fn spawn_local_store(
     );
 
     Ok(store)
+}
+
+error_union! {
+    /// What the local store can fail with.
+    #[derive(Debug, Clone, PartialEq)]
+    pub Error {
+        Lifecycle(LifecycleError),
+        Config(ConfigError),
+        Clock(ClockError),
+        Log(LogError),
+        Snapshot(SnapshotError),
+        Net(NetError),
+        Consensus(ConsensusError),
+    }
+    from zslg_time::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_log::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_snapshot::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_consensus::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_raft::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_net::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+}
+
+error_bridge!(Error => zslg_time::Error, zslg_log::Error, zslg_snapshot::Error, zslg_consensus::Error, zslg_raft::Error, zslg_net::Error; Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus);
+error_union::error_home!(Error);
+
+impl From<rocksdb_kit::StorageError> for Error {
+    fn from(e: rocksdb_kit::StorageError) -> Self {
+        match e {
+            rocksdb_kit::StorageError::InvalidConfiguration(msg) => {
+                Self::Config(ConfigError::InvalidConfiguration(msg))
+            }
+            rocksdb_kit::StorageError::Storage(msg) => Self::Log(LogError::Storage(msg)),
+        }
+    }
+}
+
+impl From<shutdown::Stopped> for Error {
+    fn from(_: shutdown::Stopped) -> Self {
+        Self::Lifecycle(LifecycleError::Shutdown)
+    }
 }

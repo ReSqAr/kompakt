@@ -1075,7 +1075,6 @@ fn flush_one_batch_blocking(
     reason = "test code"
 )]
 mod tests {
-    use crate::error::Home as _;
     use crossbeam_combinators::testing::ChannelTestExt as _;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
@@ -1084,35 +1083,13 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use zslg_log::{LocalStoreMut, LocalStoreView};
 
-    use crate::learner::LocalStore;
     use zslg_hlc_gate::HlcGate;
     use zslg_log_types::{DataId, LogIndex};
     use zslg_node_types::NodeId;
     use zslg_time_types::Hlc;
 
     use tokio_util::sync::CancellationToken;
-
-    async fn integrate_batch(
-        store: &LocalStore,
-        source: NodeId,
-        records: Vec<(LogIndex, Data)>,
-    ) -> Result<(), crate::Error> {
-        if records.is_empty() {
-            return Ok(());
-        }
-        let (tx, rx) = crossbeam_channel::bounded(records.len().max(1));
-        for (idx, rec) in records {
-            let _ = tx.send(Ok((source, idx, rec)));
-        }
-        let (ch, closer) = crossbeam_combinators::Channel::from(rx, "test integrate");
-        // Close before the last sender drops, or the consumer forms its
-        // verdict as "disconnected, not yet closed" — an abort.
-        closer.close();
-        drop(tx);
-        store.integrate_loop(ch).await.home()
-    }
 
     /// Create a guard for a test HLC. A fresh `HlcGate` has no cutoff, so
     /// `check_hlc` always succeeds.
@@ -1187,7 +1164,7 @@ mod tests {
         Ok(out)
     }
 
-    use crate::tests::{make_data, upstream};
+    use crate::tests::make_data;
 
     async fn fresh_store() -> (TempDir, Arc<ReplicaLogStore>) {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -2131,41 +2108,6 @@ mod tests {
             .expect("append");
         assert_eq!(appended, LogIndex(5));
         assert_eq!(store.frontier(), Some(LogIndex(5)));
-    }
-
-    #[tokio::test]
-    async fn local_store_subscription_cursor_persists_across_reopen() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("local.db");
-
-        {
-            let (store, worker) = crate::learner::open_test_local_store(&path)
-                .await
-                .expect("open");
-            for i in 1..=5u8 {
-                integrate_batch(
-                    &store,
-                    upstream(1),
-                    vec![(LogIndex(u64::from(i)), make_data(i, u64::from(i), &[i]))],
-                )
-                .await
-                .expect("integrate");
-            }
-            // Drop the store and DRAIN its worker before reopening the root:
-            // a worker mid-batch holds the DB's LOCK (`open_test_local_store`).
-            drop(store);
-            worker.stop().await;
-        }
-
-        let (store, worker) = crate::learner::open_test_local_store(&path)
-            .await
-            .expect("reopen");
-        assert_eq!(
-            store.subscription_cursor(upstream(1)).await.expect("ok"),
-            Some(LogIndex(5))
-        );
-        drop(store);
-        worker.stop().await;
     }
 
     // ── key codec ───────────────────────────────────────────────────────

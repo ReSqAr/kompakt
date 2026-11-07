@@ -80,7 +80,6 @@ pub(crate) const METRIC_PREFIX: &str = "zslg_";
 const LABEL_STEP: &str = "step";
 const LABEL_SOURCE: &str = "source";
 const LABEL_REASON: &str = "reason";
-const LABEL_KIND: &str = "kind";
 const LABEL_OUTCOME: &str = "outcome";
 const LABEL_PEER_ID: &str = "peer_id";
 /// Peer identity (`NodeId::to_string()`). High-cardinality but bounded by cluster
@@ -107,7 +106,6 @@ const ALL_LABEL_KEYS: &[&str] = &[
     LABEL_STEP,
     LABEL_SOURCE,
     LABEL_REASON,
-    LABEL_KIND,
     LABEL_OUTCOME,
     LABEL_PEER_ID,
     LABEL_NODE_ID,
@@ -638,47 +636,6 @@ metrics!("zslg_", storage; {
          means a connection's consumer stalled a full in-flight window \
          deep, or its outcome channel is sized below the client's \
          in-flight cap.";
-    hist    local_store_entry_bytes LOCAL_STORE_ENTRY_BYTES
-        "local_store_entry_bytes" Bytes
-        "Encoded size of full-data entries written to the local store. \
-         _bucket is the payload-size distribution."
-        (bytes: usize);
-    hist    local_store_flush_bytes LOCAL_STORE_FLUSH_BYTES
-        "local_store_flush_bytes" Bytes
-        "Bytes written per local-store flush (one WriteBatch). _sum \
-         is byte throughput, _count the number of flushes."
-        (bytes: usize);
-    hist    local_store_flush_entries LOCAL_STORE_FLUSH_ENTRIES
-        "local_store_flush_entries" Count
-        "Operations folded into one local-store flush. Near 1 under load = \
-         batching starvation; near the cap = healthy batching."
-        (count: usize);
-    custom  local_store_ops  LOCAL_STORE_OPS_TOTAL  "local_store_ops_total"  Counter None
-        "Local-store write operations by kind (integrate).";
-    custom  local_store_integrate_skipped_stale LOCAL_STORE_INTEGRATE_SKIPPED_STALE_TOTAL
-        "local_store_integrate_skipped_stale_total" Counter None
-        "Subscription records skipped at integrate because the stable prefix \
-         already covers them (HLC <= end_hlc). Catch-up redundancy avoided; \
-         near-zero in steady state.";
-    custom  local_store_integrate_skipped_duplicate LOCAL_STORE_INTEGRATE_SKIPPED_DUPLICATE_TOTAL
-        "local_store_integrate_skipped_duplicate_total" Counter None
-        "Duplicate copies of an already-written data_id dropped before the LSM \
-         write. Every learner subscribes to every replica, so each write \
-         arrives once per replica; this counts copies 2..n. Expect roughly \
-         (replicas - 1)/replicas of arrivals. Distinct from \
-         skipped_stale, which is about the stable prefix, not duplication.";
-    custom  local_store_flushed LOCAL_STORE_LAST_FLUSH_TIMESTAMP_SECONDS
-        "local_store_last_flush_timestamp_seconds" Gauge Seconds
-        "Unix timestamp of the last local-store flush (Grafana: time() minus \
-         this for 'time since last flush').";
-    custom  local_store_integrate_queue_depth LOCAL_STORE_INTEGRATE_QUEUE_DEPTH
-        "local_store_integrate_queue_depth" Gauge None
-         "Depth of the node's shared local-store integration channel, which \
-         every subscription forwards into. Non-zero means the single \
-         integration worker is falling behind the incoming streams. Not \
-         labeled by peer: there is one queue per node, not one per \
-         subscription (it replaced the per-peer subscription_buffer_depth \
-         when the per-subscription queue was removed).";
     custom  hlc_skew  HLC_SKEW_SECONDS  "hlc_skew_seconds" Gauge Seconds
         "Per-peer HLC physical-ms skew (|local − peer| / 1000) observed on the \
          replication subscriber path. Creeps toward the configured HLC skew \
@@ -758,36 +715,6 @@ pub(crate) fn read_entry(source: ReadEntrySource) {
 
 pub(crate) fn replica_log_flushed() {
     set_gauge(REPLICA_LOG_LAST_FLUSH_TIMESTAMP_SECONDS, unix_now_secs());
-}
-
-pub(crate) fn local_store_ops(kind: LocalWriteKind, count: u64) {
-    if count == 0 {
-        return;
-    }
-    metrics::counter!(LOCAL_STORE_OPS_TOTAL, LABEL_KIND => kind.as_str()).increment(count);
-}
-
-pub(crate) fn local_store_integrate_skipped_stale(count: u64) {
-    if count == 0 {
-        return;
-    }
-    metrics::counter!(LOCAL_STORE_INTEGRATE_SKIPPED_STALE_TOTAL).increment(count);
-}
-
-pub(crate) fn local_store_integrate_skipped_duplicate(count: u64) {
-    if count == 0 {
-        return;
-    }
-    metrics::counter!(LOCAL_STORE_INTEGRATE_SKIPPED_DUPLICATE_TOTAL).increment(count);
-}
-
-pub(crate) fn local_store_flushed() {
-    set_gauge(LOCAL_STORE_LAST_FLUSH_TIMESTAMP_SECONDS, unix_now_secs());
-}
-
-pub(crate) fn local_store_integrate_queue_depth(depth: usize) {
-    let v: u64 = u64::try_from(depth).unwrap_or(0);
-    metrics::gauge!(LOCAL_STORE_INTEGRATE_QUEUE_DEPTH).set(lossy_f64(v));
 }
 
 pub(crate) fn hlc_skew(peer_id: zslg_node_types::NodeId, skew_s: f64) {
@@ -915,10 +842,6 @@ label_enum!(#[doc = "`reason` label of [`LOG_SUBSCRIPTION_ENDED_TOTAL`] — why 
     PeerGone => "peer_gone",
     /// The stream carried an error, or a record failed to integrate.
     Failed => "failed",
-});
-
-label_enum!(#[doc = "`kind` label of [`LOCAL_STORE_OPS_TOTAL`] — the local-store write payload type."] LocalWriteKind {
-    Integrate => "integrate",
 });
 
 // ---------------------------------------------------------------------------
@@ -1098,10 +1021,6 @@ metrics!("zslg_", probes; {
         "replica_log_append_duration_seconds"
         "ReplicaLogStore::append latency by outcome (enqueue to durable + \
          broadcast). _count doubles as the append throughput.";
-    probe   local_store_integrate_probe LOCAL_STORE_INTEGRATE_DURATION_SECONDS
-        "local_store_integrate_duration_seconds"
-        "LocalStore::integrate_batch latency by outcome. _count is the \
-         integrate throughput.";
 });
 
 // ── probes: hand-written emission helpers ──────────────────────────────────
@@ -1112,6 +1031,8 @@ metrics!("zslg_", probes; {
 // ---------------------------------------------------------------------------
 
 const ALL_METRICS: &[&[MetricDef]] = &[
+    // --- local store (zslg-local-store) ---
+    zslg_local_store::metrics::METRICS,
     // --- startup (zslg-raft-startup) ---
     zslg_raft_startup::metrics::METRICS,
     // --- raft node (zslg-raft-node) ---

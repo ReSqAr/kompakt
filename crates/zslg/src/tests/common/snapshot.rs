@@ -71,7 +71,7 @@ pub(crate) async fn boot_snapshot_harness() -> SnapshotHarness {
     let dir = tempfile::tempdir().expect("tempdir");
     let local_path = dir.path().join("local.db");
     let stable_path = dir.path().join("stable.db");
-    let local_store = LocalStore::simple_at(local_path.with_extension("stable"))
+    let local_store = crate::tests::local_store_at(local_path.with_extension("stable"))
         .await
         .expect("from_db");
     let stable_log = crate::tests::stable_log_at(&stable_path).await;

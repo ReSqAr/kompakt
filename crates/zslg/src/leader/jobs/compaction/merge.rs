@@ -509,7 +509,7 @@ mod tests {
         let leader = nodes.remove(&n1).expect("n1");
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let local_store = LocalStore::simple_at(dir.path().join("local.stable"))
+        let local_store = crate::tests::local_store_at(dir.path().join("local.stable"))
             .await
             .expect("from_db");
         let stable_log = crate::tests::stable_log_at(&dir.path().join("stable.db")).await;
@@ -693,7 +693,7 @@ mod tests {
         let leader = nodes.remove(&n1).expect("n1");
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let local_store = LocalStore::simple_at(dir.path().join("local.stable"))
+        let local_store = crate::tests::local_store_at(dir.path().join("local.stable"))
             .await
             .expect("from_db");
         let stable_log = crate::tests::stable_log_at(&dir.path().join("stable.db")).await;

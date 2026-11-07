@@ -64,6 +64,7 @@ metrics-kit = { path = "crates/metrics-kit" }
 nvzn = { path = "crates/nvzn" }
 objectstorage-cache = { path = "crates/objectstorage-cache" }
 rocksdb-kit = { path = "crates/rocksdb-kit" }
+zslg-local-store = { path = "crates/zslg-local-store" }
 zslg-raft-startup = { path = "crates/zslg-raft-startup" }
 zslg-raft-node = { path = "crates/zslg-raft-node" }
 zslg-raft-tracker = { path = "crates/zslg-raft-tracker" }
@@ -101,6 +102,7 @@ zslg-snapshot = { path = "crates/zslg-snapshot" }
 zslg-snapshot-types = { path = "crates/zslg-snapshot-types" }
 zslg-time = { path = "crates/zslg-time" }
 zslg-time-fake = { path = "crates/zslg-time-fake" }
+zslg-log-fake = { path = "crates/zslg-log-fake" }
 zslg-time-types = { path = "crates/zslg-time-types" }
 
 [workspace.lints.clippy]

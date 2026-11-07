@@ -25,14 +25,12 @@ use std::sync::Arc;
 use std::sync::Weak;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use zslg_log_types::LogError;
+use zslg_log::LogError;
 
 use rocksdb_kit::Batch;
 
-use crate::learner::local_store::Dedup;
-use crate::learner::local_store::key::{
-    DATA_PRIMARY_WIDTH, decode_data_key, encode_cursor_key, encode_data_key,
-};
+use crate::Dedup;
+use crate::key::{DATA_PRIMARY_WIDTH, decode_data_key, encode_cursor_key, encode_data_key};
 use bytes::Bytes;
 use crossbeam_combinators::{
     Channel, Closed, Fanout, FanoutConfig, Feed, Finite, Infinite, OverflowPolicy, Registry,
@@ -43,20 +41,21 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tracing::error;
 
-use crate::error::{Error, Home};
-use crate::metrics::{self, LocalWriteKind, OpState};
+use crate::metrics::{self, LocalWriteKind};
+use crate::{Error, Home};
+use metrics_kit::OpState;
+use zslg_consensus::NodeId;
+use zslg_log::Data;
 use zslg_log::StableLogSnapshot;
 use zslg_log::ToStorage;
 use zslg_log::metrics::LogType;
-use zslg_log_types::Data;
-use zslg_log_types::{DataId, LogIndex};
-use zslg_node_types::NodeId;
-use zslg_time_types::Hlc;
+use zslg_log::{DataId, LogIndex};
+use zslg_time::Hlc;
 
 const STREAM_CHANNEL_CAPACITY: usize = 32;
 
 /// Shared local-store state, held behind an `Arc<LocalStore>` by every handle.
-pub(crate) struct LocalStore {
+pub struct LocalStore {
     /// Self-reference so the persistent `integrate_loop`
     /// blocking threads hold only a `Weak` and upgrade per batch (mirrors the
     /// replica flush loop + `RpcClient`): idle threads pin nothing, so a dropped
@@ -73,7 +72,7 @@ pub(crate) struct LocalStore {
     integrated: watch::Sender<()>,
     /// Set on every committed batch; cleared by the periodic flush worker
     /// ([`run_local_store_flush_worker`]) when it fsyncs. Lets an idle store
-    /// skip the flush entirely. See [`crate::learner::LearnerConfig::local_store_flush_interval`].
+    /// skip the flush entirely. See `LearnerConfig::local_store_flush_interval`.
     dirty: AtomicBool,
     /// `DataId`s known to be durably written, shared by **all** of this node's
     /// integrate workers — there is one per replica peer
@@ -104,7 +103,7 @@ pub(crate) struct LocalStore {
 /// channel. The caller starts the single worker over it — see
 /// [`super::spawn_local_store`], which registers it with `Shutdown` so a
 /// failure takes the node down the way `replica:log_flush` does.
-pub(in crate::learner::local_store) async fn create_local_store(
+pub async fn create_local_store(
     config: &super::LocalStoreConfig,
     storage: Arc<Storage>,
     stable_log: Arc<dyn StableLogSnapshot>,
@@ -208,42 +207,6 @@ impl LocalStore {
             // is left to miss it.
             let _ = self.unstable.publish(data);
         }
-    }
-
-    /// Open a store, and the stable log it reads the watermark from, on **one**
-    /// `Storage` rooted at `root` — the production shape, where both are column
-    /// families of the node's single DB.
-    ///
-    /// The integration worker is detached, so this is for tests that use a
-    /// fresh root and never reopen it. A test that reopens must drain the
-    /// worker first and wants
-    /// [`open_test_local_store`](crate::learner::open_test_local_store).
-    #[cfg(test)]
-    pub(crate) async fn simple_at(root: std::path::PathBuf) -> Result<Arc<Self>, Error> {
-        let (store, _) = Self::simple_with(root, &super::LocalStoreConfig::for_test()).await?;
-        Ok(store)
-    }
-
-    /// [`simple_at`](Self::simple_at) with a config of the test's choosing,
-    /// handing back the stable log the store reads its watermark from.
-    #[cfg(test)]
-    pub(in crate::learner) async fn simple_with(
-        root: std::path::PathBuf,
-        config: &super::LocalStoreConfig,
-    ) -> Result<(Arc<Self>, Arc<crate::learner::stable_log::StableLog>), Error> {
-        let storage = crate::database::open_for_test(&root)?;
-        let stable_log =
-            Arc::new(crate::learner::stable_log::StableLog::open_on(Arc::clone(&storage)).await?);
-        let watermark_source: Arc<dyn StableLogSnapshot> = stable_log.clone();
-        let (store, integrate_rx) = create_local_store(config, storage, watermark_source).await?;
-        // Production starts this in `spawn_local_store` under `Shutdown`;
-        // tests get a detached one so `integrate_loop` has a worker to feed.
-        tokio::spawn(run_integrate_worker(
-            Arc::downgrade(&store),
-            integrate_rx,
-            CancellationToken::new(),
-        ));
-        Ok((store, stable_log))
     }
 }
 
@@ -426,7 +389,7 @@ impl zslg_log::LocalStoreMut for LocalStore {
 /// while records were still queued and under-report (`subscriber/peer.rs`).
 ///
 /// It was called `Flush`, which invited the stronger reading.
-pub(in crate::learner::local_store) enum IntegrateItem {
+pub enum IntegrateItem {
     Record(NodeId, LogIndex, Data),
     Barrier(tokio::sync::oneshot::Sender<()>),
 }
@@ -439,13 +402,13 @@ struct BatchOutcome {
 }
 
 /// Max records / outcomes drained into one `WriteBatch`.
-pub(in crate::learner::local_store) const MAX_BATCH: usize = 1024;
+pub(crate) const MAX_BATCH: usize = 1024;
 
 /// The node's single integration worker: drains the shared channel, batches
 /// across upstreams, commits. Registered with `Shutdown` by
 /// [`super::spawn_local_store`], so an error ends the task and takes the node
 /// down — the same contract as `replica:log_flush`.
-pub(in crate::learner) async fn run_integrate_worker(
+pub async fn run_integrate_worker(
     weak: Weak<LocalStore>,
     records: crossbeam_channel::Receiver<IntegrateItem>,
     cancel: CancellationToken,
@@ -833,7 +796,7 @@ fn stream_scan(
 /// durability is not needed). Holds a `Weak` so an idle worker pins nothing,
 /// and flushes once more on cancellation so a graceful stop persists the last
 /// batch.
-pub(in crate::learner::local_store) async fn run_local_store_flush_worker(
+pub(crate) async fn run_local_store_flush_worker(
     weak: Weak<LocalStore>,
     interval: Duration,
     cancel: CancellationToken,
@@ -889,10 +852,10 @@ async fn flush_if_dirty(store: &LocalStore) -> Result<(), Error> {
 }
 
 /// Local-store data rows, keyed by `DataId`.
-pub(crate) const LOCAL_STORE_DATA_CF: ColumnFamily = ColumnFamily::new("local_store_data");
+pub const LOCAL_STORE_DATA_CF: ColumnFamily = ColumnFamily::new("local_store_data");
 
 /// Local-store subscription cursors, keyed by upstream `NodeId`.
-pub(crate) const LOCAL_STORE_CURSORS_CF: ColumnFamily = ColumnFamily::new("local_store_cursors");
+pub const LOCAL_STORE_CURSORS_CF: ColumnFamily = ColumnFamily::new("local_store_cursors");
 
 #[cfg(test)]
 #[allow(
@@ -913,12 +876,12 @@ mod tests {
     use super::*;
     use zslg_log::{LocalStoreMut, LocalStoreView};
 
-    use zslg_log_types::DataId;
-    use zslg_node_types::NodeId;
-    use zslg_time_types::Hlc;
+    use zslg_consensus::NodeId;
+    use zslg_log::DataId;
+    use zslg_time::Hlc;
 
-    use crate::tests::make_data;
-    use crate::tests::upstream;
+    use zslg_consensus_fake::upstream;
+    use zslg_log_fake::make_data;
 
     async fn integrate_batch(
         store: &LocalStore,
@@ -943,19 +906,15 @@ mod tests {
     /// One `Storage` backing both this store and the stable log it reads the
     /// watermark from — the production shape.
     async fn shared_storage(root: &Path) -> (Arc<Storage>, Arc<dyn StableLogSnapshot>) {
-        let storage = crate::database::open_for_test(root).expect("open storage");
-        let stable_log: Arc<dyn StableLogSnapshot> = Arc::new(
-            crate::learner::stable_log::StableLog::open_on(Arc::clone(&storage))
-                .await
-                .expect("stable_log"),
-        );
+        let storage = crate::testutil::open_storage(root).expect("open storage");
+        let stable_log: Arc<dyn StableLogSnapshot> = Arc::new(zslg_log_fake::FakeStableLog::new());
         (storage, stable_log)
     }
 
     async fn fresh_store() -> (TempDir, Arc<LocalStore>) {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("local.db");
-        let store = LocalStore::simple_at(path.with_extension("stable"))
+        let store = crate::testutil::simple_at(path.with_extension("stable"))
             .await
             .expect("from_db");
         (dir, store)
@@ -963,8 +922,8 @@ mod tests {
 
     /// A store whose integration worker can be drained — required before
     /// reopening the same root (see [`super::open_test_local_store`]).
-    async fn store_at(path: &Path) -> (Arc<LocalStore>, crate::learner::local_store::TestWorker) {
-        crate::learner::open_test_local_store(path)
+    async fn store_at(path: &Path) -> (Arc<LocalStore>, crate::testutil::TestWorker) {
+        crate::testutil::open_test_local_store(path)
             .await
             .expect("open")
     }
@@ -1038,7 +997,7 @@ mod tests {
     /// A store over a stable log already at `watermark`, with its own config.
     async fn store_with(
         dir: &Path,
-        config: &crate::learner::local_store::LocalStoreConfig,
+        config: &crate::LocalStoreConfig,
         watermark: Option<Hlc>,
     ) -> Arc<LocalStore> {
         let (storage, stable_log) = shared_storage(dir).await;
@@ -1089,7 +1048,7 @@ mod tests {
     #[tokio::test]
     async fn entries_at_or_below_the_watermark_are_not_published() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let config = crate::learner::local_store::LocalStoreConfig::for_test();
+        let config = crate::LocalStoreConfig::for_test();
         let store = store_with(dir.path(), &config, Some(Hlc(100))).await;
         let mut live = store.subscribe_unstable();
 
@@ -1117,13 +1076,10 @@ mod tests {
             .record_end_hlc(Hlc(100))
             .await
             .expect("record_end_hlc");
-        let (store, integrate_rx) = create_local_store(
-            &crate::learner::local_store::LocalStoreConfig::for_test(),
-            storage,
-            stable_log,
-        )
-        .await
-        .expect("create");
+        let (store, integrate_rx) =
+            create_local_store(&crate::LocalStoreConfig::for_test(), storage, stable_log)
+                .await
+                .expect("create");
         tokio::spawn(run_integrate_worker(
             Arc::downgrade(&store),
             integrate_rx,
@@ -1168,13 +1124,10 @@ mod tests {
             .record_end_hlc(Hlc(200))
             .await
             .expect("record_end_hlc");
-        let (store, integrate_rx) = create_local_store(
-            &crate::learner::local_store::LocalStoreConfig::for_test(),
-            storage,
-            stable_log,
-        )
-        .await
-        .expect("create");
+        let (store, integrate_rx) =
+            create_local_store(&crate::LocalStoreConfig::for_test(), storage, stable_log)
+                .await
+                .expect("create");
         tokio::spawn(run_integrate_worker(
             Arc::downgrade(&store),
             integrate_rx,
@@ -1312,7 +1265,7 @@ mod tests {
     async fn a_failed_fence_ends_the_flush_worker() {
         let dir = tempfile::tempdir().expect("tempdir");
         let (storage, stable_log) = shared_storage(dir.path()).await;
-        let cfg = crate::learner::local_store::LocalStoreConfig::for_test();
+        let cfg = crate::LocalStoreConfig::for_test();
         let (store, _rx) = create_local_store(&cfg, Arc::clone(&storage), stable_log)
             .await
             .expect("create");
@@ -1354,7 +1307,7 @@ mod tests {
     async fn a_failed_batch_ends_the_worker_and_leaves_the_filter_clean() {
         let dir = tempfile::tempdir().expect("tempdir");
         let (storage, stable_log) = shared_storage(dir.path()).await;
-        let cfg = crate::learner::local_store::LocalStoreConfig::for_test();
+        let cfg = crate::LocalStoreConfig::for_test();
         let (store, rx) = create_local_store(&cfg, storage, stable_log)
             .await
             .expect("create");
@@ -1756,6 +1709,41 @@ mod tests {
         assert_eq!(
             store.subscription_cursor(upstream(1)).await.expect("ok"),
             Some(LogIndex(3))
+        );
+        drop(store);
+        worker.stop().await;
+    }
+
+    #[tokio::test]
+    async fn local_store_subscription_cursor_persists_across_reopen() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("local.db");
+
+        {
+            let (store, worker) = crate::testutil::open_test_local_store(&path)
+                .await
+                .expect("open");
+            for i in 1..=5u8 {
+                integrate_batch(
+                    &store,
+                    upstream(1),
+                    vec![(LogIndex(u64::from(i)), make_data(i, u64::from(i), &[i]))],
+                )
+                .await
+                .expect("integrate");
+            }
+            // Drop the store and DRAIN its worker before reopening the root:
+            // a worker mid-batch holds the DB's LOCK (`open_test_local_store`).
+            drop(store);
+            worker.stop().await;
+        }
+
+        let (store, worker) = crate::testutil::open_test_local_store(&path)
+            .await
+            .expect("reopen");
+        assert_eq!(
+            store.subscription_cursor(upstream(1)).await.expect("ok"),
+            Some(LogIndex(5))
         );
         drop(store);
         worker.stop().await;

@@ -14,19 +14,19 @@
     clippy::result_large_err,
     reason = "test code"
 )]
-use crate::error::Home as _;
+use crate::Home as _;
 use crossbeam_combinators::testing::ChannelTestExt as _;
 use std::collections::{BTreeMap, BTreeSet};
 
 use bytes::Bytes;
 use proptest::prelude::*;
 
-use super::open_test_local_store;
 use super::store::LocalStore;
+use crate::testutil::open_test_local_store;
+use zslg_consensus::NodeId;
+use zslg_log::Data;
+use zslg_log::{DataId, LogIndex};
 use zslg_log::{LocalStoreMut, LocalStoreView};
-use zslg_log_types::Data;
-use zslg_log_types::{DataId, LogIndex};
-use zslg_node_types::NodeId;
 
 async fn integrate_batch(
     store: &LocalStore,
@@ -67,12 +67,12 @@ fn op_strategy() -> impl Strategy<Value = Op> {
     )
 }
 
-use crate::tests::upstream as upstream_for;
+use zslg_consensus_fake::upstream as upstream_for;
 
 fn data_id_for(slot: u8) -> DataId {
     // Node-independent on purpose: dedup is keyed by the data id alone, so the
     // same slot integrated from different upstreams must collide.
-    DataId::test_id(zslg_time_types::Hlc(0), u64::from(slot))
+    DataId::test_id(zslg_time::Hlc(0), u64::from(slot))
 }
 
 fn record_for(op: &Op) -> Data {

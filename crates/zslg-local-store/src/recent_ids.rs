@@ -26,18 +26,18 @@
 use std::collections::{HashSet, VecDeque};
 use std::num::NonZeroUsize;
 
-use zslg_log_types::DataId;
+use zslg_log::DataId;
 
 /// Whether this store filters duplicates. `Off` is matched **once per batch**,
 /// not once per record — the disabled path costs nothing on the hot loop.
-pub(in crate::learner::local_store) enum Dedup {
+pub enum Dedup {
     Off,
     On(RecentIds),
 }
 
 impl Dedup {
     #[must_use]
-    pub(in crate::learner::local_store) fn new(capacity: Option<NonZeroUsize>) -> Self {
+    pub fn new(capacity: Option<NonZeroUsize>) -> Self {
         match capacity {
             None => Self::Off,
             Some(cap) => Self::On(RecentIds::new(cap)),
@@ -46,7 +46,7 @@ impl Dedup {
 
     /// `true` = this id is already durably in the store; skip the write.
     #[must_use]
-    pub(in crate::learner::local_store) fn contains(&self, id: DataId) -> bool {
+    pub fn contains(&self, id: DataId) -> bool {
         match self {
             Self::Off => false,
             Self::On(r) => r.set.contains(&id),
@@ -55,10 +55,7 @@ impl Dedup {
 
     /// Remember ids whose batch **committed**. Call only after `append_batch`
     /// returns `Ok` — see the module docs for why the ordering is load-bearing.
-    pub(in crate::learner::local_store) fn record_committed(
-        &mut self,
-        ids: impl IntoIterator<Item = DataId>,
-    ) {
+    pub fn record_committed(&mut self, ids: impl IntoIterator<Item = DataId>) {
         if let Self::On(r) = self {
             for id in ids {
                 r.insert(id);
@@ -78,7 +75,7 @@ impl Dedup {
 /// A fixed-capacity insertion-ordered set: the `HashSet` answers membership,
 /// the `VecDeque` remembers eviction order. Both hold the same ids, so
 /// residency is `capacity`, never the number of ids that streamed through.
-pub(in crate::learner::local_store) struct RecentIds {
+pub struct RecentIds {
     set: HashSet<DataId>,
     ring: VecDeque<DataId>,
     cap: NonZeroUsize,
@@ -116,13 +113,13 @@ impl RecentIds {
 )]
 mod tests {
     use super::*;
-    use crate::tests::make_data;
+    use zslg_log_fake::make_data;
 
     fn ring(n: usize) -> Dedup {
         Dedup::new(Some(std::num::NonZeroUsize::new(n).unwrap()))
     }
 
-    fn id(seed: u8) -> zslg_log_types::DataId {
+    fn id(seed: u8) -> zslg_log::DataId {
         make_data(seed, u64::from(seed), b"payload").data_id
     }
 

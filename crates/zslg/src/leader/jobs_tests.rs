@@ -111,7 +111,7 @@ struct PerNode {
 
 async fn build_per_node() -> PerNode {
     let tempdir = tempfile::tempdir().expect("tempdir");
-    let local_store = LocalStore::simple_at(tempdir.path().join("local.stable"))
+    let local_store = crate::tests::local_store_at(tempdir.path().join("local.stable"))
         .await
         .expect("from_db");
 

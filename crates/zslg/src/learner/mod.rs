@@ -30,17 +30,12 @@
 //! caught up to a quorum of replicas, which is what makes a subsequent read
 //! read-your-writes rather than merely eventually consistent.
 
-mod local_store;
 mod quorum;
 mod read;
 mod stable_archive;
 mod stable_log;
 mod subscriber;
 
-pub(crate) use local_store::LocalStore;
-#[cfg(test)]
-pub(crate) use local_store::open_test_local_store;
-pub(crate) use local_store::{LOCAL_STORE_CURSORS_CF, LOCAL_STORE_DATA_CF};
 use quorum::{MultiReplicaQuorumCheck, QuorumReadDebouncer};
 use read::ReaderImpl;
 pub(crate) use read::{GatedReader, can_serve_clients};
@@ -49,6 +44,8 @@ pub(crate) use stable_log::StableLogConfig;
 pub(crate) use stable_log::{StableLog, spawn_stable_store};
 use zslg_consensus::RaftStateView;
 use zslg_lifecycle_types::ConfigError;
+pub(crate) use zslg_local_store::LocalStore;
+pub(crate) use zslg_local_store::{LOCAL_STORE_CURSORS_CF, LOCAL_STORE_DATA_CF};
 use zslg_net::Router;
 use zslg_snapshot::SnapshotStore;
 
@@ -63,7 +60,7 @@ pub(crate) struct LearnerConfig {
     pub(crate) quorum_read_deadtime: Duration,
     pub(crate) quorum_read_timeout: Duration,
     pub(crate) stable_purge_ttl: Option<Duration>,
-    /// Local-store engine sizing — see [`local_store::LocalStoreConfig`].
+    /// Local-store engine sizing — see [`zslg_local_store::LocalStoreConfig`].
     pub(crate) local_store_dedup_ring: Option<std::num::NonZeroUsize>,
     pub(crate) local_store_integrate_channel_capacity: std::num::NonZeroUsize,
 }
@@ -90,7 +87,7 @@ impl LearnerConfig {
         // Kept as a call rather than inlined `Ok(())`: the local store's own
         // knobs are operator-reachable, so if one ever grows a rule again this
         // is where it is checked. RocksDB validates its own sizing at open.
-        self.local_store_config().validate()
+        self.local_store_config().validate().map_err(Into::into)
     }
 
     /// Bytes this node's learner-side queues can hold at full depth — the
@@ -102,14 +99,14 @@ impl LearnerConfig {
     }
 
     /// Produce the local-store subsystem config (directory + its tunables).
-    pub(in crate::learner) fn local_store_config(&self) -> local_store::LocalStoreConfig {
-        local_store::LocalStoreConfig {
+    pub(in crate::learner) fn local_store_config(&self) -> zslg_local_store::LocalStoreConfig {
+        zslg_local_store::LocalStoreConfig {
             flush_interval: self.local_store_flush_interval,
             purge_grace_period: self.purge_grace_period,
             dedup_ring: self.local_store_dedup_ring,
             integrate_channel_capacity: self.local_store_integrate_channel_capacity,
             unstable_subscriber_queue_capacity:
-                local_store::DEFAULT_UNSTABLE_SUBSCRIBER_QUEUE_CAPACITY,
+                zslg_local_store::DEFAULT_UNSTABLE_SUBSCRIBER_QUEUE_CAPACITY,
         }
     }
 
@@ -191,13 +188,14 @@ pub(crate) async fn spawn_learner(
     shutdown: &mut Shutdown<Error>,
 ) -> Result<Arc<LearnerService>, Error> {
     info!("spawning learner subsystems");
-    let local_store = local_store::spawn_local_store(
+    let local_store = zslg_local_store::spawn_local_store(
         stable_log.clone(),
         storage,
         &config.local_store_config(),
         shutdown,
     )
-    .await?;
+    .await
+    .map_err(Error::from)?;
 
     let quorum_check = MultiReplicaQuorumCheck::new(
         router.clone(),

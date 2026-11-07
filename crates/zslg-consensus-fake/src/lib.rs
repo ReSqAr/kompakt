@@ -17,3 +17,21 @@ impl MembershipGate for PermissiveGate {
         Ok(())
     }
 }
+
+/// A deterministic [`NodeId`] with `byte` in the last position.
+#[must_use]
+pub fn nid(byte: u8) -> NodeId {
+    let mut b = [0u8; 16];
+    b[15] = byte;
+    NodeId::from_uuid(uuid::Uuid::from_bytes(b))
+}
+
+/// A deterministic "upstream" [`NodeId`] (`0xAA` in byte 0, `seed` in byte 15),
+/// for replication data sources.
+#[must_use]
+pub fn upstream(seed: u8) -> NodeId {
+    let mut b = [0u8; 16];
+    b[0] = 0xAA;
+    b[15] = seed;
+    NodeId::from_uuid(uuid::Uuid::from_bytes(b))
+}

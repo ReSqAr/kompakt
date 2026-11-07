@@ -4485,7 +4485,9 @@ dependencies = [
  "zslg-hlc-clock",
  "zslg-hlc-gate",
  "zslg-lifecycle-types",
+ "zslg-local-store",
  "zslg-log",
+ "zslg-log-fake",
  "zslg-log-types",
  "zslg-net",
  "zslg-net-client",
@@ -4532,6 +4534,7 @@ dependencies = [
 name = "zslg-consensus-fake"
 version = "0.1.0"
 dependencies = [
+ "uuid",
  "zslg-consensus",
  "zslg-net",
 ]
@@ -4589,6 +4592,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "zslg-local-store"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "bytesize",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "error-union",
+ "futures",
+ "metrics-kit",
+ "parking_lot 0.13.0",
+ "proptest",
+ "rocksdb-kit",
+ "shutdown",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "zslg-consensus",
+ "zslg-consensus-fake",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-log-fake",
+ "zslg-net",
+ "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
 name = "zslg-log"
 version = "0.1.0"
 dependencies = [
@@ -4605,6 +4640,21 @@ dependencies = [
  "zslg-node-types",
  "zslg-snapshot-types",
  "zslg-time-types",
+]
+
+[[package]]
+name = "zslg-log-fake"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "parking_lot 0.13.0",
+ "uuid",
+ "zslg-consensus",
+ "zslg-log",
+ "zslg-time",
 ]
 
 [[package]]

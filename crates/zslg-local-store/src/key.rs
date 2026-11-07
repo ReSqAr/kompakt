@@ -14,31 +14,29 @@
 //! alone already sorts in HLC order. (An older layout appended an `Hlc`
 //! secondary; it was redundant with the primary and is gone.)
 
-use zslg_log_types::DataId;
-use zslg_node_types::NodeId;
+use zslg_consensus::NodeId;
+use zslg_log::DataId;
 
 /// `DataId` is 32 raw bytes, already HLC-big-endian-major (`ids.rs`).
-pub(in crate::learner::local_store) const DATA_PRIMARY_WIDTH: usize = 32;
+pub(crate) const DATA_PRIMARY_WIDTH: usize = 32;
 
 /// A cursor key is the upstream `NodeId` alone — one overwritten slot per peer,
 /// zero-width secondary, never retired.
-pub(in crate::learner::local_store) const CURSOR_KEY_WIDTH: usize = 16;
+pub(crate) const CURSOR_KEY_WIDTH: usize = 16;
 
 #[must_use]
-pub(in crate::learner::local_store) fn encode_data_key(
-    data_id: DataId,
-) -> [u8; DATA_PRIMARY_WIDTH] {
+pub(crate) fn encode_data_key(data_id: DataId) -> [u8; DATA_PRIMARY_WIDTH] {
     data_id.0
 }
 
 #[must_use]
-pub(in crate::learner::local_store) fn decode_data_key(bytes: &[u8]) -> Option<DataId> {
+pub(crate) fn decode_data_key(bytes: &[u8]) -> Option<DataId> {
     let primary: [u8; DATA_PRIMARY_WIDTH] = bytes.try_into().ok()?;
     Some(DataId(primary))
 }
 
 #[must_use]
-pub(in crate::learner::local_store) fn encode_cursor_key(node: NodeId) -> [u8; CURSOR_KEY_WIDTH] {
+pub(crate) fn encode_cursor_key(node: NodeId) -> [u8; CURSOR_KEY_WIDTH] {
     node.0.as_u128().to_be_bytes()
 }
 
@@ -56,7 +54,7 @@ pub(in crate::learner::local_store) fn encode_cursor_key(node: NodeId) -> [u8; C
 mod tests {
     use super::*;
     use proptest::prelude::*;
-    use zslg_time_types::Hlc;
+    use zslg_time::Hlc;
 
     #[test]
     fn data_key_roundtrips() {

@@ -8,6 +8,7 @@ description = "In-memory consensus ports for tests"
 publish = false
 
 [dependencies]
+uuid = { workspace = true }
 zslg-consensus = { workspace = true }
 zslg-net = { workspace = true }
 

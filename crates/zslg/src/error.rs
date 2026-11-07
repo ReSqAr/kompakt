@@ -48,6 +48,7 @@ error_union! {
     from zslg_quorum_read::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_object_store_config::Error { Snapshot }
     from zslg_node_id::Error { Config, Log }
+    from zslg_local_store::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_raft_startup::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_raft_node::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_raft_tracker::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
@@ -56,52 +57,7 @@ error_union! {
     from zslg_net_server::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
 }
 
-/// Bring a value that carries a port crate's error back to zslg's own `Error`:
-/// `Result<T, E>` and the (ordered) channels of results. The boundary verb for
-/// code that calls a port; the other direction is `map_err(Into::into)` /
-/// `err_into()`. Goes away with the unions' narrowing.
-pub(crate) trait Home {
-    type Out;
-    fn home(self) -> Self::Out;
-}
-
-impl<T, E> Home for Result<T, E>
-where
-    Error: From<E>,
-{
-    type Out = Result<T, Error>;
-    fn home(self) -> Self::Out {
-        self.map_err(Into::into)
-    }
-}
-
-impl<A, E, K> Home for crossbeam_combinators::Channel<Result<A, E>, K>
-where
-    A: Send + 'static,
-    Error: From<E>,
-    E: Send + 'static,
-    K: crossbeam_combinators::Kind,
-{
-    type Out = crossbeam_combinators::Channel<Result<A, Error>, K>;
-    fn home(self) -> Self::Out {
-        self.err_into()
-    }
-}
-
-impl<A, E, P, K> Home for crossbeam_combinators::OrderedChannel<Result<A, E>, P, K>
-where
-    A: Send + 'static,
-    Error: From<E>,
-    E: Send + 'static,
-    P: crossbeam_combinators::OrderPolicy,
-    P::Key: crossbeam_combinators::Key<Result<A, Error>>,
-    K: crossbeam_combinators::Kind,
-{
-    type Out = crossbeam_combinators::OrderedChannel<Result<A, Error>, P, K>;
-    fn home(self) -> Self::Out {
-        self.err_into()
-    }
-}
+error_union::error_home!(Error);
 
 macro_rules! port_error_bridge {
     ($($port:path),+ $(,)?) => {$(
