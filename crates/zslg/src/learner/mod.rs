@@ -30,17 +30,16 @@
 //! caught up to a quorum of replicas, which is what makes a subsequent read
 //! read-your-writes rather than merely eventually consistent.
 
-mod quorum;
-mod read;
+#[cfg(test)]
+mod reader_tests;
 
-use quorum::{MultiReplicaQuorumCheck, QuorumReadDebouncer};
-use read::ReaderImpl;
-pub(crate) use read::{GatedReader, can_serve_clients};
 use zslg_consensus::RaftStateView;
 use zslg_lifecycle_types::ConfigError;
 pub(crate) use zslg_local_store::LocalStore;
 pub(crate) use zslg_local_store::{LOCAL_STORE_CURSORS_CF, LOCAL_STORE_DATA_CF};
 use zslg_net::Router;
+pub(crate) use zslg_reader::{GatedReader, can_serve_clients};
+use zslg_reader::{MultiReplicaQuorumCheck, QuorumReadDebouncer, ReaderImpl};
 use zslg_snapshot::SnapshotStore;
 pub(crate) use zslg_stable_log::STABLE_LOG_CF;
 pub(crate) use zslg_stable_log::StableLogConfig;
@@ -112,8 +111,8 @@ impl LearnerConfig {
     /// Produce the quorum-read debouncer config.
     pub(in crate::learner) fn quorum_read_debouncer_config(
         &self,
-    ) -> quorum::QuorumReadDebouncerConfig {
-        quorum::QuorumReadDebouncerConfig {
+    ) -> zslg_reader::QuorumReadDebouncerConfig {
+        zslg_reader::QuorumReadDebouncerConfig {
             deadtime: self.quorum_read_deadtime,
             check_timeout: self.quorum_read_timeout,
         }

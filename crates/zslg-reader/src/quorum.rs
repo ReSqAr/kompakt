@@ -31,23 +31,23 @@ use std::sync::Arc;
 use std::time::Duration;
 use zslg_consensus::{QuorumCheck, RaftStateView};
 use zslg_lifecycle_types::LifecycleError;
-use zslg_log_types::LogError;
+use zslg_log::LogError;
 use zslg_net::Router;
 
 use async_trait::async_trait;
 use parking_lot::Mutex as SyncMutex;
 use tokio::sync::oneshot;
 
-use crate::error::Error;
-use crate::metrics::OpState;
-use zslg_consensus_types::RaftManifestState;
+use crate::Error;
+use metrics_kit::OpState;
+use zslg_consensus::RaftManifestState;
 use zslg_log::{LocalStoreView, StableLogSnapshot};
 use zslg_quorum_read::ReplicaPoller;
 use zslg_quorum_read::{FanOutResponse, fan_out_quorum};
 
 // ── Multi-replica quorum check ──────────────────────────────────────────────
 
-pub(in crate::learner) struct MultiReplicaQuorumCheck {
+pub struct MultiReplicaQuorumCheck {
     router: Arc<dyn Router>,
     local_store: Arc<dyn LocalStoreView>,
     raft_state: Arc<dyn RaftStateView>,
@@ -56,7 +56,7 @@ pub(in crate::learner) struct MultiReplicaQuorumCheck {
 
 impl MultiReplicaQuorumCheck {
     #[must_use]
-    pub(in crate::learner) fn new(
+    pub fn new(
         router: Arc<dyn Router>,
         local_store: Arc<dyn LocalStoreView>,
         raft_state: Arc<dyn RaftStateView>,
@@ -72,7 +72,7 @@ impl MultiReplicaQuorumCheck {
 }
 
 impl MultiReplicaQuorumCheck {
-    pub(crate) async fn check_in(&self) -> Result<(), Error> {
+    pub async fn check_in(&self) -> Result<(), Error> {
         let router = self.router.clone();
         let local_store = self.local_store.clone();
         let (final_state, _successful) =
@@ -156,7 +156,7 @@ async fn wait_for_stable_caught_up(
 // ── Read debouncer ──────────────────────────────────────────────────────────
 
 #[derive(Clone)]
-pub(in crate::learner) struct QuorumReadDebouncer {
+pub struct QuorumReadDebouncer {
     state: Arc<SyncMutex<Option<DebounceState>>>,
     deadtime: Duration,
     /// Deadline for one batched check; on expiry every waiter of the batch
@@ -172,17 +172,14 @@ struct DebounceState {
 
 /// The debouncer's tunables, produced by
 /// [`LearnerConfig::quorum_read_debouncer_config`](crate::learner::LearnerConfig::quorum_read_debouncer_config).
-pub(in crate::learner) struct QuorumReadDebouncerConfig {
-    pub(in crate::learner) deadtime: Duration,
-    pub(in crate::learner) check_timeout: Duration,
+pub struct QuorumReadDebouncerConfig {
+    pub deadtime: Duration,
+    pub check_timeout: Duration,
 }
 
 impl QuorumReadDebouncer {
     #[must_use]
-    pub(in crate::learner) fn new(
-        quorum_check: Arc<dyn QuorumCheck>,
-        config: &QuorumReadDebouncerConfig,
-    ) -> Self {
+    pub fn new(quorum_check: Arc<dyn QuorumCheck>, config: &QuorumReadDebouncerConfig) -> Self {
         Self {
             state: Arc::new(SyncMutex::new(None)),
             deadtime: config.deadtime,
@@ -193,8 +190,8 @@ impl QuorumReadDebouncer {
     }
 
     /// Test convenience: build from loose parts without threading a config.
-    #[cfg(test)]
-    pub(in crate::learner) fn for_test(
+    #[cfg(any(test, feature = "testing"))]
+    pub fn for_test(
         quorum_check: Arc<dyn QuorumCheck>,
         deadtime: Duration,
         check_timeout: Duration,
@@ -212,7 +209,7 @@ impl QuorumReadDebouncer {
     /// concurrent callers. The first caller arms the timer; subsequent callers
     /// ride the same batch. Bounded by `check_timeout` — a
     /// partition/permanently-missing upstream degrades to `QuorumReadTimeout`.
-    pub(in crate::learner) async fn sync_quorum(&self) -> Result<(), Error> {
+    pub async fn sync_quorum(&self) -> Result<(), Error> {
         let batch = DebounceBatch::from_debouncer(self);
         batch.execute().await
     }
@@ -323,10 +320,10 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use crate::tests::upstream;
-    use zslg_log_types::LogIndex;
-    use zslg_node_types::NodeId;
-    use zslg_time_types::Hlc;
+    use zslg_consensus::NodeId;
+    use zslg_consensus_fake::upstream;
+    use zslg_log::LogIndex;
+    use zslg_time::Hlc;
 
     use super::*;
 
@@ -447,7 +444,7 @@ mod tests {
         }
         fn subscribe_unstable(
             &self,
-        ) -> crossbeam_combinators::Channel<zslg_log_types::Data, crossbeam_combinators::Infinite>
+        ) -> crossbeam_combinators::Channel<zslg_log::Data, crossbeam_combinators::Infinite>
         {
             crossbeam_combinators::Channel::from_infinite(
                 crossbeam_channel::never(),

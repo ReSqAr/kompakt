@@ -70,7 +70,6 @@ pub(crate) const METRIC_PREFIX: &str = "zslg_";
 // ---------------------------------------------------------------------------
 
 const LABEL_STEP: &str = "step";
-const LABEL_SOURCE: &str = "source";
 const LABEL_REASON: &str = "reason";
 const LABEL_OUTCOME: &str = "outcome";
 const LABEL_PEER_ID: &str = "peer_id";
@@ -96,7 +95,6 @@ const LABEL_CF: &str = "cf";
 const ALL_LABEL_KEYS: &[&str] = &[
     LABEL_STATE,
     LABEL_STEP,
-    LABEL_SOURCE,
     LABEL_REASON,
     LABEL_OUTCOME,
     LABEL_PEER_ID,
@@ -374,43 +372,10 @@ metrics!("zslg_", hlc; {
 // ── read path / learner stores ───────────────────────────────────────────────
 
 metrics!("zslg_", read_path; {
-    custom  read_request READS_TOTAL "reads_total" Counter None
-        "Read requests served, by source (stable vs unstable).";
-    counter stable_read_resync STABLE_READ_RESYNCS_TOTAL
-        "stable_read_resyncs_total"
-        "Stable reads (`stable_tail` / `subscribe_stable_log`) that fell \
-         behind the append broadcast and re-entered historical replay from \
-         their own cursor. Benign by construction — the consumer sees no gap \
-         and no error, only latency — but a sustained rate means consumers \
-         are slower than the write rate or their subscriber queue \
-         (`stable_log_subscriber_queue_capacity`) is too shallow for the \
-         burst size, and each resync costs a re-scan of the durable log.";
-    counter unstable_read_resync UNSTABLE_READ_RESYNCS_TOTAL
-        "unstable_read_resyncs_total"
-        "Unstable-tail subscriptions (`subscribe_unstable_tail`) the local \
-         store's fan-out hung up on, which re-entered their cycle: re-read \
-         the watermark and rescan the whole unstable window. The consumer \
-         sees duplicates, never a gap. The under-pressure signal: a steadily \
-         rising rate means consumers cannot keep up with their queue depth \
-         and are paying an O(window) rescan each time.";
-    counter read_token_wait_timeout READ_TOKEN_WAIT_TIMEOUTS_TOTAL
-        "read_token_wait_timeouts_total"
-        "Read-token waits that hit their timeout.";
-    labeled_counter quorum_read QUORUM_READS_TOTAL "quorum_reads_total"
-        "Debounced quorum end_index reads by outcome."
-        (state: OpState) [LABEL_STATE => state.as_str()];
 });
 
 // ── read path / learner stores: hand-written emission helpers ───────────────
 // (custom rows above; each fn below emits the metrics named in its row)
-
-pub(crate) fn read_request(source: ReadSource) {
-    metrics::counter!(
-        READS_TOTAL,
-        LABEL_SOURCE => source.as_str(),
-    )
-    .increment(1);
-}
 
 // ── RPC server ───────────────────────────────────────────────────────────────
 
@@ -496,11 +461,6 @@ etc.)."] WriteRpcOutcome {
 // `log_index_frontier{log_type}`. Engine-level behavior is on the storage_* series.
 
 metrics!("zslg_", storage; {
-    custom  read_entry  READ_ENTRIES_TOTAL  "read_entries_total"  Counter None
-        "Entries streamed to readers, by the storage tier that served each \
-         (source=local_store|stable_log|object_store). Per-entry, unlike \
-         reads_total (per-request). object_store is non-zero only when a \
-         read reaches below the stable-log purge floor (design doc §794).";
     hist_duration replica_log_commit_elapsed REPLICA_LOG_COMMIT_SECONDS
         "replica_log_commit_seconds"
         "Segment-WAL append + fsync latency per replica-log flush batch \
@@ -606,18 +566,6 @@ metrics!("zslg_", storage; {
 // ── storage write paths: hand-written emission helpers ───────────────────────
 // (custom rows above; each fn below emits the metrics named in its row)
 
-/// One entry streamed to a reader, labeled by the storage tier that served it:
-/// `local_store` (unstable tail), `stable_log` (local stable range), or
-/// `object_store` (purged prefix re-streamed from a snapshot — design doc §794).
-/// Per-entry, unlike the per-request `reads_total`.
-pub(crate) fn read_entry(source: ReadEntrySource) {
-    metrics::counter!(
-        READ_ENTRIES_TOTAL,
-        LABEL_SOURCE => source.as_str(),
-    )
-    .increment(1);
-}
-
 pub(crate) fn replica_log_flushed() {
     set_gauge(REPLICA_LOG_LAST_FLUSH_TIMESTAMP_SECONDS, unix_now_secs());
 }
@@ -711,20 +659,6 @@ label_enum!(#[doc = "`step` label of [`SNAPSHOT_CREATION_DURATION_SECONDS`]."] S
     WriteObject => "write_object",
     Commit => "commit",
     Total => "total",
-});
-
-label_enum!(#[doc = "`source` label of [`READS_TOTAL`]."] ReadSource {
-    Stable => "stable",
-    /// The one-shot `unstable_tail` scan.
-    Unstable => "unstable",
-    /// A `subscribe_unstable_tail` subscription, counted once at the call.
-    UnstableSubscription => "unstable_subscription",
-});
-
-label_enum!(#[doc = "`source` label of [`READ_ENTRIES_TOTAL`]: which storage tier actually served a streamed entry. Distinct from [`ReadSource`], which is the per-request entry-point label; this one is per-entry and names the tier the data came from, so a single stable read that dips below the purge floor is attributed partly to `object_store` and partly to `stable_log`."] ReadEntrySource {
-    LocalStore => "local_store",
-    StableLog => "stable_log",
-    ObjectStore => "object_store",
 });
 
 label_enum!(#[doc = "`reason` label of the per-store flush-trigger counters: why a flush ran."] FlushTrigger {
@@ -895,9 +829,6 @@ metrics!("zslg_", probes; {
     probe   write_duration_probe WRITE_DURATION_SECONDS "write_duration_seconds"
         "End-to-end client write latency: fan-out start to quorum \
          resolution. Count per state doubles as the writes counter.";
-    probe   read_token_wait_probe READ_TOKEN_WAIT_DURATION_SECONDS
-        "read_token_wait_duration_seconds"
-        "Time read-your-writes tokens waited for the store to catch up.";
     probe   replica_log_append_probe REPLICA_LOG_APPEND_DURATION_SECONDS
         "replica_log_append_duration_seconds"
         "ReplicaLogStore::append latency by outcome (enqueue to durable + \
@@ -912,6 +843,8 @@ metrics!("zslg_", probes; {
 // ---------------------------------------------------------------------------
 
 const ALL_METRICS: &[&[MetricDef]] = &[
+    // --- reader (zslg-reader) ---
+    zslg_reader::metrics::METRICS,
     // --- replication subscriber (zslg-subscriber) ---
     zslg_subscriber::metrics::METRICS,
     // --- stable log (zslg-stable-log) ---

@@ -70,6 +70,7 @@ zslg-local-store = { workspace = true }
 zslg-stable-log = { workspace = true }
 zslg-stable-archive = { workspace = true }
 zslg-subscriber = { workspace = true }
+zslg-reader = { workspace = true }
 zslg-raft = { workspace = true }
 zslg-snapshot = { workspace = true }
 zslg-snapshot-types = { workspace = true }
@@ -77,6 +78,7 @@ zslg-time = { workspace = true }
 zslg-time-types = { workspace = true }
 
 [dev-dependencies]
+zslg-reader = { workspace = true, features = ["testing"] }
 zslg-local-store = { workspace = true, features = ["testing"] }
 zslg-log-fake = { workspace = true }
 zslg-raft-node = { workspace = true, features = ["testing"] }

@@ -4507,6 +4507,7 @@ dependencies = [
  "zslg-raft-state",
  "zslg-raft-storage",
  "zslg-raft-tracker",
+ "zslg-reader",
  "zslg-snapshot",
  "zslg-snapshot-types",
  "zslg-stable-archive",
@@ -5025,6 +5026,29 @@ dependencies = [
  "zslg-consensus-types",
  "zslg-net-types",
  "zslg-node-types",
+]
+
+[[package]]
+name = "zslg-reader"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "error-union",
+ "metrics-kit",
+ "parking_lot 0.13.0",
+ "tokio",
+ "tracing",
+ "zslg-consensus",
+ "zslg-consensus-fake",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-quorum-read",
+ "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
 ]
 
 [[package]]
