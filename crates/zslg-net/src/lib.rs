@@ -18,7 +18,7 @@ pub use liveness_probe::LivenessProbe;
 pub use peers::PeersWatcher;
 pub use replica_client::ReplicaClient;
 pub use router::Router;
-pub use zslg_net_types::{HostPort, NetError, PeerAddr, ServerName};
+pub use zslg_net_types::{HostPort, NetError, PeerAddr, ServerName, ToRpc};
 
 error_union! {
     /// What the ports of this crate can fail with. Holds every leaf error for

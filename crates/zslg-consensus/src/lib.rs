@@ -21,7 +21,14 @@ pub use raft_leadership::RaftLeadership;
 pub use raft_membership::{AddMemberOutcome, RaftMembership};
 pub use raft_state::{RaftStateTracker, RaftStateView};
 pub use state_replicator::StateReplicator;
-pub use zslg_consensus_types::ConsensusError;
+pub use zslg_consensus_types::{
+    CandidateInfo, ConsensusError, EvictionStatus, Exit, InvalidRaftState, RaftGeneration,
+    RaftLogIndex, RaftManifestState, RaftState, RaftStateError, RaftStateHandle, ReplicaMembership,
+    ReplicaStatus, ReplicatedRaftState, SpareSelectionStrategy, StaleStateWrite, SubscriptionEnded,
+    UnexpectedNodeId, all_targets, drain_satisfied, is_quorum, validate_cutoff_advance,
+    validate_replicated_state, validate_transition,
+};
+pub use zslg_node_types::NodeId;
 
 error_union! {
     /// What the ports of this crate can fail with. Holds every leaf error for

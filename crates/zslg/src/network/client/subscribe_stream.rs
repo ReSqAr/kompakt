@@ -14,11 +14,11 @@ use tokio_util::sync::CancellationToken;
 
 use crate::error::Error;
 use crate::network::client::{RpcClient, Target};
-use crate::network::framing::{TcpFrameStream, adopt_blocking};
-use crate::network::messages::SubscribeStreamItem;
 use crossbeam_combinators::{Channel, Feed, Infinite};
 use zslg_log_types::Data;
 use zslg_log_types::LogIndex;
+use zslg_net_wire::messages::SubscribeStreamItem;
+use zslg_net_wire::{TcpFrameStream, adopt_blocking};
 
 /// How long the reader waits for the consumer to make room before declaring it
 /// wedged and ending the connection.
@@ -90,7 +90,7 @@ pub(in crate::network) fn open_subscribe(
             let (blk_sink, blk_stream, raw) = match adopt_blocking(sink, stream) {
                 Ok(t) => t,
                 Err(e) => {
-                    let _ = out_tx.send(Err(e));
+                    let _ = out_tx.send(Err(e.into()));
                     return;
                 }
             };
@@ -179,7 +179,7 @@ fn subscribe_reader_loop(
         match decoded {
             Ok((item, drift)) => {
                 if let Some(drift_err) = drift {
-                    let _ = out.try_send(Err(drift_err));
+                    let _ = out.try_send(Err(drift_err.into()));
                     return;
                 }
                 if send_or_stall(&out, (item.source_index, item.record)).is_err() {
@@ -187,7 +187,7 @@ fn subscribe_reader_loop(
                 }
             }
             Err(e) => {
-                let _ = out.try_send(Err(e));
+                let _ = out.try_send(Err(e.into()));
                 return;
             }
         }
@@ -347,7 +347,7 @@ mod tests {
     }
 
     fn test_client_config() -> crate::network::client::RpcClientConfig {
-        let sopts = crate::network::tcp::SocketOpts::for_test();
+        let sopts = zslg_net_wire::tcp::SocketOpts::for_test();
         crate::network::client::RpcClientConfig {
             tcp_keepalive_interval: sopts.keepalive_interval,
             #[cfg(target_os = "linux")]

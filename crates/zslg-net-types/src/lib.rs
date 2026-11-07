@@ -168,3 +168,16 @@ pub enum NetError {
     #[error("rpc error: {0}")]
     Rpc(String),
 }
+
+/// Adapt any displayable error into [`NetError::Rpc`], prefixed with what was being done.
+pub trait ToRpc<T> {
+    /// # Errors
+    /// The original error, rendered into a [`NetError::Rpc`] with `context`.
+    fn to_rpc(self, context: &str) -> Result<T, NetError>;
+}
+
+impl<T, E: std::fmt::Display> ToRpc<T> for Result<T, E> {
+    fn to_rpc(self, context: &str) -> Result<T, NetError> {
+        self.map_err(|e| NetError::Rpc(format!("{context}: {e}")))
+    }
+}

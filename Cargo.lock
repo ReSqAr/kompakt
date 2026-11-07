@@ -4452,7 +4452,6 @@ dependencies = [
  "serde",
  "serde_json",
  "shutdown",
- "socket2",
  "tempfile",
  "tikv-jemalloc-ctl",
  "tikv-jemallocator",
@@ -4471,6 +4470,7 @@ dependencies = [
  "zslg-log-types",
  "zslg-net",
  "zslg-net-types",
+ "zslg-net-wire",
  "zslg-node-types",
  "zslg-raft",
  "zslg-raft-types",
@@ -4584,6 +4584,29 @@ dependencies = [
  "serde",
  "thiserror 2.0.21",
  "tokio",
+]
+
+[[package]]
+name = "zslg-net-wire"
+version = "0.1.0"
+dependencies = [
+ "bytesize",
+ "error-union",
+ "framing",
+ "futures",
+ "metrics-kit",
+ "openraft",
+ "postcard",
+ "serde",
+ "socket2",
+ "tokio",
+ "zslg-consensus",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
 ]
 
 [[package]]

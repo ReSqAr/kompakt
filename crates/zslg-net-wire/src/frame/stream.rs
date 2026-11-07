@@ -23,24 +23,26 @@
 //! default.
 
 use std::sync::Arc;
-use zslg_log_types::LogError;
-use zslg_net_types::NetError;
+use zslg_log::LogError;
+use zslg_net::NetError;
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::io::{AsyncRead, AsyncReadExt as _};
 
-use crate::error::{Error, ToCodec};
-use crate::network::messages::RpcEnvelope;
+use crate::Error;
+use crate::messages::RpcEnvelope;
 use framing::verify_frame_crc32;
-use zslg_node_types::NodeId;
+use zslg_consensus::NodeId;
+use zslg_consensus::{ConsensusError, UnexpectedNodeId};
+use zslg_log::ToCodec;
 use zslg_time::Clock;
 
 use super::{LEN_PREFIX, MAX_FRAME_LEN, READ_CHUNK, shrink_drained};
 
 /// Generic over the byte-stream read half — see
 /// [`FrameSink`](super::FrameSink).
-pub(in crate::network) struct FrameStream<R> {
+pub struct FrameStream<R> {
     read: R,
     /// Bytes read from `read`. Lives on the struct, not in the `next_frame_raw`
     /// future — that is what keeps `next_frame_raw` cancel-safe (see its docs).
@@ -62,11 +64,7 @@ pub(in crate::network) struct FrameStream<R> {
 
 impl<R> FrameStream<R> {
     #[must_use]
-    pub(in crate::network) fn new(
-        recv: R,
-        clock: Arc<dyn Clock>,
-        expected_node_id: Option<NodeId>,
-    ) -> Self {
+    pub fn new(recv: R, clock: Arc<dyn Clock>, expected_node_id: Option<NodeId>) -> Self {
         Self {
             read: recv,
             scratch: Vec::with_capacity(READ_CHUNK),
@@ -82,7 +80,7 @@ impl<R> FrameStream<R> {
     /// [`into_raw_parts`](Self::into_raw_parts)) must be replayed here or the
     /// first real frame is lost.
     #[must_use]
-    pub(in crate::network) fn new_with_prefill(
+    pub fn new_with_prefill(
         recv: R,
         clock: Arc<dyn Clock>,
         expected_node_id: Option<NodeId>,
@@ -101,7 +99,7 @@ impl<R> FrameStream<R> {
     /// expected_node_id)`. The remainder is the bytes read past the last returned
     /// frame — replay them via [`new_with_prefill`](Self::new_with_prefill) when
     /// handing a partially-read stream to another transport, or they are lost.
-    pub(in crate::network) fn into_raw_parts(self) -> (R, Vec<u8>, Arc<dyn Clock>, Option<NodeId>) {
+    pub fn into_raw_parts(self) -> (R, Vec<u8>, Arc<dyn Clock>, Option<NodeId>) {
         let remainder = self
             .scratch
             .get(self.consumed..)
@@ -196,7 +194,9 @@ impl<R> FrameStream<R> {
         if let (Some(expected), Some(actual)) = (self.expected_node_id, env.node_id)
             && actual != expected
         {
-            return Err(Error::unexpected_node_id(expected, actual));
+            return Err(Error::Consensus(ConsensusError::UnexpectedNodeId(
+                Box::new(UnexpectedNodeId { expected, actual }),
+            )));
         }
         // Absorb the peer HLC. On success the clock advances; on drift the error
         // is surfaced (clock not advanced) but the frame is still handed back.
@@ -218,7 +218,7 @@ impl<R: AsyncRead + Unpin + Send> FrameStream<R> {
     /// **Cancel safe** (`client/write_stream.rs`, `server/stream_handler.rs`
     /// await it in `select!` arms). Do not add a second await point, and do not
     /// park decoded state in a local.
-    pub(in crate::network) async fn next_frame_raw<T: Serialize + DeserializeOwned>(
+    pub async fn next_frame_raw<T: Serialize + DeserializeOwned>(
         &mut self,
     ) -> Option<Result<(T, Option<Error>), Error>> {
         loop {
@@ -251,7 +251,7 @@ impl<R: AsyncRead + Unpin + Send> FrameStream<R> {
     /// as fatal (subscribe, unary, server ingress).
     ///
     /// [`next_frame_raw`]: Self::next_frame_raw
-    pub(in crate::network) async fn next_frame<T: Serialize + DeserializeOwned>(
+    pub async fn next_frame<T: Serialize + DeserializeOwned>(
         &mut self,
     ) -> Option<Result<T, Error>> {
         match self.next_frame_raw::<T>().await {
@@ -267,7 +267,7 @@ impl<R: AsyncRead + Unpin + Send> FrameStream<R> {
 impl<R: std::io::Read> FrameStream<R> {
     /// Blocking [`next_frame_raw`](FrameStream::next_frame_raw). Nothing to be
     /// cancel-safe against — one thread owns this stream and blocks in `read`.
-    pub(in crate::network) fn next_frame_raw_blocking<T: Serialize + DeserializeOwned>(
+    pub fn next_frame_raw_blocking<T: Serialize + DeserializeOwned>(
         &mut self,
     ) -> Option<Result<(T, Option<Error>), Error>> {
         loop {

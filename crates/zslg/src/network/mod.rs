@@ -28,10 +28,6 @@ mod router;
 mod server;
 mod transport;
 
-mod framing;
-mod messages;
-mod tcp;
-
 use std::sync::Arc;
 use zslg_net::{ReplicaClient, Router};
 
@@ -44,13 +40,13 @@ pub(crate) use crate::network::client::RpcClientConfig;
 use crate::network::server::DispatchHandler;
 use crate::network::server::RpcServer;
 pub(crate) use crate::network::server::RpcServerConfig;
-pub(crate) use crate::network::tcp::SocketOpts;
 pub(crate) use peers::PeersMembershipGate;
 #[cfg(test)]
 pub(crate) use peers::permissive_gate;
 pub(crate) use peers::static_peers;
 pub(crate) use router::{LocalReplicaClient, PeerRouter, RemoteRouter};
 use shutdown::Shutdown;
+pub(crate) use zslg_net_wire::tcp::SocketOpts;
 use zslg_time::Clock;
 
 /// Build an outbound [`Router`] from the client tuning config. The `RpcClient`

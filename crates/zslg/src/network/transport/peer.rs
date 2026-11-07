@@ -19,9 +19,6 @@ use zslg_raft::RaftTransport;
 
 use crate::error::Error;
 use crate::network::client::{RpcClient, Target};
-use crate::network::messages::{
-    RpcFrame, RpcRaftFrame, RpcRaftRequest, RpcReplicaFrame, RpcReplicaRequest, RpcRequest,
-};
 use async_trait::async_trait;
 use crossbeam_combinators::Channel;
 use futures::StreamExt;
@@ -35,6 +32,9 @@ use zslg_consensus_types::ReplicaStatus;
 use zslg_log::{Replica, StampedWrite, WriteOutcome};
 use zslg_log_types::LogIndex;
 use zslg_net_types::PeerAddr;
+use zslg_net_wire::messages::{
+    RpcFrame, RpcRaftFrame, RpcRaftRequest, RpcReplicaFrame, RpcReplicaRequest, RpcRequest,
+};
 use zslg_node_types::NodeId;
 use zslg_raft_types::TypeConfig;
 /// Per-peer typed transport over [`RpcClient`]. The peer is addressed either by
@@ -212,14 +212,14 @@ impl Replica for TcpPeerClient {
                         Some(Ok(RpcFrame::Replica(RpcReplicaFrame::StatusItem { status }))) => {
                             Some((Ok(status), (fs, false)))
                         }
-                        Some(Ok(RpcFrame::Error(e))) => Some((Err(e), (fs, true))),
+                        Some(Ok(RpcFrame::Error(e))) => Some((Err(e.into()), (fs, true))),
                         Some(Ok(other)) => Some((
                             Err(Error::Net(NetError::Rpc(format!(
                                 "unexpected frame in subscribe_status: {other:?}"
                             )))),
                             (fs, true),
                         )),
-                        Some(Err(e)) => Some((Err(e), (fs, true))),
+                        Some(Err(e)) => Some((Err(e.into()), (fs, true))),
                     }
                 });
 

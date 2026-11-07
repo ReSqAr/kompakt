@@ -34,13 +34,13 @@ use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use crate::error::{Error, Home};
-use crate::network::framing::{
-    AsyncFrameSink, AsyncFrameStream, TcpFrameSink, TcpFrameStream, adopt_blocking,
-};
-use crate::network::messages::{RpcReplicaRequest, RpcRequest, WriteOutcome, WriteStreamResponse};
 use crossbeam_combinators::{AbortReason, Channel};
 use zslg_log::StampedWrite;
 use zslg_log_types::LogIndex;
+use zslg_net_wire::messages::{RpcReplicaRequest, RpcRequest, WriteOutcome, WriteStreamResponse};
+use zslg_net_wire::{
+    AsyncFrameSink, AsyncFrameStream, TcpFrameSink, TcpFrameStream, adopt_blocking,
+};
 
 /// In-flight window between the socket reader and the replica's write pipeline.
 /// Backpressure, not buffering: a peer that outruns the replica's flush loop
@@ -117,7 +117,7 @@ fn reader_loop(
                     Some(drift_err) => drift_tx
                         .send(Ok(zslg_log::WriteOutcome::Failed {
                             data_id: data.data_id,
-                            error: drift_err.into(),
+                            error: Error::from(drift_err).into(),
                         }))
                         .is_ok(),
                     None => data_tx.send(StampedWrite::now(*data)).is_ok(),
@@ -184,14 +184,14 @@ fn outcome_to_response(outcome: zslg_log::WriteOutcome) -> WriteStreamResponse {
         } => WriteStreamResponse {
             data_id,
             outcome: WriteOutcome::Rejected {
-                error: error.into(),
+                error: zslg_net_wire::Error::from(Error::from(error)),
                 raft_state,
             },
         },
         zslg_log::WriteOutcome::Failed { data_id, error } => WriteStreamResponse {
             data_id,
             outcome: WriteOutcome::Failed {
-                error: error.into(),
+                error: zslg_net_wire::Error::from(Error::from(error)),
             },
         },
     }
@@ -264,7 +264,7 @@ fn subscribe_writer_loop(mut sink: TcpFrameSink, mut items: zslg_log::ReplicaStr
                 Err(_) => return,
             };
             if sink
-                .feed_blocking(crate::network::messages::SubscribeStreamItem {
+                .feed_blocking(zslg_net_wire::messages::SubscribeStreamItem {
                     source_index: idx,
                     record,
                 })

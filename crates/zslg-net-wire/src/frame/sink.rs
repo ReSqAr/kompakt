@@ -11,7 +11,7 @@
 //! would desynchronize the peer's stream permanently.
 
 use std::sync::Arc;
-use zslg_log_types::LogError;
+use zslg_log::LogError;
 
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
@@ -19,10 +19,12 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::io::{AsyncWrite, AsyncWriteExt as _};
 
-use crate::error::{Error, ToCodec, ToRpc};
-use crate::network::messages::RpcEnvelope;
+use crate::Error;
+use crate::messages::RpcEnvelope;
 use framing::append_crc32_from;
-use zslg_node_types::NodeId;
+use zslg_consensus::NodeId;
+use zslg_log::ToCodec;
+use zslg_net::ToRpc;
 use zslg_time::Clock;
 
 use super::{BACKPRESSURE_BOUNDARY, LEN_PREFIX, MAX_FRAME_LEN, shrink_drained};
@@ -58,7 +60,7 @@ impl postcard::ser_flavors::Flavor for VecFlavor<'_> {
 /// above it) is transport-agnostic; the default type parameter names the
 /// transport actually in use (a plain-TCP write half), so call sites just say
 /// `FrameSink`.
-pub(in crate::network) struct FrameSink<W> {
+pub struct FrameSink<W> {
     write: W,
     /// Frames fed but not yet written to `write`. Reused across frames, so the
     /// steady state allocates nothing per frame: this side only appends, then
@@ -72,7 +74,7 @@ pub(in crate::network) struct FrameSink<W> {
 
 impl<W> FrameSink<W> {
     #[must_use]
-    pub(in crate::network) fn new(send: W, clock: Arc<dyn Clock>, node_id: Option<NodeId>) -> Self {
+    pub fn new(send: W, clock: Arc<dyn Clock>, node_id: Option<NodeId>) -> Self {
         Self {
             write: send,
             pending: Vec::with_capacity(BACKPRESSURE_BOUNDARY),
@@ -129,7 +131,7 @@ impl<W> FrameSink<W> {
     /// be handed to another transport (e.g. reuniting the split halves of a TCP
     /// connection into a blocking `std::net::TcpStream` after the handshake).
     /// Any buffered `pending` frames are dropped — call only on a flushed sink.
-    pub(in crate::network) fn into_raw_parts(self) -> (W, Arc<dyn Clock>, Option<NodeId>) {
+    pub fn into_raw_parts(self) -> (W, Arc<dyn Clock>, Option<NodeId>) {
         let Self {
             write,
             pending: _,
@@ -143,10 +145,7 @@ impl<W> FrameSink<W> {
 impl<W: AsyncWrite + Unpin + Send> FrameSink<W> {
     /// Buffer one frame without flushing. Use [`send`](Self::send) when a single
     /// frame must reach the peer immediately.
-    pub(in crate::network) async fn feed<T: Serialize + DeserializeOwned>(
-        &mut self,
-        value: T,
-    ) -> Result<(), Error> {
+    pub async fn feed<T: Serialize + DeserializeOwned>(&mut self, value: T) -> Result<(), Error> {
         if self.encode_into_pending(value)? {
             self.flush().await?;
         }
@@ -154,7 +153,7 @@ impl<W: AsyncWrite + Unpin + Send> FrameSink<W> {
     }
 
     /// Flush all buffered (`feed`) frames to the underlying stream.
-    pub(in crate::network) async fn flush(&mut self) -> Result<(), Error> {
+    pub async fn flush(&mut self) -> Result<(), Error> {
         if !self.pending.is_empty() {
             self.write
                 .write_all(&self.pending)
@@ -177,7 +176,7 @@ impl<W: AsyncWrite + Unpin + Send> FrameSink<W> {
     /// (`server/handlers.rs`) already sit near the `large_stack_frames` bar with
     /// an `RpcFrame` live across the await. Inlining this future pushes three of
     /// them over it.
-    pub(in crate::network) fn send<'a, T: Serialize + DeserializeOwned + Send + 'a>(
+    pub fn send<'a, T: Serialize + DeserializeOwned + Send + 'a>(
         &'a mut self,
         value: T,
     ) -> BoxFuture<'a, Result<(), Error>> {
@@ -193,10 +192,7 @@ impl<W: AsyncWrite + Unpin + Send> FrameSink<W> {
 /// `std::net::TcpStream` — the writer→replica hot path.
 impl<W: std::io::Write> FrameSink<W> {
     /// Blocking [`feed`](FrameSink::feed).
-    pub(in crate::network) fn feed_blocking<T: Serialize>(
-        &mut self,
-        value: T,
-    ) -> Result<(), Error> {
+    pub fn feed_blocking<T: Serialize>(&mut self, value: T) -> Result<(), Error> {
         if self.encode_into_pending(value)? {
             self.flush_blocking()?;
         }
@@ -204,7 +200,7 @@ impl<W: std::io::Write> FrameSink<W> {
     }
 
     /// Blocking [`flush`](FrameSink::flush).
-    pub(in crate::network) fn flush_blocking(&mut self) -> Result<(), Error> {
+    pub fn flush_blocking(&mut self) -> Result<(), Error> {
         if !self.pending.is_empty() {
             self.write.write_all(&self.pending).to_rpc("stream write")?;
             self.pending.clear();

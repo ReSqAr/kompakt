@@ -47,16 +47,16 @@ use tracing::debug;
 use crate::ByteSize;
 use crate::error::Error;
 use crate::metrics::OpState;
-use crate::network::framing::{AsyncFrameSink, AsyncFrameStream};
-use crate::network::messages::{
-    RpcFrame, RpcRaftFrame, RpcRaftRequest, RpcReplicaFrame, RpcReplicaRequest, RpcRequest,
-    RpcStreamKind,
-};
-use crate::network::tcp::{self, SocketOpts};
 use crossbeam_combinators::Channel;
 use zslg_log::{StampedWrite, WriteOutcome};
 use zslg_log_types::LogIndex;
 use zslg_net_types::PeerAddr;
+use zslg_net_wire::messages::{
+    RpcFrame, RpcRaftFrame, RpcRaftRequest, RpcReplicaFrame, RpcReplicaRequest, RpcRequest,
+    RpcStreamKind,
+};
+use zslg_net_wire::tcp::{self, SocketOpts};
+use zslg_net_wire::{AsyncFrameSink, AsyncFrameStream};
 use zslg_node_types::NodeId;
 use zslg_time::Clock;
 
@@ -211,7 +211,7 @@ impl UnaryConn {
         self.sink.send(request).await?;
         match self.stream.next_frame::<RpcFrame>().await {
             Some(Ok(frame)) => Ok(frame),
-            Some(Err(e)) => Err(e),
+            Some(Err(e)) => Err(e.into()),
             None => Err(Error::Net(NetError::Rpc(
                 "stream closed without response".into(),
             ))),
@@ -504,7 +504,7 @@ impl RpcClient {
             .await?
         {
             RpcFrame::Replica(frame) => Ok(frame),
-            RpcFrame::Error(e) => Err(e),
+            RpcFrame::Error(e) => Err(e.into()),
             other => Err(Error::Net(NetError::Rpc(format!(
                 "unexpected frame in replica response from {target:?}: {other:?}"
             )))),
@@ -523,7 +523,7 @@ impl RpcClient {
             .await?
         {
             RpcFrame::Raft(frame) => Ok(frame),
-            RpcFrame::Error(e) => Err(e),
+            RpcFrame::Error(e) => Err(e.into()),
             other => Err(Error::Net(NetError::Rpc(format!(
                 "unexpected frame in raft response from {target:?}: {other:?}"
             )))),
@@ -537,7 +537,7 @@ impl RpcClient {
             .await?
         {
             RpcFrame::Echo => Ok(()),
-            RpcFrame::Error(e) => Err(e),
+            RpcFrame::Error(e) => Err(e.into()),
             other => Err(Error::Net(NetError::Rpc(format!(
                 "echo: unexpected frame {other:?}"
             )))),

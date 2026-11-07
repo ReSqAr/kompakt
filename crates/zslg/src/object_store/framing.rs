@@ -31,8 +31,9 @@ use zslg_snapshot_types::SnapshotError;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::error::{Error, ToCodec};
+use crate::error::Error;
 use framing::{append_crc32, verify_frame_crc32};
+use zslg_log_types::ToCodec;
 use zslg_snapshot_types::CompressionLevel;
 
 const MAGIC: [u8; 4] = *b"SNZC";

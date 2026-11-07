@@ -774,20 +774,6 @@ metrics!("zslg_", rpc_server; {
         "Open TCP connections on the RPC server (unary keep-alive \
          connections + persistent write/subscribe connections)."
         (count: u64);
-    labeled_counter rpc_connect_failed RPC_CONNECT_FAILED_TOTAL
-        "rpc_connect_failed_total"
-        "Failed outbound dials by reason. \"refused\" = the host answered \
-         but nothing is listening (peer down, or its accept loop is \
-         dead). \"local_fd_exhausted\" = EMFILE/ENFILE — OUR resource \
-         exhaustion, not a peer fault, and every dial fails until fds are \
-         released. \"reset\" = established then torn down, typically the \
-         peer's accept backlog overflowing. \"timeout\" = no answer \
-         within connect_timeout (wedged peer or blackholed route). \
-         \"dns\" = resolution failed, no socket was ever attempted. \
-         \"unreachable\" = no route. A sustained non-zero rate with a \
-         live peer means connections cannot be re-established at all — \
-         distinct from, and far more serious than, streams that end."
-        (reason: ConnectFailure) [LABEL_REASON => reason.as_str()];
     counter raft_log_read_empty_range RAFT_LOG_READ_EMPTY_RANGE_TOTAL
         "raft_log_read_empty_range_total"
         "Raft-log reads for a non-empty index range that returned no \
@@ -798,15 +784,6 @@ metrics!("zslg_", rpc_server; {
          falls back to snapshot replication. Non-zero therefore means \
          that fallback is being exercised — a follower fell behind the \
          purge floor — not that anything crashed.";
-    labeled_counter rpc_accept_failed RPC_ACCEPT_FAILED_TOTAL
-        "rpc_accept_failed_total"
-        "Failed accept() calls on the RPC server, same `reason` \
-         vocabulary as rpc_connect_failed_total. The server-side half of \
-         a connectivity failure: peers reporting \"refused\"/\"reset\" \
-         while this counter climbs locates the fault on THIS node. \
-         \"local_fd_exhausted\" additionally means the accept loop is \
-         hot-spinning, since it retries immediately on error."
-        (reason: ConnectFailure) [LABEL_REASON => reason.as_str()];
 });
 
 // ── RPC server: hand-written emission helpers ────────────────────────────────
@@ -827,51 +804,6 @@ pub(crate) fn rpc_server_request_duration(method: &'static str, elapsed: Duratio
         LABEL_METHOD => method,
     )
     .record(elapsed);
-}
-
-label_enum!(#[doc = "`reason` label of [`RPC_CONNECT_FAILED_TOTAL`]. Bounded by \
-construction: every `std::io::Error` maps into exactly one of these."] ConnectFailure {
-    /// The connect did not complete within `connect_timeout`. Peer alive but
-    /// wedged, or a blackholed route (no RST comes back).
-    Timeout => "timeout",
-    /// DNS resolution failed — we never got as far as a socket.
-    Dns => "dns",
-    /// `ECONNREFUSED`: the host answered, nothing is listening on the port.
-    /// The peer's accept loop is dead or the process is down.
-    Refused => "refused",
-    /// `EMFILE`/`ENFILE`: **we** ran out of file descriptors. A local resource
-    /// exhaustion, not a peer fault — every dial fails until fds are released.
-    LocalFdExhausted => "local_fd_exhausted",
-    /// `ECONNRESET`/`ECONNABORTED`: the connection was established and then
-    /// torn down. Typically the peer's accept backlog overflowed.
-    Reset => "reset",
-    /// `EHOSTUNREACH`/`ENETUNREACH`/`ENETDOWN`: no route.
-    Unreachable => "unreachable",
-    /// Anything else. A non-trivial rate here means this enum needs another arm.
-    Other => "other",
-});
-
-impl ConnectFailure {
-    /// Classify a connect `io::Error`. `ErrorKind` covers most cases on stable;
-    /// fd exhaustion still has no stable `ErrorKind`, so it is matched on the
-    /// raw errno (EMFILE 24 / ENFILE 23 on Linux and macOS alike) — and it is
-    /// worth the special case, because it is the one failure that is *ours*.
-    #[must_use]
-    pub(crate) fn classify(e: &std::io::Error) -> Self {
-        use std::io::ErrorKind as K;
-        const EMFILE: i32 = 24;
-        const ENFILE: i32 = 23;
-        if matches!(e.raw_os_error(), Some(EMFILE | ENFILE)) {
-            return Self::LocalFdExhausted;
-        }
-        match e.kind() {
-            K::ConnectionRefused => Self::Refused,
-            K::ConnectionReset | K::ConnectionAborted => Self::Reset,
-            K::HostUnreachable | K::NetworkUnreachable | K::NetworkDown => Self::Unreachable,
-            K::TimedOut => Self::Timeout,
-            _ => Self::Other,
-        }
-    }
 }
 
 // ── RPC client (writer/learner outbound; async-path investigation) ───────────
@@ -1513,9 +1445,6 @@ pub(crate) fn jemalloc_stats(s: &JemallocStats) {
 // (`object_store_request_probe`, `rpc_conn_reuse`) are hand-written below.
 
 metrics!("zslg_", probes; {
-    probe_unlabeled rpc_dns_resolve_probe RPC_DNS_RESOLVE_SECONDS "rpc_dns_resolve_seconds"
-        "DNS resolution time inside a dial. Called on every connect / \
-         reconnect; slow = resolver issue or DNS server unreachable.";
     probe_unlabeled raft_log_append_probe RAFT_LOG_APPEND_DURATION_SECONDS
         "raft_log_append_duration_seconds"
         "Raft append_to_log latency (encode + batch + commit + fsync). \
@@ -1661,6 +1590,8 @@ impl Drop for RpcServerGuard {
 // ---------------------------------------------------------------------------
 
 const ALL_METRICS: &[&[MetricDef]] = &[
+    // --- RPC wire (zslg-net-wire) ---
+    zslg_net_wire::metrics::METRICS,
     // --- storage memory budget (namespaced) ---
     &storage_budget!(),
     // --- process resource gauges (unprefixed: Prometheus standard) ---
@@ -2145,14 +2076,21 @@ mod registry_golden {
     const GOLDEN_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/metrics.golden");
 
     fn dump() -> String {
-        let mut out = String::new();
-        for def in ALL_METRICS.iter().copied().flatten() {
-            out.push_str(&format!(
-                "{}\t{:?}\t{:?}\t{}\n",
-                def.name, def.kind, def.unit, def.help
-            ));
-        }
-        out
+        // Sorted: which crate declares a metric (and so the registry order) is
+        // not part of the contract; the set is.
+        let mut lines: Vec<String> = ALL_METRICS
+            .iter()
+            .copied()
+            .flatten()
+            .map(|def| {
+                format!(
+                    "{}\t{:?}\t{:?}\t{}\n",
+                    def.name, def.kind, def.unit, def.help
+                )
+            })
+            .collect();
+        lines.sort();
+        lines.concat()
     }
 
     /// The exported metric set — names, kinds, units and help text — is a

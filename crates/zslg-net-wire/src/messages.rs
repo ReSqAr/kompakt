@@ -40,27 +40,27 @@ use openraft::raft::{
 };
 use serde::{Deserialize, Serialize};
 
-use zslg_consensus_types::{RaftState, ReplicaStatus};
-use zslg_log_types::Data;
-use zslg_log_types::{DataId, LogIndex};
-use zslg_net_types::PeerAddr;
-use zslg_node_types::NodeId;
-use zslg_raft_types::TypeConfig;
-use zslg_time_types::Hlc;
+use zslg_consensus::NodeId;
+use zslg_consensus::{RaftState, ReplicaStatus};
+use zslg_log::Data;
+use zslg_log::{DataId, LogIndex};
+use zslg_net::PeerAddr;
+use zslg_raft::TypeConfig;
+use zslg_time::Hlc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(in crate::network) struct RpcEnvelope<T> {
-    pub(in crate::network) hlc: Hlc,
+pub struct RpcEnvelope<T> {
+    pub hlc: Hlc,
     /// Node ID of the intended recipient. `None` is used when the
     /// caller does not yet know the target's identity (e.g. initial
     /// join via a direct-by-address connect); the receiver skips
     /// verification in that case.
-    pub(in crate::network) node_id: Option<NodeId>,
-    pub(in crate::network) inner: T,
+    pub node_id: Option<NodeId>,
+    pub inner: T,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(in crate::network) enum RpcReplicaRequest {
+pub enum RpcReplicaRequest {
     Write { data: Box<Data> },
     FetchStatus,
     SubscribeStatus,
@@ -68,7 +68,7 @@ pub(in crate::network) enum RpcReplicaRequest {
 
 impl RpcReplicaRequest {
     #[must_use]
-    pub(in crate::network) fn kind(&self) -> &'static str {
+    pub fn kind(&self) -> &'static str {
         match self {
             Self::Write { .. } => "ReplicaWrite",
             Self::FetchStatus => "ReplicaFetchStatus",
@@ -78,7 +78,7 @@ impl RpcReplicaRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(in crate::network) enum RpcRaftRequest {
+pub enum RpcRaftRequest {
     AppendEntries {
         request: AppendEntriesRequest<TypeConfig>,
     },
@@ -96,7 +96,7 @@ pub(in crate::network) enum RpcRaftRequest {
 
 impl RpcRaftRequest {
     #[must_use]
-    pub(in crate::network) fn kind(&self) -> &'static str {
+    pub fn kind(&self) -> &'static str {
         match self {
             Self::AppendEntries { .. } => "RaftAppendEntries",
             Self::Vote { .. } => "RaftVote",
@@ -109,7 +109,7 @@ impl RpcRaftRequest {
 /// Which persistent handler a `Stream` handshake selects. Always the first frame
 /// on a long-lived connection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(in crate::network) enum RpcStreamKind {
+pub enum RpcStreamKind {
     /// The persistent per-peer write stream (`client::write_stream` /
     /// `server::stream_handler`).
     ReplicaWrite,
@@ -120,7 +120,7 @@ pub(in crate::network) enum RpcStreamKind {
 
 impl RpcStreamKind {
     #[must_use]
-    pub(in crate::network) fn kind(&self) -> &'static str {
+    pub fn kind(&self) -> &'static str {
         match self {
             Self::ReplicaWrite => "ReplicaWriteStream",
             Self::ReplicaSubscribe { .. } => "ReplicaSubscribeStream",
@@ -129,7 +129,7 @@ impl RpcStreamKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(in crate::network) enum RpcRequest {
+pub enum RpcRequest {
     #[doc(hidden)]
     Reserved,
 
@@ -144,7 +144,7 @@ pub(in crate::network) enum RpcRequest {
 
 impl RpcRequest {
     #[must_use]
-    pub(in crate::network) fn kind(&self) -> &'static str {
+    pub fn kind(&self) -> &'static str {
         match self {
             Self::Reserved => "Reserved",
             Self::Echo => "Echo",
@@ -158,31 +158,31 @@ impl RpcRequest {
 /// Outcome of one replica write. The wire form of
 /// [`zslg_log::WriteOutcome`](zslg_log::WriteOutcome), mapped 1:1.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(in crate::network) enum WriteOutcome {
+pub enum WriteOutcome {
     /// Accepted by this replica, with its Raft state at accept time.
     Accepted { raft_state: RaftState },
     /// Rejected, with the state the writer needs for generation tracking
     /// (CLAUDE.md §9).
     Rejected {
-        error: crate::error::Error,
+        error: crate::Error,
         raft_state: RaftState,
     },
     /// Rejected *and* `fetch_status` failed too, so there is no state to report
     /// — rare, since `fetch_status` is a local call. The fan-out treats it as
     /// unreachable and takes the fresh generation from another replica.
-    Failed { error: crate::error::Error },
+    Failed { error: crate::Error },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(in crate::network) enum RpcReplicaFrame {
+pub enum RpcReplicaFrame {
     FetchStatus { status: ReplicaStatus },
     StatusItem { status: ReplicaStatus },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(in crate::network) struct SubscribeStreamItem {
-    pub(in crate::network) source_index: LogIndex,
-    pub(in crate::network) record: Data,
+pub struct SubscribeStreamItem {
+    pub source_index: LogIndex,
+    pub record: Data,
 }
 
 /// One response on a write stream. Its own type rather than an [`RpcFrame`]
@@ -190,13 +190,13 @@ pub(in crate::network) struct SubscribeStreamItem {
 /// correlates by id, and there is no representable frame it would have to treat
 /// as a protocol break.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(in crate::network) struct WriteStreamResponse {
-    pub(in crate::network) data_id: DataId,
-    pub(in crate::network) outcome: WriteOutcome,
+pub struct WriteStreamResponse {
+    pub data_id: DataId,
+    pub outcome: WriteOutcome,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub(in crate::network) enum RpcRaftFrame {
+pub enum RpcRaftFrame {
     AppendEntries {
         response: Result<AppendEntriesResponse<NodeId>, RaftError<NodeId>>,
     },
@@ -213,13 +213,13 @@ pub(in crate::network) enum RpcRaftFrame {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub(in crate::network) enum RpcFrame {
+pub enum RpcFrame {
     #[doc(hidden)]
     Reserved,
 
     /// A failed RPC. The crate error type travels the wire directly and is
     /// reconstructed exactly on the caller side (no lossy translation layer).
-    Error(crate::error::Error),
+    Error(crate::Error),
 
     Echo,
 

@@ -2,8 +2,9 @@
 //! connection make it: the client at `open_write`, the server at `run_write`.
 //! Doing it twice would risk the two halves disagreeing about the read-ahead.
 
-use crate::error::{Error, ToRpc};
-use zslg_net_types::NetError;
+use crate::Error;
+use zslg_net::NetError;
+use zslg_net::ToRpc;
 
 use super::{AsyncFrameSink, AsyncFrameStream, TcpFrameSink, TcpFrameStream};
 
@@ -14,7 +15,7 @@ use super::{AsyncFrameSink, AsyncFrameStream, TcpFrameSink, TcpFrameStream};
 ///
 /// Whatever the async reader buffered past the handshake is replayed into the
 /// blocking stream; dropping it would lose the first real frame.
-pub(in crate::network) fn adopt_blocking(
+pub fn adopt_blocking(
     sink: AsyncFrameSink,
     stream: AsyncFrameStream,
 ) -> Result<(TcpFrameSink, TcpFrameStream, std::net::TcpStream), Error> {

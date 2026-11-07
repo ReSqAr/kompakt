@@ -35,7 +35,7 @@ impl RemoteRouter {
         clock: Arc<dyn zslg_time::Clock>,
         unary_timeout: std::time::Duration,
     ) -> Self {
-        let sopts = crate::network::tcp::SocketOpts::for_test();
+        let sopts = zslg_net_wire::tcp::SocketOpts::for_test();
         Self::new(RpcClient::new(
             clock,
             crate::network::client::RpcClientConfig {

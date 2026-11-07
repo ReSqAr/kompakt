@@ -12,9 +12,7 @@
 
 use error_union::error_union;
 use serde::{Deserialize, Serialize};
-use zslg_consensus_types::{
-    ConsensusError, InvalidRaftState, StaleStateWrite, SubscriptionEnded, UnexpectedNodeId,
-};
+use zslg_consensus_types::{ConsensusError, InvalidRaftState, StaleStateWrite, SubscriptionEnded};
 use zslg_lifecycle_types::{ConfigError, LifecycleError};
 use zslg_log_types::LogError;
 use zslg_net_types::NetError;
@@ -46,6 +44,7 @@ error_union! {
     from zslg_consensus::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_raft::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_net::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_net_wire::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
 }
 
 /// Bring a value that carries a port crate's error back to zslg's own `Error`:
@@ -119,7 +118,8 @@ port_error_bridge!(
     zslg_snapshot::Error,
     zslg_consensus::Error,
     zslg_raft::Error,
-    zslg_net::Error
+    zslg_net::Error,
+    zslg_net_wire::Error
 );
 
 // ── Boxed variant payloads ────────────────────────────────────────────────────
@@ -143,14 +143,6 @@ port_error_bridge!(
 // is `#[error(transparent)]`, so error text is unchanged.
 
 impl Error {
-    /// Build [`Error::UnexpectedNodeId`].
-    #[must_use]
-    pub(crate) fn unexpected_node_id(expected: NodeId, actual: NodeId) -> Self {
-        Self::Consensus(ConsensusError::UnexpectedNodeId(Box::new(
-            UnexpectedNodeId { expected, actual },
-        )))
-    }
-
     /// Build [`Error::StaleStateWrite`].
     #[must_use]
     pub(crate) fn stale_state_write(
@@ -288,16 +280,6 @@ impl From<bytesize::OutOfRange> for Error {
     }
 }
 
-pub(crate) trait ToRpc<T> {
-    fn to_rpc(self, context: &str) -> Result<T, NetError>;
-}
-
-impl<T, E: std::fmt::Display> ToRpc<T> for Result<T, E> {
-    fn to_rpc(self, context: &str) -> Result<T, NetError> {
-        self.map_err(|e| NetError::Rpc(format!("{context}: {e}")))
-    }
-}
-
 pub(crate) trait ToStorage<T> {
     fn to_storage(self, context: &str) -> Result<T, LogError>;
 }
@@ -318,16 +300,6 @@ impl<T, E: std::fmt::Display> ToRaft<T> for Result<T, E> {
     }
 }
 
-pub(crate) trait ToCodec<T> {
-    fn to_codec(self, context: &str) -> Result<T, LogError>;
-}
-
-impl<T, E: std::fmt::Display> ToCodec<T> for Result<T, E> {
-    fn to_codec(self, context: &str) -> Result<T, LogError> {
-        self.map_err(|e| LogError::Codec(format!("{context}: {e}")))
-    }
-}
-
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -338,6 +310,7 @@ impl<T, E: std::fmt::Display> ToCodec<T> for Result<T, E> {
 )]
 mod tests {
     use super::*;
+    use zslg_net_types::ToRpc as _;
 
     /// `Error` rides in every streamed channel item — a `Channel<Result<T, Error>>`
     /// ring pre-allocates `capacity` slots, so the *error* arm sets the slot

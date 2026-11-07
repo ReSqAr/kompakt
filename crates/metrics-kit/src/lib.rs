@@ -63,8 +63,11 @@ macro_rules! unit {
 /// a `&[&[MetricDef]]` — see the assembly step).
 #[macro_export]
 macro_rules! metrics {
+    (pub $prefix:literal, $group:ident; { $($row:tt)* }) => {
+        $crate::metrics_impl!(pub, $group, $prefix, [], $($row)*);
+    };
     ($prefix:literal, $group:ident; { $($row:tt)* }) => {
-        $crate::metrics_impl!($group, $prefix, [], $($row)*);
+        $crate::metrics_impl!(pub(crate), $group, $prefix, [], $($row)*);
     };
 }
 
@@ -76,95 +79,95 @@ macro_rules! metrics {
 #[macro_export]
 macro_rules! metrics_impl {
     // base case: emit the group's `[MetricDef; N]` array as a zero-arg macro
-    ($group:ident, $prefix:literal, [$($defs:tt),*] $(,)?) => {
+    ($vis:vis, $group:ident, $prefix:literal, [$($defs:tt),*] $(,)?) => {
         macro_rules! $group { () => { [ $($defs),* ] } }
     };
 
     // gauge:   set_gauge(CONST, v)                    arg u64,  unit required
-    ($group:ident, $prefix:literal, [$($defs:tt),*], gauge $fn:ident $const:ident $name:literal $unit:tt $help:literal ($arg:ident: u64); $($rest:tt)*) => {
-        pub(crate) const $const: &str = concat!($prefix, $name);
+    ($vis:vis, $group:ident, $prefix:literal, [$($defs:tt),*], gauge $fn:ident $const:ident $name:literal $unit:tt $help:literal ($arg:ident: u64); $($rest:tt)*) => {
+        $vis const $const: &str = concat!($prefix, $name);
         #[doc = $help]
-        pub(crate) fn $fn($arg: u64) { $crate::set_gauge($const, $arg); }
-        $crate::metrics_impl!($group, $prefix, [$($defs,)* ($crate::MetricDef { name: $const, kind: $crate::MetricKind::Gauge, unit: $crate::unit!($unit), help: $help })], $($rest)*);
+        $vis fn $fn($arg: u64) { $crate::set_gauge($const, $arg); }
+        $crate::metrics_impl!($vis, $group, $prefix, [$($defs,)* ($crate::MetricDef { name: $const, kind: $crate::MetricKind::Gauge, unit: $crate::unit!($unit), help: $help })], $($rest)*);
     };
 
     // flag:    set_flag(CONST, on)                    arg bool, no unit
-    ($group:ident, $prefix:literal, [$($defs:tt),*], flag $fn:ident $const:ident $name:literal $help:literal ($arg:ident: bool); $($rest:tt)*) => {
-        pub(crate) const $const: &str = concat!($prefix, $name);
+    ($vis:vis, $group:ident, $prefix:literal, [$($defs:tt),*], flag $fn:ident $const:ident $name:literal $help:literal ($arg:ident: bool); $($rest:tt)*) => {
+        $vis const $const: &str = concat!($prefix, $name);
         #[doc = $help]
-        pub(crate) fn $fn($arg: bool) { $crate::set_flag($const, $arg); }
-        $crate::metrics_impl!($group, $prefix, [$($defs,)* ($crate::MetricDef { name: $const, kind: $crate::MetricKind::Gauge, unit: None, help: $help })], $($rest)*);
+        $vis fn $fn($arg: bool) { $crate::set_flag($const, $arg); }
+        $crate::metrics_impl!($vis, $group, $prefix, [$($defs,)* ($crate::MetricDef { name: $const, kind: $crate::MetricKind::Gauge, unit: None, help: $help })], $($rest)*);
     };
 
     // counter: counter!(CONST).increment(1)           no args, no unit
-    ($group:ident, $prefix:literal, [$($defs:tt),*], counter $fn:ident $const:ident $name:literal $help:literal; $($rest:tt)*) => {
-        pub(crate) const $const: &str = concat!($prefix, $name);
+    ($vis:vis, $group:ident, $prefix:literal, [$($defs:tt),*], counter $fn:ident $const:ident $name:literal $help:literal; $($rest:tt)*) => {
+        $vis const $const: &str = concat!($prefix, $name);
         #[doc = $help]
-        pub(crate) fn $fn() { $crate::metrics_crate::counter!($const).increment(1); }
-        $crate::metrics_impl!($group, $prefix, [$($defs,)* ($crate::MetricDef { name: $const, kind: $crate::MetricKind::Counter, unit: None, help: $help })], $($rest)*);
+        $vis fn $fn() { $crate::metrics_crate::counter!($const).increment(1); }
+        $crate::metrics_impl!($vis, $group, $prefix, [$($defs,)* ($crate::MetricDef { name: $const, kind: $crate::MetricKind::Counter, unit: None, help: $help })], $($rest)*);
     };
 
     // labeled_counter: counter!(CONST, <labels>).increment(1)
-    ($group:ident, $prefix:literal, [$($defs:tt),*], labeled_counter $fn:ident $const:ident $name:literal $help:literal ($arg:ident: $ty:ty) [$($label:tt)*]; $($rest:tt)*) => {
-        pub(crate) const $const: &str = concat!($prefix, $name);
+    ($vis:vis, $group:ident, $prefix:literal, [$($defs:tt),*], labeled_counter $fn:ident $const:ident $name:literal $help:literal ($arg:ident: $ty:ty) [$($label:tt)*]; $($rest:tt)*) => {
+        $vis const $const: &str = concat!($prefix, $name);
         #[doc = $help]
-        pub(crate) fn $fn($arg: $ty) { $crate::metrics_crate::counter!($const, $($label)*).increment(1); }
-        $crate::metrics_impl!($group, $prefix, [$($defs,)* ($crate::MetricDef { name: $const, kind: $crate::MetricKind::Counter, unit: None, help: $help })], $($rest)*);
+        $vis fn $fn($arg: $ty) { $crate::metrics_crate::counter!($const, $($label)*).increment(1); }
+        $crate::metrics_impl!($vis, $group, $prefix, [$($defs,)* ($crate::MetricDef { name: $const, kind: $crate::MetricKind::Counter, unit: None, help: $help })], $($rest)*);
     };
 
     // gauge_via: set_gauge(CONST, conv(arg))        arg $ty, conversion path fn($ty) -> u64, unit required
-    ($group:ident, $prefix:literal, [$($defs:tt),*], gauge_via $fn:ident $const:ident $name:literal $unit:tt $help:literal ($arg:ident: $ty:ty => $conv:path); $($rest:tt)*) => {
-        pub(crate) const $const: &str = concat!($prefix, $name);
+    ($vis:vis, $group:ident, $prefix:literal, [$($defs:tt),*], gauge_via $fn:ident $const:ident $name:literal $unit:tt $help:literal ($arg:ident: $ty:ty => $conv:path); $($rest:tt)*) => {
+        $vis const $const: &str = concat!($prefix, $name);
         #[doc = $help]
-        pub(crate) fn $fn($arg: $ty) { $crate::set_gauge($const, $conv($arg)); }
-        $crate::metrics_impl!($group, $prefix, [$($defs,)* ($crate::MetricDef { name: $const, kind: $crate::MetricKind::Gauge, unit: $crate::unit!($unit), help: $help })], $($rest)*);
+        $vis fn $fn($arg: $ty) { $crate::set_gauge($const, $conv($arg)); }
+        $crate::metrics_impl!($vis, $group, $prefix, [$($defs,)* ($crate::MetricDef { name: $const, kind: $crate::MetricKind::Gauge, unit: $crate::unit!($unit), help: $help })], $($rest)*);
     };
 
     // gauge_usize: set_gauge_usize(CONST, v)          arg usize, unit required
-    ($group:ident, $prefix:literal, [$($defs:tt),*], gauge_usize $fn:ident $const:ident $name:literal $unit:tt $help:literal ($arg:ident: usize); $($rest:tt)*) => {
-        pub(crate) const $const: &str = concat!($prefix, $name);
+    ($vis:vis, $group:ident, $prefix:literal, [$($defs:tt),*], gauge_usize $fn:ident $const:ident $name:literal $unit:tt $help:literal ($arg:ident: usize); $($rest:tt)*) => {
+        $vis const $const: &str = concat!($prefix, $name);
         #[doc = $help]
-        pub(crate) fn $fn($arg: usize) { $crate::set_gauge_usize($const, $arg); }
-        $crate::metrics_impl!($group, $prefix, [$($defs,)* ($crate::MetricDef { name: $const, kind: $crate::MetricKind::Gauge, unit: $crate::unit!($unit), help: $help })], $($rest)*);
+        $vis fn $fn($arg: usize) { $crate::set_gauge_usize($const, $arg); }
+        $crate::metrics_impl!($vis, $group, $prefix, [$($defs,)* ($crate::MetricDef { name: $const, kind: $crate::MetricKind::Gauge, unit: $crate::unit!($unit), help: $help })], $($rest)*);
     };
 
     // hist:    record_usize_hist(CONST, n)            arg usize, unit required
-    ($group:ident, $prefix:literal, [$($defs:tt),*], hist $fn:ident $const:ident $name:literal $unit:tt $help:literal ($arg:ident: usize); $($rest:tt)*) => {
-        pub(crate) const $const: &str = concat!($prefix, $name);
+    ($vis:vis, $group:ident, $prefix:literal, [$($defs:tt),*], hist $fn:ident $const:ident $name:literal $unit:tt $help:literal ($arg:ident: usize); $($rest:tt)*) => {
+        $vis const $const: &str = concat!($prefix, $name);
         #[doc = $help]
-        pub(crate) fn $fn($arg: usize) { $crate::record_usize_hist($const, $arg); }
-        $crate::metrics_impl!($group, $prefix, [$($defs,)* ($crate::MetricDef { name: $const, kind: $crate::MetricKind::Histogram, unit: $crate::unit!($unit), help: $help })], $($rest)*);
+        $vis fn $fn($arg: usize) { $crate::record_usize_hist($const, $arg); }
+        $crate::metrics_impl!($vis, $group, $prefix, [$($defs,)* ($crate::MetricDef { name: $const, kind: $crate::MetricKind::Histogram, unit: $crate::unit!($unit), help: $help })], $($rest)*);
     };
 
     // hist_duration: histogram!(CONST).record(d)      arg Duration, unit Seconds implicit
-    ($group:ident, $prefix:literal, [$($defs:tt),*], hist_duration $fn:ident $const:ident $name:literal $help:literal ($arg:ident: Duration); $($rest:tt)*) => {
-        pub(crate) const $const: &str = concat!($prefix, $name);
+    ($vis:vis, $group:ident, $prefix:literal, [$($defs:tt),*], hist_duration $fn:ident $const:ident $name:literal $help:literal ($arg:ident: Duration); $($rest:tt)*) => {
+        $vis const $const: &str = concat!($prefix, $name);
         #[doc = $help]
-        pub(crate) fn $fn($arg: ::std::time::Duration) { $crate::metrics_crate::histogram!($const).record($arg); }
-        $crate::metrics_impl!($group, $prefix, [$($defs,)* ($crate::MetricDef { name: $const, kind: $crate::MetricKind::Histogram, unit: Some($crate::Unit::Seconds), help: $help })], $($rest)*);
+        $vis fn $fn($arg: ::std::time::Duration) { $crate::metrics_crate::histogram!($const).record($arg); }
+        $crate::metrics_impl!($vis, $group, $prefix, [$($defs,)* ($crate::MetricDef { name: $const, kind: $crate::MetricKind::Histogram, unit: Some($crate::Unit::Seconds), help: $help })], $($rest)*);
     };
 
     // probe:   Probe::start(CONST, OpState::Failure)  no args, unit Seconds implicit
-    ($group:ident, $prefix:literal, [$($defs:tt),*], probe $fn:ident $const:ident $name:literal $help:literal; $($rest:tt)*) => {
-        pub(crate) const $const: &str = concat!($prefix, $name);
+    ($vis:vis, $group:ident, $prefix:literal, [$($defs:tt),*], probe $fn:ident $const:ident $name:literal $help:literal; $($rest:tt)*) => {
+        $vis const $const: &str = concat!($prefix, $name);
         #[doc = $help]
-        pub(crate) fn $fn() -> $crate::Probe<$crate::OpState> { $crate::Probe::start($const, $crate::OpState::Failure) }
-        $crate::metrics_impl!($group, $prefix, [$($defs,)* ($crate::MetricDef { name: $const, kind: $crate::MetricKind::Histogram, unit: Some($crate::Unit::Seconds), help: $help })], $($rest)*);
+        $vis fn $fn() -> $crate::Probe<$crate::OpState> { $crate::Probe::start($const, $crate::OpState::Failure) }
+        $crate::metrics_impl!($vis, $group, $prefix, [$($defs,)* ($crate::MetricDef { name: $const, kind: $crate::MetricKind::Histogram, unit: Some($crate::Unit::Seconds), help: $help })], $($rest)*);
     };
 
     // probe_unlabeled: Probe::unlabeled(CONST)        no args, unit Seconds implicit
-    ($group:ident, $prefix:literal, [$($defs:tt),*], probe_unlabeled $fn:ident $const:ident $name:literal $help:literal; $($rest:tt)*) => {
-        pub(crate) const $const: &str = concat!($prefix, $name);
+    ($vis:vis, $group:ident, $prefix:literal, [$($defs:tt),*], probe_unlabeled $fn:ident $const:ident $name:literal $help:literal; $($rest:tt)*) => {
+        $vis const $const: &str = concat!($prefix, $name);
         #[doc = $help]
-        pub(crate) fn $fn() -> $crate::Probe<$crate::NoOutcome> { $crate::Probe::unlabeled($const) }
-        $crate::metrics_impl!($group, $prefix, [$($defs,)* ($crate::MetricDef { name: $const, kind: $crate::MetricKind::Histogram, unit: Some($crate::Unit::Seconds), help: $help })], $($rest)*);
+        $vis fn $fn() -> $crate::Probe<$crate::NoOutcome> { $crate::Probe::unlabeled($const) }
+        $crate::metrics_impl!($vis, $group, $prefix, [$($defs,)* ($crate::MetricDef { name: $const, kind: $crate::MetricKind::Histogram, unit: Some($crate::Unit::Seconds), help: $help })], $($rest)*);
     };
 
     // custom: const + MetricDef only; the emission fn is hand-written below
     // the block and references $const. $fn is documentation-only.
-    ($group:ident, $prefix:literal, [$($defs:tt),*], custom $fn:ident $const:ident $name:literal $kind:ident $unit:tt $help:literal; $($rest:tt)*) => {
-        pub(crate) const $const: &str = concat!($prefix, $name);
-        $crate::metrics_impl!($group, $prefix, [$($defs,)* ($crate::MetricDef { name: $const, kind: $crate::MetricKind::$kind, unit: $crate::unit!($unit), help: $help })], $($rest)*);
+    ($vis:vis, $group:ident, $prefix:literal, [$($defs:tt),*], custom $fn:ident $const:ident $name:literal $kind:ident $unit:tt $help:literal; $($rest:tt)*) => {
+        $vis const $const: &str = concat!($prefix, $name);
+        $crate::metrics_impl!($vis, $group, $prefix, [$($defs,)* ($crate::MetricDef { name: $const, kind: $crate::MetricKind::$kind, unit: $crate::unit!($unit), help: $help })], $($rest)*);
     };
 }
 

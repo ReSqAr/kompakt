@@ -37,11 +37,12 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, trace, warn};
 
-use crate::error::{Error, ToRpc};
+use crate::error::Error;
 use crate::metrics::{self};
-use crate::network::framing::{AsyncFrameSink, AsyncFrameStream};
-use crate::network::messages::{RpcFrame, RpcRequest};
-use crate::network::tcp::{self, SocketOpts};
+use zslg_net_types::ToRpc;
+use zslg_net_wire::messages::{RpcFrame, RpcRequest};
+use zslg_net_wire::tcp::{self, SocketOpts};
+use zslg_net_wire::{AsyncFrameSink, AsyncFrameStream};
 use zslg_node_types::NodeId;
 use zslg_time::Clock;
 
@@ -119,8 +120,8 @@ impl RpcServer {
             let (stream, remote) = match accepted {
                 Ok(pair) => pair,
                 Err(e) => {
-                    let reason = metrics::ConnectFailure::classify(&e);
-                    metrics::rpc_accept_failed(reason);
+                    let reason = zslg_net_wire::metrics::ConnectFailure::classify(&e);
+                    zslg_net_wire::metrics::rpc_accept_failed(reason);
                     // NOTE: this `continue` retries immediately. For a transient
                     // error that is right; for a persistent one (fd exhaustion)
                     // it is a hot spin that also refuses every new connection
@@ -179,12 +180,14 @@ async fn handle_connection(
             r = frame_recv.next_frame() => r,
         } {
             Some(Ok(r)) => r,
-            Some(Err(e @ Error::Clock(ClockError::HlcDriftTooLarge { .. }))) => {
+            Some(Err(e @ zslg_net_wire::Error::Clock(ClockError::HlcDriftTooLarge { .. }))) => {
                 debug!(error = %e, "request rejected: HLC drift");
                 let _ = sink.send(RpcFrame::Error(e)).await;
                 return;
             }
-            Some(Err(e @ Error::Consensus(ConsensusError::UnexpectedNodeId { .. }))) => {
+            Some(Err(
+                e @ zslg_net_wire::Error::Consensus(ConsensusError::UnexpectedNodeId { .. }),
+            )) => {
                 debug!(error = %e, "request rejected: unexpected node_id");
                 let _ = sink.send(RpcFrame::Error(e)).await;
                 return;
@@ -219,7 +222,7 @@ async fn handle_connection(
                 guard.finish(result.is_ok());
                 if let Err(e) = result {
                     debug!(error = %e, kind, "handler error → emitting Error frame");
-                    if let Err(e2) = sink.send(RpcFrame::Error(e)).await {
+                    if let Err(e2) = sink.send(RpcFrame::Error(e.into())).await {
                         warn!(error = %e2, kind, "failed to send error frame");
                         return;
                     }

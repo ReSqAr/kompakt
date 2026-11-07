@@ -25,7 +25,7 @@ pub use stable_archive::{ArchiveBounds, ArchiveStream, ArchiveUpperBound, Stable
 pub use stable_log::StableLogSnapshot;
 pub use writer::Writer;
 pub use zslg_log_types::{
-    Data, DataId, LogError, LogIndex, SnapshotEntry, StableLogEvent, UnstableEvent,
+    Data, DataId, LogError, LogIndex, SnapshotEntry, StableLogEvent, ToCodec, UnstableEvent,
 };
 
 error_union! {

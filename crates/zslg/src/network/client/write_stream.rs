@@ -16,12 +16,12 @@ use zslg_lifecycle_types::LifecycleError;
 use crate::error::Error;
 use crate::metrics;
 use crate::network::client::{RpcClient, Target};
-use crate::network::framing::{TcpFrameSink, TcpFrameStream, adopt_blocking};
-use crate::network::messages::WriteOutcome as WireWriteOutcome;
-use crate::network::messages::{RpcReplicaRequest, RpcRequest, WriteStreamResponse};
 use crossbeam_combinators::{Channel, Feed, Finite, Infinite};
 use zslg_log::{StampedWrite, WriteOutcome};
 use zslg_log_types::Data;
+use zslg_net_wire::messages::WriteOutcome as WireWriteOutcome;
+use zslg_net_wire::messages::{RpcReplicaRequest, RpcRequest, WriteStreamResponse};
+use zslg_net_wire::{TcpFrameSink, TcpFrameStream, adopt_blocking};
 
 /// Open a write stream to `target` over **one** connection. Drives writes off
 /// `input`, yielding their outcomes. See [`Replica::write`](zslg_log::Replica::write).
@@ -57,7 +57,7 @@ pub(in crate::network) fn open_write(
         let (blk_sink, blk_stream, closer) = match adopt_blocking(sink, stream) {
             Ok(t) => t,
             Err(e) => {
-                let _ = out_tx.send(Err(e));
+                let _ = out_tx.send(Err(e.into()));
                 return;
             }
         };
@@ -138,13 +138,13 @@ fn reader_loop(mut stream: TcpFrameStream, out: Feed<Result<WriteOutcome, Error>
 fn resolve_response(
     out: &Feed<Result<WriteOutcome, Error>, Infinite>,
     resp: WriteStreamResponse,
-    drift: Option<Error>,
+    drift: Option<zslg_net_wire::Error>,
 ) -> Result<(), ()> {
     let WriteStreamResponse { data_id, outcome } = resp;
     let write_outcome = if let Some(drift_err) = drift {
         WriteOutcome::Failed {
             data_id,
-            error: drift_err.into(),
+            error: Error::from(drift_err).into(),
         }
     } else {
         match outcome {
@@ -154,12 +154,12 @@ fn resolve_response(
             },
             WireWriteOutcome::Rejected { error, raft_state } => WriteOutcome::Rejected {
                 data_id,
-                error: error.into(),
+                error: Error::from(error).into(),
                 raft_state,
             },
             WireWriteOutcome::Failed { error } => WriteOutcome::Failed {
                 data_id,
-                error: error.into(),
+                error: Error::from(error).into(),
             },
         }
     };
@@ -195,7 +195,7 @@ mod tests {
     #[test]
     fn drift_response_fails_only_its_own_write() {
         let (out, mut rx) = Feed::<_, Infinite>::channel(8, "test");
-        let drift = Some(Error::Clock(ClockError::HlcDriftTooLarge {
+        let drift = Some(zslg_net_wire::Error::Clock(ClockError::HlcDriftTooLarge {
             peer: Hlc(0),
             local: Hlc(0),
         }));
@@ -204,7 +204,7 @@ mod tests {
             WriteStreamResponse {
                 data_id: data_id(1),
                 outcome: WireWriteOutcome::Failed {
-                    error: Error::Net(NetError::Rpc("unused on drift path".into())),
+                    error: zslg_net_wire::Error::Net(NetError::Rpc("unused on drift path".into())),
                 },
             },
             drift,
@@ -227,7 +227,7 @@ mod tests {
             WriteStreamResponse {
                 data_id: data_id(1),
                 outcome: WireWriteOutcome::Failed {
-                    error: Error::Net(NetError::Rpc("boom".into())),
+                    error: zslg_net_wire::Error::Net(NetError::Rpc("boom".into())),
                 },
             },
             None,
@@ -251,7 +251,7 @@ mod tests {
             WriteStreamResponse {
                 data_id: data_id(1),
                 outcome: WireWriteOutcome::Failed {
-                    error: Error::Net(NetError::Rpc("boom".into())),
+                    error: zslg_net_wire::Error::Net(NetError::Rpc("boom".into())),
                 },
             },
             None,

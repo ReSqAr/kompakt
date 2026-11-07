@@ -471,3 +471,16 @@ pub enum LogError {
     #[error("quorum read timed out after {timeout:?}")]
     QuorumReadTimeout { timeout: std::time::Duration },
 }
+
+/// Adapt any displayable error into [`LogError::Codec`], prefixed with what was being done.
+pub trait ToCodec<T> {
+    /// # Errors
+    /// The original error, rendered into a [`LogError::Codec`] with `context`.
+    fn to_codec(self, context: &str) -> Result<T, LogError>;
+}
+
+impl<T, E: std::fmt::Display> ToCodec<T> for Result<T, E> {
+    fn to_codec(self, context: &str) -> Result<T, LogError> {
+        self.map_err(|e| LogError::Codec(format!("{context}: {e}")))
+    }
+}

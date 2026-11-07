@@ -20,12 +20,12 @@ use tokio_util::sync::CancellationToken;
 
 use crate::Error;
 
-use crate::network::framing::{AsyncFrameSink, AsyncFrameStream};
-use crate::network::messages::{
+use crate::network::server::{run_subscribe, run_write};
+use zslg_net_wire::messages::{
     RpcFrame, RpcRaftFrame, RpcRaftRequest, RpcReplicaFrame, RpcReplicaRequest, RpcRequest,
     RpcStreamKind,
 };
-use crate::network::server::{run_subscribe, run_write};
+use zslg_net_wire::{AsyncFrameSink, AsyncFrameStream};
 
 #[async_trait]
 pub(in crate::network) trait RpcHandlers: Send + Sync + 'static {
@@ -123,7 +123,7 @@ impl DispatchHandler {
                 return Ok(());
             }
         };
-        sink.send(frame).await
+        sink.send(frame).await.map_err(Error::from)
     }
 
     async fn dispatch_raft(
@@ -164,6 +164,6 @@ impl DispatchHandler {
                 }
             }
         };
-        sink.send(frame).await
+        sink.send(frame).await.map_err(Error::from)
     }
 }

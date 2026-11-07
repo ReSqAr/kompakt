@@ -73,6 +73,7 @@ zslg-lifecycle-types = { path = "crates/zslg-lifecycle-types" }
 zslg-log = { path = "crates/zslg-log" }
 zslg-log-types = { path = "crates/zslg-log-types" }
 zslg-net = { path = "crates/zslg-net" }
+zslg-net-wire = { path = "crates/zslg-net-wire" }
 zslg-net-types = { path = "crates/zslg-net-types" }
 zslg-node-types = { path = "crates/zslg-node-types" }
 zslg-raft = { path = "crates/zslg-raft" }
@@ -119,6 +120,7 @@ opt-level = 1
 inherits = "dev"
 debug = 0
 opt-level = 0
+incremental = false
 
 [profile.ci]
 inherits = "dev"

@@ -119,8 +119,8 @@ use parking_lot::Mutex as SyncMutex;
 use rocksdb_kit::Batch;
 use tokio::sync::Mutex as AsyncMutex;
 
+use crate::error::ToStorage;
 use crate::error::{Error, Home};
-use crate::error::{ToCodec, ToStorage};
 use crate::metrics::{self, LogType, OpState};
 use crossbeam_combinators::{
     Channel, Fanout, FanoutConfig, Finite, Infinite, Level, LevelSetter, OverflowPolicy, Registry,
@@ -128,6 +128,7 @@ use crossbeam_combinators::{
 };
 use rocksdb_kit::Storage;
 use zslg_log_types::LogIndex;
+use zslg_log_types::ToCodec;
 use zslg_log_types::{Data, SnapshotEntry, StableLogEvent};
 use zslg_time_types::Hlc;
 

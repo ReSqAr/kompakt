@@ -66,14 +66,14 @@ mod adopt;
 mod sink;
 mod stream;
 
-pub(in crate::network) use adopt::adopt_blocking;
-pub(in crate::network) use sink::FrameSink;
-pub(in crate::network) use stream::FrameStream;
+pub use adopt::adopt_blocking;
+pub use sink::FrameSink;
+pub use stream::FrameStream;
 
-pub(in crate::network) type TcpFrameSink = FrameSink<std::net::TcpStream>;
-pub(in crate::network) type TcpFrameStream = FrameStream<std::net::TcpStream>;
-pub(in crate::network) type AsyncFrameSink = FrameSink<tokio::net::tcp::OwnedWriteHalf>;
-pub(in crate::network) type AsyncFrameStream = FrameStream<tokio::net::tcp::OwnedReadHalf>;
+pub type TcpFrameSink = FrameSink<std::net::TcpStream>;
+pub type TcpFrameStream = FrameStream<std::net::TcpStream>;
+pub type AsyncFrameSink = FrameSink<tokio::net::tcp::OwnedWriteHalf>;
+pub type AsyncFrameStream = FrameStream<tokio::net::tcp::OwnedReadHalf>;
 
 #[cfg(test)]
 #[allow(
@@ -85,19 +85,19 @@ pub(in crate::network) type AsyncFrameStream = FrameStream<tokio::net::tcp::Owne
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use zslg_log_types::LogError;
-    use zslg_net_types::NetError;
+    use zslg_log::LogError;
+    use zslg_net::NetError;
 
     use serde::Serialize;
     use serde::de::DeserializeOwned;
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _, duplex};
 
-    use crate::error::Error;
-    use crate::network::messages::RpcEnvelope;
+    use crate::Error;
+    use crate::messages::RpcEnvelope;
     use framing::verify_frame_crc32;
-    use zslg_node_types::NodeId;
+    use zslg_consensus::NodeId;
     use zslg_time::Clock;
-    use zslg_time_types::Hlc;
+    use zslg_time::Hlc;
 
     #[test]
     fn shrink_drained_when_empty_and_over_capacity() {
