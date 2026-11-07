@@ -39,7 +39,6 @@ use zslg_node_types::NodeId;
 use zslg_time::Clock;
 
 pub(in crate::leader) mod cleanup;
-pub(in crate::leader) mod compaction;
 pub(in crate::leader) mod cutoff;
 pub(in crate::leader) mod membership;
 pub(in crate::leader) mod snapshot;

@@ -12,6 +12,9 @@
 pub(crate) mod jobs;
 
 #[cfg(test)]
+mod compaction_tests;
+
+#[cfg(test)]
 mod jobs_tests;
 
 #[cfg(test)]
@@ -102,7 +105,21 @@ pub(super) fn spawn_leader_loop(
         config.poll_interval,
         config.quorum_wait_timeout,
     );
-    jobs::compaction::spawn(shutdown, &handles, &config.snapshot);
+    zslg_leader_compaction::spawn(
+        shutdown,
+        zslg_leader_compaction::CompactionHandles {
+            self_node_id: handles.self_node_id,
+            snapshot_store: handles.snapshot_store.clone(),
+            raft_state: handles.raft_state.clone(),
+            leadership: handles.leadership.clone(),
+            intents: handles.intents.clone(),
+        },
+        zslg_leader_compaction::CompactionConfig {
+            tiers: config.snapshot.compaction_tiers.clone(),
+            compression: config.snapshot.compression,
+            interval: config.snapshot.compaction_interval,
+        },
+    );
     jobs::cleanup::spawn(shutdown, &handles, &config.snapshot);
     jobs::membership::spawn(shutdown, &handles, &config.membership, &config.liveness);
     jobs::voters::spawn(

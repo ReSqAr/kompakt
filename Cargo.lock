@@ -4490,6 +4490,7 @@ dependencies = [
  "zslg-consensus-types",
  "zslg-hlc-clock",
  "zslg-hlc-gate",
+ "zslg-leader-compaction",
  "zslg-leader-integrator",
  "zslg-lifecycle-types",
  "zslg-local-store",
@@ -4596,6 +4597,27 @@ dependencies = [
  "tokio-util",
  "tracing",
  "zslg-consensus",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-leader-compaction"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-combinators",
+ "error-union",
+ "metrics-kit",
+ "proptest",
+ "shutdown",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-raft",
+ "zslg-snapshot",
  "zslg-time",
 ]
 

@@ -19,47 +19,57 @@ use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::error::Error;
-use crate::leader::jobs::compaction::merge::compact;
-use crate::leader::jobs::{LeaderHandles, is_local_leader};
-use zslg_consensus::IntentSubmitter;
-use zslg_consensus_types::metrics::{LeaderJob, leader_job_ran};
-use zslg_node_types::NodeId;
-use zslg_snapshot_types::CompactionTier;
-use zslg_snapshot_types::CompressionLevel;
+use crate::Error;
+use crate::merge::compact;
+use zslg_consensus::NodeId;
+use zslg_consensus::metrics::{LeaderJob, leader_job_ran};
+use zslg_consensus::{IntentSubmitter, RaftLeadership, RaftStateView};
+use zslg_snapshot::CompactionTier;
+use zslg_snapshot::CompressionLevel;
+use zslg_snapshot::SnapshotStore;
 
-pub(in crate::leader) mod merge;
-
-/// Spawn `leader:compaction` on the shutdown tree.
-pub(in crate::leader) fn spawn(
-    shutdown: &mut shutdown::Shutdown<crate::Error>,
-    handles: &crate::leader::jobs::LeaderHandles,
-    config: &crate::leader::jobs::snapshot::SnapshotConfig,
-) {
-    let job = CompactionJob {
-        self_node_id: handles.self_node_id,
-        handles: handles.clone(),
-        intents: handles.intents.clone(),
-        tiers: config.compaction_tiers.clone(),
-        compression: config.compression,
-        interval: config.compaction_interval,
-    };
-    shutdown.spawn("leader:compaction", job.run(shutdown.token()));
+/// What the compaction job reads and writes through.
+#[derive(Clone)]
+pub struct CompactionHandles {
+    pub self_node_id: NodeId,
+    pub snapshot_store: Arc<dyn SnapshotStore>,
+    pub raft_state: Arc<dyn RaftStateView>,
+    pub leadership: Arc<dyn RaftLeadership>,
+    pub intents: Arc<dyn IntentSubmitter>,
 }
 
-pub(in crate::leader) struct CompactionJob {
-    pub(in crate::leader) self_node_id: NodeId,
-    pub(in crate::leader) handles: LeaderHandles,
-    pub(in crate::leader) intents: Arc<dyn IntentSubmitter>,
-    pub(in crate::leader) tiers: Vec<CompactionTier>,
-    pub(in crate::leader) compression: CompressionLevel,
-    pub(in crate::leader) interval: Duration,
+/// Compaction tunings.
+#[derive(Debug, Clone)]
+pub struct CompactionConfig {
+    pub tiers: Vec<CompactionTier>,
+    pub compression: CompressionLevel,
+    pub interval: Duration,
+}
+
+/// Spawn `leader:compaction` on the shutdown tree.
+pub fn spawn<E>(
+    shutdown: &mut shutdown::Shutdown<E>,
+    handles: CompactionHandles,
+    config: CompactionConfig,
+) where
+    E: From<Error> + From<shutdown::Stopped> + std::fmt::Display + Send + 'static,
+{
+    let job = CompactionJob { handles, config };
+    let cancel = shutdown.token();
+    shutdown.spawn("leader:compaction", async move {
+        job.run(cancel).await.map_err(E::from)
+    });
+}
+
+struct CompactionJob {
+    handles: CompactionHandles,
+    config: CompactionConfig,
 }
 
 impl CompactionJob {
-    pub(in crate::leader) async fn run(self, cancel: CancellationToken) -> Result<(), Error> {
+    async fn run(self, cancel: CancellationToken) -> Result<(), Error> {
         info!("leader:compaction: starting");
-        let mut ticker = interval(self.interval);
+        let mut ticker = interval(self.config.interval);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
             tokio::select! {
@@ -77,15 +87,15 @@ impl CompactionJob {
     }
 
     async fn tick(&self) {
-        if !is_local_leader(self.handles.leadership.as_ref(), self.self_node_id) {
+        if !self.handles.leadership.is_leader(self.handles.self_node_id) {
             return;
         }
         match compact(
             &self.handles.snapshot_store,
             self.handles.raft_state.as_ref(),
-            &self.tiers,
-            self.compression,
-            self.intents.as_ref(),
+            &self.config.tiers,
+            self.config.compression,
+            self.handles.intents.as_ref(),
         )
         .await
         {

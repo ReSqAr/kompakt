@@ -176,9 +176,6 @@ metrics!("zslg_", snapshots; {
          write_object, commit) plus total.";
     gauge_usize snapshot_entries SNAPSHOT_ENTRIES_COUNT "snapshot_entries_count" Count
         "Entries in the last successful snapshot." (n: usize);
-    labeled_counter compaction_run COMPACTION_RUNS_TOTAL "compaction_runs_total"
-        "Manifest compaction runs by outcome."
-        (state: OpState) [LABEL_STATE => state.as_str()];
 });
 
 // ── snapshots / leader background tasks: hand-written emission helpers ──────
@@ -512,6 +509,8 @@ pub(crate) fn jemalloc_stats(s: &JemallocStats) {
 const ALL_METRICS: &[&[MetricDef]] = &[
     // --- leader job heartbeat (zslg-consensus-types) ---
     zslg_consensus_types::metrics::METRICS,
+    // --- leader compaction (zslg-leader-compaction) ---
+    zslg_leader_compaction::metrics::METRICS,
     // --- leader integrator (zslg-leader-integrator) ---
     zslg_leader_integrator::metrics::METRICS,
     // --- writer (zslg-writer) ---

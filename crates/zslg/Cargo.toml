@@ -72,6 +72,7 @@ zslg-replica-log = { workspace = true }
 zslg-replica-service = { workspace = true }
 zslg-writer = { workspace = true }
 zslg-leader-integrator = { workspace = true, features = ["testing"] }
+zslg-leader-compaction = { workspace = true }
 zslg-raft = { workspace = true }
 zslg-snapshot = { workspace = true }
 zslg-snapshot-types = { workspace = true }
