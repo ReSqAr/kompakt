@@ -4515,6 +4515,7 @@ dependencies = [
  "zslg-raft",
  "zslg-raft-node",
  "zslg-raft-rpc",
+ "zslg-raft-setup",
  "zslg-raft-startup",
  "zslg-raft-state",
  "zslg-raft-storage",
@@ -5065,6 +5066,29 @@ dependencies = [
  "zslg-consensus",
  "zslg-net",
  "zslg-raft",
+]
+
+[[package]]
+name = "zslg-raft-setup"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-combinators",
+ "error-union",
+ "raft-kit",
+ "rocksdb-kit",
+ "shutdown",
+ "zslg-consensus",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-raft",
+ "zslg-raft-node",
+ "zslg-raft-rpc",
+ "zslg-raft-startup",
+ "zslg-raft-state",
+ "zslg-raft-storage",
+ "zslg-snapshot",
+ "zslg-time",
 ]
 
 [[package]]

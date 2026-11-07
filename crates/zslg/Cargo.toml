@@ -25,7 +25,6 @@ metrics = { workspace = true }
 metrics-kit = { workspace = true }
 metrics-exporter-prometheus = { workspace = true, optional = true }
 object_store = { workspace = true }
-raft-kit = { workspace = true }
 rocksdb-kit = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
 shutdown = { workspace = true }
@@ -54,10 +53,10 @@ zslg-net-server = { workspace = true }
 zslg-net-router = { workspace = true }
 zslg-raft-storage = { workspace = true }
 zslg-peers = { workspace = true }
-zslg-raft-rpc = { workspace = true }
 zslg-raft-state = { workspace = true }
 zslg-raft-tracker = { workspace = true }
 zslg-raft-node = { workspace = true }
+zslg-raft-setup = { workspace = true, features = ["testing"] }
 zslg-raft-startup = { workspace = true }
 zslg-local-store = { workspace = true }
 zslg-stable-log = { workspace = true }
@@ -78,6 +77,8 @@ zslg-time = { workspace = true }
 zslg-time-types = { workspace = true }
 
 [dev-dependencies]
+raft-kit = { workspace = true }
+zslg-raft-rpc = { workspace = true }
 async-trait = { workspace = true }
 pace-kit = { workspace = true }
 parking_lot = { workspace = true }

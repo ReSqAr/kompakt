@@ -1,0 +1,36 @@
+[package]
+name = "zslg-raft-setup"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Raft assembly: wires storage, RPC, state publishing and the node for one openraft instance"
+publish = false
+
+[dependencies]
+crossbeam-combinators = { workspace = true }
+error-union = { workspace = true }
+raft-kit = { workspace = true }
+rocksdb-kit = { workspace = true }
+shutdown = { workspace = true }
+zslg-consensus = { workspace = true }
+zslg-lifecycle-types = { workspace = true }
+zslg-log = { workspace = true }
+zslg-net = { workspace = true }
+zslg-raft = { workspace = true }
+zslg-raft-node = { workspace = true }
+zslg-raft-rpc = { workspace = true }
+zslg-raft-startup = { workspace = true }
+zslg-raft-state = { workspace = true }
+zslg-raft-storage = { workspace = true }
+zslg-snapshot = { workspace = true }
+zslg-time = { workspace = true }
+
+[features]
+testing = []
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "assembly"

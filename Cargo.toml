@@ -68,6 +68,7 @@ zslg-leader-membership = { path = "crates/zslg-leader-membership" }
 zslg-leader-snapshot = { path = "crates/zslg-leader-snapshot" }
 zslg-leader-compaction = { path = "crates/zslg-leader-compaction" }
 zslg-leader-integrator = { path = "crates/zslg-leader-integrator" }
+zslg-raft-setup = { path = "crates/zslg-raft-setup" }
 zslg-writer = { path = "crates/zslg-writer" }
 zslg-replica-service = { path = "crates/zslg-replica-service" }
 zslg-replica-log = { path = "crates/zslg-replica-log" }
