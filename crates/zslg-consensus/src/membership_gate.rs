@@ -10,7 +10,7 @@
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 
-pub(crate) trait MembershipGate: Send + Sync + 'static {
+pub trait MembershipGate: Send + Sync + 'static {
     /// `Ok(())` if `node_id` at `peer_addr` may join, else
     /// `Err(Error::MembershipDenied)` — which callers treat as fatal for that
     /// joiner, not as a retryable rejection.

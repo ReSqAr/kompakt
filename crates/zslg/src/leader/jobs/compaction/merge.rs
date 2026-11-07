@@ -32,10 +32,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_consensus::RaftStateView;
 use zslg_log_types::LogError;
 use zslg_snapshot::SnapshotStore;
 
-use crate::api::RaftStateView;
 use crate::error::Error;
 use crate::leader::integrator::{IntentOutcome, IntentSubmitter};
 use crate::metrics::{self, OpState};

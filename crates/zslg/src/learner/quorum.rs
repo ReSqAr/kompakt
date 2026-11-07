@@ -29,6 +29,7 @@
 
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_consensus::{QuorumCheck, RaftStateView};
 use zslg_lifecycle_types::LifecycleError;
 use zslg_log_types::LogError;
 
@@ -36,8 +37,7 @@ use async_trait::async_trait;
 use parking_lot::Mutex as SyncMutex;
 use tokio::sync::oneshot;
 
-use crate::api::QuorumCheck;
-use crate::api::{RaftStateView, Router};
+use crate::api::Router;
 use crate::error::Error;
 use crate::metrics::OpState;
 use crate::quorum::{FanOutResponse, fan_out_quorum};
@@ -71,9 +71,8 @@ impl MultiReplicaQuorumCheck {
     }
 }
 
-#[async_trait]
-impl QuorumCheck for MultiReplicaQuorumCheck {
-    async fn check(&self) -> Result<(), Error> {
+impl MultiReplicaQuorumCheck {
+    pub(crate) async fn check_in(&self) -> Result<(), Error> {
         let router = self.router.clone();
         let local_store = self.local_store.clone();
         let (final_state, _successful) =
@@ -93,6 +92,13 @@ impl QuorumCheck for MultiReplicaQuorumCheck {
         // Check 2 (module header): the cursor comparison above cannot see data
         // the leader already snapshotted and the replicas purged.
         wait_for_stable_caught_up(self.stable_log.as_ref(), &final_state.manifest_state).await
+    }
+}
+
+#[async_trait]
+impl QuorumCheck for MultiReplicaQuorumCheck {
+    async fn check(&self) -> Result<(), zslg_consensus::Error> {
+        self.check_in().await.map_err(Into::into)
     }
 }
 
@@ -365,7 +371,7 @@ impl<'a> DebounceBatch<'a> {
                 // every subsequent quorum read (F-21). Dropping the check
                 // future cancels its fan-out tasks.
                 let result = match tokio::time::timeout(check_timeout, quorum_check.check()).await {
-                    Ok(result) => result,
+                    Ok(result) => result.map_err(Error::from),
                     Err(_) => {
                         crate::metrics::read_token_wait_timeout();
                         Err(Error::Log(LogError::QuorumReadTimeout {
@@ -411,8 +417,6 @@ mod tests {
 
     use super::*;
 
-    use crate::api::QuorumCheck;
-
     /// Fake `QuorumCheck` that returns a pre-set result.
     struct ScriptedQuorum {
         result: std::sync::Mutex<Result<(), Error>>,
@@ -426,10 +430,16 @@ mod tests {
         }
     }
 
+    impl ScriptedQuorum {
+        pub(crate) async fn check_in(&self) -> Result<(), Error> {
+            self.result.lock().expect("lock").clone()
+        }
+    }
+
     #[async_trait]
     impl QuorumCheck for ScriptedQuorum {
-        async fn check(&self) -> Result<(), Error> {
-            self.result.lock().expect("lock").clone()
+        async fn check(&self) -> Result<(), zslg_consensus::Error> {
+            self.check_in().await.map_err(Into::into)
         }
     }
 
@@ -449,14 +459,20 @@ mod tests {
             calls: AtomicU32,
         }
 
-        #[async_trait]
-        impl QuorumCheck for CountingCheck {
-            async fn check(&self) -> Result<(), Error> {
+        impl CountingCheck {
+            pub(crate) async fn check_in(&self) -> Result<(), Error> {
                 self.calls.fetch_add(1, Ordering::SeqCst);
                 // Let the batch gather — the first caller arms the timer,
                 // subsequent waiters ride.
                 tokio::time::sleep(Duration::from_millis(20)).await;
                 Ok(())
+            }
+        }
+
+        #[async_trait]
+        impl QuorumCheck for CountingCheck {
+            async fn check(&self) -> Result<(), zslg_consensus::Error> {
+                self.check_in().await.map_err(Into::into)
             }
         }
 

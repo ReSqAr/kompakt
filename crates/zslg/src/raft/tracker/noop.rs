@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use tokio::sync::watch;
+use zslg_consensus::{RaftStateTracker, RaftStateView};
 
-use crate::api::{RaftStateTracker, RaftStateView};
 use zslg_consensus_types::RaftState;
 
 pub(crate) struct NoOpRaftViewer(Arc<dyn RaftStateView>);

@@ -2,7 +2,7 @@
 //!
 //! Configuration, not consensus: this is the bootstrap/join answer to "who
 //! should be here", distinct from the membership openraft has actually applied
-//! (that is [`RaftLeadership::voter_ids`](crate::api::RaftLeadership)). A
+//! (that is [`RaftLeadership::voter_ids`](zslg_consensus::RaftLeadership)). A
 //! watch-shaped seam so a future config source can push changes to a running
 //! node; the current impl is the static `config.peers` list.
 

@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_consensus::{RaftLeadership, RaftStateView};
+use zslg_consensus_types::CandidateInfo;
 use zslg_consensus_types::ConsensusError;
 use zslg_lifecycle_types::ConfigError;
 use zslg_net_types::NetError;
@@ -10,7 +12,7 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::api::{CandidateInfo, RaftLeadership, RaftStateView, Router};
+use crate::api::Router;
 use crate::error::Error;
 use crate::leader::jobs::membership::change::LivenessQuery;
 use zslg_node_types::NodeId;
@@ -314,6 +316,12 @@ mod tests {
     use zslg_net_types::ServerName;
 
     struct NoVoters;
+    impl NoVoters {
+        pub(crate) async fn remove_member_in(&self, _node_id: NodeId) -> Result<(), crate::Error> {
+            Ok(())
+        }
+    }
+
     #[async_trait::async_trait]
     impl RaftLeadership for NoVoters {
         fn current_leader(&self) -> Option<NodeId> {
@@ -325,8 +333,11 @@ mod tests {
         fn voter_server_names(&self) -> Vec<(NodeId, ServerName)> {
             Vec::new()
         }
-        async fn remove_member(&self, _node_id: NodeId) -> Result<(), crate::Error> {
-            Ok(())
+        async fn remove_member(
+            &self,
+            node_id: zslg_node_types::NodeId,
+        ) -> Result<(), zslg_consensus::Error> {
+            self.remove_member_in(node_id).await.map_err(Into::into)
         }
     }
 

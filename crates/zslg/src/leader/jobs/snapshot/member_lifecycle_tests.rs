@@ -286,10 +286,17 @@ async fn full_lifecycle_bootstrap_snapshot_churn_failure() {
 
     struct StaticLiveness(BTreeSet<NodeId>);
     impl LivenessQuery for StaticLiveness {
-        fn candidates(&self) -> std::collections::BTreeMap<NodeId, crate::api::CandidateInfo> {
+        fn candidates(
+            &self,
+        ) -> std::collections::BTreeMap<NodeId, zslg_consensus_types::CandidateInfo> {
             self.0
                 .iter()
-                .map(|&node_id| (node_id, crate::api::CandidateInfo { node_id, rtt: None }))
+                .map(|&node_id| {
+                    (
+                        node_id,
+                        zslg_consensus_types::CandidateInfo { node_id, rtt: None },
+                    )
+                })
                 .collect()
         }
     }

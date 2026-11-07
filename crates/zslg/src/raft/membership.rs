@@ -2,12 +2,9 @@
 //! deficit ([`SpareSelectionStrategy`]) and the cluster-shape knobs
 //! ([`MembershipConfig`]) — how many replica nodes to maintain and how long a
 //! Raft voter may be absent from `config.peers` before eviction.
-use std::time::Duration;
 use zslg_lifecycle_types::ConfigError;
 
-use crate::api::{CandidateInfo, SpareSelector};
 use zslg_consensus_types::SpareSelectionStrategy;
-use zslg_node_types::NodeId;
 
 /// Membership and replica node management configuration.
 #[derive(Debug, Clone)]
@@ -44,25 +41,6 @@ impl MembershipConfig {
             ));
         }
         Ok(())
-    }
-}
-
-impl SpareSelector for SpareSelectionStrategy {
-    fn rank(&self, candidates: &[CandidateInfo]) -> Vec<NodeId> {
-        match self {
-            Self::Random => {
-                let mut v: Vec<NodeId> = candidates.iter().map(|c| c.node_id).collect();
-                rand::seq::SliceRandom::shuffle(v.as_mut_slice(), &mut rand::rng());
-                v
-            }
-            Self::LowestLatency => {
-                let mut v = candidates.to_vec();
-                // None RTT sorts last (Duration::MAX); NodeId breaks ties for a
-                // total order.
-                v.sort_by_key(|c| (c.rtt.unwrap_or(Duration::MAX), c.node_id));
-                v.into_iter().map(|c| c.node_id).collect()
-            }
-        }
     }
 }
 

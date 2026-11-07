@@ -15,7 +15,7 @@ pub use meta::{
     Exit, RaftManifestState, RaftState, ReplicaMembership, ReplicaStatus, drain_satisfied,
 };
 pub use types::{
-    EvictionStatus, RaftGeneration, RaftLogIndex, RaftStateError, ReplicatedRaftState,
-    SpareSelectionStrategy, all_targets, is_quorum,
+    CandidateInfo, EvictionStatus, RaftGeneration, RaftLogIndex, RaftStateError,
+    ReplicatedRaftState, SpareSelectionStrategy, all_targets, is_quorum,
 };
 pub use validators::{validate_cutoff_advance, validate_replicated_state, validate_transition};

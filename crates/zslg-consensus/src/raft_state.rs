@@ -34,7 +34,7 @@ pub trait RaftStateView: Send + Sync + 'static {
     fn subscribe(&self) -> watch::Receiver<Arc<RaftState>>;
 }
 
-pub(crate) trait RaftStateTracker: RaftStateView {
+pub trait RaftStateTracker: RaftStateView {
     fn integrate(&self, observed: &RaftState);
 }
 

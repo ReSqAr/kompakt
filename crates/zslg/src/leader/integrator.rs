@@ -28,6 +28,7 @@
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use zslg_consensus::{RaftStateView, StateReplicator};
 use zslg_consensus_types::ConsensusError;
 use zslg_lifecycle_types::LifecycleError;
 
@@ -35,7 +36,6 @@ use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::api::{RaftStateView, StateReplicator};
 use crate::error::Error;
 use crate::metrics::IntentState;
 use zslg_consensus_types::RaftGeneration;
@@ -228,6 +228,7 @@ impl Integrator {
             .state_replicator
             .replicate_state(proposed, base.generation, "client_write leader intents")
             .await
+            .map_err(Error::from)
         {
             Ok(()) => {
                 // Not re-read after the commit: the submitter asked which
@@ -530,9 +531,8 @@ mod tests {
         }
     }
 
-    #[async_trait::async_trait]
-    impl StateReplicator for FakeRaft {
-        async fn replicate_state(
+    impl FakeRaft {
+        pub(crate) async fn replicate_state_in(
             &self,
             state: ReplicatedRaftState,
             expected_generation: RaftGeneration,
@@ -569,6 +569,20 @@ mod tests {
             self.proposals.fetch_add(1, Ordering::Relaxed);
             let next = RaftGeneration(current.generation.raw().saturating_add(1));
             self.state.apply_replicated(state, next).map_err(Into::into)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl StateReplicator for FakeRaft {
+        async fn replicate_state(
+            &self,
+            state: zslg_consensus_types::ReplicatedRaftState,
+            expected_generation: zslg_consensus_types::RaftGeneration,
+            context: &'static str,
+        ) -> Result<(), zslg_consensus::Error> {
+            self.replicate_state_in(state, expected_generation, context)
+                .await
+                .map_err(Into::into)
         }
     }
 

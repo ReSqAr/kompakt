@@ -64,7 +64,6 @@ mod tests;
 pub(crate) mod writer;
 pub(crate) mod writer_node;
 
-pub use crate::api::RaftStateView;
 pub use crate::error::Error;
 pub use crate::follower_node::{FollowerNode, FollowerNodeConfig};
 pub use crate::hlc::HlcClock;
@@ -76,6 +75,7 @@ pub use crate::observability::{METRIC_NAMESPACE, describe_metrics, histogram_buc
 pub use crate::replica_node::{InitialisingReplicaNode, ReplicaNode, ReplicaNodeConfig};
 pub use crate::writer_node::{WriterNode, WriterNodeConfig};
 pub use bytesize::ByteSize;
+pub use zslg_consensus::RaftStateView;
 pub use zslg_consensus_types::{
     ConsensusError, Exit, RaftGeneration, RaftManifestState, RaftState, RaftStateHandle,
     ReplicaMembership, SpareSelectionStrategy,

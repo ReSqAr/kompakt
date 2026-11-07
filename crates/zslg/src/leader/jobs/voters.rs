@@ -18,13 +18,14 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use zslg_consensus::RaftLeadership;
 
 use tokio::task::JoinSet;
 use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
-use crate::api::{PeersWatcher, RaftLeadership};
+use crate::api::PeersWatcher;
 use crate::error::Error;
 use crate::leader::jobs::is_local_leader;
 use crate::leader::jobs::membership::MembershipObserver;

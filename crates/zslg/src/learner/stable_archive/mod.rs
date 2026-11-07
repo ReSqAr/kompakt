@@ -10,9 +10,9 @@
 //! range that was ever stable is recoverable here.
 
 use std::sync::Arc;
+use zslg_consensus::RaftStateView;
 use zslg_snapshot::SnapshotStore;
 
-use crate::api::RaftStateView;
 use crate::error::Error;
 use crossbeam_combinators::{Channel, Contiguous, Finite, NonDecreasing, OrderedChannel};
 use zslg_log::ArchiveStream;

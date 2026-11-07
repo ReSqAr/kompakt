@@ -6,16 +6,20 @@
 //! come free from the blanket impls in `api`, which is what lets a caller treat
 //! self and a remote peer identically.
 //!
+//! `RaftMembership` is written out here: its former blanket impl over
+//! `RaftConsensus + RaftStateView` cannot live in a crate that defines neither.
+//!
 //! In practice only the [`Replica`] facet is exercised — openraft handles self
 //! internally, cluster join dials peers directly, and a node never
 //! liveness-probes itself — but the full surface has to exist for the router's
 //! return type to be one `dyn ReplicaClient`.
 
 use std::sync::Arc;
+use zslg_consensus::RaftStateView;
 
 use tokio::sync::watch;
 
-use crate::api::{LivenessProbe, RaftConsensus, RaftStateView};
+use crate::api::{LivenessProbe, RaftConsensus};
 use crossbeam_combinators::Channel;
 use futures::stream::BoxStream;
 use openraft::error::{InstallSnapshotError, RaftError};
@@ -23,7 +27,8 @@ use openraft::raft::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
     VoteRequest, VoteResponse,
 };
-use zslg_consensus_types::{RaftState, ReplicaStatus};
+use zslg_consensus::{AddMemberOutcome, RaftMembership};
+use zslg_consensus_types::{ConsensusError, RaftState, ReplicaStatus};
 use zslg_log::{Replica, StampedWrite, WriteOutcome};
 use zslg_log_types::LogIndex;
 use zslg_net_types::PeerAddr;
@@ -106,6 +111,26 @@ impl RaftConsensus for LocalReplicaClient {
         peer_addr: PeerAddr,
     ) -> Result<(), crate::Error> {
         self.raft.add_member(new_node_id, peer_addr).await
+    }
+}
+
+#[async_trait::async_trait]
+impl RaftMembership for LocalReplicaClient {
+    async fn add_member(
+        &self,
+        node_id: NodeId,
+        peer_addr: PeerAddr,
+    ) -> Result<AddMemberOutcome, zslg_consensus::Error> {
+        let state = (*self.raft_state.snapshot()).clone();
+        match self.raft.add_member(node_id, peer_addr).await {
+            Ok(()) => Ok(AddMemberOutcome::Accepted { state }),
+            // Denied is the one answer no retry can improve: everything else
+            // becomes Rejected, which the joiner retries elsewhere.
+            Err(crate::Error::Consensus(ConsensusError::MembershipDenied { .. })) => Err(
+                zslg_consensus::Error::Consensus(ConsensusError::MembershipDenied { node_id }),
+            ),
+            Err(_) => Ok(AddMemberOutcome::Rejected { state }),
+        }
     }
 }
 

@@ -8,6 +8,7 @@
 //! poll frame and trip `large_stack_frames` (CLAUDE.md §2).
 
 use std::sync::Arc;
+use zslg_consensus::AddMemberOutcome;
 use zslg_lifecycle_types::LifecycleError;
 use zslg_net_types::NetError;
 
@@ -17,7 +18,7 @@ use futures::StreamExt as _;
 use tokio_util::sync::CancellationToken;
 
 use crate::Error;
-use crate::api::{AddMemberOutcome, ReplicaClient};
+use crate::api::ReplicaClient;
 use crate::network::framing::{AsyncFrameSink, AsyncFrameStream};
 use crate::network::messages::{
     RpcFrame, RpcRaftFrame, RpcRaftRequest, RpcReplicaFrame, RpcReplicaRequest, RpcRequest,

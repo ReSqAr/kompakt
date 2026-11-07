@@ -8,6 +8,7 @@ description = "The cluster's vocabulary: who is in it, what state it replicates,
 publish = false
 
 [dependencies]
+rand = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }

@@ -16,7 +16,7 @@ use zslg_consensus_types::RaftGeneration;
 use zslg_consensus_types::ReplicatedRaftState;
 
 #[async_trait::async_trait]
-pub(crate) trait StateReplicator: Send + Sync + 'static {
+pub trait StateReplicator: Send + Sync + 'static {
     /// Submit `state` as the next committed state. The impl refuses to even
     /// propose a structurally invalid state, so the caller gets an immediate
     /// `Err` and no known-bad entry ever enters the raft log; the apply fence

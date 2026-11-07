@@ -22,6 +22,7 @@ use crate::leader::jobs::LeaderHandles;
 pub(super) use crate::leader::jobs::membership::liveness::LivenessConfig;
 pub(super) use crate::leader::jobs::snapshot::SnapshotConfig;
 pub(in crate::leader) use integrator::{Integrator, IntentOutcome, IntentSubmitter, RaftIntent};
+use zslg_consensus::{RaftLeadership, RaftStateView, StateReplicator};
 use zslg_snapshot::SnapshotStore;
 
 #[cfg(test)]
@@ -33,7 +34,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::api::PeersWatcher;
-use crate::api::{RaftLeadership, RaftStateView, Router, StateReplicator};
+use crate::api::Router;
 use crate::raft::MembershipConfig;
 use shutdown::Shutdown;
 use zslg_log::{LocalStoreView, StableLogSnapshot};

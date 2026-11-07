@@ -26,11 +26,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, warn};
+use zslg_consensus::RaftStateView;
 use zslg_consensus_types::ConsensusError;
 use zslg_log_types::LogError;
 use zslg_snapshot::SnapshotStore;
 
-use crate::api::{RaftStateView, Router};
+use crate::api::Router;
 use crate::error::ToStorage;
 use crate::error::{Error, Home};
 use crate::learner::ReplicaPoller;
@@ -244,7 +245,7 @@ pub(in crate::leader) struct SnapshotInputs<'a> {
     pub(in crate::leader) raft_state: &'a dyn RaftStateView,
     pub(in crate::leader) router: Arc<dyn Router>,
     /// For the re-check after the quorum wait — see [`build_snapshot`].
-    pub(in crate::leader) leadership: Arc<dyn crate::api::RaftLeadership>,
+    pub(in crate::leader) leadership: Arc<dyn zslg_consensus::RaftLeadership>,
     pub(in crate::leader) self_node_id: zslg_node_types::NodeId,
     pub(in crate::leader) quorum_poll_interval: Duration,
     pub(in crate::leader) quorum_wait_timeout: Duration,

@@ -10,11 +10,11 @@
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use zslg_consensus::RaftStateView;
 
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
-use crate::api::RaftStateView;
 use crate::error::Error;
 use crate::metrics;
 use zslg_log::StableLogSnapshot;

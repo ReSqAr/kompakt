@@ -48,6 +48,7 @@ pub(crate) use read::{GatedReader, can_serve_clients};
 pub(crate) use stable_log::STABLE_LOG_CF;
 pub(crate) use stable_log::StableLogConfig;
 pub(crate) use stable_log::{StableLog, spawn_stable_store};
+use zslg_consensus::RaftStateView;
 use zslg_lifecycle_types::ConfigError;
 use zslg_snapshot::SnapshotStore;
 
@@ -128,7 +129,7 @@ use std::time::Duration;
 
 use tracing::info;
 
-use crate::api::{RaftStateView, Router};
+use crate::api::Router;
 use crate::hlc::HlcClock;
 use crate::{Error, Reader};
 use shutdown::Shutdown;

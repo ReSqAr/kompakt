@@ -18,6 +18,7 @@ use crate::error::Home as _;
 use crate::test_stream::ChannelTestExt as _;
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_consensus::RaftLeadership;
 use zslg_log_types::LogError;
 use zslg_snapshot::{CleanupReport, SnapshotStore, SnapshotWrite};
 
@@ -728,7 +729,7 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
         },
         tokio_util::sync::CancellationToken::new(),
     ));
-    let leadership: Arc<dyn crate::api::RaftLeadership> = Arc::new(RaftNode::new(
+    let leadership: Arc<dyn zslg_consensus::RaftLeadership> = Arc::new(RaftNode::new(
         h.raft.clone(),
         crate::network::permissive_gate(),
         std::time::Duration::from_secs(30),
@@ -858,7 +859,7 @@ async fn snapshot_quorum_tolerates_one_wedged_replica() {
         },
         tokio_util::sync::CancellationToken::new(),
     ));
-    let leadership: Arc<dyn crate::api::RaftLeadership> = Arc::new(RaftNode::new(
+    let leadership: Arc<dyn zslg_consensus::RaftLeadership> = Arc::new(RaftNode::new(
         h.raft.clone(),
         crate::network::permissive_gate(),
         std::time::Duration::from_secs(30),
@@ -897,7 +898,6 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use crate::api::RaftLeadership;
     use crate::api::Router;
     use crate::error::Error;
     use crate::leader::jobs::snapshot::create::{SnapshotInputs, build_snapshot};
@@ -944,6 +944,12 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
         }
     }
 
+    impl FakeLeadership {
+        pub(crate) async fn remove_member_in(&self, _node_id: NodeId) -> Result<(), Error> {
+            Ok(())
+        }
+    }
+
     #[async_trait::async_trait]
     impl RaftLeadership for FakeLeadership {
         fn current_leader(&self) -> Option<NodeId> {
@@ -958,8 +964,11 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
             Vec::new()
         }
 
-        async fn remove_member(&self, _node_id: NodeId) -> Result<(), Error> {
-            Ok(())
+        async fn remove_member(
+            &self,
+            node_id: zslg_node_types::NodeId,
+        ) -> Result<(), zslg_consensus::Error> {
+            self.remove_member_in(node_id).await.map_err(Into::into)
         }
     }
 

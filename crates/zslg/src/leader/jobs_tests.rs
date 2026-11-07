@@ -19,6 +19,7 @@ use crate::error::Home as _;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_consensus::{RaftLeadership, StateReplicator};
 use zslg_log_types::Data;
 use zslg_snapshot::SnapshotStore;
 use zslg_snapshot_types::CompressionLevel;
@@ -28,7 +29,7 @@ use object_store::memory::InMemory;
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
-use crate::api::{LivenessProbe, RaftLeadership, Router, StateReplicator};
+use crate::api::{LivenessProbe, Router};
 use crate::hlc::CutoffApplier;
 use crate::hlc::HlcClock;
 use crate::hlc::HlcGate;

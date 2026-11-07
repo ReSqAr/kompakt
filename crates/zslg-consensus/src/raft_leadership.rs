@@ -16,7 +16,7 @@ use zslg_net_types::ServerName;
 use zslg_node_types::NodeId;
 
 #[async_trait::async_trait]
-pub(crate) trait RaftLeadership: Send + Sync + 'static {
+pub trait RaftLeadership: Send + Sync + 'static {
     #[must_use]
     fn current_leader(&self) -> Option<NodeId>;
 

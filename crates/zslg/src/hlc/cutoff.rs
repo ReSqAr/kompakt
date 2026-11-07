@@ -22,12 +22,12 @@
 //! actually being enforced.
 
 use std::sync::Arc;
+use zslg_consensus::RaftStateView;
 
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
-use crate::api::RaftStateView;
 use crate::error::Error;
 use crate::hlc::HlcGate;
 use crate::metrics::{self, CutoffSetState};

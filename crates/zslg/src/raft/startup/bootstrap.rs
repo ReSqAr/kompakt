@@ -33,6 +33,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
+use zslg_consensus::{AddMemberOutcome, RaftStateView};
 use zslg_consensus_types::ConsensusError;
 use zslg_lifecycle_types::LifecycleError;
 use zslg_snapshot::SnapshotStore;
@@ -41,7 +42,7 @@ use super::rejoin::{
     REJOIN_LEADERLESS_GRACE, REJOIN_RECONCILE_INTERVAL, RejoinMonitor, RejoinMonitorInputs,
     RejoinProbe, RpcRejoinProbe,
 };
-use crate::api::{AddMemberOutcome, PeersWatcher, RaftStateView, Router};
+use crate::api::{PeersWatcher, Router};
 use crate::error::{Error, ToRaft};
 use crate::quorum::{FanOutResponse, fan_out_quorum};
 use crate::raft::{RaftNode, membership_map};
@@ -679,7 +680,9 @@ pub(in crate::raft) async fn attempt_join_once(
             Ok(Ok(AddMemberOutcome::Rejected { state })) => {
                 debug!(server_name = %peer_addr.server_name, ?node_id, leader_node_id = ?state.leader, "RaftAddMember rejected; will retry");
             }
-            Ok(Err(Error::Consensus(ConsensusError::MembershipDenied { .. }))) => {
+            Ok(Err(zslg_consensus::Error::Consensus(ConsensusError::MembershipDenied {
+                ..
+            }))) => {
                 // `debug`, not `warn`: this fires on every call once denied, and
                 // `RejoinMonitor::run` is a continuous retry loop (never fatal —
                 // see its module doc) that calls this every

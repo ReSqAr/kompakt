@@ -32,12 +32,11 @@ pub(crate) use cutoff_observer::CutoffObserver;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use zslg_consensus::{AddMemberOutcome, RaftMembership};
 use zslg_net_types::NetError;
 
 use crate::Error;
-use crate::api::{
-    AddMemberOutcome, LivenessProbe, RaftMembership, RaftTransport, ReplicaClient, Router,
-};
+use crate::api::{LivenessProbe, RaftTransport, ReplicaClient, Router};
 use crate::learner::LocalStore;
 use crate::raft::build_raft_for_test;
 use crossbeam_combinators::{Channel, Finite, Infinite};
@@ -535,14 +534,26 @@ impl RaftTransport for ReplicaOnly {
     }
 }
 
-#[async_trait::async_trait]
-impl RaftMembership for ReplicaOnly {
-    async fn add_member(
+impl ReplicaOnly {
+    pub(crate) async fn add_member_in(
         &self,
         _node_id: NodeId,
         _peer_addr: PeerAddr,
     ) -> Result<AddMemberOutcome, Error> {
         unimplemented!("ReplicaOnly: membership not used")
+    }
+}
+
+#[async_trait::async_trait]
+impl RaftMembership for ReplicaOnly {
+    async fn add_member(
+        &self,
+        node_id: zslg_node_types::NodeId,
+        peer_addr: zslg_net_types::PeerAddr,
+    ) -> Result<zslg_consensus::AddMemberOutcome, zslg_consensus::Error> {
+        self.add_member_in(node_id, peer_addr)
+            .await
+            .map_err(Into::into)
     }
 }
 
@@ -671,14 +682,26 @@ impl RaftTransport for ProbeOnly {
     }
 }
 
-#[async_trait::async_trait]
-impl RaftMembership for ProbeOnly {
-    async fn add_member(
+impl ProbeOnly {
+    pub(crate) async fn add_member_in(
         &self,
         _node_id: NodeId,
         _peer_addr: PeerAddr,
     ) -> Result<AddMemberOutcome, Error> {
         unimplemented!("ProbeOnly: membership not used")
+    }
+}
+
+#[async_trait::async_trait]
+impl RaftMembership for ProbeOnly {
+    async fn add_member(
+        &self,
+        node_id: zslg_node_types::NodeId,
+        peer_addr: zslg_net_types::PeerAddr,
+    ) -> Result<zslg_consensus::AddMemberOutcome, zslg_consensus::Error> {
+        self.add_member_in(node_id, peer_addr)
+            .await
+            .map_err(Into::into)
     }
 }
 

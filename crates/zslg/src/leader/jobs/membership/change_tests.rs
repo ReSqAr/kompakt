@@ -17,6 +17,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_consensus::RaftLeadership;
 use zslg_consensus_types::ConsensusError;
 
 use async_trait::async_trait;
@@ -24,7 +25,7 @@ use parking_lot::Mutex as SyncMutex;
 use tokio_util::sync::CancellationToken;
 
 use crate::Error;
-use crate::api::RaftLeadership;
+
 use crate::leader::jobs::membership::change::{
     LivenessQuery, MembershipChangeInputs, MembershipChangeManager, needs_retarget,
 };
@@ -96,10 +97,17 @@ impl MembershipObserver for LocalObserver {
 struct StaticLiveness(BTreeSet<NodeId>);
 
 impl LivenessQuery for StaticLiveness {
-    fn candidates(&self) -> std::collections::BTreeMap<NodeId, crate::api::CandidateInfo> {
+    fn candidates(
+        &self,
+    ) -> std::collections::BTreeMap<NodeId, zslg_consensus_types::CandidateInfo> {
         self.0
             .iter()
-            .map(|&node_id| (node_id, crate::api::CandidateInfo { node_id, rtt: None }))
+            .map(|&node_id| {
+                (
+                    node_id,
+                    zslg_consensus_types::CandidateInfo { node_id, rtt: None },
+                )
+            })
             .collect()
     }
 }
@@ -123,6 +131,12 @@ impl StaticLeadership {
     }
 }
 
+impl StaticLeadership {
+    pub(crate) async fn remove_member_in(&self, _node_id: NodeId) -> Result<(), crate::Error> {
+        Ok(())
+    }
+}
+
 #[async_trait]
 impl RaftLeadership for StaticLeadership {
     fn current_leader(&self) -> Option<NodeId> {
@@ -137,8 +151,11 @@ impl RaftLeadership for StaticLeadership {
         Vec::new()
     }
 
-    async fn remove_member(&self, _node_id: NodeId) -> Result<(), crate::Error> {
-        Ok(())
+    async fn remove_member(
+        &self,
+        node_id: zslg_node_types::NodeId,
+    ) -> Result<(), zslg_consensus::Error> {
+        self.remove_member_in(node_id).await.map_err(Into::into)
     }
 }
 

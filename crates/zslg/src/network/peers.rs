@@ -6,11 +6,12 @@
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use zslg_consensus::MembershipGate;
 use zslg_consensus_types::ConsensusError;
 
 use tokio::sync::watch;
 
-use crate::api::{MembershipGate, PeersWatcher};
+use crate::api::PeersWatcher;
 use zslg_net_types::{PeerAddr, ServerName};
 use zslg_node_types::NodeId;
 
@@ -79,7 +80,7 @@ impl PeersMembershipGate {
 }
 
 impl MembershipGate for PeersMembershipGate {
-    fn admit(&self, node_id: NodeId, peer_addr: &PeerAddr) -> Result<(), crate::Error> {
+    fn admit(&self, node_id: NodeId, peer_addr: &PeerAddr) -> Result<(), zslg_consensus::Error> {
         let allowed: BTreeSet<ServerName> = self
             .peers
             .current()
@@ -94,9 +95,9 @@ impl MembershipGate for PeersMembershipGate {
                 %peer_addr.server_name,
                 "AddMember denied: server_name not in config.peers",
             );
-            Err(crate::Error::Consensus(ConsensusError::MembershipDenied {
-                node_id,
-            }))
+            Err(zslg_consensus::Error::Consensus(
+                ConsensusError::MembershipDenied { node_id },
+            ))
         }
     }
 }
@@ -114,7 +115,7 @@ struct PermissiveGate;
 
 #[cfg(test)]
 impl MembershipGate for PermissiveGate {
-    fn admit(&self, _node_id: NodeId, _peer_addr: &PeerAddr) -> Result<(), crate::Error> {
+    fn admit(&self, _node_id: NodeId, _peer_addr: &PeerAddr) -> Result<(), zslg_consensus::Error> {
         Ok(())
     }
 }

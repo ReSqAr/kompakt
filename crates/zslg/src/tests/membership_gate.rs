@@ -18,6 +18,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_consensus::AddMemberOutcome;
 /// End-to-end coverage for the leader's `config.peers` admission gate
 /// (docs/LIVENESS_REVIEW.md §2). A real `AddMember` arriving by address for a
 /// `server_name` that is not in `config.peers` must come back as the
@@ -27,13 +28,13 @@ use std::time::Duration;
 /// process is the orchestrator's).
 use zslg_consensus_types::ConsensusError;
 
-use crate::api::{AddMemberOutcome, Router};
+use crate::ReplicaNode;
+use crate::api::Router;
 use crate::hlc::HlcClock;
 use crate::network::RemoteRouter;
 use crate::replica_node::ReplicaNodeConfig;
 use crate::tests::reserve_port;
 use crate::tests::wait_until_sync as wait_until;
-use crate::{Error, ReplicaNode};
 use zslg_net_types::PeerAddr;
 use zslg_node_types::NodeId;
 
@@ -75,7 +76,7 @@ async fn add_member_by_address(
     join_node_id: NodeId,
     join_address: String,
     join_server_name: &str,
-) -> Result<AddMemberOutcome, crate::Error> {
+) -> Result<AddMemberOutcome, zslg_consensus::Error> {
     // The connection dials by address; the *request body* carries the join
     // server_name the gate inspects.
     let join_addr: SocketAddr = join_address.parse().expect("valid socket addr");
@@ -125,7 +126,7 @@ async fn add_member_denied_for_server_name_not_in_config_peers() {
     )
     .await
     {
-        Err(Error::Consensus(ConsensusError::MembershipDenied { .. })) => {}
+        Err(zslg_consensus::Error::Consensus(ConsensusError::MembershipDenied { .. })) => {}
         other => panic!("expected Denied error, got {other:?}"),
     }
 

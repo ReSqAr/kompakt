@@ -14,11 +14,12 @@
 //! election (`client_write_timeout`) — see the field docs.
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use zslg_consensus::MembershipGate;
 use zslg_lifecycle_types::ConfigError;
 
 use openraft::storage::Adaptor;
 
-use crate::api::{MembershipGate, Router};
+use crate::api::Router;
 use crate::error::{Error, ToRaft};
 use crate::raft::raft_storage::RocksRaftStorage;
 use crate::raft::rpc::NetworkFactory;

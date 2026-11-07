@@ -708,7 +708,7 @@ mod tests {
     use zslg_snapshot_types::{CompressionLevel, SnapshotId};
 
     use crate::Reader;
-    use crate::api::QuorumCheck;
+
     use crossbeam_combinators::{Cancellation, Channel, Finite, Infinite};
     use zslg_log::{LocalStoreMut, StableLogSnapshot};
     use zslg_log_types::StableLogEvent;
@@ -732,10 +732,16 @@ mod tests {
 
     struct NoOpCheck;
 
-    #[async_trait]
-    impl QuorumCheck for NoOpCheck {
-        async fn check(&self) -> Result<(), crate::Error> {
+    impl NoOpCheck {
+        pub(crate) async fn check_in(&self) -> Result<(), crate::Error> {
             Ok(())
+        }
+    }
+
+    #[async_trait]
+    impl zslg_consensus::QuorumCheck for NoOpCheck {
+        async fn check(&self) -> Result<(), zslg_consensus::Error> {
+            self.check_in().await.map_err(Into::into)
         }
     }
 
@@ -758,7 +764,7 @@ mod tests {
         stable_log: Arc<StableLog>,
         deadtime: Duration,
         snapshot_store: Arc<dyn zslg_snapshot::SnapshotStore>,
-        raft_state: Arc<dyn crate::api::RaftStateView>,
+        raft_state: Arc<dyn zslg_consensus::RaftStateView>,
     ) -> ReaderImpl {
         reader_shut_down_by(
             local_store,
@@ -775,7 +781,7 @@ mod tests {
         stable_log: Arc<StableLog>,
         deadtime: Duration,
         snapshot_store: Arc<dyn zslg_snapshot::SnapshotStore>,
-        raft_state: Arc<dyn crate::api::RaftStateView>,
+        raft_state: Arc<dyn zslg_consensus::RaftStateView>,
         shutdown: Cancellation,
     ) -> ReaderImpl {
         let debouncer = Arc::new(QuorumReadDebouncer::for_test(
@@ -1537,7 +1543,7 @@ mod tests {
     async fn scripted_reader(
         stable_log: Arc<dyn StableLogSnapshot>,
         snapshot_store: Arc<dyn zslg_snapshot::SnapshotStore>,
-        raft_state: Arc<dyn crate::api::RaftStateView>,
+        raft_state: Arc<dyn zslg_consensus::RaftStateView>,
     ) -> (tempfile::TempDir, ReaderImpl) {
         let debouncer = Arc::new(QuorumReadDebouncer::for_test(
             Arc::new(NoOpCheck),

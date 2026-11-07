@@ -279,7 +279,7 @@ fn spawn_snapshot(
             },
             tokio_util::sync::CancellationToken::new(),
         );
-        let leadership: Arc<dyn crate::api::RaftLeadership> = Arc::new(RaftNode::new(
+        let leadership: Arc<dyn zslg_consensus::RaftLeadership> = Arc::new(RaftNode::new(
             raft.clone(),
             crate::network::permissive_gate(),
             std::time::Duration::from_secs(30),

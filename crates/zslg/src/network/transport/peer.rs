@@ -12,9 +12,10 @@
 //! `NodeId` is known, it can carry membership and status but not writes.
 
 use std::sync::Arc;
+use zslg_consensus::{AddMemberOutcome, RaftMembership};
 use zslg_net_types::NetError;
 
-use crate::api::{AddMemberOutcome, LivenessProbe, RaftMembership, RaftTransport};
+use crate::api::{LivenessProbe, RaftTransport};
 use crate::error::Error;
 use crate::network::client::{RpcClient, Target};
 use crate::network::messages::{
@@ -77,9 +78,8 @@ impl TcpPeerClient {
     }
 }
 
-#[async_trait]
-impl RaftMembership for TcpPeerClient {
-    async fn add_member(
+impl TcpPeerClient {
+    pub(crate) async fn add_member_in(
         &self,
         node_id: NodeId,
         peer_addr: PeerAddr,
@@ -105,6 +105,19 @@ impl RaftMembership for TcpPeerClient {
             )))),
             Err(e) => Err(e),
         }
+    }
+}
+
+#[async_trait]
+impl RaftMembership for TcpPeerClient {
+    async fn add_member(
+        &self,
+        node_id: zslg_node_types::NodeId,
+        peer_addr: zslg_net_types::PeerAddr,
+    ) -> Result<zslg_consensus::AddMemberOutcome, zslg_consensus::Error> {
+        self.add_member_in(node_id, peer_addr)
+            .await
+            .map_err(Into::into)
     }
 }
 

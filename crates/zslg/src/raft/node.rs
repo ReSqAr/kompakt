@@ -9,9 +9,9 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_consensus::{MembershipGate, RaftLeadership, StateReplicator};
 use zslg_consensus_types::ConsensusError;
 use zslg_net_types::NetError;
-use zslg_raft_types::Raft;
 
 use futures::FutureExt as _;
 
@@ -22,7 +22,7 @@ use openraft::raft::{
 };
 use tracing::info;
 
-use crate::api::{MembershipGate, RaftConsensus, RaftLeadership, StateReplicator};
+use crate::api::RaftConsensus;
 use crate::error::{Error, ToRaft};
 use crate::metrics;
 use zslg_consensus_types::RaftGeneration;
@@ -215,6 +215,23 @@ impl RaftConsensus for RaftNode {
 
 // ── RaftLeadership (leader queries + membership remove) ─────────────────
 
+impl RaftNode {
+    pub(crate) async fn remove_member_in(&self, node_id: NodeId) -> Result<(), Error> {
+        let metrics = self.inner.metrics().borrow().clone();
+        let members: BTreeSet<NodeId> = metrics
+            .membership_config
+            .membership()
+            .voter_ids()
+            .filter(|id| *id != node_id)
+            .collect();
+        self.inner
+            .change_membership(members, false)
+            .await
+            .to_raft("change_membership remove")?;
+        Ok(())
+    }
+}
+
 #[async_trait::async_trait]
 impl RaftLeadership for RaftNode {
     fn current_leader(&self) -> Option<NodeId> {
@@ -241,27 +258,18 @@ impl RaftLeadership for RaftNode {
             .collect()
     }
 
-    async fn remove_member(&self, node_id: NodeId) -> Result<(), Error> {
-        let metrics = self.inner.metrics().borrow().clone();
-        let members: BTreeSet<NodeId> = metrics
-            .membership_config
-            .membership()
-            .voter_ids()
-            .filter(|id| *id != node_id)
-            .collect();
-        self.inner
-            .change_membership(members, false)
-            .await
-            .to_raft("change_membership remove")?;
-        Ok(())
+    async fn remove_member(
+        &self,
+        node_id: zslg_node_types::NodeId,
+    ) -> Result<(), zslg_consensus::Error> {
+        self.remove_member_in(node_id).await.map_err(Into::into)
     }
 }
 
 // ── StateReplicator (fenced cluster-state write) ─────────────────────────
 
-#[async_trait::async_trait]
-impl StateReplicator for RaftNode {
-    async fn replicate_state(
+impl RaftNode {
+    pub(crate) async fn replicate_state_in(
         &self,
         state: ReplicatedRaftState,
         expected_generation: RaftGeneration,
@@ -305,36 +313,15 @@ impl StateReplicator for RaftNode {
 }
 
 #[async_trait::async_trait]
-impl StateReplicator for Raft {
+impl StateReplicator for RaftNode {
     async fn replicate_state(
         &self,
-        state: ReplicatedRaftState,
-        expected_generation: RaftGeneration,
+        state: zslg_consensus_types::ReplicatedRaftState,
+        expected_generation: zslg_consensus_types::RaftGeneration,
         context: &'static str,
-    ) -> Result<(), crate::Error> {
-        use crate::error::ToRaft as _;
-        // See `StateReplicator::replicate_state` for the pre-flight contract.
-        zslg_consensus_types::validate_replicated_state(&state)
-            .map_err(|source| crate::error::Error::invalid_raft_state(context, source))?;
-        let response = self
-            .client_write(FencedStateWrite {
-                expected_generation,
-                state,
-            })
+    ) -> Result<(), zslg_consensus::Error> {
+        self.replicate_state_in(state, expected_generation, context)
             .await
-            .to_raft(context)?;
-        match response.data {
-            RaftResponse::Applied => Ok(()),
-            RaftResponse::RejectedStaleGeneration { expected, current } => {
-                crate::metrics::raft_fenced_write();
-                Err(crate::error::Error::stale_state_write(
-                    context, expected, current,
-                ))
-            }
-            RaftResponse::RejectedInvalidState { reason } => {
-                crate::metrics::raft_fenced_write();
-                Err(crate::error::Error::invalid_raft_state(context, reason))
-            }
-        }
+            .map_err(Into::into)
     }
 }

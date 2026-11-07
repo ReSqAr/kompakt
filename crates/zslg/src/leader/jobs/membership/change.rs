@@ -22,18 +22,18 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
+use zslg_consensus::{RaftLeadership, RaftStateView};
+use zslg_consensus_types::{CandidateInfo, SpareSelectionStrategy};
 use zslg_lifecycle_types::ConfigError;
 
 use async_trait::async_trait;
 use futures::FutureExt as _;
 use tracing::{debug, info, warn};
 
-use crate::api::{CandidateInfo, RaftLeadership, RaftStateView, SpareSelector};
 use crate::error::Error;
 use crate::leader::jobs::membership::{MembershipDriver, MembershipObserver, TickOutcome};
 use crate::quorum::{FanOutResponse, fan_out_quorum};
 use zslg_consensus_types::RaftGeneration;
-use zslg_consensus_types::SpareSelectionStrategy;
 use zslg_consensus_types::{Exit, ReplicaMembership};
 use zslg_node_types::NodeId;
 use zslg_time_types::Hlc;
@@ -444,13 +444,13 @@ impl MembershipDriver for MembershipChangeManager {
 }
 
 /// Fills a replica-set deficit by promoting spare live nodes. Which spares are
-/// chosen is decided by the configured [`SpareSelector`] (see
+/// chosen is decided by the configured [`SpareSelectionStrategy`] (see
 /// [`SpareSelectionStrategy`]).
 fn compute_target(
     current: &BTreeSet<NodeId>,
     live: &BTreeSet<NodeId>,
     target_size: u32,
-    selector: &dyn SpareSelector,
+    selector: &SpareSelectionStrategy,
     candidate_info: &BTreeMap<NodeId, CandidateInfo>,
 ) -> Option<BTreeSet<NodeId>> {
     let mut target: BTreeSet<NodeId> = current.intersection(live).copied().collect();

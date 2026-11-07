@@ -20,6 +20,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+use zslg_consensus::RaftLeadership;
 use zslg_log_types::LogError;
 use zslg_log_types::SnapshotEntry;
 use zslg_snapshot::{CleanupReport, SnapshotStore, SnapshotWrite};
@@ -28,7 +29,6 @@ use tokio::sync::watch;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-use crate::api::RaftLeadership;
 use crate::error::Error;
 use crate::leader::integrator::Integrator;
 use crate::leader::jobs::LeaderHandles;
@@ -111,6 +111,12 @@ impl MembershipDriver for CountingDriver {
 
 struct SelfLeader(NodeId);
 
+impl SelfLeader {
+    pub(crate) async fn remove_member_in(&self, _node_id: NodeId) -> Result<(), Error> {
+        unimplemented!("pacing tests do not remove members")
+    }
+}
+
 #[async_trait::async_trait]
 impl RaftLeadership for SelfLeader {
     fn current_leader(&self) -> Option<NodeId> {
@@ -122,8 +128,11 @@ impl RaftLeadership for SelfLeader {
     fn voter_server_names(&self) -> Vec<(NodeId, ServerName)> {
         Vec::new()
     }
-    async fn remove_member(&self, _node_id: NodeId) -> Result<(), Error> {
-        unimplemented!("pacing tests do not remove members")
+    async fn remove_member(
+        &self,
+        node_id: zslg_node_types::NodeId,
+    ) -> Result<(), zslg_consensus::Error> {
+        self.remove_member_in(node_id).await.map_err(Into::into)
     }
 }
 
@@ -539,15 +548,28 @@ fn spawn_always_failing_snapshot_job() -> SnapshotHarness {
 
 struct NoopReplicator;
 
-#[async_trait::async_trait]
-impl crate::api::StateReplicator for NoopReplicator {
-    async fn replicate_state(
+impl NoopReplicator {
+    pub(crate) async fn replicate_state_in(
         &self,
         _state: zslg_consensus_types::ReplicatedRaftState,
         _expected_generation: zslg_consensus_types::RaftGeneration,
         _context: &'static str,
     ) -> Result<(), Error> {
         unimplemented!("pacing tests never reach a proposal")
+    }
+}
+
+#[async_trait::async_trait]
+impl zslg_consensus::StateReplicator for NoopReplicator {
+    async fn replicate_state(
+        &self,
+        state: zslg_consensus_types::ReplicatedRaftState,
+        expected_generation: zslg_consensus_types::RaftGeneration,
+        context: &'static str,
+    ) -> Result<(), zslg_consensus::Error> {
+        self.replicate_state_in(state, expected_generation, context)
+            .await
+            .map_err(Into::into)
     }
 }
 

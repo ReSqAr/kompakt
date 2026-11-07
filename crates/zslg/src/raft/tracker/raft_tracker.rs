@@ -13,6 +13,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_consensus::RaftStateView;
 use zslg_lifecycle_types::ConfigError;
 use zslg_net_types::NetError;
 
@@ -20,7 +21,7 @@ use tokio::sync::watch;
 use tracing::debug;
 
 use crate::Error;
-use crate::api::{PeersWatcher, RaftStateView};
+use crate::api::PeersWatcher;
 use zslg_consensus_types::RaftState;
 use zslg_node_types::NodeId;
 
@@ -154,7 +155,7 @@ impl RaftStateView for RaftTracker {
     }
 }
 
-impl crate::api::RaftStateTracker for RaftTracker {
+impl zslg_consensus::RaftStateTracker for RaftTracker {
     fn integrate(&self, observed: &RaftState) {
         // The compare-and-store and the notification are the same operation
         // under the watch's own lock, so the separate write lock this needed is
@@ -189,7 +190,8 @@ impl crate::api::RaftStateTracker for RaftTracker {
 )]
 mod tests {
     use super::*;
-    use crate::api::RaftStateTracker;
+    use zslg_consensus::RaftStateTracker as _;
+
     use crate::tests::nid;
     use zslg_consensus_types::RaftGeneration;
     use zslg_consensus_types::{RaftManifestState, ReplicaMembership};

@@ -16,9 +16,7 @@
 //! | 4 | Routing (this module) | `PeerRouter` |
 
 use crate::Error;
-use crate::api::{
-    AddMemberOutcome, LivenessProbe, RaftMembership, RaftTransport, ReplicaClient, Router,
-};
+use crate::api::{LivenessProbe, RaftTransport, ReplicaClient, Router};
 use crossbeam_combinators::Channel;
 use futures::stream::BoxStream;
 use openraft::error::{InstallSnapshotError, RaftError};
@@ -27,6 +25,7 @@ use openraft::raft::{
     VoteRequest, VoteResponse,
 };
 use std::sync::{Arc, Weak};
+use zslg_consensus::{AddMemberOutcome, RaftMembership};
 use zslg_consensus_types::ReplicaStatus;
 use zslg_lifecycle_types::LifecycleError;
 use zslg_log::{Replica, StampedWrite, WriteOutcome};
@@ -156,14 +155,26 @@ impl RaftTransport for ErrorTransport {
     }
 }
 
-#[async_trait::async_trait]
-impl RaftMembership for ErrorTransport {
-    async fn add_member(
+impl ErrorTransport {
+    pub(crate) async fn add_member_in(
         &self,
         _node_id: NodeId,
         _peer_addr: PeerAddr,
     ) -> Result<AddMemberOutcome, Error> {
         Err(Error::Lifecycle(LifecycleError::Shutdown))
+    }
+}
+
+#[async_trait::async_trait]
+impl RaftMembership for ErrorTransport {
+    async fn add_member(
+        &self,
+        node_id: zslg_node_types::NodeId,
+        peer_addr: zslg_net_types::PeerAddr,
+    ) -> Result<zslg_consensus::AddMemberOutcome, zslg_consensus::Error> {
+        self.add_member_in(node_id, peer_addr)
+            .await
+            .map_err(Into::into)
     }
 }
 

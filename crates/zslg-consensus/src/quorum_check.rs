@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use crate::Error;
 
 #[async_trait]
-pub(crate) trait QuorumCheck: Send + Sync + 'static {
+pub trait QuorumCheck: Send + Sync + 'static {
     /// `Ok(())` means every entry that was on a quorum of replicas when the call
     /// started is now locally visible. Fails if no quorum answers — never
     /// returns early with a partial catch-up.

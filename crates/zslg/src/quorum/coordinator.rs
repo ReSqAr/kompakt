@@ -34,6 +34,7 @@ use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
+use zslg_consensus::RaftStateTracker;
 use zslg_consensus_types::ConsensusError;
 
 use crossbeam_channel::{Receiver, Sender};
@@ -41,7 +42,7 @@ use dashmap::DashMap;
 use dashmap::mapref::entry::Entry as MapEntry;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
-use crate::api::{RaftStateTracker, Router};
+use crate::api::Router;
 use crate::error::Error;
 use crate::metrics::{self, FanoutResponseState, WriteRpcOutcome};
 use crossbeam_combinators::Channel;
@@ -504,7 +505,7 @@ mod tests {
     use futures::stream::BoxStream;
 
     use super::*;
-    use crate::api::{RaftStateTracker, ReplicaClient};
+    use crate::api::ReplicaClient;
     use crate::tests::{make_data, nid, replica_only};
     use zslg_consensus_types::RaftGeneration;
     use zslg_consensus_types::{RaftManifestState, RaftState, ReplicaMembership, ReplicaStatus};
@@ -616,7 +617,7 @@ mod tests {
         integrated: AtomicU64,
     }
 
-    impl crate::api::RaftStateView for FixedTracker {
+    impl zslg_consensus::RaftStateView for FixedTracker {
         fn snapshot(&self) -> Arc<RaftState> {
             self.state.clone()
         }

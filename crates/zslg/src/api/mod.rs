@@ -27,31 +27,16 @@
 //! same client surface as a remote peer with no hand-written forwarding.
 
 mod liveness_probe;
-mod membership_gate;
 mod peers;
-mod quorum_check;
 mod raft_consensus;
-mod raft_leadership;
-mod raft_membership;
 mod raft_peer;
-mod raft_state;
 mod replica_client;
 mod router;
-mod spare_selection;
-mod state_replicator;
 
 pub(crate) use peers::PeersWatcher;
 
 pub(crate) use liveness_probe::LivenessProbe;
-pub(crate) use membership_gate::MembershipGate;
-pub(crate) use quorum_check::QuorumCheck;
 pub(crate) use raft_consensus::RaftConsensus;
-pub(crate) use raft_leadership::RaftLeadership;
-pub(crate) use raft_membership::{AddMemberOutcome, RaftMembership};
 pub(crate) use raft_peer::RaftTransport;
-pub(crate) use raft_state::RaftStateTracker;
-pub use raft_state::RaftStateView;
 pub(crate) use replica_client::ReplicaClient;
 pub(crate) use router::Router;
-pub(crate) use spare_selection::{CandidateInfo, SpareSelector};
-pub(crate) use state_replicator::StateReplicator;

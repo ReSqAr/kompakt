@@ -19,13 +19,14 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_consensus::RaftStateView;
 use zslg_net_types::NetError;
 
 use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::api::{RaftStateView, Router};
+use crate::api::Router;
 use crate::error::Error;
 use crate::leader::jobs::Pace;
 use crate::leader::jobs::is_local_leader;
@@ -156,7 +157,7 @@ pub(in crate::leader) const MEMBERSHIP_STEP_FLOOR: Duration = Duration::from_mil
 
 pub(in crate::leader) struct MembershipJob {
     pub(in crate::leader) self_node_id: NodeId,
-    pub(in crate::leader) leadership: Arc<dyn crate::api::RaftLeadership>,
+    pub(in crate::leader) leadership: Arc<dyn zslg_consensus::RaftLeadership>,
     pub(in crate::leader) raft_state: Arc<dyn RaftStateView>,
     pub(in crate::leader) driver: Arc<dyn MembershipDriver>,
     pub(in crate::leader) liveness_state: LivenessState,
@@ -260,7 +261,7 @@ impl MembershipJob {
 #[must_use]
 pub(in crate::leader) fn initial_live_set(
     raft_state: &dyn RaftStateView,
-    leadership: &dyn crate::api::RaftLeadership,
+    leadership: &dyn zslg_consensus::RaftLeadership,
     self_node_id: NodeId,
 ) -> BTreeSet<NodeId> {
     zslg_consensus_types::all_targets(&raft_state.snapshot().replica)

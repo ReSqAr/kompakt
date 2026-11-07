@@ -17,13 +17,13 @@
 
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_consensus::RaftStateView;
 use zslg_lifecycle_types::LifecycleError;
 
 use tokio::time::{Instant, MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::api::RaftStateView;
 use crate::error::Error;
 use crate::leader::integrator::{IntentOutcome, IntentSubmitter, RaftIntent};
 use crate::leader::jobs::is_local_leader;
@@ -53,7 +53,7 @@ pub(in crate::leader) fn spawn(
 pub(in crate::leader) struct CutoffJob {
     pub(in crate::leader) self_node_id: NodeId,
     pub(in crate::leader) clock: Arc<dyn Clock>,
-    pub(in crate::leader) leadership: Arc<dyn crate::api::RaftLeadership>,
+    pub(in crate::leader) leadership: Arc<dyn zslg_consensus::RaftLeadership>,
     pub(in crate::leader) raft_state: Arc<dyn RaftStateView>,
     pub(in crate::leader) intents: IntentSubmitter,
     /// How far behind "now" a new cutoff is placed, so in-flight writes below it

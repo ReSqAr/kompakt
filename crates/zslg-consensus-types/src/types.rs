@@ -255,8 +255,7 @@ impl EvictionStatus {
 }
 
 /// Strategy for choosing which spare (live, non-member) nodes are promoted to
-/// fill a replica-set deficit during a membership change. Implements
-/// `SpareSelector` (in zslg). Future signal-aware strategies
+/// fill a replica-set deficit during a membership change. Future signal-aware strategies
 /// (most-caught-up, lowest-latency, failure-domain) add variants here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpareSelectionStrategy {
@@ -266,6 +265,35 @@ pub enum SpareSelectionStrategy {
     /// Prefer the spare with the lowest probe RTT to this (leader) node;
     /// not-yet-probed spares (`rtt == None`) sort last.
     LowestLatency,
+}
+
+/// What the selection knows about one live spare.
+#[derive(Debug, Clone)]
+pub struct CandidateInfo {
+    pub node_id: NodeId,
+    /// Probe round-trip time to the leader; `None` until probed.
+    pub rtt: Option<std::time::Duration>,
+}
+
+impl SpareSelectionStrategy {
+    /// `candidates` in the order they should be promoted.
+    #[must_use]
+    pub fn rank(&self, candidates: &[CandidateInfo]) -> Vec<NodeId> {
+        match self {
+            Self::Random => {
+                let mut v: Vec<NodeId> = candidates.iter().map(|c| c.node_id).collect();
+                rand::seq::SliceRandom::shuffle(v.as_mut_slice(), &mut rand::rng());
+                v
+            }
+            Self::LowestLatency => {
+                let mut v = candidates.to_vec();
+                // None RTT sorts last (Duration::MAX); NodeId breaks ties for a
+                // total order.
+                v.sort_by_key(|c| (c.rtt.unwrap_or(std::time::Duration::MAX), c.node_id));
+                v.into_iter().map(|c| c.node_id).collect()
+            }
+        }
+    }
 }
 
 #[must_use]
