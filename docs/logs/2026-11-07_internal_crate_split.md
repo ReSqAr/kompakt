@@ -4,7 +4,7 @@ Working document for the IAIC interview. Current model only.
 
 ## Where we are
 
-Q1, Q2 settled (D1, D2). Asked Q3 (domain groups for the types+api layer). No design doc yet.
+Q1-Q3 settled (D1-D3). Asked Q4 (where the Error enum lives). No design doc yet.
 
 ## Model of the problem
 

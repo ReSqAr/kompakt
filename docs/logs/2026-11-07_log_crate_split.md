@@ -39,7 +39,20 @@ Rejected: one fat `core` crate (becomes a dumping ground).
 User refinement: not one types crate and one api crate but **several**, grouped
 logically by domain; the grouping shows up in the import pattern.
 
+### D3. Five foundation groups, each types + ports
+
+`time` (Hlc, Clock), `log` (Data, DataId, LogIndex, events; Reader, Writer,
+StableLog, LocalStore*, StableArchive, Replica), `snapshot` (SnapshotId,
+SnapshotMetadata, CompressionLevel; SnapshotStore), `consensus` (NodeId,
+RaftGeneration, RaftState, ReplicaMembership, Exit, TypeConfig; Raft* ports,
+QuorumCheck, SpareSelection), `net` (PeerAddr, HostPort, ServerName; Peers,
+Router, ReplicaClient, LivenessProbe, MembershipGate). Dependencies:
+time <- log <- snapshot <- consensus <- net (consensus also needs time).
+`meta.rs` and `ids.rs` dissolve into the groups that own each item.
+`snapshot` stays separate from `log` (it carries CompressionLevel and the
+object-store concern). Names are working names.
+
 ## Open
 
-- Q3: which domain groups, and where do the mixed files (`meta.rs`, `error.rs`)
-  split?
+- Q4: the `Error` enum (33 variants, names Hlc, NodeId, RaftStateError) is
+  returned by the ports in every group — where does it live?
