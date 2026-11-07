@@ -108,6 +108,7 @@ zslg-snapshot = { path = "crates/zslg-snapshot" }
 zslg-snapshot-types = { path = "crates/zslg-snapshot-types" }
 zslg-time = { path = "crates/zslg-time" }
 zslg-time-fake = { path = "crates/zslg-time-fake" }
+zslg-net-fake = { path = "crates/zslg-net-fake" }
 zslg-log-fake = { path = "crates/zslg-log-fake" }
 zslg-time-types = { path = "crates/zslg-time-types" }
 

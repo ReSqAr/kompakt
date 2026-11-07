@@ -4490,6 +4490,7 @@ dependencies = [
  "zslg-log-types",
  "zslg-net",
  "zslg-net-client",
+ "zslg-net-fake",
  "zslg-net-router",
  "zslg-net-server",
  "zslg-net-types",
@@ -4726,6 +4727,24 @@ dependencies = [
  "zslg-snapshot",
  "zslg-time",
  "zslg-time-fake",
+]
+
+[[package]]
+name = "zslg-net-fake"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crossbeam-combinators",
+ "error-union",
+ "futures",
+ "raft-kit",
+ "zslg-consensus",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
 ]
 
 [[package]]

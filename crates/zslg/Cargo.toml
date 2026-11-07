@@ -84,6 +84,7 @@ zslg-replica-log = { workspace = true, features = ["testing"] }
 zslg-reader = { workspace = true, features = ["testing"] }
 zslg-local-store = { workspace = true, features = ["testing"] }
 zslg-log-fake = { workspace = true }
+zslg-net-fake = { workspace = true }
 zslg-raft-node = { workspace = true, features = ["testing"] }
 zslg-consensus-fake = { workspace = true }
 zslg-raft-storage = { workspace = true, features = ["testing"] }
