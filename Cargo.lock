@@ -1947,6 +1947,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "metrics-kit"
+version = "0.1.0"
+dependencies = [
+ "metrics",
+ "metrics-util",
+ "tokio",
+]
+
+[[package]]
 name = "metrics-util"
 version = "0.20.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4418,6 +4427,7 @@ dependencies = [
  "hyper-util",
  "metrics",
  "metrics-exporter-prometheus",
+ "metrics-kit",
  "metrics-util",
  "object_store",
  "openraft",

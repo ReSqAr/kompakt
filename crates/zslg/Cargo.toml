@@ -24,6 +24,7 @@ dashmap = { workspace = true }
 framing = { workspace = true }
 futures = { workspace = true }
 metrics = { workspace = true }
+metrics-kit = { workspace = true }
 metrics-exporter-prometheus = { workspace = true, optional = true }
 object_store = { workspace = true }
 openraft = { workspace = true }

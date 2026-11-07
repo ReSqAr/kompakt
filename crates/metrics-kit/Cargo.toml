@@ -1,0 +1,22 @@
+[package]
+name = "metrics-kit"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Metric registry mechanism: definitions, row macros, label enums, probes"
+publish = false
+
+[dependencies]
+metrics = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
+
+[dev-dependencies]
+metrics-util = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "library"

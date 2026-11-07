@@ -60,6 +60,7 @@ bytesize = { path = "crates/bytesize" }
 crossbeam-combinators = { path = "crates/crossbeam-combinators" }
 error-union = { path = "crates/error-union" }
 framing = { path = "crates/framing" }
+metrics-kit = { path = "crates/metrics-kit" }
 nvzn = { path = "crates/nvzn" }
 objectstorage-cache = { path = "crates/objectstorage-cache" }
 shutdown = { path = "crates/shutdown" }

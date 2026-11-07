@@ -36,10 +36,23 @@
     reason = "u64::try_from(usize) on bounded metric values (counts, lengths)"
 )]
 
-use metrics::Unit;
+use metrics_kit::{
+    LABEL_STATE, MetricDef, Probe, Unit, label_enum, lossy_f64, lossy_f64_signed, metrics,
+    set_gauge, unix_now_secs,
+};
 use std::time::Duration;
 
+pub(crate) use metrics_kit::OpState;
+#[cfg(test)]
+use metrics_kit::{LABEL_NONE, MetricKind, set_flag};
+
 use crate::hlc::Hlc;
+
+/// HLC gauges export the physical-millisecond part: the raw `u64` exceeds f64's
+/// exact-integer range.
+fn hlc_physical_ms(hlc: Hlc) -> u64 {
+    hlc.parts().physical_ms
+}
 
 // ---------------------------------------------------------------------------
 // Registry types
@@ -49,35 +62,9 @@ use crate::hlc::Hlc;
 // timing, `leader/snapshot/create.rs`) or Pattern 6 (stored-Instant fields for
 // queue-wait measurement). Everything else uses Probe or RpcServerGuard.
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MetricKind {
-    Counter,
-    Gauge,
-    Histogram,
-}
-
-/// One canonical metric: everything a recorder or a dashboard needs to know.
-#[derive(Debug, Clone, Copy)]
-struct MetricDef {
-    name: &'static str,
-    kind: MetricKind,
-    unit: Option<Unit>,
-    help: &'static str,
-}
-
 // ---------------------------------------------------------------------------
 // Registry macros
 // ---------------------------------------------------------------------------
-
-/// `Seconds` → `Some(Unit::Seconds)`, `None` → `None`. Unit slot for a row.
-macro_rules! unit {
-    (None) => {
-        None
-    };
-    ($u:ident) => {
-        Some(Unit::$u)
-    };
-}
 
 /// The namespace every metric this crate owns is exported under.
 ///
@@ -87,168 +74,10 @@ macro_rules! unit {
 #[cfg(test)]
 pub(crate) const METRIC_PREFIX: &str = "zslg_";
 
-/// Declare a subsystem group of metrics as rows (see the file's group blocks).
-/// Each row declares one metric: emission fn name, const name, metric string,
-/// (kind+unit per shape), help prose, and signature. The block expands each
-/// row to its `pub(crate) const` and (except `custom`) its `#[doc = help]`
-/// emission fn, and defines a zero-arg macro named `<group>` that expands to a
-/// `[MetricDef; N]` array for `ALL_METRICS` (assembled as `&[ &group!(), .. ]`,
-/// a `&[&[MetricDef]]` — see the assembly step).
-macro_rules! metrics {
-    ($group:ident; { $($row:tt)* }) => {
-        metrics_impl!($group, "zslg_", [], $($row)*);
-    };
-
-    // Opt out of the namespace for names that are a shared convention rather
-    // than ours — the Prometheus-standard `process_*` collector namespace,
-    // which every client library exports under exactly these names. Prefixing
-    // them would hide this process from tooling that expects the standard.
-    ($group:ident, unprefixed; { $($row:tt)* }) => {
-        metrics_impl!($group, "", [], $($row)*);
-    };
-}
-
-// Accumulated `MetricDef` fragments are captured as `tt` (not `expr`) and each
-// is wrapped in parentheses so it is a single token tree; the base case emits
-// the group's defs as a bracketed array literal.
-
-macro_rules! metrics_impl {
-    // base case: emit the group's `[MetricDef; N]` array as a zero-arg macro
-    ($group:ident, $prefix:literal, [$($defs:tt),*] $(,)?) => {
-        macro_rules! $group { () => { [ $($defs),* ] } }
-    };
-
-    // gauge:   set_gauge(CONST, v)                    arg u64,  unit required
-    ($group:ident, $prefix:literal, [$($defs:tt),*], gauge $fn:ident $const:ident $name:literal $unit:tt $help:literal ($arg:ident: u64); $($rest:tt)*) => {
-        pub(crate) const $const: &str = concat!($prefix, $name);
-        #[doc = $help]
-        pub(crate) fn $fn($arg: u64) { set_gauge($const, $arg); }
-        metrics_impl!($group, $prefix, [$($defs,)* (MetricDef { name: $const, kind: MetricKind::Gauge, unit: unit!($unit), help: $help })], $($rest)*);
-    };
-
-    // flag:    set_flag(CONST, on)                    arg bool, no unit
-    ($group:ident, $prefix:literal, [$($defs:tt),*], flag $fn:ident $const:ident $name:literal $help:literal ($arg:ident: bool); $($rest:tt)*) => {
-        pub(crate) const $const: &str = concat!($prefix, $name);
-        #[doc = $help]
-        pub(crate) fn $fn($arg: bool) { set_flag($const, $arg); }
-        metrics_impl!($group, $prefix, [$($defs,)* (MetricDef { name: $const, kind: MetricKind::Gauge, unit: None, help: $help })], $($rest)*);
-    };
-
-    // counter: counter!(CONST).increment(1)           no args, no unit
-    ($group:ident, $prefix:literal, [$($defs:tt),*], counter $fn:ident $const:ident $name:literal $help:literal; $($rest:tt)*) => {
-        pub(crate) const $const: &str = concat!($prefix, $name);
-        #[doc = $help]
-        pub(crate) fn $fn() { metrics::counter!($const).increment(1); }
-        metrics_impl!($group, $prefix, [$($defs,)* (MetricDef { name: $const, kind: MetricKind::Counter, unit: None, help: $help })], $($rest)*);
-    };
-
-    // labeled_counter: counter!(CONST, <labels>).increment(1)
-    ($group:ident, $prefix:literal, [$($defs:tt),*], labeled_counter $fn:ident $const:ident $name:literal $help:literal ($arg:ident: $ty:ty) [$($label:tt)*]; $($rest:tt)*) => {
-        pub(crate) const $const: &str = concat!($prefix, $name);
-        #[doc = $help]
-        pub(crate) fn $fn($arg: $ty) { metrics::counter!($const, $($label)*).increment(1); }
-        metrics_impl!($group, $prefix, [$($defs,)* (MetricDef { name: $const, kind: MetricKind::Counter, unit: None, help: $help })], $($rest)*);
-    };
-
-    // hlc:     set_hlc_gauge(CONST, h)                arg Hlc, unit required
-    ($group:ident, $prefix:literal, [$($defs:tt),*], hlc $fn:ident $const:ident $name:literal $unit:tt $help:literal ($arg:ident: Hlc); $($rest:tt)*) => {
-        pub(crate) const $const: &str = concat!($prefix, $name);
-        #[doc = $help]
-        pub(crate) fn $fn($arg: Hlc) { set_hlc_gauge($const, $arg); }
-        metrics_impl!($group, $prefix, [$($defs,)* (MetricDef { name: $const, kind: MetricKind::Gauge, unit: unit!($unit), help: $help })], $($rest)*);
-    };
-
-    // gauge_usize: set_gauge_usize(CONST, v)          arg usize, unit required
-    ($group:ident, $prefix:literal, [$($defs:tt),*], gauge_usize $fn:ident $const:ident $name:literal $unit:tt $help:literal ($arg:ident: usize); $($rest:tt)*) => {
-        pub(crate) const $const: &str = concat!($prefix, $name);
-        #[doc = $help]
-        pub(crate) fn $fn($arg: usize) { set_gauge_usize($const, $arg); }
-        metrics_impl!($group, $prefix, [$($defs,)* (MetricDef { name: $const, kind: MetricKind::Gauge, unit: unit!($unit), help: $help })], $($rest)*);
-    };
-
-    // hist:    record_usize_hist(CONST, n)            arg usize, unit required
-    ($group:ident, $prefix:literal, [$($defs:tt),*], hist $fn:ident $const:ident $name:literal $unit:tt $help:literal ($arg:ident: usize); $($rest:tt)*) => {
-        pub(crate) const $const: &str = concat!($prefix, $name);
-        #[doc = $help]
-        pub(crate) fn $fn($arg: usize) { record_usize_hist($const, $arg); }
-        metrics_impl!($group, $prefix, [$($defs,)* (MetricDef { name: $const, kind: MetricKind::Histogram, unit: unit!($unit), help: $help })], $($rest)*);
-    };
-
-    // hist_duration: histogram!(CONST).record(d)      arg Duration, unit Seconds implicit
-    ($group:ident, $prefix:literal, [$($defs:tt),*], hist_duration $fn:ident $const:ident $name:literal $help:literal ($arg:ident: Duration); $($rest:tt)*) => {
-        pub(crate) const $const: &str = concat!($prefix, $name);
-        #[doc = $help]
-        pub(crate) fn $fn($arg: Duration) { metrics::histogram!($const).record($arg); }
-        metrics_impl!($group, $prefix, [$($defs,)* (MetricDef { name: $const, kind: MetricKind::Histogram, unit: Some(Unit::Seconds), help: $help })], $($rest)*);
-    };
-
-    // probe:   Probe::start(CONST, OpState::Failure)  no args, unit Seconds implicit
-    ($group:ident, $prefix:literal, [$($defs:tt),*], probe $fn:ident $const:ident $name:literal $help:literal; $($rest:tt)*) => {
-        pub(crate) const $const: &str = concat!($prefix, $name);
-        #[doc = $help]
-        pub(crate) fn $fn() -> Probe<OpState> { Probe::start($const, OpState::Failure) }
-        metrics_impl!($group, $prefix, [$($defs,)* (MetricDef { name: $const, kind: MetricKind::Histogram, unit: Some(Unit::Seconds), help: $help })], $($rest)*);
-    };
-
-    // probe_unlabeled: Probe::unlabeled(CONST)        no args, unit Seconds implicit
-    ($group:ident, $prefix:literal, [$($defs:tt),*], probe_unlabeled $fn:ident $const:ident $name:literal $help:literal; $($rest:tt)*) => {
-        pub(crate) const $const: &str = concat!($prefix, $name);
-        #[doc = $help]
-        pub(crate) fn $fn() -> Probe<NoOutcome> { Probe::unlabeled($const) }
-        metrics_impl!($group, $prefix, [$($defs,)* (MetricDef { name: $const, kind: MetricKind::Histogram, unit: Some(Unit::Seconds), help: $help })], $($rest)*);
-    };
-
-    // custom: const + MetricDef only; the emission fn is hand-written below
-    // the block and references $const. $fn is documentation-only.
-    ($group:ident, $prefix:literal, [$($defs:tt),*], custom $fn:ident $const:ident $name:literal $kind:ident $unit:tt $help:literal; $($rest:tt)*) => {
-        pub(crate) const $const: &str = concat!($prefix, $name);
-        metrics_impl!($group, $prefix, [$($defs,)* (MetricDef { name: $const, kind: MetricKind::$kind, unit: unit!($unit), help: $help })], $($rest)*);
-    };
-}
-
-/// Fieldless label-vocabulary enum with a `const fn as_str`. `$name` takes the
-/// standard `Debug, Clone, Copy, PartialEq, Eq` derive; extra attributes pass
-/// through before the name. Variant `///` doc comments pass through to the
-/// enum variants. Enum-level docs must be given as `#[doc = "..."]` INSIDE the
-/// invocation (a `///` before the invocation would warn `unused_doc_comments`
-/// under `-D warnings`).
-macro_rules! label_enum {
-    ($(#[$meta:meta])* $name:ident { $($(#[$vmeta:meta])* $variant:ident => $value:literal),+ $(,)? }) => {
-        $(#[$meta])*
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-        pub(crate) enum $name {
-            $( $(#[$vmeta])* $variant ),+
-        }
-
-        impl $name {
-            #[must_use]
-            pub(crate) const fn as_str(self) -> &'static str {
-                match self {
-                    $( Self::$variant => $value ),+
-                }
-            }
-        }
-    };
-}
-
-/// Like [`label_enum!`] plus `impl ProbeOutcome for $name`.
-macro_rules! probe_enum {
-    ($(#[$meta:meta])* $name:ident { $($(#[$vmeta:meta])* $variant:ident => $value:literal),+ $(,)? }) => {
-        label_enum!($(#[$meta])* $name { $($(#[$vmeta])* $variant => $value),+ });
-
-        impl ProbeOutcome for $name {
-            fn as_str(self) -> &'static str {
-                $name::as_str(self)
-            }
-        }
-    };
-}
-
 // ---------------------------------------------------------------------------
 // Label keys
 // ---------------------------------------------------------------------------
 
-const LABEL_STATE: &str = "state";
 const LABEL_LOG_TYPE: &str = "log_type";
 const LABEL_STEP: &str = "step";
 const LABEL_OP: &str = "op";
@@ -304,7 +133,7 @@ const ALL_LABEL_KEYS: &[&str] = &[
 
 // ── raft / consensus ────────────────────────────────────────────────────────
 
-metrics!(raft; {
+metrics!("zslg_", raft; {
     flag    raft_is_member   RAFT_IS_MEMBER   "raft_is_member"
         "1 if this node is a voting member of the raft config, else 0. \
          Cluster bootstrap alert: sum() staying 0." (is_member: bool);
@@ -454,7 +283,7 @@ pub(crate) fn membership_joint_exit_hlc_physical_ms(exit: Option<crate::meta::Ex
         Some(crate::meta::Exit::AnyTime) | None => None,
     };
     match exit_hlc {
-        Some(hlc) => set_hlc_gauge(MEMBERSHIP_JOINT_EXIT_HLC_PHYSICAL_MS, hlc),
+        Some(hlc) => set_gauge(MEMBERSHIP_JOINT_EXIT_HLC_PHYSICAL_MS, hlc_physical_ms(hlc)),
         None => set_gauge(MEMBERSHIP_JOINT_EXIT_HLC_PHYSICAL_MS, 0),
     }
 }
@@ -496,7 +325,7 @@ pub(crate) fn node_live(node_id: crate::ids::NodeId, live: bool) {
 
 // ── write path (writer side) ────────────────────────────────────────────────
 
-metrics!(write_path_writer; {
+metrics!("zslg_", write_path_writer; {
     custom  write_fanout_response  WRITE_FANOUT_RESPONSES_TOTAL
         "write_fanout_responses_total" Counter None
         "Per-replica fan-out responses (ack / rejected / unreachable). \
@@ -569,7 +398,7 @@ pub(crate) fn writer_inflight_permits_set(held: usize) {
 
 // ── write path (replica side) + HLC cutoff ──────────────────────────────────
 
-metrics!(write_path_replica; {
+metrics!("zslg_", write_path_replica; {
     labeled_counter replica_write_request REPLICA_WRITE_REQUESTS_TOTAL
         "replica_write_requests_total"
         "Replica-side write requests by outcome. fail_hlc_cutoff spikes are \
@@ -618,7 +447,7 @@ label_enum!(#[doc = "`direction` label of [`HLC_DRIFT_REJECTIONS_TOTAL`]."] Drif
 
 // ── logs and replication ────────────────────────────────────────────────────
 
-metrics!(logs; {
+metrics!("zslg_", logs; {
     custom  log_writes  LOG_WRITES_TOTAL  "log_writes_total"  Counter None
         "Entries appended/integrated, by log (replica = single-writer \
          replica log, local = learner local store).";
@@ -685,7 +514,7 @@ pub(crate) fn subscription_messages(count: usize) {
 // is preventing a subscriber from ever catching up. Nothing here changes the
 // shedding behaviour.
 
-metrics!(subscription; {
+metrics!("zslg_", subscription; {
     counter subscription_consumer_stalled LOG_SUBSCRIPTION_CONSUMER_STALLED_TOTAL
         "log_subscription_consumer_stalled_total"
         "Subscriptions ended because the consumer accepted nothing for \
@@ -747,7 +576,7 @@ pub(crate) fn subscription_records_retired(records: u64) {
 
 // ── snapshots / leader background tasks ─────────────────────────────────────
 
-metrics!(snapshots; {
+metrics!("zslg_", snapshots; {
     custom  purged_entries  PURGED_ENTRIES_TOTAL  "purged_entries_total"  Counter None
         "Entries removed by purge workers, by log type.";
     labeled_counter snapshot_creation SNAPSHOT_CREATION_TOTAL "snapshot_creation_total"
@@ -815,7 +644,7 @@ pub(crate) fn snapshot_compression_ratio(uncompressed: u64, compressed: u64) {
 
 // ── object store ────────────────────────────────────────────────────────────
 
-metrics!(object_store; {
+metrics!("zslg_", object_store; {
     custom  object_store_transfer_bytes OBJECT_STORE_TRANSFER_BYTES_TOTAL
         "object_store_transfer_bytes_total" Counter Bytes
         "Bytes moved to/from the object store, by operation and by *why* the \
@@ -844,9 +673,9 @@ pub(crate) fn object_store_transfer_bytes(
 
 // ── HLC / clock ──────────────────────────────────────────────────────────────
 
-metrics!(hlc; {
-    hlc     hlc_now_physical_ms HLC_NOW_PHYSICAL_MS "hlc_now_physical_ms" Milliseconds
-        "Physical-millisecond part of the node's current HLC." (hlc: Hlc);
+metrics!("zslg_", hlc; {
+    gauge_via     hlc_now_physical_ms HLC_NOW_PHYSICAL_MS "hlc_now_physical_ms" Milliseconds
+        "Physical-millisecond part of the node's current HLC." (hlc: Hlc => hlc_physical_ms);
     gauge   hlc_logical HLC_LOGICAL "hlc_logical" Count
         "Logical component of the node's current HLC. Sustained high \
          values = wall clock stalled or heavy same-millisecond traffic."
@@ -855,8 +684,8 @@ metrics!(hlc; {
         Gauge Milliseconds
         "Signed difference between the HLC physical part and the wall \
          clock. Approaching max_clock_skew = imminent write rejections.";
-    hlc     hlc_cutoff_physical_ms HLC_CUTOFF_PHYSICAL_MS "hlc_cutoff_physical_ms" Milliseconds
-        "Physical-millisecond part of this replica's HLC cutoff." (cutoff: Hlc);
+    gauge_via     hlc_cutoff_physical_ms HLC_CUTOFF_PHYSICAL_MS "hlc_cutoff_physical_ms" Milliseconds
+        "Physical-millisecond part of this replica's HLC cutoff." (cutoff: Hlc => hlc_physical_ms);
 });
 
 // ── HLC / clock: hand-written emission helpers ──────────────────────────────
@@ -868,11 +697,11 @@ pub(crate) fn hlc_wall_clock_drift_ms(drift_ms: i64) {
 
 // ── read path / learner stores ───────────────────────────────────────────────
 
-metrics!(read_path; {
-    hlc     manifest_end_hlc_physical_ms MANIFEST_END_HLC_PHYSICAL_MS
+metrics!("zslg_", read_path; {
+    gauge_via     manifest_end_hlc_physical_ms MANIFEST_END_HLC_PHYSICAL_MS
         "manifest_end_hlc_physical_ms" Milliseconds
         "Physical-millisecond part of the stable watermark. Distance to \
-         hlc_now_physical_ms = stabilization lag." (watermark: Hlc);
+         hlc_now_physical_ms = stabilization lag." (watermark: Hlc => hlc_physical_ms);
     custom  manifest_watermark_advanced MANIFEST_WATERMARK_ADVANCED_TIMESTAMP_SECONDS
         "manifest_watermark_advanced_timestamp_seconds" Gauge Seconds
         "Unix-epoch seconds of the last applied manifest-watermark advance \
@@ -932,7 +761,7 @@ pub(crate) fn read_request(source: ReadSource) {
 
 // ── RPC server ───────────────────────────────────────────────────────────────
 
-metrics!(rpc_server; {
+metrics!("zslg_", rpc_server; {
     custom  rpc_server_request  RPC_SERVER_REQUESTS_TOTAL
         "rpc_server_requests_total" Counter None
         "RPC requests handled, by method and outcome.";
@@ -1052,7 +881,7 @@ impl ConnectFailure {
 // hits vs misses; `open_stream` is a dedicated stream/subscribe dial; `roundtrip`
 // is the whole `send_unary` exchange.
 
-metrics!(rpc_client; {
+metrics!("zslg_", rpc_client; {
     custom  replica_write_rpc  REPLICA_WRITE_RPC_DURATION_SECONDS
         "replica_write_rpc_duration_seconds" Histogram Seconds
         "Per-replica write-RPC latency + outcome (peer_id, outcome = \
@@ -1138,20 +967,20 @@ etc.)."] WriteRpcOutcome {
 // throughput + entry count ride on the existing `log_writes{log_type}` /
 // `log_index_frontier{log_type}`. Engine-level behavior is on the storage_* series.
 
-metrics!(storage; {
-    hlc     stable_log_end_hlc_physical_ms STABLE_LOG_END_HLC_PHYSICAL_MS
+metrics!("zslg_", storage; {
+    gauge_via     stable_log_end_hlc_physical_ms STABLE_LOG_END_HLC_PHYSICAL_MS
         "stable_log_end_hlc_physical_ms" Milliseconds
         "Physical-millisecond part of the stable log's end HLC (highest \
          stabilized HLC). Distance to hlc_now_physical_ms = stabilization lag."
-        (end_hlc: Hlc);
-    hlc     stable_log_purge_threshold_physical_ms STABLE_LOG_PURGE_THRESHOLD_PHYSICAL_MS
+        (end_hlc: Hlc => hlc_physical_ms);
+    gauge_via     stable_log_purge_threshold_physical_ms STABLE_LOG_PURGE_THRESHOLD_PHYSICAL_MS
         "stable_log_purge_threshold_physical_ms" Milliseconds
         "Physical-millisecond part of the HLC the stable log is being purged \
          up to (manifest_watermark − purge_ttl, before the frontier clamp). \
          Only moves when TTL purge is enabled; 0/absent means purge off or \
          nothing aged out yet. Gap to stable_log_end_hlc_physical_ms = the \
          live retention window still held locally (design doc §794)."
-        (threshold: Hlc);
+        (threshold: Hlc => hlc_physical_ms);
     custom  stable_log_end_advanced STABLE_LOG_END_HLC_ADVANCED_TIMESTAMP_SECONDS
         "stable_log_end_hlc_advanced_timestamp_seconds" Gauge Seconds
         "Unix-epoch seconds of the last stable-log upper-watermark (HLC end) \
@@ -1418,19 +1247,6 @@ pub(crate) fn storage_actual_delayed_write_rate(value: u64) {
 // Label-value vocabularies
 // ---------------------------------------------------------------------------
 
-probe_enum!(#[doc = "Generic success/failure outcome (`state` label)."] OpState {
-    Success => "success",
-    Failure => "failure",
-});
-
-impl OpState {
-    /// Convenience: derive the label value from any `Result`.
-    #[must_use]
-    pub(crate) const fn from_ok(ok: bool) -> Self {
-        if ok { Self::Success } else { Self::Failure }
-    }
-}
-
 label_enum!(#[doc = "`job` label of the `leader_job_*` metrics — one value per leader task (`crate::leader::jobs`). Label values come from this enum, never ad-hoc strings (CLAUDE.md §7)."] LeaderJob {
     /// Publishes the HLC cutoff (snapshot protocol step 1).
     Cutoff => "cutoff",
@@ -1565,167 +1381,12 @@ label_enum!(#[doc = "`kind` label of [`LOCAL_STORE_OPS_TOTAL`] — the local-sto
 // RAII timing probe
 // ---------------------------------------------------------------------------
 
-/// Outcome label vocabulary usable as a [`Probe`] `state` label.
-pub(crate) trait ProbeOutcome: Copy {
-    #[must_use]
-    fn as_str(self) -> &'static str;
-}
-
-/// Marker type for probes that record an unlabeled histogram (no outcome label).
-///
-/// See [`Probe::unlabeled`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct NoOutcome;
-
-impl ProbeOutcome for NoOutcome {
-    fn as_str(self) -> &'static str {
-        unreachable!("NoOutcome is never serialised into a label value")
-    }
-}
-
-/// Sentinel `label_key` value for unlabeled probes.
-const LABEL_NONE: &str = "";
-
-/// Times a code region and records a `*_duration_seconds` histogram labeled by
-/// outcome when it drops — replacing the manual
-/// `let t0 = Instant::now(); …; metrics::foo(t0.elapsed())` pattern.
-///
-/// The histogram's `_count{state}` doubles as the outcome-breakdown counter and
-/// `_bucket` carries the latency, so one probe usually stands in for a histogram
-/// *and* a counter. The `outcome` defaults to a failure-ish variant so an early
-/// `return`/`?`/panic still records (as that default) rather than vanishing.
-#[must_use = "a Probe records its metric on drop; bind it to a name, do not discard it"]
-pub(crate) struct Probe<O: ProbeOutcome> {
-    t0: tokio::time::Instant,
-    hist: &'static str,
-    label_key: &'static str,
-    outcome: O,
-    /// One extra static label pair (e.g. `(LABEL_OP, "put")` for dual-label
-    /// metrics). `None` → single outcome label or unlabeled histogram.
-    extra: Option<(&'static str, &'static str)>,
-    armed: bool,
-}
-
-impl<O: ProbeOutcome> Probe<O> {
-    fn new(
-        hist: &'static str,
-        label_key: &'static str,
-        extra: Option<(&'static str, &'static str)>,
-        default_outcome: O,
-        armed: bool,
-    ) -> Self {
-        Self {
-            t0: tokio::time::Instant::now(),
-            hist,
-            label_key,
-            outcome: default_outcome,
-            extra,
-            armed,
-        }
-    }
-
-    fn start(hist: &'static str, default_outcome: O) -> Self {
-        Self::new(hist, LABEL_STATE, None, default_outcome, true)
-    }
-
-    /// Like `start` but with one extra static label pair baked in at
-    /// construction (e.g. `(LABEL_OP, "put")`).
-    fn start_with_extra(
-        hist: &'static str,
-        label_key: &'static str,
-        extra: (&'static str, &'static str),
-        default_outcome: O,
-    ) -> Self {
-        Self::new(hist, label_key, Some(extra), default_outcome, true)
-    }
-
-    /// Update the outcome that will be recorded on drop; keeps timing.
-    #[allow(dead_code, reason = "used when probes replace StreamMetricsGuard")]
-    pub(crate) fn set(&mut self, outcome: O) {
-        self.outcome = outcome;
-    }
-
-    /// Set the final outcome and record immediately (consumes the probe).
-    pub(crate) fn finish(mut self, outcome: O) {
-        self.outcome = outcome;
-        // `drop` does the emission.
-    }
-
-    /// Suppress emission entirely (e.g. clean shutdown, not a real operation).
-    #[allow(
-        dead_code,
-        reason = "available for callers that need to suppress emission on clean exit"
-    )]
-    pub(crate) fn disarm(&mut self) {
-        self.armed = false;
-    }
-}
-
-impl<O: ProbeOutcome> Probe<O> {
-    /// Record the histogram now, regardless of `armed`. Shared by `Drop` and
-    /// the probe impl.
-    #[allow(clippy::expect_used, reason = "elapsed is infallible")]
-    fn emit(&self) {
-        let elapsed = self.t0.elapsed();
-        if self.label_key == LABEL_NONE {
-            if let Some((ek, ev)) = self.extra {
-                // One static label, no outcome (Pattern 4: per-store timings).
-                metrics::histogram!(self.hist, ek => ev).record(elapsed);
-            } else {
-                // Unlabeled histogram (Pattern 3).
-                metrics::histogram!(self.hist).record(elapsed);
-            }
-        } else if let Some((ek, ev)) = self.extra {
-            // Dual-label (Pattern 2): outcome state + one extra static label.
-            metrics::histogram!(self.hist, self.label_key => self.outcome.as_str(), ek => ev)
-                .record(elapsed);
-        } else {
-            // Single outcome label (Pattern 1, status quo).
-            metrics::histogram!(self.hist, self.label_key => self.outcome.as_str()).record(elapsed);
-        }
-    }
-}
-
-/// zslg's RAII probe: a caller binds one and lets it drop, and `Drop` records
-/// the histogram.
-impl<O: ProbeOutcome> Drop for Probe<O> {
-    fn drop(&mut self) {
-        if !self.armed {
-            return;
-        }
-        self.emit();
-    }
-}
-
-// ── NoOutcome-specific constructors ─────────────────────────────────────
-
-impl Probe<NoOutcome> {
-    /// Unlabeled histogram: records just `histogram!(hist).record(elapsed)`.
-    fn unlabeled(hist: &'static str) -> Self {
-        Self::new(hist, LABEL_NONE, None, NoOutcome, true)
-    }
-
-    /// Record the histogram immediately and disarm (consumes the probe).
-    /// Useful when the timing boundary doesn't align with scope exit.
-    #[allow(
-        dead_code,
-        reason = "used for explicit timing boundaries; will be adopted by more callers"
-    )]
-    pub(crate) fn record(mut self) {
-        self.armed = false;
-        metrics::histogram!(self.hist).record(self.t0.elapsed());
-    }
-}
-
-// The stable/replica-log/local-store probe factories moved into the `probes!`
-// group below (they are generated from its rows).
-
 // ── Process-level resource gauges ──────────────────────────────────────
 
 // ── Memory budget gauges: zslg's own, so namespaced — but read beside the
 // unprefixed process_* gauges below, which is why they sit here.
 
-metrics!(storage_budget; {
+metrics!("zslg_", storage_budget; {
     gauge   storage_memory_charged_bytes STORAGE_MEMORY_CHARGED_BYTES "storage_memory_charged_bytes" Bytes
         "Bytes held by the storage engine's block cache — block, index and \
          filter blocks plus the memtables charged to it. This is what the \
@@ -1748,7 +1409,7 @@ metrics!(storage_budget; {
         (bytes: u64);
 });
 
-metrics!(process, unprefixed; {
+metrics!("", process; {
     custom  process_cpu_seconds PROCESS_CPU_SECONDS "process_cpu_seconds" Gauge Seconds
         "Cumulative user+system CPU seconds consumed by this process \
          (read from /proc/self/stat). Delta / wall-clock delta = CPU \
@@ -1807,7 +1468,7 @@ pub(crate) fn process_memory_split_bytes(anon: u64, file: u64) {
 
 // ── jemalloc allocator gauges (only emitted with the `jemalloc` feature) ──
 
-metrics!(jemalloc; {
+metrics!("zslg_", jemalloc; {
     custom  jemalloc_stats JEMALLOC_ALLOCATED_BYTES "jemalloc_allocated_bytes"
         Gauge Bytes
         "jemalloc stats.allocated: bytes the application has live-allocated \
@@ -1869,7 +1530,7 @@ pub(crate) fn jemalloc_stats(s: &JemallocStats) {
 // Consts + factories generated from the rows; the two non-family factories
 // (`object_store_request_probe`, `rpc_conn_reuse`) are hand-written below.
 
-metrics!(probes; {
+metrics!("zslg_", probes; {
     probe_unlabeled rpc_dns_resolve_probe RPC_DNS_RESOLVE_SECONDS "rpc_dns_resolve_seconds"
         "DNS resolution time inside a dial. Called on every connect / \
          reconnect; slow = resolver issue or DNS server unreachable.";
@@ -2056,6 +1717,20 @@ const ALL_METRICS: &[&[MetricDef]] = &[
 // Recorder registration
 // ---------------------------------------------------------------------------
 
+/// Every registered histogram, as `(name, declared unit)`.
+///
+/// The unit is what `observability` derives bucket ladders from, so a `_bytes`
+/// histogram never lands on a latency scale.
+pub(crate) fn histograms() -> impl Iterator<Item = (&'static str, Option<Unit>)> {
+    metrics_kit::histograms(ALL_METRICS)
+}
+
+/// Register help text and units for every metric with the installed recorder.
+/// Call once after `observability::init_prometheus`.
+pub(crate) fn describe_all() {
+    metrics_kit::describe_all(ALL_METRICS);
+}
+
 /// Whether `name` is a registered histogram. For `observability`'s check that
 /// every exported bucket override names one.
 #[cfg(test)]
@@ -2067,107 +1742,9 @@ pub(crate) fn is_registered_histogram(name: &str) -> bool {
         .any(|m| m.name == name && m.kind == MetricKind::Histogram)
 }
 
-/// Every registered histogram, as `(name, declared unit)`.
-///
-/// The unit is what `observability` derives bucket ladders from, so a `_bytes`
-/// histogram never lands on a latency scale.
-pub(crate) fn histograms() -> impl Iterator<Item = (&'static str, Option<Unit>)> {
-    ALL_METRICS
-        .iter()
-        .copied()
-        .flatten()
-        .filter(|m| m.kind == MetricKind::Histogram)
-        .map(|m| (m.name, m.unit))
-}
-
-/// Register help text and units for every metric with the installed recorder.
-/// Call once after `observability::init_prometheus`.
-pub(crate) fn describe_all() {
-    for def in ALL_METRICS.iter().copied().flatten() {
-        match (def.kind, def.unit) {
-            (MetricKind::Counter, Some(unit)) => {
-                metrics::describe_counter!(def.name, unit, def.help);
-            }
-            (MetricKind::Counter, None) => metrics::describe_counter!(def.name, def.help),
-            (MetricKind::Gauge, Some(unit)) => {
-                metrics::describe_gauge!(def.name, unit, def.help);
-            }
-            (MetricKind::Gauge, None) => metrics::describe_gauge!(def.name, def.help),
-            (MetricKind::Histogram, Some(unit)) => {
-                metrics::describe_histogram!(def.name, unit, def.help);
-            }
-            (MetricKind::Histogram, None) => metrics::describe_histogram!(def.name, def.help),
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Lint-safe emission helpers
 // ---------------------------------------------------------------------------
-
-/// The crate's single sanctioned lossy integer→float conversion, for gauge
-/// readings only. Values above 2^53 lose precision; every gauge emitted
-/// through this is bounded well below that (counts, byte sizes, indices,
-/// HLC *physical-ms parts* — never `Hlc::raw()`).
-#[must_use]
-#[allow(
-    clippy::as_conversions,
-    reason = "audited lossy f64 conversion for bounded gauge values; see doc comment"
-)]
-fn lossy_f64(value: u64) -> f64 {
-    value as f64
-}
-
-/// Signed variant of [`lossy_f64`] (e.g. clock drift).
-#[must_use]
-#[allow(
-    clippy::as_conversions,
-    reason = "audited lossy f64 conversion; see lossy_f64"
-)]
-fn lossy_f64_signed(value: i64) -> f64 {
-    value as f64
-}
-
-/// Set an unlabeled gauge from a `u64` reading.
-fn set_gauge(name: &'static str, value: u64) {
-    metrics::gauge!(name).set(lossy_f64(value));
-}
-
-/// Set an unlabeled gauge from a `usize` reading (counts, queue depths).
-fn set_gauge_usize(name: &'static str, value: usize) {
-    set_gauge(
-        name,
-        u64::try_from(value).expect("usize gauge value fits u64"),
-    );
-}
-
-/// Record an unlabeled histogram from a `usize` reading (byte sizes, batch counts).
-fn record_usize_hist(name: &'static str, value: usize) {
-    metrics::histogram!(name).record(lossy_f64(
-        u64::try_from(value).expect("usize histogram value fits u64"),
-    ));
-}
-
-/// Set an unlabeled 0/1 gauge.
-fn set_flag(name: &'static str, on: bool) {
-    metrics::gauge!(name).set(if on { 1.0 } else { 0.0 });
-}
-
-/// Set an HLC-valued gauge: exports the physical-millisecond part (raw HLCs
-/// exceed f64's exact-integer range).
-fn set_hlc_gauge(name: &'static str, hlc: Hlc) {
-    set_gauge(name, hlc.parts().physical_ms);
-}
-
-/// Wall-clock seconds since the Unix epoch, for "last run at" timestamp gauges
-/// (Grafana renders "time since" as `time() - metric`). Clock-skew safe.
-#[must_use]
-fn unix_now_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
 
 #[cfg(test)]
 mod tests {
@@ -2579,107 +2156,37 @@ mod tests {
 }
 
 #[cfg(test)]
-mod macro_smoke_tests {
+#[allow(clippy::unwrap_used, clippy::format_push_string, reason = "test code")]
+mod registry_golden {
     use super::*;
 
-    metrics!(synthetic; {
-        gauge   synth_gauge   SYNTH_GAUGE   "synth_gauge"  Seconds  "A synthetic gauge." (v: u64);
-        flag    synth_flag    SYNTH_FLAG    "synth_flag"   "A synthetic flag." (on: bool);
-        counter synth_counter SYNTH_COUNTER "synth_counter" "A synthetic counter.";
-        labeled_counter synth_led SYNTH_LED "synth_led" "A synthetic labeled counter."
-            (s: OpState) [LABEL_STATE => s.as_str()];
-        hlc     synth_hlc     SYNTH_HLC     "synth_hlc"    Milliseconds  "A synthetic hlc gauge." (h: Hlc);
-        gauge_usize synth_gu  SYNTH_GU      "synth_gu"     Count  "A synthetic usize gauge." (n: usize);
-        hist    synth_hist    SYNTH_HIST    "synth_hist"   Bytes  "A synthetic histogram." (n: usize);
-        hist_duration synth_hd SYNTH_HD     "synth_hd"     "A synthetic duration histogram." (d: Duration);
-        probe   synth_probe   SYNTH_PROBE   "synth_probe"  "A synthetic probe.";
-        probe_unlabeled synth_up SYNTH_UP   "synth_up"     "A synthetic unlabeled probe.";
-        custom  synth_custom  SYNTH_CUSTOM  "synth_custom" Gauge None "A synthetic custom.";
-    });
+    const GOLDEN_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/metrics.golden");
 
-    metrics!(synthetic_raw, unprefixed; {
-        gauge   synth_raw_gauge SYNTH_RAW_GAUGE "synth_raw_gauge" Count
-            "A synthetic gauge in an unprefixed group." (v: u64);
-    });
-
-    /// The `unprefixed` arm is what keeps `process_*` on the Prometheus
-    /// standard names; without a test the exemption is one typo from silently
-    /// namespacing them.
-    #[test]
-    fn unprefixed_group_keeps_its_bare_name() {
-        assert_eq!(SYNTH_RAW_GAUGE, "synth_raw_gauge");
-        assert_eq!(PROCESS_OPEN_FDS, "process_open_fds");
-
-        let recorder = metrics_util::debugging::DebuggingRecorder::new();
-        let snapshotter = recorder.snapshotter();
-        metrics::with_local_recorder(&recorder, || synth_raw_gauge(1));
-        assert!(
-            snapshotter
-                .snapshot()
-                .into_hashmap()
-                .keys()
-                .any(|k| k.key().name() == "synth_raw_gauge"),
-            "an unprefixed group must emit under its bare name",
-        );
-
-        let defs = synthetic_raw!();
-        assert_eq!(defs[0].name, "synth_raw_gauge");
-    }
-
-    #[test]
-    fn synthetic_group_defines_consts_and_emits() {
-        // The namespace is applied by the macro, so the const and the emitted
-        // name both carry it and a row never writes it.
-        assert_eq!(SYNTH_GAUGE, "zslg_synth_gauge");
-        assert_eq!(SYNTH_CUSTOM, "zslg_synth_custom");
-
-        let recorder = metrics_util::debugging::DebuggingRecorder::new();
-        let snapshotter = recorder.snapshotter();
-        metrics::with_local_recorder(&recorder, || {
-            synth_gauge(7);
-            synth_flag(true);
-            synth_counter();
-            synth_led(OpState::Success);
-            synth_hlc(Hlc::ZERO);
-            synth_gu(3);
-            synth_hist(4);
-            synth_hd(Duration::from_millis(1));
-            synth_probe().finish(OpState::Success);
-            let _probe = synth_up();
-        });
-        let map = snapshotter.snapshot().into_hashmap();
-        for name in [
-            "zslg_synth_gauge",
-            "zslg_synth_flag",
-            "zslg_synth_counter",
-            "zslg_synth_led",
-            "zslg_synth_hlc",
-            "zslg_synth_gu",
-            "zslg_synth_hist",
-            "zslg_synth_hd",
-            "zslg_synth_probe",
-            "zslg_synth_up",
-        ] {
-            assert!(
-                map.keys().any(|k| k.key().name() == name),
-                "missing emitted metric {name}"
-            );
+    fn dump() -> String {
+        let mut out = String::new();
+        for def in ALL_METRICS.iter().copied().flatten() {
+            out.push_str(&format!(
+                "{}\t{:?}\t{:?}\t{}\n",
+                def.name, def.kind, def.unit, def.help
+            ));
         }
+        out
     }
 
+    /// The exported metric set — names, kinds, units and help text — is a
+    /// contract with dashboards and alerts. A restructuring of the code that
+    /// emits them must not change it. `UPDATE_GOLDEN=1` rewrites the file.
     #[test]
-    fn synthetic_group_assembles_metric_defs() {
-        let defs = synthetic!();
-        assert_eq!(defs.len(), 11);
-        assert_eq!(defs[0].name, SYNTH_GAUGE);
-        assert_eq!(defs[0].kind, MetricKind::Gauge);
-        assert_eq!(defs[0].unit, Some(Unit::Seconds));
-        assert_eq!(defs[2].unit, None); // counter
-        assert_eq!(defs[4].unit, Some(Unit::Milliseconds)); // hlc — the arm takes a unit token
-        assert_eq!(defs[5].unit, Some(Unit::Count)); // gauge_usize
-        assert_eq!(defs[7].unit, Some(Unit::Seconds)); // hist_duration implicit
-        assert_eq!(defs[8].unit, Some(Unit::Seconds)); // probe implicit
-        assert_eq!(defs[10].kind, MetricKind::Gauge);
-        assert_eq!(defs[10].unit, None); // custom None
+    fn the_registry_matches_the_golden_dump() {
+        let now = dump();
+        if std::env::var_os("UPDATE_GOLDEN").is_some() {
+            std::fs::write(GOLDEN_PATH, &now).unwrap();
+            return;
+        }
+        let golden = std::fs::read_to_string(GOLDEN_PATH).unwrap();
+        assert!(
+            golden == now,
+            "metric registry differs from src/metrics.golden"
+        );
     }
 }
