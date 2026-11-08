@@ -8,6 +8,7 @@ description = "Projections folded from an append-only log"
 publish = false
 
 [dependencies]
+metrics-kit = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 const-fnv1a-hash = { workspace = true }

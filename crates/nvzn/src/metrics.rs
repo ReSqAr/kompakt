@@ -23,7 +23,7 @@
 //! are as fixed as an enum.)
 
 use crate::Tenant;
-use metrics::Unit;
+use metrics_kit::{MetricDef, MetricKind, Unit, lossy_f64, metrics, unix_now_secs};
 use std::time::Duration;
 
 /// The namespace every metric this crate owns is exported under.
@@ -33,22 +33,6 @@ use std::time::Duration;
 /// re-deriving one.
 #[cfg(test)]
 pub(crate) const METRIC_PREFIX: &str = "nvzn_";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MetricKind {
-    Counter,
-    Gauge,
-    Histogram,
-}
-
-/// One canonical metric: everything a recorder or a dashboard needs to know.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct MetricDef {
-    pub(crate) name: &'static str,
-    pub(crate) kind: MetricKind,
-    pub(crate) unit: Option<Unit>,
-    pub(crate) help: &'static str,
-}
 
 // ---------------------------------------------------------------------------
 // Label keys and vocabularies
@@ -189,216 +173,91 @@ impl RowOp {
 // Names
 // ---------------------------------------------------------------------------
 
-pub(crate) const FOLD_WATERMARK_ADVANCED_TIMESTAMP_SECONDS: &str =
-    "nvzn_fold_watermark_advanced_timestamp_seconds";
-pub(crate) const FOLD_WATERMARK_LOG_INDEX: &str = "nvzn_fold_watermark_log_index";
-pub(crate) const FOLD_WATERMARK_HLC_PHYSICAL_MS: &str = "nvzn_fold_watermark_hlc_physical_ms";
-pub(crate) const FOLD_BATCHES_TOTAL: &str = "nvzn_fold_batches_total";
-pub(crate) const FOLD_BATCH_SECONDS: &str = "nvzn_fold_batch_seconds";
-pub(crate) const FOLD_BATCH_ENTRIES: &str = "nvzn_fold_batch_entries";
-pub(crate) const FOLD_BATCH_BYTES: &str = "nvzn_fold_batch_bytes";
-pub(crate) const FOLD_ENTRIES_TOTAL: &str = "nvzn_fold_entries_total";
-pub(crate) const FOLD_STOPPED_TOTAL: &str = "nvzn_fold_stopped_total";
-pub(crate) const PROJECTION_ROWS_TOTAL: &str = "nvzn_projection_rows_total";
-pub(crate) const STORE_FENCE_TOTAL: &str = "nvzn_store_fence_total";
-pub(crate) const STORE_FENCE_SECONDS: &str = "nvzn_store_fence_seconds";
-pub(crate) const STORE_LIVE_SST_FILES_SIZE_BYTES: &str = "nvzn_store_live_sst_files_size_bytes";
-pub(crate) const STORE_RESETS_TOTAL: &str = "nvzn_store_resets_total";
-pub(crate) const READS_TOTAL: &str = "nvzn_reads_total";
-pub(crate) const WRITES_TOTAL: &str = "nvzn_writes_total";
-pub(crate) const LIVE_HELD_EVENTS: &str = "nvzn_live_held_events";
-pub(crate) const LIVE_HELD_BYTES: &str = "nvzn_live_held_bytes";
-pub(crate) const LIVE_COVERAGE: &str = "nvzn_live_coverage";
-pub(crate) const LIVE_MATERIALISE_SECONDS: &str = "nvzn_live_materialise_seconds";
-pub(crate) const LIVE_MATERIALISE_ENTRIES: &str = "nvzn_live_materialise_entries";
-pub(crate) const LIVE_SCAN_SECONDS: &str = "nvzn_live_scan_seconds";
-pub(crate) const LIVE_SCAN_ENTRIES: &str = "nvzn_live_scan_entries";
-pub(crate) const LIVE_UNDECODABLE_TOTAL: &str = "nvzn_live_undecodable_total";
-pub(crate) const WRITE_EVENTS_TOTAL: &str = "nvzn_write_events_total";
-
-pub(crate) const ALL_METRICS: &[MetricDef] = &[
-    MetricDef {
-        name: LIVE_HELD_EVENTS,
-        kind: MetricKind::Gauge,
-        unit: Some(Unit::Count),
-        help: "Writes a live view holds above the fold's watermark, by tenant: the \
+metrics!("nvzn_", nvzn; {
+    custom live_held_events LIVE_HELD_EVENTS "live_held_events" Gauge Count
+        "Writes a live view holds above the fold's watermark, by tenant: the \
                `S` events that reached this node and are not folded yet. Small \
-               unless the fold stalls or `S` events flood.",
-    },
-    MetricDef {
-        name: LIVE_HELD_BYTES,
-        kind: MetricKind::Gauge,
-        unit: Some(Unit::Bytes),
-        help: "Payload bytes of the writes a live view holds, by tenant; with \
-               nvzn_live_held_events, what the overflow cap is checked against.",
-    },
-    MetricDef {
-        name: LIVE_COVERAGE,
-        kind: MetricKind::Gauge,
-        unit: None,
-        help: "A live view's state, by tenant and state: 1 for the current one of \
+               unless the fold stalls or `S` events flood.";
+    custom live_held_bytes LIVE_HELD_BYTES "live_held_bytes" Gauge Bytes
+        "Payload bytes of the writes a live view holds, by tenant; with \
+               nvzn_live_held_events, what the overflow cap is checked against.";
+    custom live_coverage LIVE_COVERAGE "live_coverage" Gauge None
+        "A live view's state, by tenant and state: 1 for the current one of \
                `scanning` (cold start, snapshots wait), `complete`, `overflowed` \
                (over the cap: snapshots serve the fold's state alone until it \
-               passes what was dropped).",
-    },
-    MetricDef {
-        name: LIVE_MATERIALISE_SECONDS,
-        kind: MetricKind::Histogram,
-        unit: Some(Unit::Seconds),
-        help: "Time to build one live snapshot: open the store, fold the held \
-               events through the live projections.",
-    },
-    MetricDef {
-        name: LIVE_MATERIALISE_ENTRIES,
-        kind: MetricKind::Histogram,
-        unit: Some(Unit::Count),
-        help: "Held writes folded into one live snapshot. Repeated per snapshot, \
-               so this is the per-read cost the held set adds.",
-    },
-    MetricDef {
-        name: LIVE_SCAN_SECONDS,
-        kind: MetricKind::Histogram,
-        unit: Some(Unit::Seconds),
-        help: "Duration of a live view's cold-start scan of the stable log, \
-               which the first snapshots wait for.",
-    },
-    MetricDef {
-        name: LIVE_SCAN_ENTRIES,
-        kind: MetricKind::Histogram,
-        unit: Some(Unit::Count),
-        help: "Stable-log entries a live view's cold-start scan read: the gap \
-               between the store's watermark and the stable watermark at start.",
-    },
-    MetricDef {
-        name: LIVE_UNDECODABLE_TOTAL,
-        kind: MetricKind::Counter,
-        unit: None,
-        help: "Payloads a live view could not decode, by tenant: logged and \
-               skipped (the fold stops on the same entry once it is stable).",
-    },
-    MetricDef {
-        name: FOLD_WATERMARK_ADVANCED_TIMESTAMP_SECONDS,
-        kind: MetricKind::Gauge,
-        unit: Some(Unit::Seconds),
-        help: "Unix-epoch seconds of the last fold-watermark advance. THE staleness \
+               passes what was dropped).";
+    custom live_materialise_seconds LIVE_MATERIALISE_SECONDS "live_materialise_seconds" Histogram Seconds
+        "Time to build one live snapshot: open the store, fold the held \
+               events through the live projections.";
+    custom live_materialise_entries LIVE_MATERIALISE_ENTRIES "live_materialise_entries" Histogram Count
+        "Held writes folded into one live snapshot. Repeated per snapshot, \
+               so this is the per-read cost the held set adds.";
+    custom live_scan_seconds LIVE_SCAN_SECONDS "live_scan_seconds" Histogram Seconds
+        "Duration of a live view's cold-start scan of the stable log, \
+               which the first snapshots wait for.";
+    custom live_scan_entries LIVE_SCAN_ENTRIES "live_scan_entries" Histogram Count
+        "Stable-log entries a live view's cold-start scan read: the gap \
+               between the store's watermark and the stable watermark at start.";
+    custom live_undecodable_total LIVE_UNDECODABLE_TOTAL "live_undecodable_total" Counter None
+        "Payloads a live view could not decode, by tenant: logged and \
+               skipped (the fold stops on the same entry once it is stable).";
+    custom fold_watermark_advanced_timestamp_seconds FOLD_WATERMARK_ADVANCED_TIMESTAMP_SECONDS "fold_watermark_advanced_timestamp_seconds" Gauge Seconds
+        "Unix-epoch seconds of the last fold-watermark advance. THE staleness \
                alert, evaluated as `time() - nvzn_fold_watermark_advanced_timestamp_seconds`: \
-               a lag gauge goes stale exactly when the dispatcher dies, this keeps climbing.",
-    },
-    MetricDef {
-        name: FOLD_WATERMARK_LOG_INDEX,
-        kind: MetricKind::Gauge,
-        unit: Some(Unit::Count),
-        help: "Stable-log index the read model has folded through. Where the \
-               projections are, in log terms.",
-    },
-    MetricDef {
-        name: FOLD_WATERMARK_HLC_PHYSICAL_MS,
-        kind: MetricKind::Gauge,
-        unit: Some(Unit::Milliseconds),
-        help: "Physical-millisecond part of the folded watermark's HLC. Distance to \
+               a lag gauge goes stale exactly when the dispatcher dies, this keeps climbing.";
+    custom fold_watermark_log_index FOLD_WATERMARK_LOG_INDEX "fold_watermark_log_index" Gauge Count
+        "Stable-log index the read model has folded through. Where the \
+               projections are, in log terms.";
+    custom fold_watermark_hlc_physical_ms FOLD_WATERMARK_HLC_PHYSICAL_MS "fold_watermark_hlc_physical_ms" Gauge Milliseconds
+        "Physical-millisecond part of the folded watermark's HLC. Distance to \
                zslg's zslg_manifest_end_hlc_physical_ms is projection lag in \
-               wall-clock terms.",
-    },
-    MetricDef {
-        name: FOLD_BATCHES_TOTAL,
-        kind: MetricKind::Counter,
-        unit: None,
-        help: "Batches committed by the fold loop. One batch is one store transaction \
-               covering whole log entries until it holds `fold_commit` bytes of writes.",
-    },
-    MetricDef {
-        name: FOLD_BATCH_SECONDS,
-        kind: MetricKind::Histogram,
-        unit: Some(Unit::Seconds),
-        help: "Time to fold and commit one batch: decode, project, and commit.",
-    },
-    MetricDef {
-        name: FOLD_BATCH_ENTRIES,
-        kind: MetricKind::Histogram,
-        unit: Some(Unit::Count),
-        help: "Log entries per committed batch.",
-    },
-    MetricDef {
-        name: FOLD_BATCH_BYTES,
-        kind: MetricKind::Histogram,
-        unit: Some(Unit::Bytes),
-        help: "Bytes a committed batch staged (rows and index entries, estimated). \
-               At `fold_commit` (4 MiB unless configured) a burst folds in several commits.",
-    },
-    MetricDef {
-        name: FOLD_ENTRIES_TOTAL,
-        kind: MetricKind::Counter,
-        unit: None,
-        help: "Log entries seen by the fold loop, by what became of them. Deliberately \
+               wall-clock terms.";
+    custom fold_batches_total FOLD_BATCHES_TOTAL "fold_batches_total" Counter None
+        "Batches committed by the fold loop. One batch is one store transaction \
+               covering whole log entries until it holds `fold_commit` bytes of writes.";
+    custom fold_batch_seconds FOLD_BATCH_SECONDS "fold_batch_seconds" Histogram Seconds
+        "Time to fold and commit one batch: decode, project, and commit.";
+    custom fold_batch_entries FOLD_BATCH_ENTRIES "fold_batch_entries" Histogram Count
+        "Log entries per committed batch.";
+    custom fold_batch_bytes FOLD_BATCH_BYTES "fold_batch_bytes" Histogram Bytes
+        "Bytes a committed batch staged (rows and index entries, estimated). \
+               At `fold_commit` (4 MiB unless configured) a burst folds in several commits.";
+    custom fold_entries_total FOLD_ENTRIES_TOTAL "fold_entries_total" Counter None
+        "Log entries seen by the fold loop, by what became of them. Deliberately \
                unlabelled by tenant: `foreign_tenant` counts entries for tenants this \
-               dispatcher does not host, whose ids are unbounded on a shared log.",
-    },
-    MetricDef {
-        name: FOLD_STOPPED_TOTAL,
-        kind: MetricKind::Counter,
-        unit: None,
-        help: "Fold-loop exits by reason. `poison_entry` and `non_monotone_data_id` \
+               dispatcher does not host, whose ids are unbounded on a shared log.";
+    custom fold_stopped_total FOLD_STOPPED_TOTAL "fold_stopped_total" Counter None
+        "Fold-loop exits by reason. `poison_entry` and `non_monotone_data_id` \
                are permanent: the entry stays in the log, so a restart fails \
-               identically and the read model is frozen until an operator acts.",
-    },
-    MetricDef {
-        name: PROJECTION_ROWS_TOTAL,
-        kind: MetricKind::Counter,
-        unit: None,
-        help: "Projection rows written by the fold loop, by tenant, projection type and \
-               operation. The churn each projection actually sees.",
-    },
-    MetricDef {
-        name: STORE_FENCE_TOTAL,
-        kind: MetricKind::Counter,
-        unit: None,
-        help: "Store fsyncs by outcome. `failed` is terminal — nothing this dispatcher \
-               commits can be made durable any more, so the fold loop stops.",
-    },
-    MetricDef {
-        name: STORE_FENCE_SECONDS,
-        kind: MetricKind::Histogram,
-        unit: Some(Unit::Seconds),
-        help: "Time for one store fsync (flush_wal).",
-    },
-    MetricDef {
-        name: STORE_LIVE_SST_FILES_SIZE_BYTES,
-        kind: MetricKind::Gauge,
-        unit: Some(Unit::Bytes),
-        help: "rocksdb.live-sst-files-size: on-disk size of the live SST files, per \
+               identically and the read model is frozen until an operator acts.";
+    custom projection_rows_total PROJECTION_ROWS_TOTAL "projection_rows_total" Counter None
+        "Projection rows written by the fold loop, by tenant, projection type and \
+               operation. The churn each projection actually sees.";
+    custom store_fence_total STORE_FENCE_TOTAL "store_fence_total" Counter None
+        "Store fsyncs by outcome. `failed` is terminal — nothing this dispatcher \
+               commits can be made durable any more, so the fold loop stops.";
+    custom store_fence_seconds STORE_FENCE_SECONDS "store_fence_seconds" Histogram Seconds
+        "Time for one store fsync (flush_wal).";
+    custom store_live_sst_files_size_bytes STORE_LIVE_SST_FILES_SIZE_BYTES "store_live_sst_files_size_bytes" Gauge Bytes
+        "rocksdb.live-sst-files-size: on-disk size of the live SST files, per \
                column family. Sampled on every store fence tick; matches zslg's \
-               zslg_storage_live_sst_files_size_bytes.",
-    },
-    MetricDef {
-        name: STORE_RESETS_TOTAL,
-        kind: MetricKind::Counter,
-        unit: None,
-        help: "Config-hash mismatches that wiped the store and refolded the log from \
+               zslg_storage_live_sst_files_size_bytes.";
+    custom store_resets_total STORE_RESETS_TOTAL "store_resets_total" Counter None
+        "Config-hash mismatches that wiped the store and refolded the log from \
                index zero. Expected on a deploy that changes the registered \
-               projections; a steady rate is not.",
-    },
-    MetricDef {
-        name: READS_TOTAL,
-        kind: MetricKind::Counter,
-        unit: None,
-        help: "Snapshots opened, by tenant and freshness. `stable` sees only what has \
+               projections; a steady rate is not.";
+    custom reads_total READS_TOTAL "reads_total" Counter None
+        "Snapshots opened, by tenant and freshness. `stable` sees only what has \
                gone stable in the log, so a caller expecting read-your-own-writes \
-               and finding `stable` here is reading the wrong one.",
-    },
-    MetricDef {
-        name: WRITES_TOTAL,
-        kind: MetricKind::Counter,
-        unit: None,
-        help: "Event batches written to the log, by tenant.",
-    },
-    MetricDef {
-        name: WRITE_EVENTS_TOTAL,
-        kind: MetricKind::Counter,
-        unit: None,
-        help: "Events written to the log, by tenant. Against nvzn_writes_total, the \
-               batch size a caller is actually achieving.",
-    },
-];
+               and finding `stable` here is reading the wrong one.";
+    custom writes_total WRITES_TOTAL "writes_total" Counter None
+        "Event batches written to the log, by tenant.";
+    custom write_events_total WRITE_EVENTS_TOTAL "write_events_total" Counter None
+        "Events written to the log, by tenant. Against nvzn_writes_total, the \
+               batch size a caller is actually achieving.";
+});
+
+pub(crate) const ALL_METRICS: &[MetricDef] = &nvzn!();
 
 /// The namespace every metric this crate owns is exported under.
 pub const METRIC_NAMESPACE: &str = "nvzn_";
@@ -497,26 +356,6 @@ pub fn describe_metrics() {
 // ---------------------------------------------------------------------------
 // Conversions
 // ---------------------------------------------------------------------------
-
-/// Integer → gauge float. Lossy above 2^53; every gauge here is a log index, a
-/// count, a byte size or an HLC *physical-millisecond part*, all bounded well below that.
-#[allow(
-    clippy::as_conversions,
-    reason = "audited lossy f64 conversion for bounded gauge values; see doc comment"
-)]
-fn lossy_f64(value: u64) -> f64 {
-    value as f64
-}
-
-/// Wall-clock seconds since the Unix epoch, for "last advanced at" gauges.
-/// Grafana renders the age as `time() - metric`, which keeps climbing whether
-/// or not anything is still emitting.
-fn unix_now_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or_default()
-}
 
 /// The last `::` segment of a type's path — `Todo`, not
 /// `my_app::projections::Todo`. Label values, so readability beats fidelity;
@@ -849,5 +688,34 @@ mod tests {
     #[test]
     fn short_type_name_takes_the_last_segment() {
         assert_eq!(short_type_name::<crate::testsupport::Todo>(), "Todo");
+    }
+
+    const GOLDEN_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/metrics.golden");
+
+    /// The exported metric set — names, kinds, units and help text — is a
+    /// contract with dashboards and alerts. A restructuring of the code that
+    /// emits them must not change it. `UPDATE_GOLDEN=1` rewrites the file.
+    #[test]
+    fn the_registry_matches_the_golden_dump() {
+        let mut lines: Vec<String> = ALL_METRICS
+            .iter()
+            .map(|def| {
+                format!(
+                    "{}\t{:?}\t{:?}\t{}\n",
+                    def.name, def.kind, def.unit, def.help
+                )
+            })
+            .collect();
+        lines.sort();
+        let now = lines.concat();
+        if std::env::var_os("UPDATE_GOLDEN").is_some() {
+            std::fs::write(GOLDEN_PATH, &now).unwrap();
+            return;
+        }
+        let golden = std::fs::read_to_string(GOLDEN_PATH).unwrap();
+        assert!(
+            golden == now,
+            "metric registry differs from src/metrics.golden"
+        );
     }
 }

@@ -2115,6 +2115,7 @@ dependencies = [
  "itertools 0.15.0",
  "metrics",
  "metrics-exporter-prometheus",
+ "metrics-kit",
  "metrics-util",
  "postcard",
  "proptest",
