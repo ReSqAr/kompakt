@@ -126,8 +126,8 @@ macro_rules! error_bridge {
 /// crate needs `crossbeam-combinators`.
 #[macro_export]
 macro_rules! error_home {
-    ($error:ident) => {
-        pub(crate) trait Home {
+    ($vis:vis $error:ident) => {
+        $vis trait Home {
             type Out;
             fn home(self) -> Self::Out;
         }

@@ -4,7 +4,7 @@
 //! three are proper subsets of it:
 //!
 //! | [`ReplicaNode`] | raft voter + replica log + writer + reader |
-//! | [`FollowerNode`](crate::follower_node) | writer + reader, no raft, no replica log |
+//! | `FollowerNode` | writer + reader, no raft, no replica log |
 //! | `LearnerNode` | reader only |
 //! | `WriterNode` | writer only, no durable state |
 //!
@@ -14,12 +14,9 @@
 //! together.
 //!
 //! Leader-only work is not started here. Every leader job is spawned
-//! unconditionally and gates on leadership itself (`crate::leader`), so
+//! unconditionally and gates on leadership itself (`zslg-leader`), so
 //! promotion and demotion move no tasks.
 
-use crate::database::NODE_ID_CF;
-use crate::learner::{LOCAL_STORE_CURSORS_CF, LOCAL_STORE_DATA_CF, STABLE_LOG_CF};
-use crate::replica::REPLICA_LOG_CF;
 use futures::FutureExt as _;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -28,45 +25,54 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 use zslg_consensus::RaftStateView;
+pub use zslg_error::Error;
+use zslg_learner::{LOCAL_STORE_CURSORS_CF, LOCAL_STORE_DATA_CF, STABLE_LOG_CF};
 use zslg_lifecycle_types::{ConfigError, LifecycleError};
 use zslg_net::PeersWatcher;
+use zslg_node_id::NODE_ID_CF;
+use zslg_replica_log::REPLICA_LOG_CF;
 use zslg_snapshot::SnapshotStore;
 
 use std::num::NonZeroUsize;
 
-use crate::ByteSize;
+use bytesize::ByteSize;
 
-use crate::error::Error;
-use crate::leader::spawn_leader_loop;
-use crate::leader::{LivenessConfig, SnapshotConfig};
-use crate::learner::LearnerConfig;
-use crate::learner::{LearnerService, spawn_learner, spawn_stable_store};
-use crate::network::{
-    LocalReplicaClient, PeerRouter, RpcClientConfig, RpcServerConfig, SocketOpts, setup_router,
-};
-use crate::raft::RaftConfig;
-use crate::raft::{RaftNode, run_raft_startup, setup_raft};
-use crate::replica::ReplicaLogConfig;
-use crate::replica::{ReplicaService, spawn_replica};
-use crate::{database, network};
+mod replica;
+
+// Depended on only to switch on the `testing` hooks of `RaftNode`.
+#[cfg(feature = "testing")]
+use zslg_raft_node as _;
+
+use crate::replica::spawn_replica;
 #[cfg(test)]
 use rocksdb_kit::ColumnFamily;
 use rocksdb_kit::{CfSpec, Storage, StorageConfig};
 use shutdown::Shutdown;
-use zslg_consensus_types::SpareSelectionStrategy;
-use zslg_consensus_types::{EvictionStatus, RaftStateHandle};
+use zslg_consensus::NodeId;
+use zslg_consensus::SpareSelectionStrategy;
+use zslg_consensus::{EvictionStatus, RaftStateHandle};
 use zslg_hlc_clock::{HlcClock, run_clock_gauges};
 use zslg_hlc_gate::HlcGate;
+use zslg_leader::spawn_leader_loop;
+use zslg_leader::{LivenessConfig, SnapshotConfig};
 use zslg_leader_membership::MembershipConfig;
-use zslg_net_types::ServerName;
-use zslg_net_types::{HostPort, PeerAddr};
-use zslg_node_types::NodeId;
+use zslg_learner::{LearnerConfig, LearnerService, spawn_learner, spawn_stable_store};
+use zslg_net::ServerName;
+use zslg_net::{HostPort, PeerAddr};
+use zslg_net_setup as network;
+use zslg_net_setup::{
+    LocalReplicaClient, PeerRouter, RpcClientConfig, RpcServerConfig, SocketOpts, setup_router,
+};
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use zslg_object_store_config::IntoArcObjectStore;
 use zslg_peers::PeersMembershipGate;
+use zslg_raft_setup::RaftConfig;
+use zslg_raft_setup::{RaftNode, run_raft_startup, setup_raft};
 use zslg_raft_tracker::NoOpRaftViewer;
-use zslg_snapshot_types::CompactionTier;
-use zslg_snapshot_types::CompressionLevel;
+use zslg_replica_log::ReplicaLogConfig;
+use zslg_replica_service::ReplicaService;
+use zslg_snapshot::CompactionTier;
+use zslg_snapshot::CompressionLevel;
 use zslg_writer::WriterService;
 
 #[derive(Debug, Clone)]
@@ -286,7 +292,7 @@ impl ReplicaNodeConfig {
             db_path,
             object_store: object_store.into_arc_object_store()?,
             stable_log_subscriber_queue_capacity:
-                crate::learner::StableLogConfig::DEFAULT_SUBSCRIBER_QUEUE_CAPACITY,
+                zslg_learner::StableLogConfig::DEFAULT_SUBSCRIBER_QUEUE_CAPACITY,
             stable_log_compression: true,
             drain_timeout: Duration::from_secs(30),
         })
@@ -296,7 +302,7 @@ impl ReplicaNodeConfig {
     /// durable identity. The raft store's two column families come from the
     /// [`Storage`] opened in `start`, not from a path in here.
     #[must_use]
-    pub(crate) fn raft_config(&self, node_id: NodeId) -> RaftConfig {
+    pub fn raft_config(&self, node_id: NodeId) -> RaftConfig {
         RaftConfig {
             heartbeat_interval: self.raft_heartbeat_interval,
             election_timeout_min: self.raft_election_timeout_min,
@@ -311,7 +317,7 @@ impl ReplicaNodeConfig {
 
     /// Produce the snapshot subsystem config.
     #[must_use]
-    pub(crate) fn snapshot_config(&self) -> SnapshotConfig {
+    pub fn snapshot_config(&self) -> SnapshotConfig {
         SnapshotConfig {
             interval: self.snapshot_interval,
             cutoff_timeout: self.snapshot_cutoff_timeout,
@@ -326,7 +332,7 @@ impl ReplicaNodeConfig {
 
     /// Produce the membership subsystem config.
     #[must_use]
-    pub(crate) fn membership_config(&self) -> MembershipConfig {
+    pub fn membership_config(&self) -> MembershipConfig {
         MembershipConfig {
             replica_node_count: self.membership_replica_node_count,
             replica_node_max_failures: self.membership_replica_node_max_failures,
@@ -338,7 +344,7 @@ impl ReplicaNodeConfig {
 
     /// Produce the liveness subsystem config.
     #[must_use]
-    pub(crate) fn liveness_config(&self) -> LivenessConfig {
+    pub fn liveness_config(&self) -> LivenessConfig {
         LivenessConfig {
             probe_interval: self.liveness_probe_interval,
             probe_timeout: self.liveness_probe_timeout,
@@ -347,7 +353,7 @@ impl ReplicaNodeConfig {
 
     /// Produce the outbound router's client config.
     #[must_use]
-    pub(crate) fn router_config(&self) -> RpcClientConfig {
+    pub fn router_config(&self) -> RpcClientConfig {
         RpcClientConfig {
             tcp_keepalive_interval: self.keepalive_interval,
             #[cfg(target_os = "linux")]
@@ -365,14 +371,14 @@ impl ReplicaNodeConfig {
 
     /// Produce the persistent peers watcher from the flat peer list.
     #[must_use]
-    pub(crate) fn peers_watcher(&self) -> Arc<dyn PeersWatcher> {
+    pub fn peers_watcher(&self) -> Arc<dyn PeersWatcher> {
         zslg_peers::static_peers(self.peers.clone())
     }
 
     /// Produce the RPC server bind config, including the TCP socket tuning and
     /// the node's durable identity.
     #[must_use]
-    pub(crate) fn rpc_server_config(&self, node_id: NodeId) -> RpcServerConfig {
+    pub fn rpc_server_config(&self, node_id: NodeId) -> RpcServerConfig {
         RpcServerConfig {
             listen_addr: self.network_listen_addr,
             socket_opts: SocketOpts {
@@ -388,7 +394,7 @@ impl ReplicaNodeConfig {
 
     /// Whether this node is the bootstrap node.
     #[must_use]
-    pub(crate) fn is_bootstrap_node(&self) -> bool {
+    pub fn is_bootstrap_node(&self) -> bool {
         self.network_server_name == self.network_bootstrap_server_name
     }
 
@@ -398,7 +404,7 @@ impl ReplicaNodeConfig {
     /// length is what sizes each memtable, so a family that is listed but never
     /// used still costs the ones that are.
     #[must_use]
-    pub(crate) fn column_families(&self) -> Vec<CfSpec> {
+    pub fn column_families(&self) -> Vec<CfSpec> {
         let mut cfs = Vec::from(zslg_raft_storage::raft_cf_specs());
         cfs.extend([
             // Compression is a per-store footprint/CPU trade, never a
@@ -433,7 +439,7 @@ impl ReplicaNodeConfig {
     /// Produce the storage tuning: the budget plus the overrides, with every
     /// unset one left to `rocksdb_kit`'s derivation from the budget.
     #[must_use]
-    pub(crate) fn storage_config(&self) -> StorageConfig {
+    pub fn storage_config(&self) -> StorageConfig {
         StorageConfig {
             memory: self.storage_memory,
             write_buffer: self.storage_write_buffer,
@@ -448,7 +454,7 @@ impl ReplicaNodeConfig {
     /// Produce the learner subsystem config: the learner tunables plus the
     /// store directory derived from the storage root.
     #[must_use]
-    pub(crate) fn learner_config(&self) -> LearnerConfig {
+    pub fn learner_config(&self) -> LearnerConfig {
         LearnerConfig {
             fetch_sweep_interval: self.learner_fetch_sweep_interval,
             purge_grace_period: self.learner_purge_grace_period,
@@ -465,7 +471,7 @@ impl ReplicaNodeConfig {
     /// Produce the replica-log subsystem config: the replica-log tunables plus
     /// the log directory derived from the storage root and the node identity.
     #[must_use]
-    pub(crate) fn replica_log_config(&self, effective_node_id: NodeId) -> ReplicaLogConfig {
+    pub fn replica_log_config(&self, effective_node_id: NodeId) -> ReplicaLogConfig {
         ReplicaLogConfig {
             purge_grace_period: self.replica_log_purge_grace_period,
             fetch_sweep_interval: self.replica_log_fetch_sweep_interval,
@@ -480,8 +486,8 @@ impl ReplicaNodeConfig {
     /// Produce the stable-log subsystem config: the engine sizing plus the log
     /// directory derived from the storage root.
     #[must_use]
-    pub(crate) fn stable_log_config(&self) -> crate::learner::StableLogConfig {
-        crate::learner::StableLogConfig {
+    pub fn stable_log_config(&self) -> zslg_learner::StableLogConfig {
+        zslg_learner::StableLogConfig {
             subscriber_queue_capacity: self.stable_log_subscriber_queue_capacity,
         }
     }
@@ -489,11 +495,8 @@ impl ReplicaNodeConfig {
     /// Produce the leader-loop config bundle from the snapshot / membership /
     /// liveness / quorum-timing / network fields.
     #[must_use]
-    pub(crate) fn leader_loop_config(
-        &self,
-        self_node_id: NodeId,
-    ) -> crate::leader::LeaderLoopConfig {
-        crate::leader::LeaderLoopConfig {
+    pub fn leader_loop_config(&self, self_node_id: NodeId) -> zslg_leader::LeaderLoopConfig {
+        zslg_leader::LeaderLoopConfig {
             snapshot: self.snapshot_config(),
             membership: self.membership_config(),
             liveness: self.liveness_config(),
@@ -507,7 +510,7 @@ impl ReplicaNodeConfig {
 
     /// Produce the snapshot-store constructor config.
     #[must_use]
-    pub(crate) fn snapshot_store_config(&self) -> SnapshotStoreConfig {
+    pub fn snapshot_store_config(&self) -> SnapshotStoreConfig {
         SnapshotStoreConfig {
             object_store: self.object_store.clone(),
         }
@@ -516,7 +519,7 @@ impl ReplicaNodeConfig {
     /// Validate all sub-configs and cross-field constraints.
     /// Produce the writer constructor config.
     #[must_use]
-    pub(crate) fn writer_config(&self, node_id: NodeId) -> zslg_writer::WriterConfig {
+    pub fn writer_config(&self, node_id: NodeId) -> zslg_writer::WriterConfig {
         zslg_writer::WriterConfig {
             node_id,
             write_timeout: self.write_timeout,
@@ -526,7 +529,7 @@ impl ReplicaNodeConfig {
     /// Compute the `PeerAddr` this node advertises to the cluster, given the
     /// socket `bind_server` returned.
     #[must_use]
-    pub(crate) fn self_peer_addr(&self, server_addr: SocketAddr) -> PeerAddr {
+    pub fn self_peer_addr(&self, server_addr: SocketAddr) -> PeerAddr {
         PeerAddr {
             addr: if server_addr.ip().is_unspecified() {
                 HostPort::new(&self.network_server_name, server_addr.port())
@@ -541,14 +544,14 @@ impl ReplicaNodeConfig {
     /// timing. Active handles (`raft`, `raft_state`, `snapshot_store`, `router`)
     /// are passed directly to `run_raft_startup`.
     #[must_use]
-    pub(crate) fn raft_startup_config(
+    pub fn raft_startup_config(
         &self,
         node_id: NodeId,
         has_local_state: bool,
         peers_watcher: Arc<dyn PeersWatcher>,
         server_addr: SocketAddr,
-    ) -> crate::raft::RaftStartupConfig {
-        crate::raft::RaftStartupConfig {
+    ) -> zslg_raft_setup::RaftStartupConfig {
+        zslg_raft_setup::RaftStartupConfig {
             node_id,
             peers_watcher,
             is_bootstrap_node: self.is_bootstrap_node(),
@@ -558,7 +561,7 @@ impl ReplicaNodeConfig {
         }
     }
 
-    pub(crate) fn validate(&self) -> Result<(), Error> {
+    pub fn validate(&self) -> Result<(), Error> {
         // Dummy identity — validation doesn't need a real node_id, just tunings.
         let dummy = NodeId::new_v4();
         self.raft_config(dummy).validate()?;
@@ -655,14 +658,14 @@ pub struct ReplicaNode {
     learner: Arc<LearnerService>,
     raft: Arc<RaftNode>,
     /// Published by `raft::startup::rejoin::RejoinMonitor`; consulted by
-    /// [`Self::can_serve_clients`] and [`Self::reader`]'s [`GatedReader`](crate::learner::GatedReader).
+    /// [`Self::can_serve_clients`] and [`Self::reader`]'s [`GatedReader`](zslg_learner::GatedReader).
     /// Cheap to clone (one `Arc<AtomicBool>`) — held here rather than
     /// reconstructed per call.
     eviction: EvictionStatus,
     _self_client: Arc<dyn zslg_net::ReplicaClient>,
     /// Held for shutdown only: its background retire compactions must be joined
     /// before the node's `Storage` handle drops.
-    stable_log: Arc<crate::learner::StableLog>,
+    stable_log: Arc<zslg_learner::StableLog>,
     /// The node's one RocksDB. Held so [`run`](Self::run) can join the
     /// background retire compactions before the handle drops — a detached one
     /// keeps the DB, and its LOCK, alive past this node.
@@ -701,7 +704,7 @@ pub struct InitialisingReplicaNode {
     replica: Arc<ReplicaService>,
     raft: Arc<RaftNode>,
     snapshot_store: Arc<dyn SnapshotStore>,
-    stable_log: Arc<crate::learner::StableLog>,
+    stable_log: Arc<zslg_learner::StableLog>,
     storage: Arc<Storage>,
     router: Arc<PeerRouter>,
     has_local_state: bool,
@@ -958,7 +961,7 @@ impl ReplicaNode {
             &config.column_families(),
         )?;
 
-        let node_id = database::load_or_create_node_id(&storage)?;
+        let node_id = zslg_node_id::load_or_create_node_id(&storage)?;
         info!(node_id = ?node_id, "node_id loaded or created");
 
         let snapshot_store: Arc<dyn SnapshotStore> = Arc::new(RemoteSnapshotStore::new(
@@ -1081,7 +1084,7 @@ impl ReplicaNode {
     /// ourselves as in". See `raft::startup::rejoin::EvictionStatus`.
     #[must_use]
     pub fn can_serve_clients(&self) -> bool {
-        crate::learner::can_serve_clients(&self.eviction)
+        zslg_learner::can_serve_clients(&self.eviction)
     }
 
     /// Remove `victim` from this node's openraft voter set. Test-only:
@@ -1100,8 +1103,8 @@ impl ReplicaNode {
     /// *remaining* nodes instead). `retain: true` keeps it as a learner, which
     /// still receives `AppendEntries` — so its own metrics promptly reflect
     /// the demotion, which is what this test needs to assert on.
-    #[cfg(test)]
-    pub(crate) async fn remove_member_for_test(&self, victim: NodeId) -> Result<(), Error> {
+    #[cfg(any(test, feature = "testing"))]
+    pub async fn remove_member_for_test(&self, victim: NodeId) -> Result<(), Error> {
         self.raft
             .demote_to_learner_for_test(victim)
             .await
@@ -1134,7 +1137,7 @@ impl ReplicaNode {
     /// `writer.rs`).
     #[must_use]
     pub fn reader(&self) -> Arc<dyn zslg_log::Reader> {
-        Arc::new(crate::learner::GatedReader::new(
+        Arc::new(zslg_learner::GatedReader::new(
             self.learner.reader(),
             self.eviction.clone(),
             self.node_id,
@@ -1207,14 +1210,14 @@ impl ReplicaNode {
     }
 
     #[must_use]
-    #[cfg(test)]
-    pub(crate) fn replica(&self) -> Arc<dyn zslg_log::Replica> {
+    #[cfg(any(test, feature = "testing"))]
+    pub fn replica(&self) -> Arc<dyn zslg_log::Replica> {
         self.replica.clone()
     }
 
     #[must_use]
-    #[cfg(test)]
-    pub(crate) fn server_addr(&self) -> SocketAddr {
+    #[cfg(any(test, feature = "testing"))]
+    pub fn server_addr(&self) -> SocketAddr {
         self.server_addr
     }
 
@@ -1234,7 +1237,7 @@ impl ReplicaNode {
     ///
     /// This doc example is also the crate's check that the surface really is
     /// reachable from outside: a doc test compiles as a separate crate, so it
-    /// fails if any of these items is `pub(crate)`.
+    /// fails if any of these items is `pub`.
     ///
     /// ```no_run
     /// use zslg::{RaftStateView, ReplicaMembership, ReplicaNode};

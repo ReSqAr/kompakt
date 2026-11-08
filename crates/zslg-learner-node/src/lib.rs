@@ -17,6 +17,7 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 use zslg_consensus::RaftStateView;
+pub use zslg_error::Error;
 use zslg_learner::{LOCAL_STORE_CURSORS_CF, LOCAL_STORE_DATA_CF, STABLE_LOG_CF};
 use zslg_lifecycle_types::ConfigError;
 use zslg_net::NetError;
@@ -543,53 +544,5 @@ mod tests {
                 "node_id"
             ],
         );
-    }
-}
-
-error_union::error_union! {
-    /// What this node assembly can fail with.
-    #[derive(Debug, Clone, PartialEq)]
-    pub Error {
-        Lifecycle(zslg_lifecycle_types::LifecycleError),
-        Config(zslg_lifecycle_types::ConfigError),
-        Clock(zslg_time::ClockError),
-        Log(zslg_log::LogError),
-        Snapshot(zslg_snapshot::SnapshotError),
-        Net(zslg_net::NetError),
-        Consensus(zslg_consensus::ConsensusError),
-    }
-    from zslg_time::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_log::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_snapshot::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_consensus::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_net::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_learner::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_net_client::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_net_setup::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_object_store_config::Error { Snapshot }
-    from zslg_raft_tracker::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_local_store::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_stable_log::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_reader::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_subscriber::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_node_id::Error { Config, Log }
-    from zslg_raft::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_quorum_read::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-}
-
-impl From<shutdown::Stopped> for Error {
-    fn from(_: shutdown::Stopped) -> Self {
-        Self::Lifecycle(zslg_lifecycle_types::LifecycleError::Shutdown)
-    }
-}
-
-impl From<rocksdb_kit::StorageError> for Error {
-    fn from(e: rocksdb_kit::StorageError) -> Self {
-        match e {
-            rocksdb_kit::StorageError::InvalidConfiguration(msg) => {
-                Self::Config(zslg_lifecycle_types::ConfigError::InvalidConfiguration(msg))
-            }
-            rocksdb_kit::StorageError::Storage(msg) => Self::Log(zslg_log::LogError::Storage(msg)),
-        }
     }
 }

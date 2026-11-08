@@ -41,32 +41,49 @@ use tikv_jemalloc_ctl as _;
 #[cfg(feature = "jemalloc")]
 use tikv_jemallocator as _;
 
-// `rand` is used by the `loadgen` example only.
+// Used by the examples only.
 #[cfg(test)]
 use rand as _;
+#[cfg(test)]
+use tracing as _;
 
+// Dev-dependencies that exist to switch on their `testing` hooks.
+#[cfg(test)]
+use {
+    zslg_leader_integrator as _, zslg_local_store as _, zslg_net_client as _, zslg_net_wire as _,
+    zslg_raft_node as _, zslg_raft_setup as _, zslg_reader as _,
+};
+
+#[cfg(test)]
 mod database;
-pub(crate) mod error;
+#[cfg(test)]
+pub(crate) mod error {
+    pub(crate) use zslg_error::{Error, Home};
+}
 #[cfg(test)]
 mod layering;
-pub(crate) mod leader;
-pub(crate) mod learner;
-pub(crate) use zslg_net_setup as network;
-pub(crate) mod raft;
-pub(crate) mod replica;
-pub(crate) mod replica_node;
 #[cfg(test)]
+pub(crate) mod leader;
+#[cfg(test)]
+pub(crate) mod learner;
+#[cfg(test)]
+pub(crate) use zslg_net_setup as network;
+#[cfg(test)]
+pub(crate) mod raft;
+#[cfg(test)]
+pub(crate) mod replica;
+#[cfg(test)]
+pub(crate) use zslg_replica_node as replica_node;
 #[cfg(test)]
 mod tests;
 
-pub use crate::error::Error;
-pub use crate::replica_node::{InitialisingReplicaNode, ReplicaNode, ReplicaNodeConfig};
 pub use bytesize::ByteSize;
 pub use zslg_consensus::RaftStateView;
 pub use zslg_consensus_types::{
     ConsensusError, Exit, RaftGeneration, RaftManifestState, RaftState, RaftStateHandle,
     ReplicaMembership, SpareSelectionStrategy,
 };
+pub use zslg_error::Error;
 pub use zslg_follower_node::{FollowerNode, FollowerNodeConfig};
 pub use zslg_hlc_clock::HlcClock;
 pub use zslg_learner_node::{LearnerNode, LearnerNodeConfig};
@@ -77,6 +94,7 @@ pub use zslg_net_types::{HostPort, NetError, PeerAddr, ServerName};
 pub use zslg_node_types::NodeId;
 pub use zslg_object_store_config::{IntoArcObjectStore, ObjectStoreConfig};
 pub use zslg_observability::{METRIC_NAMESPACE, describe_metrics, histogram_buckets};
+pub use zslg_replica_node::{InitialisingReplicaNode, ReplicaNode, ReplicaNodeConfig};
 pub use zslg_snapshot_types::{
     CompactionTier, CompressionLevel, SnapshotError, SnapshotId, SnapshotMetadata,
 };

@@ -8,9 +8,8 @@ description = "Writer node assembly: tracks the cluster over RPC and fans writes
 publish = false
 
 [dependencies]
-zslg-net-client = { workspace = true }
+zslg-error = { workspace = true }
 bytesize = { workspace = true }
-error-union = { workspace = true }
 shutdown = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
@@ -22,10 +21,7 @@ zslg-net = { workspace = true }
 zslg-net-setup = { workspace = true }
 zslg-observability = { workspace = true }
 zslg-peers = { workspace = true }
-zslg-raft = { workspace = true }
 zslg-raft-tracker = { workspace = true }
-zslg-snapshot = { workspace = true }
-zslg-time = { workspace = true }
 zslg-writer = { workspace = true }
 
 [lints]

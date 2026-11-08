@@ -1,4 +1,5 @@
-//! The crate-wide error type.
+//! The public error type, shared by every node crate and re-exported by the
+//! `zslg` facade.
 //!
 //! Three derives carry requirements that are easy to break by accident:
 //!
@@ -12,12 +13,12 @@
 
 use error_union::error_union;
 use serde::{Deserialize, Serialize};
-use zslg_consensus_types::ConsensusError;
+use zslg_consensus::ConsensusError;
 use zslg_lifecycle_types::{ConfigError, LifecycleError};
-use zslg_log_types::LogError;
-use zslg_net_types::NetError;
-use zslg_snapshot_types::SnapshotError;
-use zslg_time_types::ClockError;
+use zslg_log::LogError;
+use zslg_net::NetError;
+use zslg_snapshot::SnapshotError;
+use zslg_time::ClockError;
 
 error_union! {
     /// Crate-wide error type: one variant per leaf error, named after its group.
@@ -57,9 +58,6 @@ error_union! {
     from zslg_leader::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_observability::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_net_setup::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_follower_node::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_learner_node::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_writer_node::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_writer::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_reader::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_subscriber::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
@@ -74,7 +72,7 @@ error_union! {
     from zslg_net_server::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
 }
 
-error_union::error_home!(Error);
+error_union::error_home!(pub Error);
 
 macro_rules! port_error_bridge {
     ($($port:path),+ $(,)?) => {$(
@@ -212,7 +210,7 @@ mod tests {
     use zslg_consensus::NodeId;
     use zslg_consensus::ToRaft as _;
     use zslg_log::ToStorage as _;
-    use zslg_net_types::ToRpc as _;
+    use zslg_net::ToRpc as _;
 
     /// `Error` rides in every streamed channel item — a `Channel<Result<T, Error>>`
     /// ring pre-allocates `capacity` slots, so the *error* arm sets the slot
@@ -225,7 +223,7 @@ mod tests {
     #[test]
     fn error_is_within_the_size_bar() {
         let error = size_of::<Error>();
-        let bar = size_of::<zslg_log_types::DataId>() + 8;
+        let bar = size_of::<zslg_log::DataId>() + 8;
         assert!(
             error <= bar,
             "size_of::<Error>() == {error}, over the {bar}-byte bar. \

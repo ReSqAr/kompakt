@@ -8,8 +8,8 @@ description = "Follower node assembly: learner plus writer on one node"
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 bytesize = { workspace = true }
-error-union = { workspace = true }
 object_store = { workspace = true }
 rocksdb-kit = { workspace = true }
 shutdown = { workspace = true }
@@ -20,24 +20,16 @@ zslg-consensus = { workspace = true }
 zslg-hlc-clock = { workspace = true }
 zslg-learner = { workspace = true }
 zslg-lifecycle-types = { workspace = true }
-zslg-local-store = { workspace = true }
 zslg-log = { workspace = true }
 zslg-net = { workspace = true }
-zslg-net-client = { workspace = true }
 zslg-net-setup = { workspace = true }
 zslg-node-id = { workspace = true }
 zslg-object-store = { workspace = true }
 zslg-object-store-config = { workspace = true }
 zslg-observability = { workspace = true }
 zslg-peers = { workspace = true }
-zslg-quorum-read = { workspace = true }
-zslg-raft = { workspace = true }
 zslg-raft-tracker = { workspace = true }
-zslg-reader = { workspace = true }
 zslg-snapshot = { workspace = true }
-zslg-stable-log = { workspace = true }
-zslg-subscriber = { workspace = true }
-zslg-time = { workspace = true }
 zslg-writer = { workspace = true }
 
 [lints]

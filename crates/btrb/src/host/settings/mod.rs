@@ -285,7 +285,7 @@ fn worker_config(env: &mut Env, entries: &[crate::Entry]) -> Result<WorkerSettin
     let mut zslg = FollowerNodeConfig::new(peers, db_path, object_store).map_err(|source| {
         ConfigError::Rejected {
             var: "ZSLG_OBJECT_STORE",
-            source: source.into(),
+            source,
         }
     })?;
     zslg.storage_memory = WORKER_STORAGE_MEMORY;

@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
+pub use zslg_error::Error;
 use zslg_lifecycle_types::ConfigError;
 
 use std::num::NonZeroUsize;
@@ -270,36 +271,5 @@ impl WriterNodeConfig {
             )));
         }
         Ok(())
-    }
-}
-
-error_union::error_union! {
-    /// What this node assembly can fail with.
-    #[derive(Debug, Clone, PartialEq)]
-    pub Error {
-        Lifecycle(zslg_lifecycle_types::LifecycleError),
-        Config(zslg_lifecycle_types::ConfigError),
-        Clock(zslg_time::ClockError),
-        Log(zslg_log::LogError),
-        Snapshot(zslg_snapshot::SnapshotError),
-        Net(zslg_net::NetError),
-        Consensus(zslg_consensus::ConsensusError),
-    }
-    from zslg_time::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_log::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_snapshot::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_consensus::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_net::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_net_client::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_net_setup::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_observability::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_raft_tracker::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_writer::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_raft::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-}
-
-impl From<shutdown::Stopped> for Error {
-    fn from(_: shutdown::Stopped) -> Self {
-        Self::Lifecycle(zslg_lifecycle_types::LifecycleError::Shutdown)
     }
 }

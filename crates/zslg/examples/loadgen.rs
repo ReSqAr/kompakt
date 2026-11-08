@@ -813,9 +813,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             writer_readers.push(node.reader());
             writers.push(node.writer());
             writer_tokens.push(node.shutdown_token());
-            writer_runs.push(NodeRun::Task(tokio::spawn(async move {
-                node.run().await.map_err(zslg::Error::from)
-            })));
+            writer_runs.push(NodeRun::Task(tokio::spawn(async move { node.run().await })));
         }
     }
 

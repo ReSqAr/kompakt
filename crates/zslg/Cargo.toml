@@ -16,70 +16,57 @@ workspace = true
 [dependencies]
 bytesize = { workspace = true }
 console-subscriber = { workspace = true, optional = true }
-crossbeam-channel = { workspace = true }
-crossbeam-combinators = { workspace = true, features = ["tokio"] }
-error-union = { workspace = true }
-framing = { workspace = true }
-futures = { workspace = true }
 metrics-exporter-prometheus = { workspace = true, optional = true }
-object_store = { workspace = true }
-rocksdb-kit = { workspace = true }
-serde = { workspace = true, features = ["rc"] }
-shutdown = { workspace = true }
 tikv-jemalloc-ctl = { workspace = true, optional = true }
 tikv-jemallocator = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "fs", "signal", "net"] }
-tokio-util = { workspace = true, features = ["io-util"] }
-tracing = { workspace = true }
 zslg-consensus = { workspace = true }
 zslg-consensus-types = { workspace = true }
 zslg-lifecycle-types = { workspace = true }
 zslg-log = { workspace = true }
 zslg-log-types = { workspace = true }
-zslg-net = { workspace = true }
-zslg-net-wire = { workspace = true }
 zslg-net-types = { workspace = true }
 zslg-node-types = { workspace = true }
-zslg-quorum-read = { workspace = true }
 zslg-object-store-config = { workspace = true }
-zslg-node-id = { workspace = true }
-zslg-object-store = { workspace = true }
 zslg-hlc-clock = { workspace = true }
-zslg-hlc-gate = { workspace = true }
-zslg-net-client = { workspace = true }
-zslg-net-server = { workspace = true }
-zslg-raft-storage = { workspace = true }
-zslg-peers = { workspace = true }
-zslg-raft-tracker = { workspace = true }
-zslg-raft-node = { workspace = true }
-zslg-raft-setup = { workspace = true, features = ["testing"] }
-zslg-raft-startup = { workspace = true }
-zslg-leader = { workspace = true }
-zslg-net-setup = { workspace = true }
 zslg-observability = { workspace = true }
-zslg-learner = { workspace = true, features = ["testing"] }
-zslg-local-store = { workspace = true }
-zslg-stable-log = { workspace = true }
-zslg-stable-archive = { workspace = true }
-zslg-subscriber = { workspace = true }
-zslg-reader = { workspace = true }
-zslg-replica-log = { workspace = true }
-zslg-replica-service = { workspace = true }
-zslg-writer = { workspace = true }
+zslg-error = { workspace = true }
 zslg-follower-node = { workspace = true }
 zslg-learner-node = { workspace = true }
+zslg-replica-node = { workspace = true, features = ["testing"] }
 zslg-writer-node = { workspace = true }
-zslg-leader-integrator = { workspace = true, features = ["testing"] }
-zslg-leader-compaction = { workspace = true }
-zslg-leader-snapshot = { workspace = true }
-zslg-leader-membership = { workspace = true, features = ["testing"] }
-zslg-raft = { workspace = true }
-zslg-snapshot = { workspace = true }
 zslg-snapshot-types = { workspace = true }
-zslg-time = { workspace = true }
 zslg-time-types = { workspace = true }
 
 [dev-dependencies]
+zslg-raft-setup = { workspace = true, features = ["testing"] }
+zslg-learner = { workspace = true, features = ["testing"] }
+zslg-leader-integrator = { workspace = true, features = ["testing"] }
+zslg-reader = { workspace = true, features = ["testing"] }
+zslg-local-store = { workspace = true, features = ["testing"] }
+zslg-raft-node = { workspace = true, features = ["testing"] }
+zslg-net-wire = { workspace = true, features = ["testing"] }
+zslg-net-client = { workspace = true, features = ["testing"] }
+tracing = { workspace = true }
+shutdown = { workspace = true }
+zslg-leader = { workspace = true }
+zslg-leader-compaction = { workspace = true }
+zslg-leader-membership = { workspace = true, features = ["testing"] }
+zslg-leader-snapshot = { workspace = true }
+zslg-net = { workspace = true }
+zslg-net-setup = { workspace = true }
+zslg-node-id = { workspace = true }
+zslg-raft = { workspace = true }
+zslg-replica-service = { workspace = true }
+zslg-snapshot = { workspace = true }
+zslg-time = { workspace = true }
+crossbeam-channel = { workspace = true }
+futures = { workspace = true }
+object_store = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "fs", "signal", "net", "test-util"] }
+tokio-util = { workspace = true, features = ["io-util"] }
+zslg-hlc-gate = { workspace = true }
+zslg-object-store = { workspace = true }
+zslg-peers = { workspace = true }
 metrics = { workspace = true }
 raft-kit = { workspace = true }
 zslg-raft-rpc = { workspace = true }
@@ -89,17 +76,12 @@ rand = { workspace = true }
 bytes = { workspace = true }
 dashmap = { workspace = true }
 zslg-replica-log = { workspace = true, features = ["testing"] }
-zslg-reader = { workspace = true, features = ["testing"] }
-zslg-local-store = { workspace = true, features = ["testing"] }
 zslg-net-fake = { workspace = true }
 zslg-time-fake = { workspace = true }
-zslg-raft-node = { workspace = true, features = ["testing"] }
 zslg-consensus-fake = { workspace = true }
 zslg-raft-storage = { workspace = true, features = ["testing"] }
 crossbeam-combinators = { workspace = true, features = ["testing"] }
 uuid = { workspace = true, features = ["serde"] }
-zslg-net-wire = { workspace = true, features = ["testing"] }
-zslg-net-client = { workspace = true, features = ["testing"] }
 rocksdb-kit = { workspace = true, features = ["testing"] }
 clap = { workspace = true, features = ["env"] }
 tracing-subscriber = { workspace = true, features = ["json"] }
@@ -112,7 +94,6 @@ proptest = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 time = { workspace = true }
-tokio = { workspace = true, features = ["test-util"] }
 tokio-metrics = { workspace = true }
 
 

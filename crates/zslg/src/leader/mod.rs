@@ -24,7 +24,7 @@ mod leadership_churn_tests;
 
 #[cfg(test)]
 pub(in crate::leader) use zslg_leader::Integrator;
-pub(super) use zslg_leader::{LeaderLoopConfig, LivenessConfig, SnapshotConfig, spawn_leader_loop};
+pub(super) use zslg_leader::{LeaderLoopConfig, SnapshotConfig, spawn_leader_loop};
 #[cfg(test)]
 pub(crate) use zslg_leader_snapshot::create::SnapshotResult;
 #[cfg(test)]
