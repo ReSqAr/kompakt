@@ -4,8 +4,8 @@
 mod compaction_tests;
 mod jobs_tests;
 mod leadership_churn_tests;
-mod membership_change_tests;
+mod membership_change;
 mod snapshot_build_tests;
 mod snapshot_harness;
-mod snapshot_lifecycle_tests;
+mod snapshot_lifecycle;
 mod snapshot_member_lifecycle_tests;
