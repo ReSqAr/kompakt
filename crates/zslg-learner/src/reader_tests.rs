@@ -1266,11 +1266,9 @@ mod tests {
     async fn an_evicted_node_refuses_the_unstable_subscription() {
         let (_dir, _local, _stable, reader) =
             unstable_rig(16, Hlc(50), Cancellation::never()).await;
-        let gated = super::GatedReader::new(
-            Arc::new(reader),
-            zslg_consensus::EvictionStatus::denied_for_test(),
-            upstream(9),
-        );
+        let denied = zslg_consensus::EvictionStatus::new();
+        denied.set(true);
+        let gated = super::GatedReader::new(Arc::new(reader), denied, upstream(9));
         let mut stream = gated.subscribe_unstable_tail();
         assert!(matches!(
             stream.recv(),

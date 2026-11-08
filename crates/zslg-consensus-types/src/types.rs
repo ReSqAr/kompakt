@@ -239,16 +239,6 @@ impl EvictionStatus {
         self.0.load(Ordering::Relaxed)
     }
 
-    /// A status a peer has already denied — the evicted node, for read-gate
-    /// tests outside this module.
-    #[doc(hidden)]
-    #[must_use]
-    pub fn denied_for_test() -> Self {
-        let status = Self::new();
-        status.set(true);
-        status
-    }
-
     pub fn set(&self, denied: bool) {
         self.0.store(denied, Ordering::Relaxed);
     }

@@ -7,7 +7,7 @@
 //!
 //! ```text
 //!   crossbeam_combinators::Channel::recv                     channel/mod.rs
-//!   zslg::quorum::coordinator::run_replica            coordinator.rs
+//!   zslg_writer::coordinator::run_replica             zslg-writer/src/coordinator.rs
 //!   tokio::runtime::blocking::pool::Task::run
 //! ```
 //!
