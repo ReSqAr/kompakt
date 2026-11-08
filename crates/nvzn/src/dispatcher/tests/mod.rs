@@ -10,6 +10,7 @@ mod supervisor;
 
 use super::*;
 use crate::StopReason;
+use crate::{Encoder, EventWriter, Syncer};
 use crate::{
     ReadTransactionExt, Ref, Store, WithWireFormat,
     testsupport::{

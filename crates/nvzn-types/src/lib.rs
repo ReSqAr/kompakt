@@ -1,13 +1,17 @@
 //! Vocabulary shared by every nvzn crate: identifiers, event sets, the error,
 //! why a fold stops, and the cells the dispatcher shares with its readers.
 
+pub mod metrics;
+
 mod events;
 mod fold_state;
+mod handles;
 mod ids;
 mod subscriptions;
 
 pub use events::{EventSet, SubEventOf, WithWireFormat, contains, subset};
 pub use fold_state::FoldState;
+pub use handles::{Encoder, EventWriter, Syncer};
 pub use ids::{
     APP_ID_LEN, INDEX_ID_LEN, IndexId, PROJECTION_ID_LEN, PROJECTION_TYPE_ID_LEN, ProjectionId,
     ProjectionTypeId, Tenant, TenantId,

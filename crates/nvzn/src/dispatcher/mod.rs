@@ -13,7 +13,6 @@
 //! taken after.
 
 mod fold;
-mod handles;
 mod registration;
 mod subscribers;
 mod supervisor;
@@ -26,8 +25,7 @@ mod supervisor;
 )]
 mod tests;
 
-use crate::{FoldState, SubscriptionItem, Subscriptions};
-pub use handles::{Encoder, EventWriter, Syncer};
+use crate::{FoldState, SubscriptionItem, Subscriptions, Syncer};
 pub use registration::AssociatedProjectorManager;
 use registration::compute_config_hash;
 pub(crate) use subscribers::{PENDING_SUBSCRIBERS, SUBSCRIBER_CAPACITY, Subscribers};

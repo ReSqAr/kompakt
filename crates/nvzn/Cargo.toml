@@ -21,7 +21,6 @@ crossbeam-combinators = { workspace = true }
 futures = { workspace = true }
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true, optional = true }
-postcard = { workspace = true, features = ["alloc", "use-std"] }
 sha2 = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "fs", "signal", "net"] }
@@ -30,6 +29,7 @@ zslg = { workspace = true }
 
 
 [dev-dependencies]
+postcard = { workspace = true, features = ["alloc", "use-std"] }
 nvzn-fixtures = { workspace = true }
 zslg = { workspace = true, features = ["testing"] }
 serde = { workspace = true }

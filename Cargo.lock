@@ -2196,8 +2196,10 @@ dependencies = [
 name = "nvzn-types"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "const-fnv1a-hash",
  "crossbeam-combinators",
+ "metrics-kit",
  "postcard",
  "proptest",
  "rust-rocksdb",
@@ -2205,6 +2207,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
+ "tracing",
  "uuid",
  "zslg",
 ]

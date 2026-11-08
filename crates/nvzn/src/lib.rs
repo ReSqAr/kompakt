@@ -40,7 +40,7 @@ pub mod testing;
 #[cfg(test)]
 pub(crate) mod testsupport;
 
-pub use dispatcher::{AssociatedProjectorManager, Dispatcher, Encoder, EventWriter, Syncer};
+pub use dispatcher::{AssociatedProjectorManager, Dispatcher};
 pub use live::{Live, LiveLimits, Wait, is_live};
 #[cfg(feature = "prometheus")]
 pub use metrics::configure_prometheus;
@@ -55,9 +55,9 @@ pub use nvzn_store::{
 pub use nvzn_store_fake::InMemoryStore;
 pub use nvzn_store_rocksdb::RocksDBStore;
 pub use nvzn_types::{
-    APP_ID_LEN, Error, EventSet, INDEX_ID_LEN, IndexId, PROJECTION_ID_LEN, PROJECTION_TYPE_ID_LEN,
-    ProjectionId, ProjectionTypeId, StopReason, SubEventOf, Tenant, TenantId, WithWireFormat,
-    chained_from, define_events,
+    APP_ID_LEN, Encoder, Error, EventSet, EventWriter, INDEX_ID_LEN, IndexId, PROJECTION_ID_LEN,
+    PROJECTION_TYPE_ID_LEN, ProjectionId, ProjectionTypeId, StopReason, SubEventOf, Syncer, Tenant,
+    TenantId, WithWireFormat, chained_from, define_events,
 };
 pub(crate) use nvzn_types::{FoldState, SubscriptionItem, Subscriptions, subset};
 pub use reader::{Reader, Snapshot};

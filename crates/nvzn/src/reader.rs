@@ -1,10 +1,11 @@
+use crate::Syncer;
 use crate::dispatcher::PENDING_SUBSCRIBERS;
 use crate::live::{self, Live, LiveLimits};
 use crate::metrics::{self, ReadKind};
 use crate::subset;
 use crate::{
     ArcReadTransaction, ArcStore, Error, EventSet, Index, Projection, ProjectionTypeId,
-    ReadTransactionExt, Ref, ResultSet, SubEventOf, Syncer, Tenant, TenantId, View, WithWireFormat,
+    ReadTransactionExt, Ref, ResultSet, SubEventOf, Tenant, TenantId, View, WithWireFormat,
 };
 use crate::{FoldState, Subscriptions};
 use crossbeam_combinators::{Channel, Infinite, RegistryError};

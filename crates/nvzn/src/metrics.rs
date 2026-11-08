@@ -174,11 +174,6 @@ metrics!("nvzn_", nvzn; {
         "Snapshots opened, by tenant and freshness. `stable` sees only what has \
                gone stable in the log, so a caller expecting read-your-own-writes \
                and finding `stable` here is reading the wrong one.";
-    custom writes_total WRITES_TOTAL "writes_total" Counter None
-        "Event batches written to the log, by tenant.";
-    custom write_events_total WRITE_EVENTS_TOTAL "write_events_total" Counter None
-        "Events written to the log, by tenant. Against nvzn_writes_total, the \
-               batch size a caller is actually achieving.";
 });
 
 const OWN_METRICS: &[MetricDef] = &nvzn!();
@@ -190,6 +185,7 @@ pub(crate) fn all_metrics() -> impl Iterator<Item = &'static MetricDef> {
         .iter()
         .chain(nvzn_projector::metrics::METRICS.iter())
         .chain(nvzn_store_rocksdb::metrics::METRICS.iter())
+        .chain(nvzn_types::metrics::METRICS.iter())
 }
 
 /// The namespace every metric this crate owns is exported under.
@@ -359,12 +355,6 @@ pub(crate) fn live_scan(entries: u64, elapsed: Duration) {
 
 pub(crate) fn live_undecodable(tenant: Tenant) {
     metrics::counter!(LIVE_UNDECODABLE_TOTAL, LABEL_TENANT => tenant.name()).increment(1);
-}
-
-pub(crate) fn write(tenant: Tenant, events: usize) {
-    metrics::counter!(WRITES_TOTAL, LABEL_TENANT => tenant.name()).increment(1);
-    metrics::counter!(WRITE_EVENTS_TOTAL, LABEL_TENANT => tenant.name())
-        .increment(u64::try_from(events).unwrap_or(0));
 }
 
 #[cfg(test)]
@@ -555,7 +545,7 @@ mod tests {
             store_fence(FenceOutcome::Ok, Duration::from_millis(1));
             nvzn_store_rocksdb::metrics::store_live_sst_files_size_bytes("store", 4096);
             store_reset();
-            write(tenant, 4);
+            nvzn_types::metrics::write(tenant, 4);
             read(tenant, ReadKind::Live);
             live_held(tenant, 2, 300);
             live_coverage(tenant, "complete");

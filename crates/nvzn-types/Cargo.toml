@@ -8,6 +8,9 @@ description = "Identifiers, event sets, the error and the shared cells of nvzn"
 publish = false
 
 [dependencies]
+bytes = { workspace = true }
+metrics-kit = { workspace = true }
+tracing = { workspace = true }
 const-fnv1a-hash = { workspace = true }
 crossbeam-combinators = { workspace = true }
 postcard = { workspace = true, features = ["alloc", "use-std"] }

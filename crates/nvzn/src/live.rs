@@ -739,7 +739,7 @@ const START_BACKOFF_MAX: Duration = Duration::from_secs(10);
 /// serves the stable snapshot) only if the fold stops.
 pub(crate) async fn begin_when_caught_up<Ev: WithWireFormat>(
     live: Live<Ev>,
-    syncer: crate::Syncer,
+    syncer: nvzn_types::Syncer,
     reader: Arc<dyn zslg::Reader>,
     cancelled: crossbeam_combinators::Cancellation,
 ) {

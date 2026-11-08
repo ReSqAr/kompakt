@@ -1,5 +1,5 @@
 //! The handles a tenant writes and waits through, beside its
-//! [`Reader`](crate::Reader).
+//! `Reader`.
 //!
 //! ```text
 //!   zslg Data blob = tenant_id(16) ‖ Ev::encode(events)
@@ -10,9 +10,8 @@
 //! fold's own progress, so it fails rather than blocks once the fold has
 //! stopped.
 
-use crate::FoldState;
 use crate::metrics;
-use crate::{Error, Tenant, WithWireFormat};
+use crate::{Error, FoldState, Tenant, WithWireFormat};
 use std::marker::PhantomData;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -46,14 +45,16 @@ where
 }
 
 impl<Ev> Encoder<Ev> {
-    pub(crate) fn new(tenant: Tenant) -> Self {
+    #[must_use]
+    pub fn new(tenant: Tenant) -> Self {
         Self {
             tenant,
             phantom: PhantomData,
         }
     }
 
-    pub(crate) fn tenant(&self) -> Tenant {
+    #[must_use]
+    pub fn tenant(&self) -> Tenant {
         self.tenant
     }
 }
@@ -66,7 +67,7 @@ pub struct Syncer {
 }
 
 impl Syncer {
-    pub(super) fn new(
+    pub fn new(
         reader: Arc<dyn zslg::Reader>,
         watermark: watch::Receiver<Option<zslg::Hlc>>,
         fold_state: FoldState,
@@ -79,7 +80,8 @@ impl Syncer {
     }
 
     /// The fold's watermark: the HLC committed through, as it advances.
-    pub(crate) fn watermark(&self) -> watch::Receiver<Option<zslg::Hlc>> {
+    #[must_use]
+    pub fn watermark(&self) -> watch::Receiver<Option<zslg::Hlc>> {
         self.watermark.clone()
     }
 
@@ -151,7 +153,7 @@ impl<Ev> Clone for EventWriter<Ev> {
 }
 
 impl<Ev> EventWriter<Ev> {
-    pub(super) fn new(encoder: Encoder<Ev>, writer: Arc<dyn zslg::Writer>) -> Self {
+    pub fn new(encoder: Encoder<Ev>, writer: Arc<dyn zslg::Writer>) -> Self {
         Self { encoder, writer }
     }
 }

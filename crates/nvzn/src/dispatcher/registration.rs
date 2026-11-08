@@ -11,11 +11,12 @@
 //! resuming and refolding, so it covers exactly what changes the folded
 //! state's shape. Length prefixes keep the two sets from aliasing.
 
-use super::{Dispatcher, Encoder, EventWriter};
+use super::Dispatcher;
 use crate::{
     ConfigHash, Error, IndexId, Projection, ProjectionTypeId, ProjectorManager, Reader, SubEventOf,
     TenantId, WithWireFormat, WriteTransactionImpl,
 };
+use crate::{Encoder, EventWriter};
 use nvzn_projector::fold_event;
 use sha2::Digest;
 use std::collections::BTreeSet;
