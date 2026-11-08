@@ -52,7 +52,6 @@ pub(crate) mod follower_node;
 mod layering;
 pub(crate) mod leader;
 pub(crate) mod learner;
-pub(crate) mod learner_node;
 pub(crate) use zslg_net_setup as network;
 pub(crate) mod raft;
 pub(crate) mod replica;
@@ -63,7 +62,6 @@ mod tests;
 
 pub use crate::error::Error;
 pub use crate::follower_node::{FollowerNode, FollowerNodeConfig};
-pub use crate::learner_node::{LearnerNode, LearnerNodeConfig};
 pub use crate::replica_node::{InitialisingReplicaNode, ReplicaNode, ReplicaNodeConfig};
 pub use bytesize::ByteSize;
 pub use zslg_consensus::RaftStateView;
@@ -72,6 +70,7 @@ pub use zslg_consensus_types::{
     ReplicaMembership, SpareSelectionStrategy,
 };
 pub use zslg_hlc_clock::HlcClock;
+pub use zslg_learner_node::{LearnerNode, LearnerNodeConfig};
 pub use zslg_lifecycle_types::{ConfigError, LifecycleError};
 pub use zslg_log::{Error as LogApiError, Reader, StableStream, Writer};
 pub use zslg_log_types::{Data, DataId, LogError, LogIndex, StableLogEvent, UnstableEvent};

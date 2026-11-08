@@ -1,7 +1,7 @@
 //! A free-standing follower node: learner + writer merged.
 //!
 //! `FollowerNode` is the read-write counterpart of
-//! [`LearnerNode`](crate::learner_node::LearnerNode): it has persistent identity,
+//! `LearnerNode`: it has persistent identity,
 //! durable local storage, subscribes to the replica cluster's log streams to
 //! build a local data cache, serves the [`Reader`](crate::Reader) API, *and* can
 //! write data to a quorum of replicas. It joins no Raft and never binds a server.
@@ -50,7 +50,7 @@ use zslg_writer::WriterService;
 ///
 /// A follower is a learner + writer merged: it has durable local storage,
 /// subscribes to replica streams, serves reads, and can write to quorum.
-/// The config is essentially [`LearnerNodeConfig`](crate::learner_node::LearnerNodeConfig)
+/// The config is essentially `LearnerNodeConfig`
 /// — write-pool settings are flat on the node config itself.
 #[derive(Debug, Clone)]
 pub struct FollowerNodeConfig {

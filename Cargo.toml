@@ -73,6 +73,7 @@ zslg-learner = { path = "crates/zslg-learner" }
 zslg-leader = { path = "crates/zslg-leader" }
 zslg-observability = { path = "crates/zslg-observability" }
 zslg-net-setup = { path = "crates/zslg-net-setup" }
+zslg-learner-node = { path = "crates/zslg-learner-node" }
 zslg-writer-node = { path = "crates/zslg-writer-node" }
 zslg-writer = { path = "crates/zslg-writer" }
 zslg-replica-service = { path = "crates/zslg-replica-service" }

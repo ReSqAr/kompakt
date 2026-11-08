@@ -66,6 +66,7 @@ zslg-reader = { workspace = true }
 zslg-replica-log = { workspace = true }
 zslg-replica-service = { workspace = true }
 zslg-writer = { workspace = true }
+zslg-learner-node = { workspace = true }
 zslg-writer-node = { workspace = true }
 zslg-leader-integrator = { workspace = true, features = ["testing"] }
 zslg-leader-compaction = { workspace = true }

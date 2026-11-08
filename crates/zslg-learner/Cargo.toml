@@ -13,7 +13,7 @@ crossbeam-combinators = { workspace = true, features = ["tokio"] }
 error-union = { workspace = true }
 rocksdb-kit = { workspace = true }
 shutdown = { workspace = true }
-tokio = { workspace = true, features = ["rt", "sync", "time", "macros"] }
+tokio = { workspace = true, features = ["rt", "sync", "time", "macros"], optional = true }
 tracing = { workspace = true }
 zslg-consensus = { workspace = true }
 zslg-lifecycle-types = { workspace = true }
@@ -48,7 +48,7 @@ zslg-consensus-fake = { workspace = true }
 zslg-log-fake = { workspace = true }
 
 [features]
-testing = ["dep:bytesize", "dep:tokio-util", "dep:zslg-log-fake", "zslg-local-store/testing", "zslg-reader/testing"]
+testing = ["dep:bytesize", "dep:tokio", "dep:tokio-util", "dep:zslg-log-fake", "zslg-local-store/testing", "zslg-reader/testing"]
 
 [lints]
 workspace = true

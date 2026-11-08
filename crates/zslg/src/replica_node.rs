@@ -5,7 +5,7 @@
 //!
 //! | [`ReplicaNode`] | raft voter + replica log + writer + reader |
 //! | [`FollowerNode`](crate::follower_node) | writer + reader, no raft, no replica log |
-//! | [`LearnerNode`](crate::learner_node) | reader only |
+//! | `LearnerNode` | reader only |
 //! | `WriterNode` | writer only, no durable state |
 //!
 //! This file is composition, not logic: it validates config, opens the stores in
