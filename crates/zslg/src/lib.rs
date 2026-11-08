@@ -55,15 +55,11 @@ use {
 };
 
 #[cfg(test)]
-mod database;
-#[cfg(test)]
 pub(crate) mod error {
     pub(crate) use zslg_error::Error;
 }
 #[cfg(test)]
 pub(crate) mod learner;
-#[cfg(test)]
-pub(crate) use zslg_net_setup as network;
 #[cfg(test)]
 pub(crate) mod raft;
 #[cfg(test)]

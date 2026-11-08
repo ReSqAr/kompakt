@@ -35,7 +35,6 @@ zslg-writer-node = { workspace = true }
 [dev-dependencies]
 zslg-error = { workspace = true }
 zslg-raft-setup = { workspace = true, features = ["testing"] }
-zslg-learner = { workspace = true, features = ["testing"] }
 zslg-leader-integrator = { workspace = true, features = ["testing"] }
 zslg-reader = { workspace = true, features = ["testing"] }
 zslg-local-store = { workspace = true, features = ["testing"] }
@@ -44,8 +43,6 @@ zslg-net-wire = { workspace = true, features = ["testing"] }
 zslg-net-client = { workspace = true, features = ["testing"] }
 tracing = { workspace = true }
 shutdown = { workspace = true }
-zslg-net-setup = { workspace = true }
-zslg-node-id = { workspace = true }
 dashmap = { workspace = true }
 futures = { workspace = true }
 object_store = { workspace = true }
@@ -54,13 +51,10 @@ tokio-util = { workspace = true, features = ["io-util"] }
 metrics = { workspace = true }
 rand = { workspace = true }
 bytes = { workspace = true }
-zslg-replica-log = { workspace = true, features = ["testing"] }
 zslg-consensus-fake = { workspace = true }
 testing-kit = { workspace = true }
 zslg-log-fake = { workspace = true }
-zslg-raft-storage = { workspace = true, features = ["testing"] }
 crossbeam-combinators = { workspace = true, features = ["testing"] }
-rocksdb-kit = { workspace = true, features = ["testing"] }
 clap = { workspace = true, features = ["env"] }
 tracing-subscriber = { workspace = true, features = ["json"] }
 http-body-util = { workspace = true }
