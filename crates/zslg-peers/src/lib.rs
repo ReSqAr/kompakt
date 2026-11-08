@@ -1,7 +1,7 @@
 //! Dynamic source of expected Raft member addresses.
 //!
 //! The [`PeersWatcher`] trait is defined in [`zslg_net`]. This module
-//! provides the concrete [`StaticPeers`] implementation and the
+//! provides the concrete `StaticPeers` implementation and the
 //! [`static_peers`] convenience constructor.
 
 use std::collections::BTreeSet;
@@ -53,7 +53,7 @@ impl PeersWatcher for StaticPeers {
 }
 
 /// Convenience: convert a `Vec<PeerAddr>` into an
-/// `Arc<dyn PeersWatcher>` backed by [`StaticPeers`].
+/// `Arc<dyn PeersWatcher>` backed by `StaticPeers`.
 #[must_use]
 pub fn static_peers(peers: Vec<PeerAddr>) -> Arc<dyn PeersWatcher> {
     Arc::new(StaticPeers::new(peers))
@@ -63,7 +63,7 @@ pub fn static_peers(peers: Vec<PeerAddr>) -> Arc<dyn PeersWatcher> {
 
 /// [`MembershipGate`] that admits joiners whose `server_name` appears in the
 /// configured peer list. This is the single source of truth for membership
-/// admission: the check lives in [`RaftNode::add_member`](RaftNode),
+/// admission: the check lives in `RaftNode::add_member`,
 /// not in the network dispatch layer.
 pub struct PeersMembershipGate {
     peers: Arc<dyn PeersWatcher>,

@@ -176,7 +176,7 @@ pub(crate) fn bootstrap_decision(
 
 /// Config-only fields for `run_raft_startup`. Active handles are passed as
 /// separate parameters — this struct carries only tunables and identity.
-/// Produced by [`ReplicaNodeConfig::raft_startup_config`].
+/// Produced by `ReplicaNodeConfig::raft_startup_config`.
 pub struct RaftStartupConfig {
     pub node_id: NodeId,
     pub peers_watcher: Arc<dyn PeersWatcher>,

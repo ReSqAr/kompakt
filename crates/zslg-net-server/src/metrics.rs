@@ -52,7 +52,7 @@ pub fn rpc_server_request_duration(method: &'static str, elapsed: Duration) {
 /// RAII guard for RPC server handler metrics. Records one histogram
 /// (`rpc_server_request_duration_seconds`) and one counter
 /// (`rpc_server_requests_total`) on drop — the two-metric pattern that
-/// [`Probe`] is not designed for.
+/// `Probe` is not designed for.
 #[must_use = "RpcServerGuard records metrics on drop"]
 pub struct RpcServerGuard {
     t0: tokio::time::Instant,

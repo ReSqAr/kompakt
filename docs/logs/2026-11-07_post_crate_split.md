@@ -7,8 +7,8 @@ nvzn split (step 15) is tracked separately below.
 
 ## Result
 
-zslg is 73 workspace crates by role (`crates/README.md`). The `zslg` facade is
-`pub use`, the public `Error`, `zslg::testing`, the integration tests and the
+The workspace is 87 crates (60 `zslg-*`, 10 `nvzn-*` plus the facades and libraries; `crates/README.md`). The `zslg` facade is
+`pub use`, the public `Error`, `zslg::testing` and the
 examples; it depends on no type crate and no implementation. The layering test
 (`zslg::layering`) enforces the role table, the ports→ports exception for
 `zslg-net`, and "no `-types` import above the ports layer" (except
@@ -40,14 +40,13 @@ examples; it depends on no type crate and no implementation. The layering test
 ## Workflow notes
 
 - One commit per crate, each green on `clippy --workspace --all-targets
-  --all-features --profile lint -D warnings`; the full workspace test run was
+  --all-features -D warnings`; the full workspace test run was
   executed at the milestones. Two tests are load-sensitive and pass alone:
   `cluster_proptest::cluster_upholds_invariants_under_generated_faults` and
   `objectstorage-cache` evictor timing; decommission tests flake under a full
   parallel run and pass in isolation.
-- `[profile.lint] incremental = false` keeps `target/` from growing with the
-  number of crates; stale test executables in `target/lint/deps` can be deleted
-  when the disk fills.
+- The `lint` and `ci` cargo profiles were dropped (CI uses the default one). With 87 crates
+  `target/` grows large; stale test executables in `target/debug/deps` can be deleted when the disk fills.
 
 ## nvzn (step 15)
 
@@ -118,3 +117,21 @@ network is `zslg-raft-fake`; the generic waits, ports and logging are `testing-k
 of an implementation with a fake (`start_cluster`) sit behind the owning assembly's `testing`
 feature. A test-only crate that is only dev-dependencies (`zslg-cluster-tests`) keeps
 `unused_crate_dependencies` meaningful without `as _` lists.
+
+## Open: the error model is wider than it needs to be
+
+Every port and implementation union still lists all seven leaves, so some conversions and
+signatures admit errors that cannot happen: `Clock::integrate` can report `Log` and `Net`, and
+`zslg-stable-log` depends on `zslg-net` and `zslg-raft` only to name variants it never raises.
+The unions were widened first so the split could land crate by crate, and were meant to be narrowed
+afterwards; that pass has not happened. It is a change across about sixty crates (each union, each
+`from`/`bridge`/`into`, and the port signatures), so it is a PR of its own.
+
+## Conscious exceptions to the layering
+
+- **The `zslg` facade reaches lower-layer types through assemblies.** `Error`, `ConfigError` and
+  `LifecycleError` are re-exported from `zslg-writer-node`, and `nvzn` re-exports `RocksDBStore` and
+  `ResultSet` from `nvzn-dispatcher`. The public paths and types are the ones the monolith had.
+  A direct edge to `zslg-error` (and `zslg-lifecycle-types`) would be the cleaner way to say it, but
+  the layering rule forbids a facade → types edge; the alternative is to allow exactly that one
+  edge for the shared public error. Until decided, the re-export through the node is the exception.

@@ -320,7 +320,7 @@ impl Storage {
     }
 
     /// Make every subsequent [`write`](Self::write) fail. See
-    /// [`fail_writes`](Self::fail_writes).
+    /// `fail_writes`.
     #[cfg(any(test, feature = "testing"))]
     pub fn fail_writes_from_now_on(&self) {
         self.fail_writes
@@ -328,7 +328,7 @@ impl Storage {
     }
 
     /// Make every subsequent [`fence_now`](Self::fence_now) fail. See
-    /// [`fail_fences`](Self::fail_fences).
+    /// `fail_fences`.
     #[cfg(any(test, feature = "testing"))]
     pub fn fail_fences_from_now_on(&self) {
         self.fail_fences

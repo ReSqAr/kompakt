@@ -18,11 +18,11 @@
 //! (`store::tests::data_and_cursor_commit_atomically`).
 //!
 //! Atomicity is all this store needs, which is why it fsyncs on a timer rather
-//! than per batch ([`store::run_local_store_flush_worker`]): every byte is a
+//! than per batch (`store::run_local_store_flush_worker`): every byte is a
 //! copy of quorum-durable replica data, so a crash loses at most a suffix, the
 //! lagging cursor re-delivers it, and the re-delivery dedups by `data_id`.
 //!
-//! Entries leave by retirement, not deletion: [`purge`] arms an HLC threshold
+//! Entries leave by retirement, not deletion: `purge` arms an HLC threshold
 //! that trails the stable watermark by a grace period, and the engine clamps
 //! reads at it.
 
@@ -116,7 +116,7 @@ impl LocalStoreConfig {
 
     /// Worst-case bytes this store's queues can hold — reported beside the
     /// engine's charged bytes, never folded into that budget (see
-    /// [`ReplicaLogConfig::queue_capacity_bytes`](crate::replica::ReplicaLogConfig::queue_capacity_bytes)
+    /// `ReplicaLogConfig::queue_capacity_bytes`
     /// for why the two are kept apart).
     ///
     /// Two terms, and only one of them is payload: the integrate channel holds

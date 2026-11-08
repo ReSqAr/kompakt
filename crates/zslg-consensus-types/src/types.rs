@@ -81,8 +81,8 @@ impl std::fmt::Display for RaftLogIndex {
 
 /// Structured reason a proposed raft state failed a structural invariant at the
 /// apply fence (`raft_storage::validate_replicated_state`). Carried as a
-/// *value* in [`RaftResponse::RejectedInvalidState`] and rendered by
-/// [`crate::Error`] — no pre-flattened string (CLAUDE.md §5). Every field is
+/// *value* in `RaftResponse::RejectedInvalidState` and rendered by
+/// `crate::Error` — no pre-flattened string (CLAUDE.md §5). Every field is
 /// `Eq + Serialize`, so it satisfies `RaftResponse`'s derives and reconstructs
 /// exactly across the RPC boundary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
@@ -206,7 +206,7 @@ pub struct ReplicatedRaftState {
 /// attempt (`JoinAttempt::Denied`) — i.e. this node has been removed from the
 /// group's `config.peers`.
 ///
-/// Published by [`RejoinMonitor`], consulted by
+/// Published by `RejoinMonitor`, consulted by
 /// `learner::read::can_serve_clients`. Deliberately narrower than "not
 /// settled": a partition yields `JoinAttempt::Retry` (nothing answered), never
 /// `Denied`, and must NOT set this — affirmative evidence only, silence is not

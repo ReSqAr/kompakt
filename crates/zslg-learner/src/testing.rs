@@ -8,7 +8,7 @@ use zslg_stable_log::integrate_manifest;
 
 use crate::Error;
 
-/// Test-only ergonomic wrapper: build an [`ObjectStoreArchiveReader`] over a
+/// Test-only ergonomic wrapper: build an `ObjectStoreArchiveReader` over a
 /// handle seeded with `manifest_state` (the archive reader selects snapshots
 /// from its raft manifest) and delegate. Lets leader/learner tests drive a load
 /// from a bare snapshot store without constructing the reader themselves.

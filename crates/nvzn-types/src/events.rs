@@ -5,7 +5,7 @@ use serde::ser::SerializeSeq;
 pub trait WithWireFormat: Clone + Send + Sync + Sized + From<Self::WireFormat> + 'static {
     type WireFormat: Serialize + DeserializeOwned + Send + Sync + From<Self>;
 
-    /// This event's number: its `event N :=` in [`define_events!`], the key
+    /// This event's number: its `event N :=` in `define_events!`, the key
     /// [`EventSet::EVENTS`] lists.
     fn number(&self) -> u32;
 
@@ -44,7 +44,7 @@ where
     }
 }
 
-/// A set of events by number: a subset enum of [`define_events!`], or a
+/// A set of events by number: a subset enum of `define_events!`, or a
 /// whole event enum (which lists all of its events). What
 /// `Projection::EVENTS` and a live view's `S` are
 /// compared by (`is_live`).

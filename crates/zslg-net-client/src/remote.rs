@@ -10,7 +10,7 @@ use zslg_consensus::NodeId;
 use zslg_net::PeerAddr;
 
 /// The single owner of the peer-connection [`RpcClient`]. Built inside
-/// [`setup_router`](crate::network::setup_router), which keeps the raw client
+/// `setup_router`, which keeps the raw client
 /// from ever escaping the `network` module.
 pub struct RemoteRouter {
     rpc_client: Arc<RpcClient>,
@@ -52,7 +52,7 @@ impl RemoteRouter {
         ))
     }
 
-    /// Test-only: build the client side from an [`RpcClientConfig`] (from the
+    /// Test-only: build the client side from an `RpcClientConfig` (from the
     /// node config's `router_config()` producer).
     #[cfg(any(test, feature = "testing"))]
     #[must_use]

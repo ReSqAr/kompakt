@@ -455,7 +455,7 @@ pub enum LogError {
 
     /// A subscription stream ended without naming its peer — produced inside
     /// `integrate_loop`, which serves any upstream and so cannot attribute it.
-    /// The per-peer caller re-wraps it as [`Error::SubscriptionEnded`].
+    /// The per-peer caller re-wraps it as `Error::SubscriptionEnded`.
     #[error("subscription stream ended: {reason}")]
     SubscriptionStreamEnded { reason: String },
 

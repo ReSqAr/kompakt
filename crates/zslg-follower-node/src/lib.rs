@@ -13,7 +13,7 @@
 //! For write-stability tracking (metrics that verify successfully-written data
 //! eventually lands in the stable log), see `examples/write_tracker.rs` — that
 //! logic lives in the examples because it can be built entirely from the public
-//! [`Writer`] + [`Reader`] traits.
+//! `Writer` + `Reader` traits.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -123,7 +123,7 @@ pub struct FollowerNodeConfig {
     pub write_timeout: Duration,
     pub db_path: PathBuf,
     pub object_store: Arc<dyn object_store::ObjectStore>,
-    /// See [`StableLogConfig::subscriber_queue_capacity`] — each stable-log
+    /// See `StableLogConfig::subscriber_queue_capacity` — each stable-log
     /// subscriber gets a queue this deep, and each queued event carries an
     /// entry payload, so this bounds memory per live subscriber. A consumer
     /// that overruns it is hung up on and replays from its cursor.

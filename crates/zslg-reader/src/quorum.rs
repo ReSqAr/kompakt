@@ -171,7 +171,7 @@ struct DebounceState {
 }
 
 /// The debouncer's tunables, produced by
-/// [`LearnerConfig::quorum_read_debouncer_config`](crate::learner::LearnerConfig::quorum_read_debouncer_config).
+/// `LearnerConfig::quorum_read_debouncer_config`.
 pub struct QuorumReadDebouncerConfig {
     pub deadtime: Duration,
     pub check_timeout: Duration,

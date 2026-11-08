@@ -156,7 +156,7 @@ impl RpcRequest {
 }
 
 /// Outcome of one replica write. The wire form of
-/// [`zslg_log::WriteOutcome`](zslg_log::WriteOutcome), mapped 1:1.
+/// [`zslg_log::WriteOutcome`], mapped 1:1.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WriteOutcome {
     /// Accepted by this replica, with its Raft state at accept time.

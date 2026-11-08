@@ -19,7 +19,7 @@ pub use log::{REPLICA_LOG_CF, ReplicaLogStore, flush_loop};
 /// Replica log persistence and purge configuration.
 ///
 /// The store itself is a column family of the node's one
-/// [`Storage`](rocksdb_kit::Storage), which [`spawn_replica`] is
+/// [`Storage`](rocksdb_kit::Storage), which `spawn_replica` is
 /// handed; what is left here is the queue sizing and the purge policy.
 #[derive(Debug, Clone)]
 pub struct ReplicaLogConfig {

@@ -9,8 +9,8 @@
 //! `RUST_LOG=zslg=debug` works as it stands.
 //!
 //! What a library does own is the knowledge, exported here as data:
-//! [`describe_metrics`], and [`METRIC_NAMESPACE`] / [`NAMESPACE_BUCKETS`] /
-//! [`BUCKET_OVERRIDES`], whose values were chosen against this crate's latency
+//! [`describe_metrics`], and [`METRIC_NAMESPACE`] / `NAMESPACE_BUCKETS` /
+//! `BUCKET_OVERRIDES`, whose values were chosen against this crate's latency
 //! distributions.
 
 use std::time::Duration;
@@ -129,10 +129,10 @@ pub fn describe_metrics() {
 /// Cadence of [`run_process_gauges`].
 const PROCESS_GAUGE_INTERVAL: Duration = Duration::from_secs(1);
 
-/// Future that reads `/proc/self/{stat,status}` every [`PROCESS_GAUGE_INTERVAL`]
-/// and emits [`metrics::process_cpu_seconds`] and
-/// [`metrics::process_memory_rss_bytes`]. Pass to
-/// [`shutdown::Shutdown::spawn`] for lifecycle management.
+/// Future that reads `/proc/self/{stat,status}` every `PROCESS_GAUGE_INTERVAL`
+/// and emits `metrics::process_cpu_seconds` and
+/// `metrics::process_memory_rss_bytes`. Pass to
+/// `shutdown::Shutdown::spawn` for lifecycle management.
 ///
 /// CPU is cumulative *clock ticks* converted to seconds via `sysconf(_SC_CLK_TCK)`
 /// (100 Hz on Linux). Memory is resident set size (VmRSS), which climbs toward the

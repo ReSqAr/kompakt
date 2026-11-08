@@ -2,7 +2,7 @@
 //! reads its settings through.
 //!
 //! | [`parse`] | the value grammar — units, booleans, sentinels |
-//! | [`env`] | the environment as a map consumed by reading, so a typo is caught |
+//! | [`env`](mod@self::env) | the environment as a map consumed by reading, so a typo is caught |
 //!
 //! [`Env`] is the whole snapshot; an app gets only a [`env::Scope`] of it.
 

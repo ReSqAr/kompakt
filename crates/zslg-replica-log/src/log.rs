@@ -847,7 +847,7 @@ impl Seam for ReplicaSeam {
 
 /// Flush loop — the single appender of the dense log.
 ///
-/// Thin async wrapper: runs [`flush_loop_blocking`] on the blocking pool for its
+/// Thin async wrapper: runs `flush_loop_blocking` on the blocking pool for its
 /// lifetime and **joins it** on either exit — a detached body would outlive the
 /// node's teardown, still holding the DB. The blocking body uses a plain
 /// (timer-free) crossbeam `recv` for the idle wait — no per-batch async↔blocking

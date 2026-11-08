@@ -79,7 +79,7 @@ pub struct StorageConfig {
     /// Open SST files. Each holds a table reader outside the block cache — the
     /// other term that escapes the budget as the dataset grows.
     pub max_open_files: Option<i32>,
-    /// Override for [`RETIRE_SWEEP_DEFAULT`]. See that constant.
+    /// Override for `RETIRE_SWEEP_DEFAULT`. See that constant.
     pub retire_sweep: Option<std::time::Duration>,
 }
 

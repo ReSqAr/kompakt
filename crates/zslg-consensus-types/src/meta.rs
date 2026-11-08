@@ -40,7 +40,7 @@ use zslg_time_types::Hlc;
 /// *that* `next`, which a new `next` has not got.
 ///
 /// A retarget needs no bound from the abandoned `next`: `old` is required for
-/// quorum at every stage until collapse (see [`crate::quorum::is_quorum`]), so a
+/// quorum at every stage until collapse (see `crate::quorum::is_quorum`), so a
 /// bound sampled over a quorum of `old` covers every write acknowledged in the
 /// whole episode — including writes acknowledged against an earlier `next`.
 ///
@@ -76,7 +76,7 @@ pub enum ReplicaMembership {
 ///
 /// Variant order is load-bearing: the derived `Ord` puts `AnyTime` below every
 /// `WatermarkAbove`, which is what the write point's monotonicity check
-/// ([`crate::raft::RaftStateError::ExitHlcRegressed`]) compares. `AnyTime` is
+/// (`crate::raft::RaftStateError::ExitHlcRegressed`) compares. `AnyTime` is
 /// the weakest bound, so arming it after a real one is a regression.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Exit {
@@ -114,7 +114,7 @@ impl ReplicaMembership {
 
     /// The set that is authoritative today: the single set, or the *old* set of
     /// a joint config. Quorum in this set is always necessary (never, on its
-    /// own, sufficient while joint — see [`crate::quorum::is_quorum`]).
+    /// own, sufficient while joint — see `crate::quorum::is_quorum`).
     #[must_use]
     pub fn current(&self) -> &BTreeSet<NodeId> {
         match self {

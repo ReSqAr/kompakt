@@ -15,7 +15,7 @@ library < types < ports < procedure < implementation < assembly < facade
 - **fake** — in-memory stand-ins for ports; dev-dependencies, or behind a `testing` feature.
 - **implementation** — one adapter; depends on ports, never on another implementation.
 - **assembly** — wires implementations (node crates, `zslg-leader`, `zslg-learner`, `nvzn-dispatcher`, …).
-- **facade** — `zslg` and `nvzn`: `pub use`, the integration tests, examples. Never an implementation.
+- **facade** — `zslg` and `nvzn`: `pub use`, examples. Never an implementation, and no tests: the multi-node ones are `zslg-cluster-tests`, the rest live in the crates that own the code.
 
 The `nvzn*` crates are built on the `zslg` facade (D11) and may depend on it; nothing else may.
 
@@ -35,7 +35,7 @@ The `nvzn*` crates are built on the `zslg` facade (D11) and may depend on it; no
 | `raft-kit` | The one place that names openraft |
 | `rocksdb-kit` | One explicit RocksDB open per node: memory budget, column families, batches, scans, fence |
 | `shutdown` | Supervision tree: any background task exiting unrequested stops the node |
-| `svg-charts` |  |
+| `svg-charts` | A server-side SVG line chart: grouping, viewport math and the renderer |
 | `warn-throttle` | Rate limiter for hot-path warn! sites |
 
 ## types

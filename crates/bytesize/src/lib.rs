@@ -69,7 +69,7 @@ impl ByteSize {
     }
 }
 
-/// `n` as a [`NonZeroUsize`], usable in a `const` initializer.
+/// `n` as a `NonZeroUsize`, usable in a `const` initializer.
 ///
 /// Total by construction — `nonzero(0)` yields 1 rather than panicking — which
 /// is what lets config defaults name a literal capacity without `expect` or

@@ -4,7 +4,7 @@
 //! nvzn reads its events from a [`zslg::Reader`] and writes them through a
 //! [`zslg::Writer`]. Both are traits, so a test does not need a cluster — but
 //! implementing them is ~140 lines of channel plumbing that every consumer
-//! would otherwise write for itself. [`TestLog`] is that plumbing, and
+//! would otherwise write for itself. `TestLog` is that plumbing, and
 //! [`Dispatcher::in_memory`](crate::Dispatcher::in_memory) is the store half.
 //!
 //! ```text
@@ -19,7 +19,7 @@
 //!                                   then each push_unstable and advance, live
 //! ```
 //!
-//! A live unstable subscriber is not resynced: [`TestLog::hang_up_unstable`]
+//! A live unstable subscriber is not resynced: `TestLog::hang_up_unstable`
 //! ends it `Aborted` where zslg would rescan, which is enough to test how a
 //! consumer reacts to the stream ending.
 //!

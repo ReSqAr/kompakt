@@ -200,7 +200,7 @@ pub struct ReplicaNodeConfig {
     pub write_timeout: Duration,
     pub db_path: PathBuf,
     pub object_store: Arc<dyn object_store::ObjectStore>,
-    /// See [`StableLogConfig::subscriber_queue_capacity`] — each stable-log
+    /// See `StableLogConfig::subscriber_queue_capacity` — each stable-log
     /// subscriber gets a queue this deep, and each queued event carries an
     /// entry payload, so this bounds memory per live subscriber. A consumer
     /// that overruns it is hung up on and replays from its cursor.
@@ -746,7 +746,7 @@ impl InitialisingReplicaNode {
     /// consumes `self`.
     ///
     /// Cancelling makes a pending [`Self::wait_until_ready`] return
-    /// [`Error::StartupCancelled`] promptly — a distinct variant precisely so an
+    /// `Error::StartupCancelled` promptly — a distinct variant precisely so an
     /// operator-requested stop is not mistaken for a startup fault — after
     /// shutting the node down gracefully. Cancelling it before or after that
     /// call is equally fine; a node that is only ever [`Self::run`] sees the same
@@ -788,7 +788,7 @@ impl InitialisingReplicaNode {
     /// than handed back — there is nothing a caller could do with a node whose
     /// startup failed except stop it.
     ///
-    /// Returns [`Error::StartupCancelled`] if [`Self::shutdown_token`] fires
+    /// Returns `Error::StartupCancelled` if [`Self::shutdown_token`] fires
     /// while the gate is still waiting. That is a clean stop, not a fault: it is
     /// the documented way to abandon a node whose quorum never returns, and it
     /// is a separate variant so a caller can log it as such instead of alerting.
@@ -1229,7 +1229,7 @@ impl ReplicaNode {
     ///
     /// Read the current state with [`RaftStateHandle::snapshot`] and follow
     /// changes with [`RaftStateHandle::subscribe`]; both are also available
-    /// through the [`RaftStateView`](crate::RaftStateView) trait.
+    /// through the [`RaftStateView`] trait.
     ///
     /// Note which fields are replicated and which are local: `generation`,
     /// `replica` and `manifest_state` are the state machine's applied output

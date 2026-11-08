@@ -1,12 +1,12 @@
 //! The learner's stable prefix: the [`StableLog`] storage plus the
-//! [`snapshot_loader`] that populates it from object-store snapshots.
+//! `snapshot_loader` that populates it from object-store snapshots.
 //!
 //! Storage is a RocksDB column family: primary = the gapless global
 //! `LogIndex`, secondary = the entry's creation HLC. With TTL purge disabled
 //! (the default) no retire threshold is ever armed, so the log never retires (it
 //! is the CQRS replay source); with purge on, an HLC-keyed threshold retires an
 //! old index prefix, served just-in-time from object store on read
-//! ([`crate::learner::stable_archive`]). The watermark (`end_hlc`) is purely
+//! (`crate::learner::stable_archive`). The watermark (`end_hlc`) is purely
 //! in-memory: recovered from the log's own tail at open (just below the
 //! frontier entry's HLC) and re-raised by the first manifest event after
 //! startup, so it can never claim more coverage than the entries this node

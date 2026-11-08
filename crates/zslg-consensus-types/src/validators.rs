@@ -5,7 +5,7 @@ use zslg_time_types::Hlc;
 /// The structural-validity check for a proposed raft state, judged **on its
 /// own** — no reference to the state it replaces. Runs pre-flight on the
 /// leader's propose path (`replicate_state`, mapped to an immediate `Err`) and
-/// again at the fence ([`evaluate_fence`], mapped to a value rejection). The
+/// again at the fence (`evaluate_fence`, mapped to a value rejection). The
 /// membership *transition* rules need the previous state and live in
 /// [`validate_transition`], which only the fence can run — so a state can pass
 /// pre-flight and still be value-rejected at the fence.

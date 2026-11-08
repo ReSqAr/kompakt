@@ -93,7 +93,7 @@ pub fn can_serve_clients(eviction: &EvictionStatus) -> bool {
     !eviction.is_denied()
 }
 
-/// Wraps a [`Reader`] so client reads are refused with [`Error::NotReady`]
+/// Wraps a [`Reader`] so client reads are refused with `Error::NotReady`
 /// once a reachable peer has affirmatively denied this node's rejoin attempt
 /// — a node removed from the group stays up (CLAUDE.md) but its
 /// replicated-state view has stopped advancing, so serving from it would

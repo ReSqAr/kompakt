@@ -77,7 +77,7 @@ pub fn membership_joint_exit_hlc_physical_ms(exit: Option<zslg_consensus::Exit>)
 
 /// Wall-clock stamp (Unix epoch seconds) of the last time the applied manifest
 /// watermark advanced — i.e. a snapshot committed and replicated. Emitted by the
-/// owner ([`crate::raft::state::state_publisher`]) on every node. The snapshot-age alert
+/// owner (`crate::raft::state::state_publisher`) on every node. The snapshot-age alert
 /// is the PromQL `time() - manifest_watermark_advanced_timestamp_seconds`, which
 /// keeps climbing regardless of whether the emitter is running.
 pub fn manifest_watermark_advanced() {

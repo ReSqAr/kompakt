@@ -13,7 +13,7 @@ struct SkewState {
     frozen: Option<u64>,
 }
 
-/// Cloneable handle for manipulating a [`SkewedClock`] at runtime.
+/// Cloneable handle for manipulating a `SkewedClock` at runtime.
 #[derive(Clone)]
 pub struct SharedClockController {
     state: Arc<SyncMutex<SkewState>>,

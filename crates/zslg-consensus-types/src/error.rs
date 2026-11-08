@@ -91,7 +91,7 @@ impl ConsensusError {
     }
 }
 
-/// Payload of [`Error::UnexpectedNodeId`].
+/// Payload of `Error::UnexpectedNodeId`.
 #[derive(Debug, Clone, PartialEq, thiserror::Error, Serialize, Deserialize)]
 #[error("unexpected node id: expected={expected:?} actual={actual:?}")]
 pub struct UnexpectedNodeId {
@@ -99,7 +99,7 @@ pub struct UnexpectedNodeId {
     pub actual: NodeId,
 }
 
-/// Payload of [`Error::StaleStateWrite`].
+/// Payload of `Error::StaleStateWrite`.
 #[derive(Debug, Clone, PartialEq, thiserror::Error, Serialize, Deserialize)]
 #[error("stale state write ({context}): expected generation {expected:?}, current {current:?}")]
 pub struct StaleStateWrite {
@@ -108,7 +108,7 @@ pub struct StaleStateWrite {
     pub current: RaftGeneration,
 }
 
-/// Payload of [`Error::InvalidRaftState`].
+/// Payload of `Error::InvalidRaftState`.
 #[derive(Debug, Clone, PartialEq, thiserror::Error, Serialize, Deserialize)]
 #[error("invalid raft state rejected by fence ({context}): {source}")]
 pub struct InvalidRaftState {
@@ -117,7 +117,7 @@ pub struct InvalidRaftState {
     pub source: RaftStateError,
 }
 
-/// Payload of [`Error::SubscriptionEnded`].
+/// Payload of `Error::SubscriptionEnded`.
 #[derive(Debug, Clone, PartialEq, thiserror::Error, Serialize, Deserialize)]
 #[error("subscription to {peer_id} ended: {reason}")]
 pub struct SubscriptionEnded {

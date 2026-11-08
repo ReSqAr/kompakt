@@ -19,9 +19,10 @@ pub use zslg_time_types::{
 };
 
 error_union! {
-    /// What the ports of this crate can fail with. Holds every leaf error for
-    /// now; narrowed to the leaves its implementations actually raise once they
-    /// have moved out of `zslg`.
+    /// What the ports of this crate can fail with. Holds all seven leaf errors,
+    /// including ones no implementation raises (a clock cannot fail with a log
+    /// error); narrowing to the leaves actually raised is open work, see
+    /// `docs/logs/2026-11-07_post_crate_split.md`.
     #[derive(Debug, Clone, PartialEq)]
     pub Error {
         Lifecycle(LifecycleError),

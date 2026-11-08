@@ -415,7 +415,7 @@ pub fn hlc(ms: u64) -> Hlc {
 
 /// A [`zslg::Reader`] whose halves the test drives separately, so the stable
 /// watermark can run ahead of what the fold has been fed — the window between
-/// zslg loading a snapshot and the fold catching up, which [`TestLog`] never
+/// zslg loading a snapshot and the fold catching up, which `TestLog` never
 /// opens because it moves both together.
 pub struct ScriptedReader {
     watermark: Mutex<Option<Hlc>>,

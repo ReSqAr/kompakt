@@ -1,9 +1,9 @@
 //! Pulling the replica logs into the local store: one long-lived subscription
 //! per replica, supervised.
 //!
-//! [`manager`] owns the set — it follows the effective replica set (current ∪
+//! `manager` owns the set — it follows the effective replica set (current ∪
 //! next, so a joining node is subscribed before it is needed) and runs one task
-//! per member. [`peer`] is that task's body: subscribe from the durable cursor,
+//! per member. `peer` is that task's body: subscribe from the durable cursor,
 //! feed a blocking integrate loop, and report back what the attempt actually
 //! accomplished.
 //!

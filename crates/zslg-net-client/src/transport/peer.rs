@@ -41,7 +41,7 @@ use zslg_raft::TypeConfig;
 /// a registered `NodeId` ([`TcpPeerClient::new`]) or directly by
 /// `(addr, server_name)` ([`TcpPeerClient::direct`]); both expose the full
 /// [`ReplicaClient`](zslg_net::ReplicaClient) surface. Built only inside
-/// [`RemoteRouter`](crate::network::RemoteRouter).
+/// `RemoteRouter`.
 pub struct TcpPeerClient {
     rpc_client: Arc<RpcClient>,
     target: Target,

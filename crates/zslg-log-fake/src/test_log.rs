@@ -118,7 +118,7 @@ impl TestLog {
     }
 
     /// Stage a payload above the watermark, where only a
-    /// [`Live`](crate::Live) view and the unstable-tail subscribers see it.
+    /// `Live` view and the unstable-tail subscribers see it.
     pub fn push_unstable(&mut self, blob: Bytes) -> DataId {
         let (_, seed) = self.next();
         let did = data_id(seed, seed);

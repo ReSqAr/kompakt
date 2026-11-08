@@ -7,7 +7,7 @@
 //! ```
 //!
 //! One connection carries one call: a frame is a `u32` big-endian length and
-//! that many bytes of postcard. The request frame is an [`Envelope`] (the
+//! that many bytes of postcard. The request frame is an `Envelope` (the
 //! app's name, its wire fingerprint, the body); the answer is the body of the
 //! app's response, or an error's words. The runtime knows nothing of an app's
 //! calls: each app declares its own `Request`/`Response`.

@@ -470,7 +470,7 @@ impl RpcClient {
         })
     }
 
-    /// Make `node_id` addressable, so a [`Target::Registered`] can resolve. Fed
+    /// Make `node_id` addressable, so a `Target::Registered` can resolve. Fed
     /// lazily from Raft membership as peers are learned; a node registers itself
     /// too, since its own `RpcClient` may route back to it.
     pub fn register_peer(&self, node_id: NodeId, peer_addr: PeerAddr) {

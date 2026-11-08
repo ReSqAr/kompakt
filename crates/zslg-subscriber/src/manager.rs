@@ -29,7 +29,7 @@ const STORE_GAUGE_TICK_INTERVAL: Duration = Duration::from_secs(1);
 /// Runs one subscriber task per effective replica, starting and cancelling them
 /// as the replica set changes. Holds the concrete `LocalStore` rather than
 /// `dyn LocalStoreView` so store gauges can be emitted from here without
-/// widening the public trait — see [`Self::emit_store_gauges`].
+/// widening the public trait — see `Self::emit_store_gauges`.
 pub struct ReplicationManager {
     clock: Arc<dyn Clock>,
     raft_state: Arc<dyn RaftStateView>,

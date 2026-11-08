@@ -66,7 +66,7 @@ impl<P: Projection> Projector<P> {
     }
 }
 
-/// An [`Index`] with its target type erased, so one projection's indices fit
+/// An `Index` with its target type erased, so one projection's indices fit
 /// one list whatever they point at. Implemented by every `Index<P, Q>`.
 impl<P: Projection, Ev, Txn> ProjectorLike<Ev, Txn> for Projector<P>
 where

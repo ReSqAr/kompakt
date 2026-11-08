@@ -122,7 +122,7 @@ pub struct LearnerNodeConfig {
     pub storage_max_open_files: Option<i32>,
     pub storage_retire_sweep: Option<Duration>,
     pub object_store: Arc<dyn object_store::ObjectStore>,
-    /// See [`StableLogConfig::subscriber_queue_capacity`] — each stable-log
+    /// See `StableLogConfig::subscriber_queue_capacity` — each stable-log
     /// subscriber gets a queue this deep, and each queued event carries an
     /// entry payload, so this bounds memory per live subscriber. A consumer
     /// that overruns it is hung up on and replays from its cursor.

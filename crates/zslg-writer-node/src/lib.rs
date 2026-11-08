@@ -222,7 +222,7 @@ impl WriterNodeConfig {
 
     /// Produce the outbound router's client config. The TCP + client + write-pool
     /// fields from the flat `network_*` prefix feed directly into the flat
-    /// [`RpcClientConfig`].
+    /// `RpcClientConfig`.
     #[must_use]
     pub fn router_config(&self) -> zslg_net_setup::RpcClientConfig {
         zslg_net_setup::RpcClientConfig {

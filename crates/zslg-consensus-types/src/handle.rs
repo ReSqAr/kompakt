@@ -62,7 +62,7 @@ impl RaftStateHandle {
     ///
     /// Public, like the trait method it shadows. An inherent method wins over
     /// a trait method in call position, so leaving this narrower than
-    /// [`crate::api::RaftStateView::subscribe`] would make `handle.subscribe()`
+    /// `crate::api::RaftStateView::subscribe` would make `handle.subscribe()`
     /// a privacy error outside `crate::raft` even where the trait is in scope.
     #[must_use]
     pub fn subscribe(&self) -> watch::Receiver<Arc<RaftState>> {
