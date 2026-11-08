@@ -33,14 +33,6 @@ zslg-replica-node = { workspace = true, features = ["testing"] }
 zslg-writer-node = { workspace = true }
 
 [dev-dependencies]
-zslg-error = { workspace = true }
-zslg-raft-setup = { workspace = true, features = ["testing"] }
-zslg-leader-integrator = { workspace = true, features = ["testing"] }
-zslg-reader = { workspace = true, features = ["testing"] }
-zslg-local-store = { workspace = true, features = ["testing"] }
-zslg-raft-node = { workspace = true, features = ["testing"] }
-zslg-net-wire = { workspace = true, features = ["testing"] }
-zslg-net-client = { workspace = true, features = ["testing"] }
 tracing = { workspace = true }
 shutdown = { workspace = true }
 dashmap = { workspace = true }
@@ -51,9 +43,6 @@ tokio-util = { workspace = true, features = ["io-util"] }
 metrics = { workspace = true }
 rand = { workspace = true }
 bytes = { workspace = true }
-zslg-consensus-fake = { workspace = true }
-testing-kit = { workspace = true }
-zslg-log-fake = { workspace = true }
 crossbeam-combinators = { workspace = true, features = ["testing"] }
 clap = { workspace = true, features = ["env"] }
 tracing-subscriber = { workspace = true, features = ["json"] }
@@ -61,8 +50,6 @@ http-body-util = { workspace = true }
 hyper = { workspace = true }
 hyper-util = { workspace = true }
 pprof = { workspace = true }
-proptest = { workspace = true }
-tempfile = { workspace = true }
 time = { workspace = true }
 tokio-metrics = { workspace = true }
 

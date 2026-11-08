@@ -22,9 +22,7 @@ use crossbeam_combinators::testing::ChannelTestExt as _;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::tests::{
-    Cluster, ClusterConfig, assert_cluster_invariants_with_acks, default_fast_config,
-};
+use crate::{Cluster, ClusterConfig, assert_cluster_invariants_with_acks, default_fast_config};
 use bytes::Bytes;
 use futures::StreamExt;
 use object_store::memory::InMemory;
@@ -64,7 +62,7 @@ async fn writes_appear_in_stable_log_across_all_nodes() {
         .expect("write");
 
     // Wait for the snapshot to be created (stable prefix covers this write).
-    crate::tests::wait_until_sync("snapshot created", Duration::from_secs(15), || {
+    crate::wait_until_sync("snapshot created", Duration::from_secs(15), || {
         cluster.nodes().any(|n| {
             n.state_handle()
                 .snapshot()

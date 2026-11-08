@@ -32,7 +32,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use futures::StreamExt;
 
-use crate::tests::common::Cluster;
+use crate::common::Cluster;
 use zslg_consensus::NodeId;
 use zslg_consensus::{RaftState, ReplicaMembership};
 use zslg_log::DataId;

@@ -35,7 +35,7 @@ use bytes::Bytes;
 use futures::StreamExt;
 use object_store::memory::InMemory;
 
-use crate::tests::{Cluster, ClusterConfig, assert_cluster_invariants};
+use crate::{Cluster, ClusterConfig, assert_cluster_invariants};
 use zslg_consensus::NodeId;
 
 /// Find the id of the current leader (panics if there is none).

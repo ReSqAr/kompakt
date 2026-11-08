@@ -1,6 +1,6 @@
 //! End-to-end: a free-standing [`LearnerNode`] subscribing to a *genuinely
 //! joined* cluster of three real [`ReplicaNode`]s over the TCP transport, then serving reads
-//! through its own [`Reader`](crate::Reader) API.
+//! through its own [`Reader`](zslg::Reader) API.
 //!
 //! This exercises the full learner path that has no Raft of its own: the learner
 //! discovers the replica set via streaming `subscribe()` connections (the
@@ -33,8 +33,8 @@ use futures::StreamExt;
 use object_store::memory::InMemory;
 use tempfile::TempDir;
 
-use crate::tests::{Cluster, ClusterConfig, assert_cluster_invariants};
-use crate::{LearnerNode, LearnerNodeConfig, ObjectStoreConfig};
+use crate::{Cluster, ClusterConfig, assert_cluster_invariants};
+use zslg::{LearnerNode, LearnerNodeConfig, ObjectStoreConfig};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn learner_node_starts_and_shuts_down_cleanly() {

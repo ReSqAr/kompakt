@@ -25,7 +25,7 @@ use bytes::Bytes;
 use futures::StreamExt;
 use object_store::memory::InMemory;
 
-use crate::tests::{Cluster, ClusterConfig};
+use crate::{Cluster, ClusterConfig};
 
 #[tokio::test]
 async fn three_node_tcp_write_round_trip() {

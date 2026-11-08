@@ -19,7 +19,7 @@
 //! # What this adds over the hand-written cluster tests
 //!
 //! Each hand-written test pins one schedule: one restart at one moment, one
-//! timescale. The invariants in [`crate::tests::common`] are crate-wide laws,
+//! timescale. The invariants in [`crate::common`] are crate-wide laws,
 //! so the interesting question is not "does this schedule hold" but "does
 //! *any* schedule hold". This module generates the schedule and the timescale
 //! and asserts the same battery over the result.
@@ -189,11 +189,11 @@ use object_store::memory::InMemory;
 use proptest::prelude::{Just, ProptestConfig, Strategy, prop_oneof, proptest};
 use proptest::{prop_assert, prop_assert_eq};
 
-use crate::replica_node::ReplicaNodeConfig;
-use crate::tests::{
+use crate::{
     Cluster, ClusterConfig, CutoffObserver, NodePlacement, assert_cluster_invariants,
     assert_cluster_invariants_with_acks, assert_durability_chain_on,
 };
+use zslg::ReplicaNodeConfig;
 use zslg_consensus::NodeId;
 use zslg_log::DataId;
 
@@ -332,7 +332,7 @@ fn config_for(
     max_flush_batch: u64,
     write_capacity: u64,
 ) -> ReplicaNodeConfig {
-    let mut cfg = crate::tests::default_fast_config();
+    let mut cfg = crate::default_fast_config();
     cfg.snapshot_interval = Duration::from_millis(snapshot_ms);
     cfg.raft_election_timeout_min = Duration::from_millis(election_min_ms);
     // Derived, not generated: max must exceed min.
@@ -742,7 +742,7 @@ fn spawn_observer(cluster: &Cluster) -> CutoffObserver {
 async fn settle_membership(cluster: &Cluster, downed: Option<NodeId>) {
     let mut want = cluster.node_ids();
     want.extend(downed);
-    crate::tests::wait_until_sync("membership settled", Duration::from_secs(30), || {
+    crate::wait_until_sync("membership settled", Duration::from_secs(30), || {
         cluster.nodes().all(|n| {
             let s = n.state_handle().snapshot();
             !s.replica.is_joint() && *s.replica.current() == want
@@ -1280,7 +1280,7 @@ fn script_constraints_hold_for_every_short_script() {
 /// where it was not survivable.
 #[tokio::test(flavor = "multi_thread")]
 async fn stressed_regime_admits_writes() {
-    crate::tests::init_logging();
+    crate::init_logging();
     let (snap, elec) = regime_ranges(Regime::Stressed);
     let (mfb_r, wc_r) = capacity_ranges(Regime::Stressed);
     // Bursts at the top of the generated `n` range, not single writes: the
@@ -1365,7 +1365,7 @@ async fn stressed_regime_admits_writes() {
 /// open. The listener must also release its port.
 #[tokio::test(flavor = "multi_thread")]
 async fn hard_killed_node_can_be_relaunched() {
-    crate::tests::init_logging();
+    crate::init_logging();
     let mut cluster = Cluster::new(ClusterConfig {
         count: 3,
         distinct_names: false,
@@ -1380,7 +1380,7 @@ async fn hard_killed_node_can_be_relaunched() {
     let leader = cluster
         .nodes()
         .find(|n| n.state_handle().snapshot().leader.is_some())
-        .map(crate::replica_node::ReplicaNode::node_id)
+        .map(zslg::ReplicaNode::node_id)
         .expect("no leader");
     let pre_kill = Bytes::from_static(b"pre-kill");
     let acked = cluster
@@ -1443,7 +1443,7 @@ proptest! {
         write_capacity_pick in 0u64..=1000,
         ops in script_strategy(),
     ) {
-        crate::tests::init_logging();
+        crate::init_logging();
         let (snap_r, elec_r) = regime_ranges(regime);
         let snapshot_ms = pick(&snap_r, snapshot_pick);
         let election_min_ms = pick(&elec_r, election_pick);
@@ -1601,7 +1601,7 @@ fn pick(range: &RangeInclusive<u64>, dial: u64) -> u64 {
 /// passing one, and this is the reporting.
 #[tokio::test(flavor = "multi_thread")]
 async fn full_vocabulary_smoke_script_holds_the_battery() {
-    crate::tests::init_logging();
+    crate::init_logging();
     // Healthy dials; the script itself drives the faults.
     let (snap, elec) = regime_ranges(Regime::Healthy);
     let (mfb_r, wc_r) = capacity_ranges(Regime::Healthy);
@@ -1749,7 +1749,7 @@ async fn full_vocabulary_smoke_script_holds_the_battery() {
 /// nothing else.
 #[tokio::test(flavor = "multi_thread")]
 async fn full_replacement_transfers_membership_and_data() {
-    crate::tests::init_logging();
+    crate::init_logging();
     let mut base = config_for(30_000, 600, 32, 256);
     // Deterministic spare choice, so `next` is not a coin flip across runs.
     base.membership_spare_selection = zslg_consensus::SpareSelectionStrategy::LowestLatency;
@@ -1805,7 +1805,7 @@ async fn full_replacement_transfers_membership_and_data() {
     // ── Stage 2: a joint config with a DISJOINT next must be committed ────
     // 4 of 7 voters survive, so the raft layer keeps working.
     let mut next: Option<BTreeSet<NodeId>> = None;
-    crate::tests::wait_until_sync("joint proposed", Duration::from_secs(20), || {
+    crate::wait_until_sync("joint proposed", Duration::from_secs(20), || {
         cluster.nodes().any(|n| {
             let s = n.state_handle().snapshot();
             match s.replica.next() {
@@ -1844,7 +1844,7 @@ async fn full_replacement_transfers_membership_and_data() {
     // bound: `AnyTime` would mean every responder reported an empty log, so
     // nothing could be stranded and the gate would be doing no work.
     let mut armed: Option<zslg_consensus::Exit> = None;
-    crate::tests::wait_until_sync("drain bound armed", Duration::from_secs(30), || {
+    crate::wait_until_sync("drain bound armed", Duration::from_secs(30), || {
         cluster
             .nodes()
             .any(|node| match node.state_handle().snapshot().replica.exit() {
@@ -1864,7 +1864,7 @@ async fn full_replacement_transfers_membership_and_data() {
     );
 
     // ── Stage 4: drain — the watermark must pass the sampled bound ────────
-    crate::tests::wait_until_sync("collapse", Duration::from_secs(60), || {
+    crate::wait_until_sync("collapse", Duration::from_secs(60), || {
         cluster.nodes().all(|node| {
             let s = node.state_handle().snapshot();
             !s.replica.is_joint() && *s.replica.current() == n

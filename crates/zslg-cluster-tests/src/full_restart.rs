@@ -35,8 +35,8 @@ use zslg_error::LifecycleError;
 use bytes::Bytes;
 use object_store::memory::InMemory;
 
-use crate::error::Error;
-use crate::tests::{Cluster, ClusterConfig, assert_cluster_invariants, default_fast_config};
+use crate::{Cluster, ClusterConfig, assert_cluster_invariants, default_fast_config};
+use zslg::Error;
 
 /// Off and on again, ALL AT ONCE: a full outage where every node restarts
 /// simultaneously must recover a leader + writable cluster on its own.
@@ -175,8 +175,8 @@ async fn rpc_server_accepts_connections_while_raft_startup_is_blocked() {
     let _dir = tempfile::tempdir().expect("tempdir");
     let store: Arc<dyn object_store::ObjectStore> = Arc::new(InMemory::new());
 
-    let listen = crate::tests::reserve_port();
-    let dead_peer = crate::tests::reserve_port(); // nothing will listen here
+    let listen = crate::reserve_port();
+    let dead_peer = crate::reserve_port(); // nothing will listen here
 
     // server_name ("node-a") != bootstrap_server_name ("node-0") ⇒ NOT the
     // bootstrap node; its only reachable peer is itself and the other
@@ -206,7 +206,7 @@ async fn rpc_server_accepts_connections_while_raft_startup_is_blocked() {
     // returns. `start` itself does return (that is the point of the split), so the
     // pending-ness asserted below is the readiness wait, not the bind.
     let handle = tokio::spawn(async move {
-        crate::replica_node::ReplicaNode::start(cfg)
+        zslg::ReplicaNode::start(cfg)
             .await?
             .wait_until_ready()
             .await
@@ -251,8 +251,8 @@ async fn cancelling_the_shutdown_token_stops_a_node_that_never_becomes_ready() {
     let dir = tempfile::tempdir().expect("tempdir");
     let store: Arc<dyn object_store::ObjectStore> = Arc::new(InMemory::new());
 
-    let listen = crate::tests::reserve_port();
-    let dead_peer = crate::tests::reserve_port(); // nothing will ever listen here
+    let listen = crate::reserve_port();
+    let dead_peer = crate::reserve_port(); // nothing will ever listen here
 
     // Same shape as `rpc_server_accepts_connections_while_raft_startup_is_blocked`:
     // not the bootstrap node, no fence, one unreachable peer ⇒ JoinExisting, which
@@ -274,7 +274,7 @@ async fn cancelling_the_shutdown_token_stops_a_node_that_never_becomes_ready() {
     cfg.db_path = dir.path().join("node.strata");
     cfg.object_store = store;
 
-    let initialising = crate::replica_node::ReplicaNode::start(cfg)
+    let initialising = zslg::ReplicaNode::start(cfg)
         .await
         .expect("start binds without a quorum");
 

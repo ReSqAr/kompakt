@@ -41,8 +41,8 @@ use object_store::ObjectStore;
 use object_store::memory::InMemory;
 use tempfile::TempDir;
 
-use crate::error::Error;
-use crate::replica_node::{ReplicaNode, ReplicaNodeConfig};
+use zslg::Error;
+use zslg::{ReplicaNode, ReplicaNodeConfig};
 use zslg_consensus::NodeId;
 use zslg_net::{PeerAddr, ServerName};
 

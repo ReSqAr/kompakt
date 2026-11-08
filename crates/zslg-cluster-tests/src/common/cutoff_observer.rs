@@ -57,8 +57,8 @@ use std::sync::{Arc, Mutex};
 use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 
-use crate::tests::common::Cluster;
-use crate::tests::common::invariants::assert_membership_well_formed;
+use crate::common::Cluster;
+use crate::common::invariants::assert_membership_well_formed;
 use zslg_consensus::NodeId;
 use zslg_consensus::RaftState;
 use zslg_consensus::RaftStateHandle;
@@ -299,7 +299,7 @@ mod tests {
     #[tokio::test]
     #[should_panic(expected = "committed cutoff regressed")]
     async fn assert_monotonic_panics_on_decrease() {
-        let node = crate::tests::nid(1);
+        let node = crate::nid(1);
         let mut seen = BTreeMap::new();
         seen.insert(node, vec![Hlc(10), Hlc(5)]);
         let observer = CutoffObserver {
@@ -325,7 +325,7 @@ mod tests {
     /// regression between any two values it did record.
     #[tokio::test(flavor = "multi_thread")]
     async fn observer_converges_on_the_published_cutoff() {
-        let node_id = crate::tests::nid(1);
+        let node_id = crate::nid(1);
         let handle = RaftStateHandle::new();
         let observer = CutoffObserver::spawn_for_handles(vec![(node_id, handle.clone())]);
 
@@ -339,7 +339,7 @@ mod tests {
         publish(Hlc(2));
         publish(Hlc(3));
 
-        crate::tests::wait_until_sync("latest publish observed", Duration::from_secs(5), || {
+        crate::wait_until_sync("latest publish observed", Duration::from_secs(5), || {
             observer
                 .seen
                 .lock()
@@ -373,18 +373,18 @@ mod tests {
     async fn joint_states_are_counted_and_checked_live() {
         use zslg_consensus::ReplicaMembership;
 
-        let node_id = crate::tests::nid(1);
+        let node_id = crate::nid(1);
         let handle = RaftStateHandle::new();
         let observer = CutoffObserver::spawn_for_handles(vec![(node_id, handle.clone())]);
 
         let mut snap = (*handle.snapshot()).clone();
         snap.replica = ReplicaMembership::joint(
-            [crate::tests::nid(1)].into_iter().collect(),
-            [crate::tests::nid(2)].into_iter().collect(),
+            [crate::nid(1)].into_iter().collect(),
+            [crate::nid(2)].into_iter().collect(),
         );
         handle.replace(snap);
 
-        crate::tests::wait_until_sync("joint state observed", Duration::from_secs(5), || {
+        crate::wait_until_sync("joint state observed", Duration::from_secs(5), || {
             observer.joint_polls() > 0
         })
         .await;

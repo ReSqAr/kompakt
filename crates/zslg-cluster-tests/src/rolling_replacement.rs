@@ -29,8 +29,8 @@ use bytes::Bytes;
 use object_store::ObjectStore;
 use tracing_subscriber::EnvFilter;
 
-use crate::replica_node::ReplicaNodeConfig;
-use crate::tests::{Cluster, ClusterConfig, assert_cluster_invariants};
+use crate::{Cluster, ClusterConfig, assert_cluster_invariants};
+use zslg::ReplicaNodeConfig;
 use zslg_consensus::NodeId;
 
 // ── helpers ───────────────────────────────────────────────────────────

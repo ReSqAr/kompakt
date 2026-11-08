@@ -34,7 +34,7 @@ pub(crate) use zslg_consensus_fake::nid;
 pub(crate) async fn replica_write<R: zslg_log::Replica + ?Sized>(
     replica: &R,
     data: zslg_log::Data,
-) -> Result<zslg_consensus::RaftState, crate::Error> {
+) -> Result<zslg_consensus::RaftState, zslg::Error> {
     zslg_log_fake::replica_write(replica, data)
         .await
         .map_err(Into::into)

@@ -25,7 +25,7 @@ use std::time::Duration;
 
 use object_store::memory::InMemory;
 
-use crate::tests::{
+use crate::{
     Cluster, ClusterConfig, assert_cluster_invariants, default_fast_config, wait_until_sync,
 };
 use zslg_consensus::NodeId;
@@ -35,7 +35,7 @@ use zslg_consensus::NodeId;
 /// `{B,C,D}` via the joint transition, with the evicted node still running.
 #[tokio::test(flavor = "multi_thread")]
 async fn evicted_member_leaves_the_replicated_set_while_still_running() {
-    crate::tests::init_logging();
+    crate::init_logging();
     // 4 nodes, distinct names: node-0 bootstraps, node-3 is a voter-only spare
     // (replica_node_count = 3). `distinct_names` is required — the eviction
     // job compares server NAMES, and shared "localhost" names can never be

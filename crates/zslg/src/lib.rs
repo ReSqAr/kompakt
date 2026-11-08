@@ -21,8 +21,9 @@
 use tracing_subscriber as _;
 #[cfg(test)]
 use {
-    clap as _, dashmap as _, http_body_util as _, hyper as _, hyper_util as _, metrics as _,
-    pprof as _, shutdown as _, time as _, tokio_metrics as _,
+    bytes as _, clap as _, crossbeam_combinators as _, dashmap as _, futures as _,
+    http_body_util as _, hyper as _, hyper_util as _, metrics as _, object_store as _, pprof as _,
+    shutdown as _, time as _, tokio as _, tokio_metrics as _, tokio_util as _,
 };
 
 // Used by `examples/common`, not here; a normal dependency only because Cargo
@@ -46,28 +47,6 @@ use tikv_jemallocator as _;
 use rand as _;
 #[cfg(test)]
 use tracing as _;
-
-// Dev-dependencies that exist to switch on their `testing` hooks.
-#[cfg(test)]
-use {
-    zslg_leader_integrator as _, zslg_local_store as _, zslg_net_client as _, zslg_net_wire as _,
-    zslg_raft_node as _, zslg_raft_setup as _, zslg_reader as _,
-};
-
-#[cfg(test)]
-pub(crate) mod error {
-    pub(crate) use zslg_error::Error;
-}
-#[cfg(test)]
-pub(crate) mod learner;
-#[cfg(test)]
-pub(crate) mod raft;
-#[cfg(test)]
-pub(crate) mod replica;
-#[cfg(test)]
-pub(crate) use zslg_replica_node as replica_node;
-#[cfg(test)]
-mod tests;
 
 pub use bytesize::ByteSize;
 pub use zslg_consensus::NodeId;

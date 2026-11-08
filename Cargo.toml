@@ -136,6 +136,7 @@ zslg-time = { path = "crates/zslg-time" }
 zslg-time-fake = { path = "crates/zslg-time-fake" }
 zslg-net-fake = { path = "crates/zslg-net-fake" }
 zslg-raft-fake = { path = "crates/zslg-raft-fake" }
+zslg-cluster-tests = { path = "crates/zslg-cluster-tests" }
 zslg-log-fake = { path = "crates/zslg-log-fake" }
 zslg-time-types = { path = "crates/zslg-time-types" }
 

@@ -34,7 +34,7 @@ use zslg_error::LifecycleError;
 
 use object_store::memory::InMemory;
 
-use crate::tests::{Cluster, ClusterConfig, default_fast_config, wait_until_sync};
+use crate::{Cluster, ClusterConfig, default_fast_config, wait_until_sync};
 
 /// A voter-set change alone — with `config.peers` never touched, so the
 /// rejoin monitor never has anything to be denied by — must NOT gate reads.
@@ -51,7 +51,7 @@ use crate::tests::{Cluster, ClusterConfig, default_fast_config, wait_until_sync}
 /// the gate does NOT trip on that alone.
 #[tokio::test(flavor = "multi_thread")]
 async fn voter_set_change_alone_does_not_gate_reads() {
-    crate::tests::init_logging();
+    crate::init_logging();
     let mut base = default_fast_config();
     // Short grace so the rejoin monitor would reach its decision quickly, if
     // there were anything for it to decide.
@@ -161,7 +161,7 @@ async fn voter_set_change_alone_does_not_gate_reads() {
 /// `config.peers` is untouched, so a rejoin attempt is accepted.
 #[tokio::test(flavor = "multi_thread")]
 async fn evicted_node_survives_a_denied_rejoin() {
-    crate::tests::init_logging();
+    crate::init_logging();
     let mut base = default_fast_config();
     base.membership_forced_node_removal_timeout = Duration::from_millis(200);
     base.membership_poll_interval = Duration::from_millis(100);
@@ -364,7 +364,7 @@ async fn evicted_node_survives_a_denied_rejoin() {
 /// long before the followers' own 5-8s timeout could fire.
 #[tokio::test(flavor = "multi_thread")]
 async fn unwanted_leader_evicts_itself() {
-    crate::tests::init_logging();
+    crate::init_logging();
     let mut base = default_fast_config();
     base.membership_forced_node_removal_timeout = Duration::from_millis(200);
     base.membership_poll_interval = Duration::from_millis(100);

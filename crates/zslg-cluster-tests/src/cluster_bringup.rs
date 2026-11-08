@@ -20,13 +20,13 @@ use std::time::Duration;
 use bytes::Bytes;
 use object_store::memory::InMemory;
 
-use crate::replica_node::ReplicaNodeConfig;
-use crate::tests::{Cluster, ClusterConfig, assert_cluster_invariants};
+use crate::{Cluster, ClusterConfig, assert_cluster_invariants};
+use zslg::ReplicaNodeConfig;
 use zslg_net::PeerAddr;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn three_node_cluster_brought_up_via_public_api() {
-    crate::tests::init_logging();
+    crate::init_logging();
     let cluster = Cluster::new(ClusterConfig {
         count: 3,
         distinct_names: false,
@@ -82,8 +82,7 @@ fn bringup_configs(
 ) -> (tempfile::TempDir, Vec<ReplicaNodeConfig>) {
     let dir = tempfile::tempdir().expect("tempdir");
     let names: Vec<zslg_net::ServerName> = (0..count).map(|i| format!("node-{i}").into()).collect();
-    let addrs: Vec<std::net::SocketAddr> =
-        (0..count).map(|_| crate::tests::reserve_port()).collect();
+    let addrs: Vec<std::net::SocketAddr> = (0..count).map(|_| crate::reserve_port()).collect();
     let peers: Vec<PeerAddr> = names
         .iter()
         .zip(&addrs)
@@ -131,8 +130,8 @@ fn bringup_configs(
 /// it is the API forcing a caller to wait at the wrong moment.
 #[tokio::test(flavor = "multi_thread")]
 async fn all_nodes_start_before_any_is_awaited_for_readiness() {
-    crate::tests::init_logging();
-    let base = crate::tests::default_fast_config();
+    crate::init_logging();
+    let base = crate::default_fast_config();
     let store: std::sync::Arc<dyn object_store::ObjectStore> =
         std::sync::Arc::new(object_store::memory::InMemory::new());
 
@@ -148,7 +147,7 @@ async fn all_nodes_start_before_any_is_awaited_for_readiness() {
         let mut nodes = Vec::new();
         for cfg in configs {
             nodes.push(
-                crate::replica_node::ReplicaNode::start(cfg)
+                zslg::ReplicaNode::start(cfg)
                     .await
                     .expect("start must not fail"),
             );
@@ -164,7 +163,7 @@ async fn all_nodes_start_before_any_is_awaited_for_readiness() {
         futures::future::try_join_all(
             initialising
                 .into_iter()
-                .map(crate::replica_node::InitialisingReplicaNode::wait_until_ready),
+                .map(zslg::InitialisingReplicaNode::wait_until_ready),
         ),
     )
     .await

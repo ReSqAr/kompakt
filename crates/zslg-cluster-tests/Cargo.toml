@@ -1,0 +1,37 @@
+[package]
+name = "zslg-cluster-tests"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "End-to-end tests: real multi-node zslg clusters over TCP, with fault injection and invariants"
+publish = false
+
+# Everything is a dev-dependency: this crate has no non-test code.
+[dev-dependencies]
+zslg-time = { workspace = true }
+zslg-snapshot = { workspace = true }
+zslg-net = { workspace = true }
+zslg-log-fake = { workspace = true }
+zslg-log = { workspace = true }
+zslg-error = { workspace = true }
+zslg-consensus-fake = { workspace = true }
+zslg-consensus = { workspace = true }
+tracing-subscriber = { workspace = true }
+tokio-util = { workspace = true }
+tempfile = { workspace = true }
+proptest = { workspace = true }
+object_store = { workspace = true }
+futures = { workspace = true }
+crossbeam-combinators = { workspace = true, features = ["testing"] }
+bytes = { workspace = true }
+zslg = { workspace = true }
+testing-kit = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "fs", "signal", "net", "test-util"] }
+zslg-replica-node = { workspace = true, features = ["testing"] }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "application"

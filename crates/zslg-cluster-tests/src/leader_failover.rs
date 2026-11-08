@@ -24,7 +24,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use object_store::memory::InMemory;
 
-use crate::tests::{Cluster, ClusterConfig, CutoffObserver, assert_cluster_invariants};
+use crate::{Cluster, ClusterConfig, CutoffObserver, assert_cluster_invariants};
 
 /// Kill the leader, wait for a new leader, and verify writes still succeed.
 #[tokio::test(flavor = "multi_thread")]
