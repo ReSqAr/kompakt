@@ -27,7 +27,6 @@ mod metrics;
 mod projection_tests;
 mod reader;
 mod resultset;
-mod store;
 #[cfg(test)]
 mod store_tests;
 
@@ -53,6 +52,8 @@ pub use nvzn_store::{
     Row, Rows, Store, StoreConfig, Watermark, WriteTransaction, WriteTransactionExt,
     WriteTransactionImpl,
 };
+pub use nvzn_store_fake::InMemoryStore;
+pub use nvzn_store_rocksdb::RocksDBStore;
 pub use nvzn_types::{
     APP_ID_LEN, Error, EventSet, INDEX_ID_LEN, IndexId, PROJECTION_ID_LEN, PROJECTION_TYPE_ID_LEN,
     ProjectionId, ProjectionTypeId, StopReason, SubEventOf, Tenant, TenantId, WithWireFormat,
@@ -61,4 +62,3 @@ pub use nvzn_types::{
 pub(crate) use nvzn_types::{FoldState, SubscriptionItem, Subscriptions, subset};
 pub use reader::{Reader, Snapshot};
 pub use resultset::{IndexJoin, Lazy, LazyRows, ResultSet};
-pub use store::{InMemoryStore, RocksDBStore};

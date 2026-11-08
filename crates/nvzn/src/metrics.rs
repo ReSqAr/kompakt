@@ -42,7 +42,6 @@ const LABEL_TENANT: &str = "tenant";
 const LABEL_OUTCOME: &str = "outcome";
 const LABEL_REASON: &str = "reason";
 const LABEL_KIND: &str = "kind";
-const LABEL_CF: &str = "cf";
 const LABEL_STATE: &str = "state";
 
 /// What the fold loop did with a log entry.
@@ -167,10 +166,6 @@ metrics!("nvzn_", nvzn; {
                commits can be made durable any more, so the fold loop stops.";
     custom store_fence_seconds STORE_FENCE_SECONDS "store_fence_seconds" Histogram Seconds
         "Time for one store fsync (flush_wal).";
-    custom store_live_sst_files_size_bytes STORE_LIVE_SST_FILES_SIZE_BYTES "store_live_sst_files_size_bytes" Gauge Bytes
-        "rocksdb.live-sst-files-size: on-disk size of the live SST files, per \
-               column family. Sampled on every store fence tick; matches zslg's \
-               zslg_storage_live_sst_files_size_bytes.";
     custom store_resets_total STORE_RESETS_TOTAL "store_resets_total" Counter None
         "Config-hash mismatches that wiped the store and refolded the log from \
                index zero. Expected on a deploy that changes the registered \
@@ -194,6 +189,7 @@ pub(crate) fn all_metrics() -> impl Iterator<Item = &'static MetricDef> {
     OWN_METRICS
         .iter()
         .chain(nvzn_projector::metrics::METRICS.iter())
+        .chain(nvzn_store_rocksdb::metrics::METRICS.iter())
 }
 
 /// The namespace every metric this crate owns is exported under.
@@ -325,11 +321,6 @@ pub(crate) fn fold_stopped(reason: StopReason) {
 pub(crate) fn store_fence(outcome: FenceOutcome, elapsed: Duration) {
     metrics::counter!(STORE_FENCE_TOTAL, LABEL_OUTCOME => outcome.as_str()).increment(1);
     metrics::histogram!(STORE_FENCE_SECONDS).record(elapsed);
-}
-
-/// `rocksdb.live-sst-files-size` for one column family.
-pub(crate) fn store_live_sst_files_size_bytes(cf: &'static str, bytes: u64) {
-    metrics::gauge!(STORE_LIVE_SST_FILES_SIZE_BYTES, LABEL_CF => cf).set(lossy_f64(bytes));
 }
 
 pub(crate) fn store_reset() {
@@ -562,7 +553,7 @@ mod tests {
                 nvzn_projector::metrics::RowOp::Upsert,
             );
             store_fence(FenceOutcome::Ok, Duration::from_millis(1));
-            store_live_sst_files_size_bytes("store", 4096);
+            nvzn_store_rocksdb::metrics::store_live_sst_files_size_bytes("store", 4096);
             store_reset();
             write(tenant, 4);
             read(tenant, ReadKind::Live);
@@ -601,7 +592,10 @@ mod tests {
             labels(nvzn_projector::metrics::PROJECTION_ROWS_TOTAL),
             vec!["op=upsert", "projection=Todo", "tenant=acct"],
         );
-        assert_eq!(labels(STORE_LIVE_SST_FILES_SIZE_BYTES), vec!["cf=store"]);
+        assert_eq!(
+            labels(nvzn_store_rocksdb::metrics::STORE_LIVE_SST_FILES_SIZE_BYTES),
+            vec!["cf=store"]
+        );
         assert_eq!(labels(READS_TOTAL), vec!["kind=live", "tenant=acct"]);
         assert_eq!(labels(FOLD_STOPPED_TOTAL), vec!["reason=poison_entry"]);
         // `foreign_tenant` ids are unbounded on a shared log, so this one

@@ -10,6 +10,8 @@ publish = false
 [dependencies]
 nvzn-projector = { workspace = true }
 nvzn-store = { workspace = true }
+nvzn-store-fake = { workspace = true }
+nvzn-store-rocksdb = { workspace = true }
 nvzn-types = { workspace = true }
 metrics-kit = { workspace = true }
 async-trait = { workspace = true }
@@ -20,7 +22,6 @@ futures = { workspace = true }
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true, optional = true }
 postcard = { workspace = true, features = ["alloc", "use-std"] }
-rust-rocksdb = { workspace = true }
 sha2 = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "fs", "signal", "net"] }
@@ -29,6 +30,7 @@ zslg = { workspace = true }
 
 
 [dev-dependencies]
+nvzn-fixtures = { workspace = true }
 zslg = { workspace = true, features = ["testing"] }
 serde = { workspace = true }
 metrics-util = { workspace = true }

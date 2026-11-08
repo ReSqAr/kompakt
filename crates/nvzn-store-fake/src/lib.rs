@@ -1,9 +1,11 @@
-use crate::{
-    ArcReadTransaction, CommitBatch, ConfigHash, Error, IndexId, ProjectionId, ProjectionTypeId,
-    ReadTransaction, Rows, Store, TenantId, Watermark, WriteTransactionImpl,
-};
+//! An in-memory `Store`, for tests and for `Dispatcher::in_memory`.
+
 use bytes::Bytes;
-use nvzn_store::IndexAction;
+use nvzn_store::{
+    ArcReadTransaction, CommitBatch, ConfigHash, IndexAction, ReadTransaction, Rows, Store,
+    Watermark, WriteTransactionImpl,
+};
+use nvzn_types::{Error, IndexId, ProjectionId, ProjectionTypeId, TenantId};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Bound;
 use std::sync::{Arc, RwLock};

@@ -2115,12 +2115,14 @@ dependencies = [
  "metrics-exporter-prometheus",
  "metrics-kit",
  "metrics-util",
+ "nvzn-fixtures",
  "nvzn-projector",
  "nvzn-store",
+ "nvzn-store-fake",
+ "nvzn-store-rocksdb",
  "nvzn-types",
  "postcard",
  "proptest",
- "rust-rocksdb",
  "serde",
  "sha2",
  "tempfile",
@@ -2129,6 +2131,16 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "zslg",
+]
+
+[[package]]
+name = "nvzn-fixtures"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "nvzn-store",
+ "nvzn-types",
+ "serde",
 ]
 
 [[package]]
@@ -2150,6 +2162,33 @@ dependencies = [
  "nvzn-types",
  "postcard",
  "serde",
+ "zslg",
+]
+
+[[package]]
+name = "nvzn-store-fake"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "nvzn-store",
+ "nvzn-types",
+]
+
+[[package]]
+name = "nvzn-store-rocksdb"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "metrics",
+ "metrics-kit",
+ "metrics-util",
+ "nvzn-fixtures",
+ "nvzn-store",
+ "nvzn-types",
+ "postcard",
+ "proptest",
+ "rust-rocksdb",
+ "tempfile",
  "zslg",
 ]
 
