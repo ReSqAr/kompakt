@@ -8,6 +8,7 @@ description = "The raft group's ports"
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 async-trait = { workspace = true }
 error-union = { workspace = true }
 zslg-consensus-types = { workspace = true }

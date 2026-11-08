@@ -8,6 +8,7 @@ description = "The raft node over the consensus engine"
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 async-trait = { workspace = true }
 error-union = { workspace = true }
 futures = { workspace = true }

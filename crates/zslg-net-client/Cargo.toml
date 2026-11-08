@@ -8,6 +8,7 @@ description = "RPC client: unary pool, streams, and the per-peer ReplicaClient"
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 dashmap = { workspace = true }
 async-trait = { workspace = true }
 bytesize = { workspace = true }

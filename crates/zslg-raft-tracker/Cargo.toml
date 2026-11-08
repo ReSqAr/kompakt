@@ -8,6 +8,7 @@ description = "Raft state tracking from peer observations"
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 shutdown = { workspace = true }
 backoff-kit = { workspace = true }
 error-union = { workspace = true }

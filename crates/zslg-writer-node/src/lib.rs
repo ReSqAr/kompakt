@@ -14,8 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
-pub use zslg_error::Error;
-use zslg_lifecycle_types::ConfigError;
+pub use zslg_error::{ConfigError, Error, LifecycleError};
 
 use std::num::NonZeroUsize;
 

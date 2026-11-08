@@ -8,6 +8,7 @@ description = "The stable archive: HLC-ordered reads from object-store snapshots
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 zslg-quorum-read = { workspace = true }
 crossbeam-combinators = { workspace = true, features = ["tokio"] }
 error-union = { workspace = true }

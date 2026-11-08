@@ -8,6 +8,7 @@ description = "Observability assembly: the metric registry, histogram buckets, p
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 error-union = { workspace = true }
 metrics = { workspace = true }
 metrics-kit = { workspace = true }

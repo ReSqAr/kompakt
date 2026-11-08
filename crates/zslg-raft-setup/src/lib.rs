@@ -84,6 +84,7 @@ error_union::error_union! {
     from zslg_raft::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_raft_storage::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     into zslg_raft::Error
+    into zslg_error::Error
 }
 
 /// Raft timing + election configuration.

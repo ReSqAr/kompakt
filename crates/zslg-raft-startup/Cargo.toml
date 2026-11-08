@@ -8,6 +8,7 @@ description = "Raft startup: bootstrap, join and rejoin"
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 async-trait = { workspace = true }
 backoff-kit = { workspace = true }
 error-union = { workspace = true }

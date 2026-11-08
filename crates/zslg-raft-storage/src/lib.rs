@@ -28,6 +28,7 @@ error_union! {
         Net(NetError),
         Consensus(ConsensusError),
     }
+    into zslg_error::Error
 }
 
 impl From<rocksdb_kit::StorageError> for Error {

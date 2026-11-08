@@ -8,6 +8,7 @@ description = "The replica log in RocksDB with its flush loop"
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 bytes = { workspace = true }
 zslg-quorum-read = { workspace = true }
 bytesize = { workspace = true }

@@ -43,6 +43,7 @@ The `nvzn*` crates are built on the `zslg` facade (D11) and may depend on it; no
 |---|---|
 | `nvzn-types` | Identifiers, event sets, the error and the shared cells of nvzn |
 | `zslg-consensus-types` | The cluster's vocabulary: who is in it, what state it replicates, and the rules that state must obey |
+| `zslg-error` | The public error union that every crate returning it converts into |
 | `zslg-lifecycle-types` | How a node's lifecycle and configuration can fail |
 | `zslg-log-types` | The replicated log's vocabulary: records, positions, events and the errors of reading and writing them |
 | `zslg-net-types` | Where nodes are and how they name each other |
@@ -126,7 +127,6 @@ The `nvzn*` crates are built on the `zslg` facade (D11) and may depend on it; no
 | crate | purpose |
 |---|---|
 | `nvzn-dispatcher` | The nvzn runtime: the fold, its supervisor, readers and live views |
-| `zslg-error` | The public error union shared by every node and re-exported by the facade |
 | `zslg-follower-node` | Follower node assembly: learner plus writer on one node |
 | `zslg-leader` | Leader assembly: hands every leader job its handles and config slice |
 | `zslg-learner-node` | Learner node assembly: read-only node over the learner assembly |

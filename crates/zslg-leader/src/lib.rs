@@ -214,4 +214,5 @@ error_union::error_union! {
     into zslg_log::Error
     into zslg_snapshot::Error
     into zslg_consensus::Error
+    into zslg_error::Error
 }

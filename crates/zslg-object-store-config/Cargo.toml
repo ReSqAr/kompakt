@@ -8,6 +8,7 @@ description = "Object-store backend configuration"
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 error-union = { workspace = true }
 object_store = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

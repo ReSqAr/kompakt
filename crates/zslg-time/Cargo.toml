@@ -8,6 +8,7 @@ description = "The clock port"
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 error-union = { workspace = true }
 zslg-consensus-types = { workspace = true }
 zslg-lifecycle-types = { workspace = true }

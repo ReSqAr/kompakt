@@ -40,6 +40,7 @@ error_union! {
     into zslg_raft::Error
     into zslg_net::Error
     into zslg_quorum_read::Error
+    into zslg_error::Error
 }
 
 impl From<shutdown::Stopped> for Error {

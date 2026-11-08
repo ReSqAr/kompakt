@@ -528,4 +528,5 @@ error_union::error_union! {
         Net(zslg_net::NetError),
         Consensus(zslg_consensus::ConsensusError),
     }
+    into zslg_error::Error
 }

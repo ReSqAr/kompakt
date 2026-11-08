@@ -8,6 +8,7 @@ description = "Learner assembly: wires the local store, stable log, archive, sub
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 zslg-hlc-clock = { workspace = true }
 crossbeam-combinators = { workspace = true, features = ["tokio"] }
 error-union = { workspace = true }

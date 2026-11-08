@@ -8,6 +8,7 @@ description = "The replica service: write admission, status and subscription ove
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 warn-throttle = { workspace = true }
 zslg-quorum-read = { workspace = true }
 async-trait = { workspace = true }

@@ -8,6 +8,7 @@ description = "The learner's reader: stable/unstable splice and quorum-read fres
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 zslg-quorum-read = { workspace = true }
 async-trait = { workspace = true }
 crossbeam-combinators = { workspace = true, features = ["tokio"] }

@@ -8,6 +8,7 @@ description = "The consensus group's ports"
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 async-trait = { workspace = true }
 error-union = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }

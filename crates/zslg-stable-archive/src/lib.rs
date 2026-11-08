@@ -235,4 +235,5 @@ error_union::error_union! {
     into zslg_snapshot::Error
     into zslg_raft::Error
     into zslg_quorum_read::Error
+    into zslg_error::Error
 }

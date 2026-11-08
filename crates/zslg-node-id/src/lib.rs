@@ -15,6 +15,7 @@ error_union! {
         Config(ConfigError),
         Log(LogError),
     }
+    into zslg_error::Error
 }
 
 impl From<rocksdb_kit::StorageError> for Error {

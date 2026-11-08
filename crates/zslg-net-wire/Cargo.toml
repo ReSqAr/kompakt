@@ -8,6 +8,7 @@ description = "The RPC wire: messages, frame codec and TCP setup"
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 bytesize = { workspace = true }
 error-union = { workspace = true }
 framing = { workspace = true }

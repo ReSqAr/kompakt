@@ -30,7 +30,7 @@ examples; it depends on no type crate and no implementation. The layering test
 | raft | `openraft` used directly | `raft-kit` is the only crate depending on openraft | one place to track the dependency |
 | leader | integrator + three job crates | plus `pace-kit` (library) and `RaftIntent`/`IntentSubmitter` moved to the ports | jobs share `Pace` and submit intents; sideways edges otherwise |
 | assemblies | raft-setup, learner, leader, observability, 4 nodes | plus `zslg-net-setup` (shared by 3 nodes) and **`zslg-error`** | see below |
-| public error | `zslg::Error` declared in the facade | `zslg-error` declares it; node crates return it; the facade re-exports | nodes live below the facade, so the union cannot; user-approved |
+| public error | `zslg::Error` declared in the facade | `zslg-error` (types role, depends on the leaf `-types` crates only) declares it; **every crate that should return it declares `into zslg_error::Error`** in its own union; node crates return it; the facade re-exports it from the nodes | nodes live below the facade, so the union cannot; inverting the edge keeps `zslg-error` at 7 dependencies instead of a 34-crate fan-in |
 | `ConfigError`/`LifecycleError` | via ports | re-exported from `zslg-error` | no ports crate owns them |
 | `HlcClock` | removed from the facade API | removed | §5.6 |
 | tests needing two implementations | move to the lowest assembly | learner tests moved to `zslg-learner`; pacing tests to `zslg-leader`; those needing a *cluster* (leader snapshot/compaction/membership, replica service, raft cluster tests) stay in the facade as end-to-end tests | the cluster harness serves the e2e suites too; decided per test with the user |

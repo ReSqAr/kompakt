@@ -89,4 +89,5 @@ error_union::error_union! {
         Consensus(zslg_consensus::ConsensusError),
     }
     from zslg_net_server::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    into zslg_error::Error
 }

@@ -8,6 +8,7 @@ description = "Pulls replica logs into the local store"
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 zslg-quorum-read = { workspace = true }
 warn-throttle = { workspace = true }
 backoff-kit = { workspace = true }

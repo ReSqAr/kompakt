@@ -8,6 +8,7 @@ description = "The writer: fans client writes out to the replicas and acknowledg
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 bytes = { workspace = true }
 dashmap = { workspace = true }
 rand = { workspace = true }

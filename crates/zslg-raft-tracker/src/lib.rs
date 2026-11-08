@@ -29,6 +29,7 @@ error_union! {
         Net(NetError),
         Consensus(ConsensusError),
     }
+    into zslg_error::Error
 }
 
 impl From<shutdown::Stopped> for Error {

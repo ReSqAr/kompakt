@@ -8,6 +8,7 @@ description = "The leader membership jobs: liveness, replica-set changes and vot
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 shutdown = { workspace = true }
 pace-kit = { workspace = true }
 zslg-quorum-read = { workspace = true }

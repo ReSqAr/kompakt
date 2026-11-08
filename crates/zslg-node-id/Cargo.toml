@@ -8,6 +8,7 @@ description = "The write-once node identity"
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 error-union = { workspace = true }
 rocksdb-kit = { workspace = true }
 uuid = { workspace = true }

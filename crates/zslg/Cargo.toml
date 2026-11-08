@@ -27,13 +27,13 @@ zslg-consensus = { workspace = true }
 zslg-log = { workspace = true }
 zslg-object-store-config = { workspace = true }
 zslg-observability = { workspace = true }
-zslg-error = { workspace = true }
 zslg-follower-node = { workspace = true }
 zslg-learner-node = { workspace = true }
 zslg-replica-node = { workspace = true, features = ["testing"] }
 zslg-writer-node = { workspace = true }
 
 [dev-dependencies]
+zslg-error = { workspace = true }
 zslg-hlc-clock = { workspace = true }
 zslg-raft-setup = { workspace = true, features = ["testing"] }
 zslg-learner = { workspace = true, features = ["testing"] }

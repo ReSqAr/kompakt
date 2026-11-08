@@ -8,6 +8,7 @@ description = "Leader assembly: hands every leader job its handles and config sl
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 error-union = { workspace = true }
 shutdown = { workspace = true }
 zslg-consensus = { workspace = true }

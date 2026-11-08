@@ -8,6 +8,7 @@ description = "RPC server: accept, dispatch and the streaming handlers"
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 async-trait = { workspace = true }
 crossbeam-channel = { workspace = true }
 crossbeam-combinators = { workspace = true, features = ["tokio"] }

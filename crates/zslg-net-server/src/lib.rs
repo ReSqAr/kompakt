@@ -40,4 +40,5 @@ error_union! {
     into zslg_raft::Error
     into zslg_net::Error
     into zslg_net_wire::Error
+    into zslg_error::Error
 }

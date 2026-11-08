@@ -146,6 +146,7 @@ error_union::error_union! {
     into zslg_log::Error
     into zslg_raft::Error
     into zslg_quorum_read::Error
+    into zslg_error::Error
 }
 
 /// Reference record size used to turn a queue's *depth* into bytes.

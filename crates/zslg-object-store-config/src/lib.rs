@@ -15,6 +15,7 @@ error_union! {
     pub Error {
         Snapshot(SnapshotError),
     }
+    into zslg_error::Error
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]

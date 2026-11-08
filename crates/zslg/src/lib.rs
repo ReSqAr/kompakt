@@ -84,7 +84,7 @@ pub use zslg_consensus::{
     ConsensusError, Exit, RaftGeneration, RaftManifestState, RaftState, RaftStateHandle,
     ReplicaMembership, SpareSelectionStrategy,
 };
-pub use zslg_error::Error;
+pub use zslg_writer_node::Error;
 
 /// An in-process log serving [`Reader`] and [`Writer`], so a consumer can test
 /// against zslg without a cluster. Behind the `testing` feature.
@@ -92,7 +92,6 @@ pub use zslg_error::Error;
 pub mod testing {
     pub use zslg_log_fake::{TestLog, data_id};
 }
-pub use zslg_error::{ConfigError, LifecycleError};
 pub use zslg_follower_node::{FollowerNode, FollowerNodeConfig};
 pub use zslg_learner_node::{LearnerNode, LearnerNodeConfig};
 pub use zslg_log::{Data, DataId, LogError, LogIndex, StableLogEvent, UnstableEvent};
@@ -105,6 +104,7 @@ pub use zslg_snapshot::{
     CompactionTier, CompressionLevel, SnapshotError, SnapshotId, SnapshotMetadata,
 };
 pub use zslg_time::{ClockError, Hlc};
+pub use zslg_writer_node::{ConfigError, LifecycleError};
 pub use zslg_writer_node::{WriterNode, WriterNodeConfig};
 
 /// Apply this crate's histogram buckets to a Prometheus builder.

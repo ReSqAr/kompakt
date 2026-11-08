@@ -8,6 +8,7 @@ description = "The leader compaction job: merges snapshot objects and splices th
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 zslg-time = { workspace = true }
 zslg-net = { workspace = true }
 zslg-raft = { workspace = true }

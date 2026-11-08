@@ -32,4 +32,6 @@ error_union! {
         Net(NetError),
         Consensus(ConsensusError),
     }
+    from zslg_error::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    into zslg_error::Error
 }

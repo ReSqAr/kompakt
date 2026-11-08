@@ -8,6 +8,7 @@ description = "The leader snapshot jobs: cutoff, snapshot build/commit and objec
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 zslg-quorum-read = { workspace = true }
 shutdown = { workspace = true }
 warn-throttle = { workspace = true }

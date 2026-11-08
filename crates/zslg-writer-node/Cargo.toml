@@ -15,7 +15,6 @@ tokio-util = { workspace = true }
 tracing = { workspace = true }
 zslg-consensus = { workspace = true }
 zslg-hlc-clock = { workspace = true }
-zslg-lifecycle-types = { workspace = true }
 zslg-log = { workspace = true }
 zslg-net = { workspace = true }
 zslg-net-setup = { workspace = true }

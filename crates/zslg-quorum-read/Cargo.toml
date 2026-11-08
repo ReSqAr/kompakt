@@ -8,6 +8,7 @@ description = "Quorum fan-out and replica polling, shared by readers and leaders
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 error-union = { workspace = true }
 metrics-kit = { workspace = true }
 tokio = { workspace = true, features = ["rt", "sync"] }

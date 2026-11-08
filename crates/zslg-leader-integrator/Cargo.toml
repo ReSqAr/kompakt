@@ -8,6 +8,7 @@ description = "The leader integrator: folds job intents into one Raft proposal"
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 async-trait = { workspace = true }
 error-union = { workspace = true }
 metrics-kit = { workspace = true }

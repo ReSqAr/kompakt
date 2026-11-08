@@ -212,6 +212,7 @@ error_union! {
     into zslg_consensus::Error
     into zslg_raft::Error
     into zslg_net::Error
+    into zslg_error::Error
 }
 
 impl From<rocksdb_kit::StorageError> for Error {

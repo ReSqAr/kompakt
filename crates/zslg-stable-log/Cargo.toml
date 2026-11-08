@@ -8,6 +8,7 @@ description = "The stable log: snapshot-fed, HLC-ordered log in RocksDB"
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 zslg-quorum-read = { workspace = true }
 postcard = { workspace = true, features = ["alloc", "use-std"] }
 async-trait = { workspace = true }

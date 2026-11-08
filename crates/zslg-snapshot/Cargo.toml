@@ -8,6 +8,7 @@ description = "The snapshot group's ports"
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 async-trait = { workspace = true }
 crossbeam-combinators = { workspace = true }
 error-union = { workspace = true }

@@ -8,6 +8,7 @@ description = "openraft storage over RocksDB column families"
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 error-union = { workspace = true }
 metrics-kit = { workspace = true }
 parking_lot = { workspace = true }

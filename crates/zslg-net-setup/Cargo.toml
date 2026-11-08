@@ -8,6 +8,7 @@ description = "Network assembly: builds the outbound router and binds the RPC se
 publish = false
 
 [dependencies]
+zslg-error = { workspace = true }
 error-union = { workspace = true }
 shutdown = { workspace = true }
 tokio-util = { workspace = true }
