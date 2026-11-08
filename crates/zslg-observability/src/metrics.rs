@@ -78,87 +78,6 @@ const ALL_LABEL_KEYS: &[&str] = &[LABEL_STATE, LABEL_CF, LABEL_NONE];
 // an unused function, which `clippy -D warnings` rejects (dead_code).
 // ---------------------------------------------------------------------------
 
-// ── raft / consensus ────────────────────────────────────────────────────────
-
-metrics!("zslg_", raft; {
-
-});
-
-// ── raft / consensus: hand-written emission helpers ────────────────────────
-// (custom rows above; each fn below emits the metrics named in its row)
-
-// ── write path (replica side) + HLC cutoff ──────────────────────────────────
-
-// ── write path (replica side) + HLC cutoff: hand-written emission helpers ───
-// (custom rows above; each fn below emits the metrics named in its row)
-
-// ── logs and replication ────────────────────────────────────────────────────
-
-metrics!("zslg_", logs; {
-});
-
-// ── logs and replication: hand-written emission helpers ─────────────────────
-// (custom rows above; each fn below emits the metrics named in its row)
-
-// ── subscription load shedding ──────────────────────────────────────────────
-//
-// The replication path sheds deliberately: a subscriber whose buffer is full is
-// dropped rather than allowed to stall the replica's shared flush thread (or to
-// buffer without bound). That is the intended availability trade — one slow
-// consumer must not take the node down. These metrics make the trade *visible*,
-// so a shed that is protecting the node can be told apart from a shed loop that
-// is preventing a subscriber from ever catching up. Nothing here changes the
-// shedding behaviour.
-
-metrics!("zslg_", subscription; {
-});
-
-// ── subscription load shedding: hand-written emission helpers ───────────────
-// (custom rows above; each fn below emits the metrics named in its row)
-
-// ── snapshots / leader background tasks ─────────────────────────────────────
-
-metrics!("zslg_", snapshots; {
-});
-
-// ── snapshots / leader background tasks: hand-written emission helpers ──────
-// (custom rows above; each fn below emits the metrics named in its row)
-
-// ── HLC / clock ──────────────────────────────────────────────────────────────
-
-metrics!("zslg_", hlc; {
-});
-
-// ── HLC / clock: hand-written emission helpers ──────────────────────────────
-// (custom rows above; each fn below emits the metrics named in its row)
-
-// ── read path / learner stores ───────────────────────────────────────────────
-
-metrics!("zslg_", read_path; {
-});
-
-// ── read path / learner stores: hand-written emission helpers ───────────────
-// (custom rows above; each fn below emits the metrics named in its row)
-
-// ── RPC server ───────────────────────────────────────────────────────────────
-
-metrics!("zslg_", rpc_server; {
-});
-
-// ── RPC server: hand-written emission helpers ────────────────────────────────
-// (custom rows above; each fn below emits the metrics named in its row)
-
-// ── RPC client (writer/learner outbound; async-path investigation) ───────────
-// Additive decomposition of one client-side unary RPC:
-//   roundtrip = conn_checkout(on miss: dial) + send + response_wait
-// `conn_checkout` is the fresh-dial cost paid on a keep-alive pool miss (a hit
-// reuses an idle connection and pays ~0); `rpc_conn_reuse_total{state}` counts
-// hits vs misses; `open_stream` is a dedicated stream/subscribe dial; `roundtrip`
-// is the whole `send_unary` exchange.
-
-// ── RPC client: hand-written emission helpers ────────────────────────────────
-// (custom rows above; each fn below emits the metrics named in its row)
-
 // ── storage write paths: the replicated logs (stable log, replica log) ─────────
 // Wrapper-level metrics keep their stable_log_*/replica_log_* names;
 // throughput + entry count ride on the existing `log_writes{log_type}` /
@@ -469,27 +388,8 @@ const ALL_METRICS: &[&[MetricDef]] = &[
     &process!(),
     // --- jemalloc allocator gauges ---
     &jemalloc!(),
-    // --- raft / consensus ---
-    &raft!(),
-    // --- write path (writer side) ---
-    // --- write path (replica side) + HLC cutoff ---
-    // --- logs and replication ---
-    &logs!(),
-    // --- subscription load shedding ---
-    &subscription!(),
-    // --- snapshots / leader background tasks ---
-    &snapshots!(),
-    // --- object store ---
-    // --- HLC / clock ---
-    &hlc!(),
-    // --- read path / learner stores ---
-    &read_path!(),
-    // --- RPC server ---
-    &rpc_server!(),
-    // --- RPC client ---
     // --- storage write paths: stable log / replica log / local store ---
     &storage!(),
-    // --- timing probes (latency histograms by outcome/op/state) ---
 ];
 
 // ---------------------------------------------------------------------------
