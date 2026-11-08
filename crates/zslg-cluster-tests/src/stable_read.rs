@@ -52,10 +52,7 @@ async fn durability_chain_rejects_wrong_payload() {
     // `find_map(.leader)` yields the leader's id. Any node would accept this
     // write, but naming the node correctly keeps the test honest about what it
     // is doing.
-    let leader = cluster
-        .nodes()
-        .find_map(|n| n.state_handle().snapshot().leader)
-        .expect("no leader");
+    let leader = cluster.leader().expect("no leader");
 
     let payload = Bytes::from_static(b"correct-payload");
     let acked = cluster

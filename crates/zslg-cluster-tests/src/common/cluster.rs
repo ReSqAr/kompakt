@@ -480,14 +480,21 @@ impl Cluster {
 
     // ── wait helpers ──────────────────────────────────────────────
 
-    /// Poll until any node sees `leader.is_some()`.
+    /// Poll until a running node reports itself as leader.
     pub(crate) async fn wait_for_leader(&self, deadline: Duration) {
-        super::wait_until_sync("cluster has leader", deadline, || {
-            self.nodes
-                .values()
-                .any(|n| n.state_handle().snapshot().leader.is_some())
-        })
-        .await;
+        super::wait_until_sync("cluster has leader", deadline, || self.leader().is_some()).await;
+    }
+
+    /// The node that reports *itself* as leader, if a running node does.
+    ///
+    /// Not "the first node that knows some leader exists": after convergence every
+    /// node knows, so that answers with an arbitrary node — and right after the
+    /// leader is removed, survivors may still name the dead one.
+    pub(crate) fn leader(&self) -> Option<NodeId> {
+        self.nodes
+            .values()
+            .find(|n| n.state_handle().snapshot().leader == Some(n.node_id()))
+            .map(ReplicaNode::node_id)
     }
 
     /// Poll until all active nodes observe a common non-joint replica set

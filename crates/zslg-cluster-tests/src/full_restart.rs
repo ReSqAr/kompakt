@@ -52,11 +52,7 @@ async fn full_cluster_restart_simultaneous_recovers() {
     cluster.wait_for_leader(Duration::from_secs(20)).await;
     cluster.wait_for_convergence(Duration::from_secs(20)).await;
 
-    let leader_id = cluster
-        .nodes()
-        .find(|n| n.state_handle().snapshot().leader.is_some())
-        .map(|n| n.node_id())
-        .expect("no leader before restart");
+    let leader_id = cluster.leader().expect("no leader before restart");
     cluster
         .node(leader_id)
         .writer()
@@ -73,11 +69,7 @@ async fn full_cluster_restart_simultaneous_recovers() {
     cluster.wait_for_leader(Duration::from_secs(20)).await;
     cluster.wait_for_convergence(Duration::from_secs(20)).await;
 
-    let new_leader = cluster
-        .nodes()
-        .find(|n| n.state_handle().snapshot().leader.is_some())
-        .map(|n| n.node_id())
-        .expect("no leader after recovery");
+    let new_leader = cluster.leader().expect("no leader after recovery");
     cluster
         .node(new_leader)
         .writer()
@@ -117,11 +109,7 @@ async fn full_cluster_restart_staggered_recovers() {
     cluster.wait_for_convergence(Duration::from_secs(20)).await;
 
     // Advance the log so every node has real persisted state to resume.
-    let leader_id = cluster
-        .nodes()
-        .find(|n| n.state_handle().snapshot().leader.is_some())
-        .map(|n| n.node_id())
-        .expect("no leader before outage");
+    let leader_id = cluster.leader().expect("no leader before outage");
     cluster
         .node(leader_id)
         .writer()
@@ -144,11 +132,7 @@ async fn full_cluster_restart_staggered_recovers() {
     cluster.wait_for_convergence(Duration::from_secs(20)).await;
 
     // The recovered cluster is functional: a fresh quorum write succeeds.
-    let new_leader = cluster
-        .nodes()
-        .find(|n| n.state_handle().snapshot().leader.is_some())
-        .map(|n| n.node_id())
-        .expect("no leader after recovery");
+    let new_leader = cluster.leader().expect("no leader after recovery");
     cluster
         .node(new_leader)
         .writer()
@@ -184,10 +168,7 @@ async fn partial_outage_keeps_membership_and_rejoins() {
     assert_eq!(all_ids.len(), 3, "3-node cluster");
 
     // Advance the log.
-    let leader_id = cluster
-        .nodes()
-        .find_map(|n| n.state_handle().snapshot().leader)
-        .expect("no leader");
+    let leader_id = cluster.leader().expect("no leader");
     cluster
         .node(leader_id)
         .writer()
@@ -225,10 +206,7 @@ async fn partial_outage_keeps_membership_and_rejoins() {
     );
 
     // The surviving quorum is still writable.
-    let leader_id = cluster
-        .nodes()
-        .find_map(|n| n.state_handle().snapshot().leader)
-        .expect("no leader during partial outage");
+    let leader_id = cluster.leader().expect("no leader during partial outage");
     cluster
         .node(leader_id)
         .writer()

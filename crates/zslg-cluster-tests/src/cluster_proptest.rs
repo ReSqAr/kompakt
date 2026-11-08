@@ -1009,8 +1009,7 @@ async fn run_case(
                     // just replaced, and re-reading who leads keeps the retries
                     // from all going to the same unlucky place.
                     let target = cluster
-                        .nodes()
-                        .find_map(|n| n.state_handle().snapshot().leader)
+                        .leader()
                         .filter(|id| ids.contains(id))
                         .unwrap_or(ids[0]);
                     let writer = cluster.node(target).writer();
@@ -1377,11 +1376,7 @@ async fn hard_killed_node_can_be_relaunched() {
     cluster.wait_for_leader(Duration::from_secs(30)).await;
     cluster.wait_for_convergence(Duration::from_secs(30)).await;
 
-    let leader = cluster
-        .nodes()
-        .find(|n| n.state_handle().snapshot().leader.is_some())
-        .map(zslg::ReplicaNode::node_id)
-        .expect("no leader");
+    let leader = cluster.leader().expect("no leader");
     let pre_kill = Bytes::from_static(b"pre-kill");
     let acked = cluster
         .node(leader)
@@ -1779,10 +1774,7 @@ async fn full_replacement_transfers_membership_and_data() {
     assert!(r.is_subset(&voters), "replicas are voters");
 
     // One write, acked against R, and above the watermark for the whole dance.
-    let leader_id = cluster
-        .nodes()
-        .find_map(|n| n.state_handle().snapshot().leader)
-        .expect("leader");
+    let leader_id = cluster.leader().expect("leader");
     let w_payload = Bytes::from_static(b"replacement-write");
     let w_id = cluster
         .node(leader_id)

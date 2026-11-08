@@ -83,10 +83,7 @@ fn fast_rolling_config() -> ReplicaNodeConfig {
 /// The id of the current leader (`find_map` on the leader *id*, not "some node
 /// knows a leader exists").
 fn leader_of(cluster: &Cluster) -> NodeId {
-    cluster
-        .nodes()
-        .find_map(|n| n.state_handle().snapshot().leader)
-        .expect("no leader")
+    cluster.leader().expect("no leader")
 }
 
 /// Write `n` tagged entries through the current leader; each must reach quorum.

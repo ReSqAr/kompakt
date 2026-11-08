@@ -42,11 +42,7 @@ async fn leader_failover_writes_recover() {
     cluster.wait_for_convergence(Duration::from_secs(20)).await;
 
     // Find the current leader.
-    let leader_id = cluster
-        .nodes()
-        .find(|n| n.state_handle().snapshot().leader.is_some())
-        .map(|n| n.node_id())
-        .expect("no leader");
+    let leader_id = cluster.leader().expect("no leader");
 
     // Spawn the committed-cutoff observer before the failover, the case
     // that matters: a new leader may *propose* a lower cutoff (CLAUDE.md
@@ -68,11 +64,7 @@ async fn leader_failover_writes_recover() {
     cluster.wait_for_leader(Duration::from_secs(15)).await;
 
     // Find the new leader.
-    let new_leader = cluster
-        .nodes()
-        .find(|n| n.state_handle().snapshot().leader.is_some())
-        .map(|n| n.node_id())
-        .expect("no leader after failover");
+    let new_leader = cluster.leader().expect("no leader after failover");
     assert_ne!(new_leader, leader_id, "new leader must be a different node");
 
     // Writes must still succeed.

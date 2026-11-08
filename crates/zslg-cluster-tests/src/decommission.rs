@@ -67,10 +67,7 @@ async fn voter_set_change_alone_does_not_gate_reads() {
     cluster.wait_for_leader(Duration::from_secs(30)).await;
     cluster.wait_for_convergence(Duration::from_secs(30)).await;
 
-    let leader = cluster
-        .nodes()
-        .find_map(|n| n.state_handle().snapshot().leader)
-        .expect("leader");
+    let leader = cluster.leader().expect("leader");
     let victim = cluster
         .node_ids()
         .into_iter()
@@ -192,8 +189,7 @@ async fn unwanted_leader_evicts_itself() {
     // part (c) below ("dropped from replica.current()") is vacuous, since the
     // spare was never in that set to begin with.
     let leader = cluster
-        .nodes()
-        .find_map(|n| n.state_handle().snapshot().leader)
+        .leader()
         .filter(|l| replicated.contains(l))
         .expect("leader must be a replicated member for this test to say anything");
     let leader_name = cluster.placement_of(leader).server_name;

@@ -88,16 +88,10 @@ async fn evicted_member_leaves_the_set_is_refused_reads_and_stays_up() {
     // Pick the victim: a replicated member that is not the current leader (a
     // leader is self-exempt from its own eviction job). It keeps running
     // throughout — only its *name* leaves everyone else's `config.peers`.
-    //
-    // `find_map(.leader)` reads the leader's *id*, which is what this needs.
-    // The `find(|n| ….leader.is_some())` idiom used elsewhere in this suite
-    // answers a different question — "which node knows a leader exists" — and
-    // returns an arbitrary node; picking the victim with it lands on the real
-    // leader often enough to hang this test.
-    let leader_id: NodeId = cluster
-        .nodes()
-        .find_map(|n| n.state_handle().snapshot().leader)
-        .expect("leader");
+    // (`Cluster::leader` is the node reporting *itself* as leader; picking the
+    // victim from "some node knows a leader" would land on the real leader
+    // often enough to hang this test.)
+    let leader_id: NodeId = cluster.leader().expect("leader");
     let victim = replicated
         .iter()
         .copied()
