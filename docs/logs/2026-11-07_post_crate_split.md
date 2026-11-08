@@ -148,9 +148,10 @@ panicked worker as `Log::Storage`, which is what pulls `Log` into the snapshot p
 
 ## Conscious exceptions to the layering
 
-- **The `zslg` facade reaches lower-layer types through assemblies.** `Error`, `ConfigError` and
-  `LifecycleError` are re-exported from `zslg-writer-node`, and `nvzn` re-exports `RocksDBStore` and
-  `ResultSet` from `nvzn-dispatcher`. The public paths and types are the ones the monolith had.
-  A direct edge to `zslg-error` (and `zslg-lifecycle-types`) would be the cleaner way to say it, but
-  the layering rule forbids a facade → types edge; the alternative is to allow exactly that one
-  edge for the shared public error. Until decided, the re-export through the node is the exception.
+- **Facade → `zslg-error`.** The one facade → types edge, allowed by name in the layering test: `zslg`
+  re-exports `Error`, `ConfigError` and `LifecycleError` from the crate that declares them, instead
+  of reaching them through `zslg-writer-node`. The public paths and types are unchanged.
+- **`nvzn` re-exports `RocksDBStore` and `ResultSet` from `nvzn-dispatcher`.** That is the intended
+  shape of a facade over an assembly, not an exception.
+- **`nvzn-store` → `nvzn-projection`** and **`zslg-net` → the four port groups** are the declared
+  ports → ports edges (`PORTS_ON_PORTS` in the layering test).

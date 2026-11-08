@@ -30,6 +30,7 @@ zslg-observability = { workspace = true }
 zslg-follower-node = { workspace = true }
 zslg-learner-node = { workspace = true }
 zslg-replica-node = { workspace = true }
+zslg-error = { workspace = true }
 zslg-writer-node = { workspace = true }
 
 [dev-dependencies]

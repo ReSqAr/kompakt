@@ -196,6 +196,11 @@ fn every_dependency_is_allowed_by_the_role_table() {
             if matches!(k.role, Role::Assembly | Role::Facade) && to == Role::Fake && d.optional {
                 continue;
             }
+            // The one facade -> types edge: the facade re-exports the public error
+            // from the crate that declares it, instead of reaching it through a node.
+            if matches!(k.role, Role::Facade) && d.name == "zslg-error" {
+                continue;
+            }
             // The ports -> ports edges: `ReplicaClient` bundles four groups, and
             // the nvzn store port is written against the projection's read port.
             // `only_declared_ports_build_on_ports` pins who may have one.
