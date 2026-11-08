@@ -49,12 +49,49 @@ examples; it depends on no type crate and no implementation. The layering test
   number of crates; stale test executables in `target/lint/deps` can be deleted
   when the disk fills.
 
+## nvzn (step 15)
+
+nvzn is 10 crates; the facade `nvzn` is re-exports, the metric registry
+functions and `nvzn::testing`.
+
+| crate | role | holds |
+|---|---|---|
+| `nvzn-types` | types | ids, event sets/wire format, `Error`, `StopReason`, `FoldState`, `Subscriptions`, **`Encoder`/`EventWriter`/`Syncer`** + the `writes` metrics slice |
+| `nvzn-store` | ports | store traits, the staging overlay (`CommitBatch`, `WriteTransactionImpl`), `StoreConfig`, **`Projection`/`Write`/`Ref`/`Index`/`View`**; re-exports the types |
+| `nvzn-projector` | procedure | `Projector`, `ProjectorManager`, `fold_event`, `projection_rows` slice |
+| `nvzn-store-fake` | fake | in-memory store |
+| `nvzn-store-rocksdb` | implementation | RocksDB store, its white-box tests, `store_live_sst` slice |
+| `nvzn-resultset` | implementation | `ResultSet` and combinators |
+| `nvzn-dispatcher` | assembly | **dispatcher, reader and live view**, fold/live metric slices, `all()` registry |
+| `nvzn-fixtures` | fake | test events, projections, store/reader doubles |
+
+Deviations from design §9 (all forced by the code, not by preference):
+
+- **Projection vocabulary lives with the store ports**, not in types:
+  `Projection::next` reads through `View`, which reads a `ReadTransaction`,
+  whose typed helpers are generic over `Projection`. One interface, one crate.
+  The staging overlay rides along because `Store` names `CommitBatch` and
+  `WriteTransactionImpl`; there is no `nvzn-store-overlay`.
+- **Projector machinery is its own procedure crate** (`nvzn-projector`); the
+  design had no home for it (user-approved).
+- **`Subscriptions` is a shared cell in `nvzn-types`** (user-approved), together
+  with `Syncer`/`Encoder`/`EventWriter`, which wrap only `zslg` and `FoldState`.
+- **Dispatcher, reader and live are one assembly.** `Live` returns `Snapshot`,
+  the reader hands out `Live` and owns the cell the dispatcher fills, the
+  dispatcher hands out `Reader`s, and `Dispatcher::new` names the RocksDB store.
+  Any split would be a cycle or a sideways edge. `Dispatcher::in_memory` is behind
+  the crate's `testing` feature (optional dependency on the fake).
+- **Metrics:** per-crate slices on `metrics-kit` (`nvzn_` namespace); a golden
+  dump captured before the move pins names, kinds, units and help.
+- **`TestLog`** moved to `zslg-log-fake` and is published as `zslg::testing`;
+  `nvzn::testing` re-exports it, so nlnr's path is unchanged.
+- **Layering:** crates named `nvzn*` may depend on the `zslg` facade (D11); no
+  other crate may.
+- **Tests:** those that need the test projections *and* the dispatcher stay in
+  the facade or the dispatcher crate; white-box store tests live with the store.
+
 ## Not done yet
 
-- nvzn split (design §9): `nvzn-types`, `nvzn-store`, `-overlay`, `-rocksdb`,
-  `-fake`, `-resultset`, `-dispatcher`, `-live`, `-reader`, facade; metrics onto
-  `metrics-kit` with a golden test. `Subscriptions` goes to `nvzn-types` as a
-  shared cell (decided).
 - CI / `cargo deny` verification on the final tree, and a before/after loadgen
   comparison (design §8).
 - Revisit the error model once everything has landed (user asked to do this

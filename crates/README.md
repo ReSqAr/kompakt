@@ -1,6 +1,6 @@
 # Crates
 
-Every directory here is a crate; each declares its layer in `[package.metadata.layer] role` and the test `zslg::layering` (in `crates/zslg/src/layering.rs`) rejects a dependency its role does not allow. Design: `docs/logs/2026-11-07_design_crate_split.md`, decisions: `docs/logs/2026-11-07_log_crate_split.md`.
+Every directory here is a crate; each declares its layer in `[package.metadata.layer] role` and the test `zslg::layering` (in `crates/zslg/src/layering.rs`) rejects a dependency its role does not allow. Design: `docs/logs/2026-11-07_design_crate_split.md`, decisions: `docs/logs/2026-11-07_log_crate_split.md`, what changed on the way: `docs/logs/2026-11-07_post_crate_split.md`.
 
 ```text
 library < types < ports < procedure < implementation < assembly < facade
@@ -14,8 +14,10 @@ library < types < ports < procedure < implementation < assembly < facade
 - **config** — public configuration shared with the facade.
 - **fake** — in-memory stand-ins for ports; dev-dependencies, or behind a `testing` feature.
 - **implementation** — one adapter; depends on ports, never on another implementation.
-- **assembly** — wires implementations (node crates, `zslg-leader`, `zslg-learner`, …).
-- **facade** — `zslg`: `pub use`, the integration tests, examples. Never an implementation.
+- **assembly** — wires implementations (node crates, `zslg-leader`, `zslg-learner`, `nvzn-dispatcher`, …).
+- **facade** — `zslg` and `nvzn`: `pub use`, the integration tests, examples. Never an implementation.
+
+The `nvzn*` crates are built on the `zslg` facade (D11) and may depend on it; nothing else may.
 
 ## library
 
@@ -39,6 +41,7 @@ library < types < ports < procedure < implementation < assembly < facade
 
 | crate | purpose |
 |---|---|
+| `nvzn-types` | Identifiers, event sets, the error and the shared cells of nvzn |
 | `zslg-consensus-types` | The cluster's vocabulary: who is in it, what state it replicates, and the rules that state must obey |
 | `zslg-lifecycle-types` | How a node's lifecycle and configuration can fail |
 | `zslg-log-types` | The replicated log's vocabulary: records, positions, events and the errors of reading and writing them |
@@ -52,6 +55,7 @@ library < types < ports < procedure < implementation < assembly < facade
 
 | crate | purpose |
 |---|---|
+| `nvzn-store` | Store ports, the staging overlay and the projection vocabulary of nvzn |
 | `zslg-consensus` | The consensus group's ports |
 | `zslg-log` | The log group's ports |
 | `zslg-net` | The net group's ports |
@@ -63,6 +67,7 @@ library < types < ports < procedure < implementation < assembly < facade
 
 | crate | purpose |
 |---|---|
+| `nvzn-projector` | The nvzn projector: folds events into projection rows and indices |
 | `zslg-net-wire` | The RPC wire: messages, frame codec and TCP setup |
 | `zslg-quorum-read` | Quorum fan-out and replica polling, shared by readers and leaders |
 
@@ -76,6 +81,8 @@ library < types < ports < procedure < implementation < assembly < facade
 
 | crate | purpose |
 |---|---|
+| `nvzn-fixtures` | Test events and projections shared by the nvzn crates' tests |
+| `nvzn-store-fake` | An in-memory nvzn Store |
 | `zslg-consensus-fake` | In-memory consensus ports for tests |
 | `zslg-log-fake` | In-memory log ports for tests |
 | `zslg-net-fake` | In-memory net ports for tests |
@@ -85,6 +92,8 @@ library < types < ports < procedure < implementation < assembly < facade
 
 | crate | purpose |
 |---|---|
+| `nvzn-resultset` | Lazy, tenant-scoped query results over one nvzn read transaction |
+| `nvzn-store-rocksdb` | The nvzn Store on RocksDB |
 | `zslg-hlc-clock` | The hybrid logical clock |
 | `zslg-hlc-gate` | Write admission against the HLC cutoff |
 | `zslg-leader-compaction` | The leader compaction job: merges snapshot objects and splices the manifest |
@@ -116,6 +125,7 @@ library < types < ports < procedure < implementation < assembly < facade
 
 | crate | purpose |
 |---|---|
+| `nvzn-dispatcher` | The nvzn runtime: the fold, its supervisor, readers and live views |
 | `zslg-error` | The public error union shared by every node and re-exported by the facade |
 | `zslg-follower-node` | Follower node assembly: learner plus writer on one node |
 | `zslg-leader` | Leader assembly: hands every leader job its handles and config slice |
