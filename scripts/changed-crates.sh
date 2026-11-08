@@ -19,7 +19,7 @@ for f in $files; do
     crates/nvzn|crates/nvzn/*|crates/nvzn-*) nvzn=1 ;;
     crates/crossbeam-combinators/*) cc=1 ;;
     # Domain-free workspace libraries (D18): every family builds on them.
-    crates/bytesize/*|crates/warn-throttle/*|crates/shutdown/*|crates/framing/*|crates/metrics-kit/*|crates/error-union/*|crates/rocksdb-kit/*) zslg=1 ;;
+    crates/bytesize/*|crates/warn-throttle/*|crates/shutdown/*|crates/framing/*|crates/metrics-kit/*|crates/error-union/*|crates/rocksdb-kit/*|crates/backoff-kit/*|crates/raft-kit/*|crates/pace-kit/*) zslg=1 ;;
     crates/btrb/*) btrb=1 ;;
     crates/objectstorage-cache/*) cache=1 ;;
     crates/svg-charts/*) svg=1 ;;
