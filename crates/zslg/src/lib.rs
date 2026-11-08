@@ -47,7 +47,6 @@ use rand as _;
 
 mod database;
 pub(crate) mod error;
-pub(crate) mod follower_node;
 #[cfg(test)]
 mod layering;
 pub(crate) mod leader;
@@ -61,7 +60,6 @@ pub(crate) mod replica_node;
 mod tests;
 
 pub use crate::error::Error;
-pub use crate::follower_node::{FollowerNode, FollowerNodeConfig};
 pub use crate::replica_node::{InitialisingReplicaNode, ReplicaNode, ReplicaNodeConfig};
 pub use bytesize::ByteSize;
 pub use zslg_consensus::RaftStateView;
@@ -69,6 +67,7 @@ pub use zslg_consensus_types::{
     ConsensusError, Exit, RaftGeneration, RaftManifestState, RaftState, RaftStateHandle,
     ReplicaMembership, SpareSelectionStrategy,
 };
+pub use zslg_follower_node::{FollowerNode, FollowerNodeConfig};
 pub use zslg_hlc_clock::HlcClock;
 pub use zslg_learner_node::{LearnerNode, LearnerNodeConfig};
 pub use zslg_lifecycle_types::{ConfigError, LifecycleError};

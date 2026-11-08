@@ -3,7 +3,7 @@
 //! `FollowerNode` is the read-write counterpart of
 //! `LearnerNode`: it has persistent identity,
 //! durable local storage, subscribes to the replica cluster's log streams to
-//! build a local data cache, serves the [`Reader`](crate::Reader) API, *and* can
+//! build a local data cache, serves the [`Reader`](zslg_log::Reader) API, *and* can
 //! write data to a quorum of replicas. It joins no Raft and never binds a server.
 //!
 //! Its identity is persistent (a [`NodeId`], one write-once row of the node's
@@ -15,32 +15,29 @@
 //! logic lives in the examples because it can be built entirely from the public
 //! [`Writer`] + [`Reader`] traits.
 
-use crate::database::NODE_ID_CF;
-use crate::learner::{LOCAL_STORE_CURSORS_CF, LOCAL_STORE_DATA_CF, STABLE_LOG_CF};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 use zslg_consensus::RaftStateView;
+use zslg_learner::{LOCAL_STORE_CURSORS_CF, LOCAL_STORE_DATA_CF, STABLE_LOG_CF};
 use zslg_lifecycle_types::ConfigError;
-use zslg_net_types::NetError;
+use zslg_net::NetError;
+use zslg_node_id::NODE_ID_CF;
 use zslg_snapshot::SnapshotStore;
 
 use std::num::NonZeroUsize;
 
-use crate::ByteSize;
+use bytesize::ByteSize;
 
-use crate::database;
-use crate::error::Error;
-use crate::learner::LearnerConfig;
-use crate::learner::{LearnerService, StableLog, spawn_learner, spawn_stable_store};
-use crate::network::setup_router;
 use rocksdb_kit::{CfSpec, Storage, StorageConfig};
 use shutdown::Shutdown;
+use zslg_consensus::NodeId;
 use zslg_hlc_clock::{HlcClock, run_clock_gauges};
-use zslg_net_types::PeerAddr;
-use zslg_node_types::NodeId;
+use zslg_learner::{LearnerConfig, LearnerService, StableLog, spawn_learner, spawn_stable_store};
+use zslg_net::PeerAddr;
+use zslg_net_setup::setup_router;
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use zslg_object_store_config::IntoArcObjectStore;
 use zslg_raft_tracker::{RaftTrackerConfig, spawn_raft_tracker_streamer};
@@ -184,7 +181,7 @@ impl FollowerNodeConfig {
             db_path,
             object_store: object_store.into_arc_object_store()?,
             stable_log_subscriber_queue_capacity:
-                crate::learner::StableLogConfig::DEFAULT_SUBSCRIBER_QUEUE_CAPACITY,
+                zslg_learner::StableLogConfig::DEFAULT_SUBSCRIBER_QUEUE_CAPACITY,
             stable_log_compression: true,
             startup_timeout: Duration::from_secs(30),
             drain_timeout: Duration::from_secs(30),
@@ -193,7 +190,7 @@ impl FollowerNodeConfig {
 
     /// Produce the raft-tracker subsystem config.
     #[must_use]
-    pub(crate) fn raft_tracker_config(&self) -> RaftTrackerConfig {
+    pub fn raft_tracker_config(&self) -> RaftTrackerConfig {
         RaftTrackerConfig {
             peers: self.peers_watcher(),
             min_backoff: self.raft_tracker_min_backoff,
@@ -204,8 +201,8 @@ impl FollowerNodeConfig {
 
     /// Produce the outbound router's client config.
     #[must_use]
-    pub(crate) fn router_config(&self) -> crate::network::RpcClientConfig {
-        crate::network::RpcClientConfig {
+    pub fn router_config(&self) -> zslg_net_setup::RpcClientConfig {
+        zslg_net_setup::RpcClientConfig {
             tcp_keepalive_interval: self.keepalive_interval,
             #[cfg(target_os = "linux")]
             tcp_user_timeout: self.user_timeout,
@@ -222,14 +219,14 @@ impl FollowerNodeConfig {
 
     /// Produce the persistent peers watcher from the flat peer list.
     #[must_use]
-    pub(crate) fn peers_watcher(&self) -> Arc<dyn zslg_net::PeersWatcher> {
+    pub fn peers_watcher(&self) -> Arc<dyn zslg_net::PeersWatcher> {
         zslg_peers::static_peers(self.peers.clone())
     }
 
     /// Produce the learner subsystem config: the learner tunables plus the
     /// store directory derived from the storage root.
     #[must_use]
-    pub(crate) fn learner_config(&self) -> LearnerConfig {
+    pub fn learner_config(&self) -> LearnerConfig {
         LearnerConfig {
             fetch_sweep_interval: self.learner_fetch_sweep_interval,
             purge_grace_period: self.learner_purge_grace_period,
@@ -249,7 +246,7 @@ impl FollowerNodeConfig {
     /// a root whose on-disk family set is not fully named here, so adding a
     /// family to this list is a wipe.
     #[must_use]
-    pub(crate) fn column_families(&self) -> [CfSpec; 4] {
+    pub fn column_families(&self) -> [CfSpec; 4] {
         [
             CfSpec {
                 cf: STABLE_LOG_CF,
@@ -276,15 +273,15 @@ impl FollowerNodeConfig {
     /// Produce the stable-log subsystem config: the engine sizing plus the log
     /// directory derived from the storage root.
     #[must_use]
-    pub(crate) fn stable_log_config(&self) -> crate::learner::StableLogConfig {
-        crate::learner::StableLogConfig {
+    pub fn stable_log_config(&self) -> zslg_learner::StableLogConfig {
+        zslg_learner::StableLogConfig {
             subscriber_queue_capacity: self.stable_log_subscriber_queue_capacity,
         }
     }
 
     /// Produce the snapshot-store constructor config.
     #[must_use]
-    pub(crate) fn snapshot_store_config(&self) -> SnapshotStoreConfig {
+    pub fn snapshot_store_config(&self) -> SnapshotStoreConfig {
         SnapshotStoreConfig {
             object_store: self.object_store.clone(),
         }
@@ -293,7 +290,7 @@ impl FollowerNodeConfig {
     /// Validate all sub-configs and required timeouts.
     /// Produce the writer constructor config.
     #[must_use]
-    pub(crate) fn writer_config(&self, node_id: NodeId) -> zslg_writer::WriterConfig {
+    pub fn writer_config(&self, node_id: NodeId) -> zslg_writer::WriterConfig {
         zslg_writer::WriterConfig {
             node_id,
             write_timeout: self.write_timeout,
@@ -302,7 +299,7 @@ impl FollowerNodeConfig {
     /// Produce the storage tuning: the budget plus the overrides, with every
     /// unset one left to `rocksdb_kit`'s derivation from the budget.
     #[must_use]
-    pub(crate) fn storage_config(&self) -> StorageConfig {
+    pub fn storage_config(&self) -> StorageConfig {
         StorageConfig {
             memory: self.storage_memory,
             write_buffer: self.storage_write_buffer,
@@ -314,7 +311,7 @@ impl FollowerNodeConfig {
         }
     }
 
-    pub(crate) fn validate(&self) -> Result<(), Error> {
+    pub fn validate(&self) -> Result<(), Error> {
         self.storage_config().validate()?;
         self.router_config().validate()?;
         if self.peers.is_empty() {
@@ -382,7 +379,7 @@ impl FollowerNode {
             &config.column_families(),
         )?;
 
-        let node_id = database::load_or_create_node_id(&storage)?;
+        let node_id = zslg_node_id::load_or_create_node_id(&storage)?;
         info!(node_id = ?node_id, "follower node starting");
 
         // ── HLC ────────────────────────────────────────────────────────────
@@ -573,5 +570,55 @@ mod tests {
                 "node_id"
             ],
         );
+    }
+}
+
+error_union::error_union! {
+    /// What this node assembly can fail with.
+    #[derive(Debug, Clone, PartialEq)]
+    pub Error {
+        Lifecycle(zslg_lifecycle_types::LifecycleError),
+        Config(zslg_lifecycle_types::ConfigError),
+        Clock(zslg_time::ClockError),
+        Log(zslg_log::LogError),
+        Snapshot(zslg_snapshot::SnapshotError),
+        Net(zslg_net::NetError),
+        Consensus(zslg_consensus::ConsensusError),
+    }
+    from zslg_time::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_log::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_snapshot::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_consensus::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_net::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_learner::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_net_client::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_net_setup::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_object_store_config::Error { Snapshot }
+    from zslg_raft_tracker::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_local_store::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_stable_log::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_reader::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_subscriber::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_node_id::Error { Config, Log }
+    from zslg_raft::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_quorum_read::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_observability::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_writer::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+}
+
+impl From<shutdown::Stopped> for Error {
+    fn from(_: shutdown::Stopped) -> Self {
+        Self::Lifecycle(zslg_lifecycle_types::LifecycleError::Shutdown)
+    }
+}
+
+impl From<rocksdb_kit::StorageError> for Error {
+    fn from(e: rocksdb_kit::StorageError) -> Self {
+        match e {
+            rocksdb_kit::StorageError::InvalidConfiguration(msg) => {
+                Self::Config(zslg_lifecycle_types::ConfigError::InvalidConfiguration(msg))
+            }
+            rocksdb_kit::StorageError::Storage(msg) => Self::Log(zslg_log::LogError::Storage(msg)),
+        }
     }
 }

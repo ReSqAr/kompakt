@@ -57,6 +57,9 @@ error_union! {
     from zslg_leader::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_observability::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_net_setup::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_follower_node::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_learner_node::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_writer_node::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_writer::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_reader::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_subscriber::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }

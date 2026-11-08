@@ -4485,6 +4485,7 @@ dependencies = [
  "zslg-consensus",
  "zslg-consensus-fake",
  "zslg-consensus-types",
+ "zslg-follower-node",
  "zslg-hlc-clock",
  "zslg-hlc-gate",
  "zslg-leader",
@@ -4577,6 +4578,43 @@ dependencies = [
  "zslg-node-types",
  "zslg-snapshot-types",
  "zslg-time-types",
+]
+
+[[package]]
+name = "zslg-follower-node"
+version = "0.1.0"
+dependencies = [
+ "bytesize",
+ "error-union",
+ "object_store",
+ "rocksdb-kit",
+ "shutdown",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-hlc-clock",
+ "zslg-learner",
+ "zslg-lifecycle-types",
+ "zslg-local-store",
+ "zslg-log",
+ "zslg-net",
+ "zslg-net-client",
+ "zslg-net-setup",
+ "zslg-node-id",
+ "zslg-object-store",
+ "zslg-object-store-config",
+ "zslg-observability",
+ "zslg-peers",
+ "zslg-quorum-read",
+ "zslg-raft",
+ "zslg-raft-tracker",
+ "zslg-reader",
+ "zslg-snapshot",
+ "zslg-stable-log",
+ "zslg-subscriber",
+ "zslg-time",
+ "zslg-writer",
 ]
 
 [[package]]
