@@ -9,6 +9,7 @@
 //!   error_union! {
 //!       pub ReadError { Log(LogError), Snapshot(SnapshotError) }
 //!       from ArchiveError { Log, Snapshot }      // ArchiveError ⊆ ReadError
+//!       bridge SiblingError                      // the same variants both ways: from + into
 //!       into PortError                           // ReadError ⊆ PortError (same variant names)
 //!   }
 //! ```
@@ -17,7 +18,8 @@
 //! `Error::source`, `From<Source>` for each `from` clause and `From<Union>` for
 //! each `into` destination (the destination must have every variant of the union;
 //! use `into` where the destination, such as a port crate's union, cannot name
-//! this crate). The compiler
+//! this crate). `bridge Peer` is both at once for a peer that has exactly this
+//! union's variants: `From<Peer>` and `From<Union>`, no variant list to repeat. The compiler
 //! checks the subset rule in both directions:
 //!
 //! ```text
@@ -66,10 +68,29 @@ macro_rules! error_union {
         }
         $crate::error_union!(@into $name, [$($variant),+]; $($rest),*);
     };
+    (@bridges $name:ident, [$($variant:ident),+];) => {};
+    (@bridges $name:ident, [$($variant:ident),+]; [$($peer:tt)+] $($rest:tt)*) => {
+        $crate::error_union!(@bridge $name, [$($variant),+]; $($peer)+);
+        $crate::error_union!(@bridges $name, [$($variant),+]; $($rest)*);
+    };
+    (@bridge $name:ident, [$($variant:ident),+]; $peer:path) => {
+        impl ::core::convert::From<$peer> for $name {
+            fn from(source: $peer) -> Self {
+                use $peer as Source;
+                match source {
+                    $(Source::$variant(leaf) => Self::$variant(leaf)),+
+                }
+            }
+        }
+        $crate::error_union!(@into $name, [$($variant),+]; $peer);
+    };
     (
         $(#[$meta:meta])*
         $vis:vis $name:ident { $($variant:ident($leaf:ty)),+ $(,)? }
         $(from $source:path { $($from_variant:ident),+ $(,)? })*
+        // The path is matched segment by segment: a `path` fragment may not be
+        // followed by another clause's keyword, so `bridge` goes before `into`.
+        $(bridge $peer_first:ident $(:: $peer_rest:ident)*)*
         $(into $dest:path)*
     ) => {
         $(#[$meta])*
@@ -113,6 +134,7 @@ macro_rules! error_union {
         )*
 
         $crate::error_union!(@into $name, [$($variant),+]; $($dest),*);
+        $crate::error_union!(@bridges $name, [$($variant),+]; $([$peer_first $(:: $peer_rest)*])*);
     };
 }
 
@@ -197,6 +219,30 @@ mod tests {
     error_union! {
         #[derive(Debug, PartialEq)]
         WideError { Log(LogError), Snapshot(SnapshotError) }
+    }
+
+    error_union! {
+        #[derive(Debug, PartialEq)]
+        LeftError { Log(LogError), Snapshot(SnapshotError) }
+        bridge RightError
+        into WideError
+    }
+
+    error_union! {
+        #[derive(Debug, PartialEq)]
+        RightError { Log(LogError), Snapshot(SnapshotError) }
+    }
+
+    #[test]
+    fn bridge_converts_both_ways() {
+        assert_eq!(
+            LeftError::from(RightError::Log(LogError::Gap)),
+            LeftError::Log(LogError::Gap)
+        );
+        assert_eq!(
+            RightError::from(LeftError::Snapshot(SnapshotError::ObjectStore)),
+            RightError::Snapshot(SnapshotError::ObjectStore)
+        );
     }
 
     #[test]

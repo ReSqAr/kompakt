@@ -40,6 +40,5 @@ error_union! {
     from zslg_consensus::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_raft::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_net::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_error::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    into zslg_error::Error
+    bridge zslg_error::Error
 }
