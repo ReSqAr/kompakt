@@ -14,16 +14,19 @@
     clippy::result_large_err,
     reason = "test code"
 )]
+use bytesize::ByteSize;
+use rocksdb_kit::{CfSpec, Storage, StorageConfig};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use zslg_error::LifecycleError;
+use zslg_lifecycle_types::LifecycleError;
 
 use object_store::ObjectStore;
 
-use crate::replica_node::ReplicaNodeConfig;
-use crate::{Error, ReplicaNode};
+use crate::ReplicaNode;
+use crate::ReplicaNodeConfig;
 use zslg_consensus::NodeId;
+use zslg_error::Error;
 use zslg_net::PeerAddr;
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use zslg_snapshot::SnapshotStore as _;
@@ -260,7 +263,7 @@ async fn hard_crash_restart_surfaces_fresh_node_id_error() {
         .expect("clean shutdown");
 
     // The raft store's DB lives under the storage root.
-    rewrite_membership_to_other_id(data_dir.join("node.db"))
+    rewrite_membership_to_other_id(data_dir.join("node.db"), cfg.column_families())
         .await
         .expect("rewrite membership");
 
@@ -282,8 +285,13 @@ async fn hard_crash_restart_surfaces_fresh_node_id_error() {
 ///
 async fn rewrite_membership_to_other_id(
     storage_root: std::path::PathBuf,
+    cfs: Vec<CfSpec>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let storage = crate::database::open_for_test(&storage_root)?;
+    let storage = Storage::open(
+        &storage_root,
+        StorageConfig::new(ByteSize::from_mib(64)),
+        &cfs,
+    )?;
     zslg_raft_storage::seed_foreign_membership_for_test(&storage).await?;
     Ok(())
 }

@@ -34,7 +34,6 @@ zslg-writer-node = { workspace = true }
 
 [dev-dependencies]
 zslg-error = { workspace = true }
-zslg-hlc-clock = { workspace = true }
 zslg-raft-setup = { workspace = true, features = ["testing"] }
 zslg-learner = { workspace = true, features = ["testing"] }
 zslg-leader-integrator = { workspace = true, features = ["testing"] }
@@ -52,7 +51,6 @@ futures = { workspace = true }
 object_store = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "fs", "signal", "net", "test-util"] }
 tokio-util = { workspace = true, features = ["io-util"] }
-zslg-object-store = { workspace = true }
 metrics = { workspace = true }
 rand = { workspace = true }
 bytes = { workspace = true }

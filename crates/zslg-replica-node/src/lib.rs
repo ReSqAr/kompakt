@@ -19,7 +19,7 @@
 
 // Dev-dependency that exists to switch on its `testing` hooks.
 #[cfg(test)]
-use zslg_raft_node as _;
+use {zslg_net_client as _, zslg_net_wire as _, zslg_raft_node as _};
 
 use futures::FutureExt as _;
 use std::net::SocketAddr;
@@ -1552,5 +1552,7 @@ mod compression_default_tests {
     }
 }
 
+#[cfg(test)]
+mod node_tests;
 #[cfg(test)]
 mod replica_tests;

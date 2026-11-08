@@ -31,13 +31,13 @@ use zslg_net::Router;
 
 use crate::ReplicaNode;
 
-use crate::network::RemoteRouter;
-use crate::replica_node::ReplicaNodeConfig;
-use crate::tests::reserve_port;
-use crate::tests::wait_until_sync as wait_until;
+use crate::ReplicaNodeConfig;
+use testing_kit::reserve_port;
+use testing_kit::wait_until_sync as wait_until;
 use zslg_consensus::NodeId;
 use zslg_hlc_clock::HlcClock;
 use zslg_net::PeerAddr;
+use zslg_net_setup::RemoteRouter;
 
 const SERVER_NAME: &str = "localhost";
 

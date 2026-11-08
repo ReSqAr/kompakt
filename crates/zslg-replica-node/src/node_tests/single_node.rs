@@ -24,9 +24,8 @@ use bytes::Bytes;
 use futures::StreamExt;
 use tempfile::TempDir;
 
-use crate::Error;
 use crate::ReplicaNode;
-use crate::replica_node::ReplicaNodeConfig;
+use crate::ReplicaNodeConfig;
 use zslg_consensus::NodeId;
 use zslg_log::DataId;
 use zslg_log::{Data, StableLogEvent};
@@ -327,11 +326,11 @@ async fn hlc_cutoff_persists_across_restart() {
         data_id: DataId::from_parts(Hlc(committed_cutoff.raw().saturating_sub(1)), node_id, 0),
         blob: Bytes::from_static(b"stale"),
     };
-    let err = crate::tests::common::replica_write(&*node.replica(), stale)
+    let err = zslg_log_fake::replica_write(&*node.replica(), stale)
         .await
         .expect_err("write below cutoff must be rejected");
     assert!(
-        matches!(err, Error::Clock(ClockError::HlcCutoff(_))),
+        matches!(err, zslg_log::Error::Clock(ClockError::HlcCutoff(_))),
         "expected HlcCutoff, got {err:?}",
     );
 

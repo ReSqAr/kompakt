@@ -44,6 +44,7 @@ zslg-time = { workspace = true }
 zslg-writer = { workspace = true }
 
 [dev-dependencies]
+testing-kit = { workspace = true }
 bytes = { workspace = true }
 bytesize = { workspace = true }
 crossbeam-combinators = { workspace = true, features = ["testing"] }
@@ -57,6 +58,9 @@ zslg-log-fake = { workspace = true }
 zslg-net-fake = { workspace = true }
 zslg-replica-log = { workspace = true, features = ["testing"] }
 zslg-raft-node = { workspace = true, features = ["testing"] }
+zslg-raft-storage = { workspace = true, features = ["testing"] }
+zslg-net-client = { workspace = true, features = ["testing"] }
+zslg-net-wire = { workspace = true, features = ["testing"] }
 zslg-time-fake = { workspace = true }
 
 [features]
