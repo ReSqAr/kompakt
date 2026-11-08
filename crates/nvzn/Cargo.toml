@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 nvzn-projector = { workspace = true }
+nvzn-resultset = { workspace = true }
 nvzn-store = { workspace = true }
 nvzn-store-fake = { workspace = true }
 nvzn-store-rocksdb = { workspace = true }

@@ -2117,6 +2117,7 @@ dependencies = [
  "metrics-util",
  "nvzn-fixtures",
  "nvzn-projector",
+ "nvzn-resultset",
  "nvzn-store",
  "nvzn-store-fake",
  "nvzn-store-rocksdb",
@@ -2149,6 +2150,14 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "metrics-kit",
+ "nvzn-store",
+ "nvzn-types",
+]
+
+[[package]]
+name = "nvzn-resultset"
+version = "0.1.0"
+dependencies = [
  "nvzn-store",
  "nvzn-types",
 ]

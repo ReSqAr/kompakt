@@ -103,6 +103,7 @@ nvzn-types = { path = "crates/nvzn-types" }
 nvzn-store = { path = "crates/nvzn-store" }
 nvzn-projector = { path = "crates/nvzn-projector" }
 nvzn-fixtures = { path = "crates/nvzn-fixtures" }
+nvzn-resultset = { path = "crates/nvzn-resultset" }
 nvzn-store-fake = { path = "crates/nvzn-store-fake" }
 nvzn-store-rocksdb = { path = "crates/nvzn-store-rocksdb" }
 zslg-consensus = { path = "crates/zslg-consensus" }
