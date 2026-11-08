@@ -501,3 +501,6 @@ impl zslg::Reader for ScriptedReader {
         Channel::from_infinite(rx, "scripted unstable")
     }
 }
+
+#[cfg(test)]
+mod events_tests;

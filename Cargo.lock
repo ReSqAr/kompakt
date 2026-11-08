@@ -2129,8 +2129,6 @@ dependencies = [
  "nvzn-store",
  "nvzn-store-rocksdb",
  "nvzn-types",
- "postcard",
- "proptest",
  "serde",
  "tempfile",
  "tokio",
@@ -2178,6 +2176,8 @@ dependencies = [
  "nvzn-projection",
  "nvzn-store",
  "nvzn-types",
+ "postcard",
+ "proptest",
  "serde",
  "zslg",
 ]
@@ -2198,10 +2198,15 @@ name = "nvzn-projector"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "metrics",
  "metrics-kit",
+ "metrics-util",
+ "nvzn-fixtures",
  "nvzn-projection",
  "nvzn-store",
+ "nvzn-store-fake",
  "nvzn-types",
+ "serde",
 ]
 
 [[package]]
@@ -2244,6 +2249,7 @@ dependencies = [
  "nvzn-fixtures",
  "nvzn-projection",
  "nvzn-store",
+ "nvzn-store-fake",
  "nvzn-types",
  "postcard",
  "proptest",

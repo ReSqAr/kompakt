@@ -18,6 +18,10 @@ nvzn-store = { workspace = true }
 nvzn-types = { workspace = true }
 serde = { workspace = true }
 
+[dev-dependencies]
+proptest = { workspace = true }
+postcard = { workspace = true, features = ["alloc", "use-std"] }
+
 [lints]
 workspace = true
 

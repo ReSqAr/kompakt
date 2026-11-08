@@ -2,6 +2,11 @@
 
 mod next_tests;
 
+/// A store that keeps nothing, for folding into.
+fn inmemory() -> nvzn_store::ArcStore {
+    std::sync::Arc::new(nvzn_store_fake::InMemoryStore::default())
+}
+
 #[allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -9,15 +14,12 @@ mod next_tests;
     reason = "test code"
 )]
 mod tests {
-    use crate::{
-        ReadTransactionExt,
-        testsupport::{
-            NewTodoV1, NewUserV3, Todo, TodoDeletedV1, TodoId, User, UserId, event, inmemory,
-            tenant, tenant_id,
-        },
+    use super::inmemory;
+    use crate::*;
+    use nvzn_fixtures::{
+        NewTodoV1, NewUserV3, Todo, TodoDeletedV1, TodoId, User, UserId, event, tenant, tenant_id,
     };
     use nvzn_projection::*;
-    use nvzn_projector::*;
     use serde::{Deserialize, Serialize};
     use std::sync::Arc;
 
@@ -32,14 +34,14 @@ mod tests {
         }
     }
 
-    fn rig() -> (Arc<dyn crate::Store>, ProjectorManager<event::Event>) {
+    fn rig() -> (Arc<dyn nvzn_store::Store>, ProjectorManager<event::Event>) {
         let mut manager = ProjectorManager::<event::Event>::new(tenant());
         manager.register::<Todo>().unwrap();
         (inmemory(), manager)
     }
 
     fn handle(
-        store: &Arc<dyn crate::Store>,
+        store: &Arc<dyn nvzn_store::Store>,
         manager: &ProjectorManager<event::Event>,
         events: &[event::Event],
     ) {
@@ -49,10 +51,10 @@ mod tests {
             fold_event(&manager.projectors, tenant(), event, &mut txn).unwrap();
         }
 
-        txn.commit(crate::Watermark::default()).unwrap();
+        txn.commit(nvzn_projection::Watermark::default()).unwrap();
     }
 
-    fn indexed_under(store: &Arc<dyn crate::Store>, user_id: u128) -> Vec<ProjectionId> {
+    fn indexed_under(store: &Arc<dyn nvzn_store::Store>, user_id: u128) -> Vec<ProjectionId> {
         let txn = store.read().unwrap();
         txn.scan_index(
             tenant_id(),
@@ -77,7 +79,6 @@ mod tests {
         let recorder = DebuggingRecorder::new();
         let snapshotter = recorder.snapshotter();
         let mut txn = store.write().unwrap();
-        // `crate::metrics` shadows the facade in this module.
         ::metrics::with_local_recorder(&recorder, || {
             for event in [
                 event::Event::NewTodo(todo(1, 1, "t")),
@@ -204,7 +205,7 @@ mod tests {
         let mut manager = ProjectorManager::<event::Event>::new(tenant());
         manager.register::<Todo>().unwrap();
         let err = manager.register::<Todo>().expect_err("duplicate must err");
-        assert!(matches!(err, crate::Error::ProjectionAlreadyRegistered(_)));
+        assert!(matches!(err, nvzn_projection::Error::ProjectionAlreadyRegistered(_)));
     }
 
     #[test]
@@ -225,7 +226,7 @@ mod tests {
         assert!(indexed_under(&store, 1).is_empty());
     }
 
-    fn rig_both() -> (Arc<dyn crate::Store>, ProjectorManager<event::Event>) {
+    fn rig_both() -> (Arc<dyn nvzn_store::Store>, ProjectorManager<event::Event>) {
         let mut manager = ProjectorManager::<event::Event>::new(tenant());
         manager.register::<Todo>().unwrap();
         manager.register::<User>().unwrap();
@@ -402,7 +403,7 @@ mod tests {
             .register::<TwoUnderOneId>()
             .expect_err("duplicate index must err");
         assert!(
-            matches!(err, crate::Error::IndexAlreadyRegistered(1)),
+            matches!(err, nvzn_projection::Error::IndexAlreadyRegistered(1)),
             "{err:?}"
         );
         assert!(manager.projectors.is_empty(), "nothing half-registered");

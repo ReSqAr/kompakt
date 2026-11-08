@@ -1,5 +1,5 @@
-//! Event-set and wire-format tests; they use the test projections, so they live
-//! with the facade.
+//! Event-set and wire-format tests of `define_events!`, over the fixture events
+//! this crate defines.
 
 #![allow(
     clippy::unwrap_used,
@@ -10,7 +10,7 @@
 
 use nvzn_types::*;
 
-use crate::testsupport::{
+use crate::{
     NewTodoV1, NewUserV1, NewUserV2, NewUserV3, PingedV1, TodoDeletedV1, TodoId, UserId, event,
 };
 use proptest::prelude::*;
@@ -94,7 +94,7 @@ fn encode_borrows_and_matches_the_owned_encoding() {
 /// by move: the same event a direct conversion builds.
 #[test]
 fn an_owned_subset_moves_into_the_event_it_restricts() {
-    use crate::EventSet;
+    use nvzn_types::EventSet;
     assert_eq!(
         <event::UserWrite as EventSet>::EVENTS,
         <event::UserEvent<'static> as EventSet>::EVENTS

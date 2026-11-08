@@ -12,14 +12,12 @@
     reason = "test code"
 )]
 
-use crate::{
-    ReadTransactionExt, Store, WriteTransactionExt,
-    testsupport::{
-        NewTodoV1, TodoId, User, UserDeletedV1, UserId, event, inmemory, tenant, tenant_id,
-    },
+use super::inmemory;
+use crate::*;
+use nvzn_fixtures::{
+    NewTodoV1, TodoId, User, UserDeletedV1, UserId, event, tenant, tenant_id,
 };
 use nvzn_projection::*;
-use nvzn_projector::*;
 use nvzn_store::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -47,7 +45,7 @@ fn run(
     for event in events {
         fold_event(&manager.projectors, tenant(), event, &mut txn)?;
     }
-    txn.commit(crate::Watermark::default())
+    txn.commit(nvzn_projection::Watermark::default())
 }
 
 fn row<P: Projection>(store: &Arc<dyn Store>, id: u128) -> Option<P> {
@@ -342,7 +340,7 @@ fn with_note_1() -> Arc<dyn Store> {
     let mut txn = store.write().unwrap();
     let row = Note::new(1, "old");
     WriteTransactionExt::set(&mut txn, tenant_id(), row.id(), Some(&row)).unwrap();
-    txn.commit(crate::Watermark::default()).unwrap();
+    txn.commit(nvzn_projection::Watermark::default()).unwrap();
     store
 }
 

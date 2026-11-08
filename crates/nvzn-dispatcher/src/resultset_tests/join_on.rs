@@ -8,11 +8,12 @@
 )]
 
 use crate::{
-    Store, WriteTransaction,
+    Store,
     resultset_tests::test_support::{rig, seed, user},
-    testsupport::{Todo, TodoId, User, UserId, commit_row, tenant_id},
+    testkit::{Todo, TodoId, User, UserId, commit_row, tenant_id},
 };
 use nvzn_projection::*;
+use nvzn_store::WriteTransaction;
 use std::sync::Arc;
 
 fn dangle(store: &Arc<dyn Store>, idx: &Index<Todo, User>) {

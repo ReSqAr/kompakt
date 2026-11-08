@@ -14,6 +14,13 @@ nvzn-projection = { workspace = true }
 nvzn-store = { workspace = true }
 nvzn-types = { workspace = true }
 
+[dev-dependencies]
+metrics = { workspace = true }
+metrics-util = { workspace = true }
+nvzn-fixtures = { workspace = true }
+nvzn-store-fake = { workspace = true }
+serde = { workspace = true }
+
 [lints]
 workspace = true
 

@@ -18,17 +18,9 @@ use crossbeam_channel as _;
 use tracing as _;
 use {async_trait as _, futures as _, tokio as _, tokio_util as _};
 #[cfg(test)]
-use {metrics_util as _, proptest as _, tempfile as _, tracing_subscriber as _};
+use {serde as _, tempfile as _, tracing_subscriber as _};
 
-#[cfg(test)]
-mod events_tests;
 mod metrics;
-#[cfg(test)]
-mod projection_tests;
-#[cfg(test)]
-mod resultset_tests;
-#[cfg(test)]
-mod store_tests;
 
 /// An in-process log and store, for testing against nvzn without a cluster.
 ///
@@ -37,8 +29,6 @@ mod store_tests;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
-#[cfg(test)]
-pub(crate) mod testsupport;
 
 #[cfg(feature = "prometheus")]
 pub use metrics::configure_prometheus;

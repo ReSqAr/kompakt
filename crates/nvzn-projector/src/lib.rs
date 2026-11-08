@@ -3,6 +3,9 @@
 
 pub mod metrics;
 
+#[cfg(test)]
+mod projection_tests;
+
 mod projector;
 
 pub use projector::{

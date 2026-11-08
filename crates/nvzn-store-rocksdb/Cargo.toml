@@ -21,6 +21,8 @@ rust-rocksdb = { workspace = true }
 metrics = { workspace = true }
 metrics-util = { workspace = true }
 nvzn-fixtures = { workspace = true }
+nvzn-store-fake = { workspace = true }
+zslg = { workspace = true, features = ["testing"] }
 proptest = { workspace = true }
 tempfile = { workspace = true }
 

@@ -9,12 +9,12 @@
 
 use crate::{
     Dispatcher, Index, IndexId, Projection, ProjectionId, Reader, Ref, Store, Watermark,
-    WriteTransaction,
-    testsupport::{
+    testkit::{
         FLUSH_INTERVAL, TestLog, Todo, TodoId, User, UserId, commit_row, event, inmemory, tenant,
         tenant_id,
     },
 };
+use nvzn_store::WriteTransaction;
 use std::sync::Arc;
 
 const IID: IndexId = IndexId::from_u32(1);

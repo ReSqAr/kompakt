@@ -2,6 +2,9 @@
 
 pub mod metrics;
 
+#[cfg(test)]
+mod store_tests;
+
 use bytes::Bytes;
 use nvzn_projection::{ArcReadTransaction, ReadTransaction, Rows, Watermark};
 use nvzn_store::{CommitBatch, ConfigHash, IndexAction, Store, StoreConfig, WriteTransactionImpl};

@@ -1,5 +1,5 @@
-//! Store-trait and overlay semantics, exercised through the in-memory store with
-//! the test projections.
+//! Store-trait and overlay semantics over the test projections, run against both
+//! this store and the in-memory fake so the two cannot drift apart.
 
 #![allow(
     clippy::unwrap_used,
@@ -13,10 +13,8 @@ use nvzn_projection::*;
 use nvzn_store::*;
 use zslg::{Hlc, LogIndex};
 
-use crate::{
-    InMemoryStore, Projection, ReadTransactionExt, Ref, WriteTransactionExt,
-    testsupport::{self, Todo, TodoId, UserId, tenant_id},
-};
+use nvzn_fixtures::{Todo, TodoId, UserId, tenant_id};
+use nvzn_store_fake::InMemoryStore;
 use proptest::prelude::*;
 use std::sync::Arc;
 
@@ -95,7 +93,7 @@ fn todo_titles(store: &Arc<dyn Store>) -> Vec<String> {
 #[test]
 fn store_commit_applies_overlay() {
     let dir = tempfile::TempDir::new().unwrap();
-    for store in [inmemory_store(), testsupport::rocksdb(dir.path())] {
+    for store in [inmemory_store(), rocksdb(dir.path())] {
         set_todo(&store, &todo(1, 0, "one"));
         set_todo(&store, &todo(2, 0, "two"));
 
@@ -133,7 +131,7 @@ fn store_commit_applies_overlay() {
 #[test]
 fn store_uncommitted_txn_leaves_store_unchanged() {
     let dir = tempfile::TempDir::new().unwrap();
-    for store in [inmemory_store(), testsupport::rocksdb(dir.path())] {
+    for store in [inmemory_store(), rocksdb(dir.path())] {
         let t = todo(1, 0, "one");
         let mut txn = store.write().unwrap();
         WriteTransactionExt::set(&mut txn, tenant_id(), Ref::new(TodoId(1).into()), Some(&t))
@@ -146,7 +144,7 @@ fn store_uncommitted_txn_leaves_store_unchanged() {
 #[test]
 fn store_commit_updates_watermark() {
     let dir = tempfile::TempDir::new().unwrap();
-    for store in [inmemory_store(), testsupport::rocksdb(dir.path())] {
+    for store in [inmemory_store(), rocksdb(dir.path())] {
         let mut txn = store.write().unwrap();
         txn.add_index(
             tenant_id(),
@@ -158,7 +156,7 @@ fn store_commit_updates_watermark() {
         .unwrap();
         let wm = Watermark {
             index: Some(LogIndex::from_bytes(9u64.to_be_bytes())),
-            data_id: Some(testsupport::data_id(9, 9)),
+            data_id: Some(zslg::testing::data_id(9, 9)),
             hlc: Some(Hlc::from_bytes(9u64.to_be_bytes())),
         };
         txn.commit(wm.clone()).unwrap();
@@ -169,7 +167,7 @@ fn store_commit_updates_watermark() {
 #[test]
 fn store_scan_merges_base_and_overlay() {
     let dir = tempfile::TempDir::new().unwrap();
-    for store in [inmemory_store(), testsupport::rocksdb(dir.path())] {
+    for store in [inmemory_store(), rocksdb(dir.path())] {
         set_todo(&store, &todo(1, 0, "keep"));
         set_todo(&store, &todo(2, 0, "delete"));
         set_todo(&store, &todo(3, 0, "update"));
@@ -208,7 +206,7 @@ fn store_scan_merges_base_and_overlay() {
 #[test]
 fn store_scan_index_applies_add_remove() {
     let dir = tempfile::TempDir::new().unwrap();
-    for store in [inmemory_store(), testsupport::rocksdb(dir.path())] {
+    for store in [inmemory_store(), rocksdb(dir.path())] {
         let p0 = ProjectionId::from_u128(10);
         let p1 = ProjectionId::from_u128(11);
         let q = ProjectionId::from_u128(100);
@@ -254,7 +252,7 @@ fn store_scan_index_applies_add_remove() {
 #[test]
 fn store_index_accumulates_into_set() {
     let dir = tempfile::TempDir::new().unwrap();
-    for store in [inmemory_store(), testsupport::rocksdb(dir.path())] {
+    for store in [inmemory_store(), rocksdb(dir.path())] {
         let q = ProjectionId::from_u128(5);
         let mut txn = store.write().unwrap();
         txn.add_index(tenant_id(), PTID, IID, ProjectionId::from_u128(1), q)
@@ -306,7 +304,7 @@ proptest! {
     #[test]
     fn store_scan_index_matches_model(ops in arb_ops()) {
         let dir = tempfile::TempDir::new().unwrap();
-        for store in [inmemory_store(), testsupport::rocksdb(dir.path())] {
+        for store in [inmemory_store(), rocksdb(dir.path())] {
             let mut model: std::collections::BTreeSet<(u8, u8, u8)> =
                 std::collections::BTreeSet::new();
             let mut touched: std::collections::BTreeSet<(u8, u8)> =
@@ -375,7 +373,7 @@ proptest! {
     #[test]
     fn store_scan_raw_matches_model(ops in arb_row_ops()) {
         let dir = tempfile::TempDir::new().unwrap();
-        for store in [inmemory_store(), testsupport::rocksdb(dir.path())] {
+        for store in [inmemory_store(), rocksdb(dir.path())] {
             let mut model: std::collections::BTreeMap<(u8, u8, u8), Vec<u8>> =
                 std::collections::BTreeMap::new();
 
@@ -419,7 +417,8 @@ proptest! {
 
 #[test]
 fn watermark_covers_everything_at_or_below_its_hlc_with_one_tie() {
-    use testsupport::{data_id, hlc};
+    use nvzn_fixtures::hlc;
+    use zslg::testing::data_id;
 
     let empty = Watermark::default();
     assert!(
@@ -467,4 +466,12 @@ fn watermark_covers_everything_at_or_below_its_hlc_with_one_tie() {
     };
     assert!(event_only.covers(data_id(50, 1)));
     assert!(!event_only.covers(data_id(51, 1)));
+}
+
+/// The production open path, on a budget small enough that a suite may hold many.
+fn rocksdb(dir: &std::path::Path) -> ArcStore {
+    let mut config = StoreConfig::new(dir);
+    config.memory = zslg::ByteSize::from_mib(16);
+    config.flush_interval = std::time::Duration::from_secs(60);
+    Arc::new(crate::RocksDBStore::new(&config).expect("open rocksdb"))
 }

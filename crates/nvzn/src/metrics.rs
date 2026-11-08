@@ -398,7 +398,7 @@ mod tests {
     #[test]
     fn short_type_name_takes_the_last_segment() {
         assert_eq!(
-            nvzn_projector::metrics::short_type_name::<crate::testsupport::Todo>(),
+            nvzn_projector::metrics::short_type_name::<nvzn_fixtures::Todo>(),
             "Todo"
         );
     }

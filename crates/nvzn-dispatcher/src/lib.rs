@@ -42,6 +42,10 @@ mod supervisor;
 #[cfg(test)]
 mod testkit;
 
+// Result sets (filter, map, joins) over a dispatcher fed by a `TestLog`.
+#[cfg(test)]
+mod resultset_tests;
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
