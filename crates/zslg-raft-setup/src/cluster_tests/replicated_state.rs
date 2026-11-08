@@ -20,7 +20,7 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use crate::tests::fast_raft_config as raft_config;
+use crate::testing::fast_raft_config as raft_config;
 use zslg_consensus::NodeId;
 use zslg_consensus::ReplicaMembership;
 use zslg_consensus::ReplicatedRaftState;
@@ -38,18 +38,18 @@ async fn three_node_initialize_and_apply_command() {
     let n3 = NodeId::new_v4();
     let ids = [n1, n2, n3];
 
-    let mut nodes = crate::tests::start_cluster(&ids, raft_config())
+    let mut nodes = crate::testing::start_cluster(&ids, raft_config())
         .await
         .expect("cluster");
 
     let leader = nodes.get_mut(&n1).expect("n1 present");
     leader
         .raft
-        .initialize(crate::tests::test_membership_map(&ids))
+        .initialize(zslg_raft_fake::test_membership_map(&ids))
         .await
         .expect("initialize");
 
-    crate::tests::wait_for_leader(&leader.raft, n1).await;
+    crate::testing::wait_for_leader(&leader.raft, n1).await;
 
     let mut rx_n1 = nodes.get(&n1).expect("n1").raft_state.subscribe();
     let mut rx_n2 = nodes.get(&n2).expect("n2").raft_state.subscribe();
@@ -58,7 +58,7 @@ async fn three_node_initialize_and_apply_command() {
     let target_set = BTreeSet::from([n1, n2, n3]);
     {
         let n1_node = nodes.get(&n1).expect("n1");
-        crate::tests::write_state_fenced(
+        crate::testing::write_state_fenced(
             &n1_node.raft,
             &n1_node.raft_state,
             ReplicatedRaftState {
@@ -108,7 +108,7 @@ async fn manifest_command_advances_published_watermark() {
     let n3 = NodeId::new_v4();
     let ids = [n1, n2, n3];
 
-    let mut nodes = crate::tests::start_cluster(&ids, raft_config())
+    let mut nodes = crate::testing::start_cluster(&ids, raft_config())
         .await
         .expect("cluster");
 
@@ -116,16 +116,16 @@ async fn manifest_command_advances_published_watermark() {
         .get_mut(&n1)
         .expect("n1")
         .raft
-        .initialize(crate::tests::test_membership_map(&ids))
+        .initialize(zslg_raft_fake::test_membership_map(&ids))
         .await
         .expect("initialize");
 
-    crate::tests::wait_for_leader(&nodes.get(&n1).expect("n1").raft, n1).await;
+    crate::testing::wait_for_leader(&nodes.get(&n1).expect("n1").raft, n1).await;
 
     let all_nodes = BTreeSet::from([n1, n2, n3]);
     {
         let n1_node = nodes.get(&n1).expect("n1");
-        crate::tests::write_state_fenced(
+        crate::testing::write_state_fenced(
             &n1_node.raft,
             &n1_node.raft_state,
             ReplicatedRaftState {

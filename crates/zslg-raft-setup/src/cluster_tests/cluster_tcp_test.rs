@@ -27,16 +27,16 @@ use zslg_net::Router;
 use raft_kit::Config;
 use raft_kit::storage::Adaptor;
 
-use crate::network::{LocalReplicaClient, RemoteRouter, RpcServerConfig, SocketOpts};
-use crate::raft::RaftNode;
-use crate::tests::ReadyReplica;
-use crate::tests::fast_raft_config as raft_config;
+use crate::RaftNode;
+use crate::testing::fast_raft_config as raft_config;
 use shutdown::Shutdown;
 use zslg_consensus::NodeId;
 use zslg_consensus::RaftStateHandle;
 use zslg_consensus::ReplicatedRaftState;
 use zslg_hlc_clock::HlcClock;
 use zslg_net::PeerAddr;
+use zslg_net_fake::ReadyReplica;
+use zslg_net_setup::{LocalReplicaClient, RemoteRouter, RpcServerConfig, SocketOpts};
 use zslg_raft::Raft;
 use zslg_raft::membership_map;
 use zslg_raft_rpc::NetworkFactory;
@@ -45,7 +45,7 @@ struct ClusterNode {
     node_id: NodeId,
     raft: Raft,
     raft_state: RaftStateHandle,
-    shutdown: Shutdown<crate::Error>,
+    shutdown: Shutdown<zslg_error::Error>,
     peer_addr: PeerAddr,
     net: Arc<dyn Router>,
     _tempdir: tempfile::TempDir,
@@ -63,7 +63,7 @@ async fn build_node(node_id: NodeId, raft_config: Arc<Config>) -> ClusterNode {
     let raft_state = RaftStateHandle::new();
     let storage = zslg_raft_storage::RocksRaftStorage::open(
         raft_state.clone(),
-        crate::database::open_for_test(tempdir.path()).expect("open storage"),
+        crate::testing::open_storage_for_test(tempdir.path()).expect("open storage"),
     )
     .await
     .expect("open raft storage");
@@ -87,7 +87,7 @@ async fn build_node(node_id: NodeId, raft_config: Arc<Config>) -> ClusterNode {
         )),
         Arc::new(raft_state.clone()),
     ));
-    let server_addr = crate::network::bind_server(
+    let server_addr = zslg_net_setup::bind_server(
         self_client,
         clock.clone(),
         RpcServerConfig {

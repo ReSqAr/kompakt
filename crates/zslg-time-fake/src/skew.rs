@@ -77,4 +77,3 @@ fn wall_clock_ms_now() -> u64 {
         .try_into()
         .unwrap_or(u64::MAX)
 }
-

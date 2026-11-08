@@ -54,7 +54,6 @@ where
     }
 }
 
-
 /// Reserve an OS-assigned TCP port on localhost (the RPC server binds TCP).
 /// Returns the bound address after releasing the listener.
 ///
@@ -99,7 +98,6 @@ pub fn reserve_port() -> std::net::SocketAddr {
     panic!("reserve_port: 64 consecutive attempts all returned an already-issued port");
 }
 
-
 /// Convenience wrapper around [`wait_until`] for sync `FnMut() -> bool`
 /// predicates (no async needed).
 pub async fn wait_until_sync(
@@ -131,4 +129,3 @@ pub fn init_logging() {
         .with_test_writer()
         .try_init();
 }
-

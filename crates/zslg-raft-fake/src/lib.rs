@@ -199,7 +199,6 @@ impl RaftNetwork<TypeConfig> for MemNetwork {
     }
 }
 
-
 #[must_use]
 pub fn test_membership_map(ids: &[NodeId]) -> BTreeMap<NodeId, NodeInfo> {
     ids.iter()
@@ -214,4 +213,3 @@ pub fn test_membership_map(ids: &[NodeId]) -> BTreeMap<NodeId, NodeInfo> {
         })
         .collect()
 }
-

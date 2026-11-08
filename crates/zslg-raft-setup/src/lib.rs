@@ -12,6 +12,15 @@
 //! (`startup_phase_timeout`) and the client-write backstop must outlast an
 //! election (`client_write_timeout`) — see the field docs.
 
+// Dev-dependencies that exist to switch on their `testing` hooks.
+#[cfg(test)]
+use {zslg_net_client as _, zslg_net_wire as _};
+
+#[cfg(test)]
+mod cluster_tests;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
+
 use std::sync::Arc;
 
 use raft_kit::storage::Adaptor;

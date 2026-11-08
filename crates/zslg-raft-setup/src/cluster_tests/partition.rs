@@ -1,5 +1,5 @@
 //! Partition/heal fault-injection tests over the in-process raft cluster
-//! (EXPERT_REVIEW Appendix B.4). The `crate::tests::Partition` handle cuts
+//! (EXPERT_REVIEW Appendix B.4). The `crate::testing::Partition` handle cuts
 //! pairwise raft links; these tests pin the two basic behaviours every
 //! partition scenario builds on: a cut minority falls behind and converges
 //! after heal, and a cut majority-less leader cannot commit.
@@ -23,7 +23,7 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 use zslg_consensus::ReplicaMembership;
 
-use crate::tests::fast_raft_config as raft_config;
+use crate::testing::fast_raft_config as raft_config;
 use zslg_consensus::NodeId;
 use zslg_consensus::ReplicatedRaftState;
 use zslg_time::Hlc;
@@ -41,17 +41,17 @@ fn state_with_cutoff(replicas: &BTreeSet<NodeId>, cutoff: u64) -> ReplicatedRaft
 async fn partitioned_follower_converges_after_heal() {
     let ids: [NodeId; 3] = std::array::from_fn(|_| NodeId::new_v4());
     let [n1, n2, n3] = ids;
-    let (nodes, partition) = crate::tests::start_cluster_with_partition(&ids, raft_config())
+    let (nodes, partition) = crate::testing::start_cluster_with_partition(&ids, raft_config())
         .await
         .expect("cluster");
     nodes
         .get(&n1)
         .expect("n1")
         .raft
-        .initialize(crate::tests::test_membership_map(&ids))
+        .initialize(zslg_raft_fake::test_membership_map(&ids))
         .await
         .expect("init");
-    crate::tests::wait_for_leader(&nodes.get(&n1).expect("n1").raft, n1).await;
+    crate::testing::wait_for_leader(&nodes.get(&n1).expect("n1").raft, n1).await;
 
     let replicas: BTreeSet<NodeId> = ids.iter().copied().collect();
 
@@ -60,7 +60,7 @@ async fn partitioned_follower_converges_after_heal() {
     // n1+n2 are still a quorum; the cluster keeps committing.
     let leader = nodes.get(&n1).expect("n1");
     for cutoff in [100u64, 200, 300] {
-        crate::tests::write_state_fenced(
+        crate::testing::write_state_fenced(
             &leader.raft,
             &leader.raft_state,
             state_with_cutoff(&replicas, cutoff),
@@ -70,7 +70,7 @@ async fn partitioned_follower_converges_after_heal() {
     }
 
     let leader_generation = leader.raft_state.snapshot().generation;
-    crate::tests::wait_until(
+    testing_kit::wait_until(
         "n2 converges during the partition",
         Duration::from_secs(5),
         || async {
@@ -90,7 +90,7 @@ async fn partitioned_follower_converges_after_heal() {
 
     partition.heal_all();
 
-    crate::tests::wait_until(
+    testing_kit::wait_until(
         "n3 converges after heal",
         Duration::from_secs(5),
         || async {
@@ -105,21 +105,21 @@ async fn partitioned_follower_converges_after_heal() {
 async fn isolated_leader_cannot_commit_until_healed() {
     let ids: [NodeId; 3] = std::array::from_fn(|_| NodeId::new_v4());
     let [n1, n2, n3] = ids;
-    let (nodes, partition) = crate::tests::start_cluster_with_partition(&ids, raft_config())
+    let (nodes, partition) = crate::testing::start_cluster_with_partition(&ids, raft_config())
         .await
         .expect("cluster");
     nodes
         .get(&n1)
         .expect("n1")
         .raft
-        .initialize(crate::tests::test_membership_map(&ids))
+        .initialize(zslg_raft_fake::test_membership_map(&ids))
         .await
         .expect("init");
-    crate::tests::wait_for_leader(&nodes.get(&n1).expect("n1").raft, n1).await;
+    crate::testing::wait_for_leader(&nodes.get(&n1).expect("n1").raft, n1).await;
 
     let replicas: BTreeSet<NodeId> = ids.iter().copied().collect();
     let leader = nodes.get(&n1).expect("n1");
-    crate::tests::write_state_fenced(
+    crate::testing::write_state_fenced(
         &leader.raft,
         &leader.raft_state,
         state_with_cutoff(&replicas, 100),
@@ -135,7 +135,7 @@ async fn isolated_leader_cannot_commit_until_healed() {
     // was deposed by the surviving majority.
     let attempt = tokio::time::timeout(
         Duration::from_secs(1),
-        crate::tests::write_state_fenced(
+        crate::testing::write_state_fenced(
             &leader.raft,
             &leader.raft_state,
             state_with_cutoff(&replicas, 200),
@@ -164,11 +164,11 @@ async fn isolated_leader_cannot_commit_until_healed() {
     // (n2/n3 may have elected a new leader during the partition; a node may
     // also briefly report a stale leader right after the heal — re-observe on
     // every attempt rather than pinning the write to one node).
-    crate::tests::write_state_fenced_via_leader(&nodes, state_with_cutoff(&replicas, 300))
+    crate::testing::write_state_fenced_via_leader(&nodes, state_with_cutoff(&replicas, 300))
         .await
         .expect("post-heal write");
 
-    crate::tests::wait_until(
+    testing_kit::wait_until(
         "all nodes converge after heal",
         Duration::from_secs(5),
         || async {

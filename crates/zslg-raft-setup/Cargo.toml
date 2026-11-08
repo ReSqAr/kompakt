@@ -25,9 +25,39 @@ zslg-raft-state = { workspace = true }
 zslg-raft-storage = { workspace = true }
 zslg-snapshot = { workspace = true }
 zslg-time = { workspace = true }
+bytesize = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
+testing-kit = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["time"], optional = true }
+zslg-raft-fake = { workspace = true, optional = true }
+
+[dev-dependencies]
+bytesize = { workspace = true }
+tempfile = { workspace = true }
+testing-kit = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "test-util"] }
+zslg-error = { workspace = true }
+zslg-hlc-clock = { workspace = true }
+zslg-consensus-fake = { workspace = true }
+zslg-net-client = { workspace = true, features = ["testing"] }
+zslg-net-fake = { workspace = true }
+zslg-net-wire = { workspace = true, features = ["testing"] }
+zslg-net-setup = { workspace = true }
+zslg-raft-fake = { workspace = true }
+zslg-raft-storage = { workspace = true, features = ["testing"] }
+zslg-time = { workspace = true }
+shutdown = { workspace = true }
 
 [features]
-testing = []
+# An in-process cluster of real Raft nodes on the in-memory network, for tests.
+testing = [
+    "dep:bytesize",
+    "dep:tempfile",
+    "dep:testing-kit",
+    "dep:tokio",
+    "dep:zslg-raft-fake",
+    "zslg-raft-storage/testing",
+]
 
 [lints]
 workspace = true

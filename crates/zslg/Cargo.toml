@@ -64,7 +64,6 @@ zslg-object-store = { workspace = true }
 zslg-peers = { workspace = true }
 metrics = { workspace = true }
 raft-kit = { workspace = true }
-zslg-raft-rpc = { workspace = true }
 async-trait = { workspace = true }
 parking_lot = { workspace = true }
 rand = { workspace = true }
