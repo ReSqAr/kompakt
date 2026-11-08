@@ -199,12 +199,6 @@ fn every_dependency_is_allowed_by_the_role_table() {
             if k.name.starts_with("nvzn") && d.name == "zslg" {
                 continue;
             }
-            // Transitional (nvzn split in progress): the nvzn facade still holds
-            // implementation code and so reaches below the assemblies. Removed
-            // when the split is complete.
-            if k.name == "nvzn" && d.name.starts_with("nvzn-") {
-                continue;
-            }
             if !allowed.contains(&to) {
                 violations.push(format!(
                     "{} ({:?}) -> {} ({:?}){}",

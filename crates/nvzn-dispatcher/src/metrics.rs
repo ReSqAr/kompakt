@@ -221,3 +221,13 @@ impl ReadKind {
         }
     }
 }
+
+/// Every metric the nvzn crates declare: this crate's slice, then each other
+/// emitting crate's.
+pub fn all() -> impl Iterator<Item = &'static MetricDef> {
+    METRICS
+        .iter()
+        .chain(nvzn_projector::metrics::METRICS.iter())
+        .chain(nvzn_store_rocksdb::metrics::METRICS.iter())
+        .chain(nvzn_types::metrics::METRICS.iter())
+}

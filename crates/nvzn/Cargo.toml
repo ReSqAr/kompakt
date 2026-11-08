@@ -9,12 +9,7 @@ publish = false
 
 [dependencies]
 nvzn-dispatcher = { workspace = true }
-nvzn-projector = { workspace = true }
-nvzn-resultset = { workspace = true }
 nvzn-store = { workspace = true }
-nvzn-store-fake = { workspace = true }
-nvzn-store-rocksdb = { workspace = true }
-nvzn-types = { workspace = true }
 metrics-kit = { workspace = true }
 async-trait = { workspace = true }
 crossbeam-channel = { workspace = true }
@@ -27,6 +22,10 @@ zslg = { workspace = true, optional = true }
 
 
 [dev-dependencies]
+nvzn-dispatcher = { workspace = true, features = ["testing"] }
+nvzn-projector = { workspace = true }
+nvzn-store-rocksdb = { workspace = true }
+nvzn-types = { workspace = true }
 bytes = { workspace = true }
 crossbeam-combinators = { workspace = true }
 tracing = { workspace = true }

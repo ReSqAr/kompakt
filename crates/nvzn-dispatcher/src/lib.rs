@@ -15,12 +15,15 @@
 pub mod metrics;
 
 // The names the moved modules reach for as `crate::X`.
-pub(crate) use nvzn_resultset::ResultSet;
+pub use nvzn_resultset::{IndexJoin, Lazy, LazyRows, ResultSet};
 pub(crate) use nvzn_store::{
     ArcReadTransaction, ConfigHash, Index, Projection, ReadTransactionExt, Ref, View, Watermark,
 };
 #[cfg(test)]
 pub(crate) use nvzn_store::{Store, Write};
+#[cfg(feature = "testing")]
+pub use nvzn_store_fake::InMemoryStore;
+pub use nvzn_store_rocksdb::RocksDBStore;
 #[cfg(test)]
 pub(crate) use nvzn_types::ProjectionId;
 pub(crate) use nvzn_types::{
@@ -52,9 +55,8 @@ pub use registration::AssociatedProjectorManager;
 use registration::compute_config_hash;
 pub(crate) use subscribers::{PENDING_SUBSCRIBERS, SUBSCRIBER_CAPACITY, Subscribers};
 
-use nvzn_projector::ProjectorManager;
+pub use nvzn_projector::ProjectorManager;
 use nvzn_store::{ArcStore, StoreConfig, WriteTransactionImpl};
-use nvzn_store_rocksdb::RocksDBStore;
 use nvzn_types::{Error, IndexId, ProjectionTypeId, Tenant, TenantId};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;

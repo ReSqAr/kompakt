@@ -39,11 +39,7 @@ pub(crate) const METRIC_PREFIX: &str = "nvzn_";
 /// Every metric the nvzn crates declare: this facade's slice, then each
 /// emitting crate's.
 pub(crate) fn all_metrics() -> impl Iterator<Item = &'static MetricDef> {
-    nvzn_dispatcher::metrics::METRICS
-        .iter()
-        .chain(nvzn_projector::metrics::METRICS.iter())
-        .chain(nvzn_store_rocksdb::metrics::METRICS.iter())
-        .chain(nvzn_types::metrics::METRICS.iter())
+    nvzn_dispatcher::metrics::all()
 }
 
 /// The namespace every metric this crate owns is exported under.

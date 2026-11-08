@@ -10,7 +10,6 @@
 
 use bytes::Bytes;
 use nvzn_store::*;
-use nvzn_types::*;
 use zslg::{Hlc, LogIndex};
 
 use crate::{

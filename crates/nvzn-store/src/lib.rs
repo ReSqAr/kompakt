@@ -20,3 +20,11 @@ pub use store::{
     Store, Watermark, WriteTransaction, WriteTransactionExt, reference_not_found,
 };
 pub use view::View;
+
+// The vocabulary the projection and store APIs are written in, re-exported so
+// the layers above need not name the types crate.
+pub use nvzn_types::{
+    APP_ID_LEN, Encoder, Error, EventSet, EventWriter, INDEX_ID_LEN, IndexId, PROJECTION_ID_LEN,
+    PROJECTION_TYPE_ID_LEN, ProjectionId, ProjectionTypeId, StopReason, SubEventOf, Syncer, Tenant,
+    TenantId, WithWireFormat, chained_from, define_events,
+};

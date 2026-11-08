@@ -43,21 +43,17 @@ pub(crate) mod testsupport;
 #[cfg(feature = "prometheus")]
 pub use metrics::configure_prometheus;
 pub use metrics::{METRIC_NAMESPACE, describe_metrics, histogram_buckets};
-pub use nvzn_dispatcher::{AssociatedProjectorManager, Dispatcher};
-pub use nvzn_dispatcher::{Live, LiveLimits, Wait, assert_live, is_live};
-pub use nvzn_dispatcher::{Reader, Snapshot};
-pub use nvzn_projector::ProjectorManager;
-pub use nvzn_resultset::{IndexJoin, Lazy, LazyRows, ResultSet};
-pub use nvzn_store::{AnyIndex, Index, Indices, Projection, Ref, View, Write};
-pub use nvzn_store::{
-    ArcReadTransaction, ArcStore, CommitBatch, ConfigHash, ReadTransaction, ReadTransactionExt,
-    Row, Rows, Store, StoreConfig, Watermark, WriteTransaction, WriteTransactionExt,
-    WriteTransactionImpl,
+#[cfg(any(test, feature = "testing"))]
+pub use nvzn_dispatcher::InMemoryStore;
+pub use nvzn_dispatcher::{
+    AssociatedProjectorManager, Dispatcher, IndexJoin, Lazy, LazyRows, Live, LiveLimits,
+    ProjectorManager, Reader, ResultSet, RocksDBStore, Snapshot, Wait, assert_live, is_live,
 };
-pub use nvzn_store_fake::InMemoryStore;
-pub use nvzn_store_rocksdb::RocksDBStore;
-pub use nvzn_types::{
-    APP_ID_LEN, Encoder, Error, EventSet, EventWriter, INDEX_ID_LEN, IndexId, PROJECTION_ID_LEN,
-    PROJECTION_TYPE_ID_LEN, ProjectionId, ProjectionTypeId, StopReason, SubEventOf, Syncer, Tenant,
-    TenantId, WithWireFormat, chained_from, define_events,
+pub use nvzn_store::{
+    APP_ID_LEN, AnyIndex, ArcReadTransaction, ArcStore, CommitBatch, ConfigHash, Encoder, Error,
+    EventSet, EventWriter, INDEX_ID_LEN, Index, IndexId, Indices, PROJECTION_ID_LEN,
+    PROJECTION_TYPE_ID_LEN, Projection, ProjectionId, ProjectionTypeId, ReadTransaction,
+    ReadTransactionExt, Ref, Row, Rows, StopReason, Store, StoreConfig, SubEventOf, Syncer, Tenant,
+    TenantId, View, Watermark, WithWireFormat, Write, WriteTransaction, WriteTransactionExt,
+    WriteTransactionImpl, chained_from, define_events,
 };
