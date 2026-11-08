@@ -557,6 +557,14 @@ mod tests {
         Reject(RaftState),
         Down,
         Silent,
+        /// A service instance that has been dropped but whose connection is
+        /// still open: answers every write `Failed(Shutdown)` and never ends
+        /// the stream.
+        Shutdown,
+        /// The first stream opened to it talks to a dropped instance
+        /// ([`Resp::Shutdown`]); every later one reaches a live replica
+        /// ([`Resp::Ack`]) — a node killed and relaunched on the same address.
+        DroppedInstanceThenAck(Arc<std::sync::atomic::AtomicBool>, RaftState),
     }
 
     struct FakeReplica {
@@ -571,7 +579,16 @@ mod tests {
         ) -> Channel<Result<WriteOutcome, zslg_log::Error>, Infinite> {
             let run = || -> Channel<Result<WriteOutcome, Error>, Infinite> {
                 let (tx, rx) = crossbeam_channel::unbounded();
-                let resp = self.resp.clone();
+                let resp = match &self.resp {
+                    Resp::DroppedInstanceThenAck(opened, live) => {
+                        if opened.swap(true, Ordering::SeqCst) {
+                            Resp::Ack(live.clone())
+                        } else {
+                            Resp::Shutdown
+                        }
+                    }
+                    other => other.clone(),
+                };
                 // This double measures nothing, so it drops the stamp immediately.
                 let mut input = input.filter_map(|s| Some(s.data));
                 std::thread::spawn(move || {
@@ -591,6 +608,14 @@ mod tests {
                                 data_id,
                                 error: Error::Net(NetError::Rpc("down".into())).into(),
                             },
+                            Resp::Shutdown => WriteOutcome::Failed {
+                                data_id,
+                                error: Error::Lifecycle(
+                                    zslg_lifecycle_types::LifecycleError::Shutdown,
+                                )
+                                .into(),
+                            },
+                            Resp::DroppedInstanceThenAck(..) => continue,
                             Resp::Silent => continue,
                         };
                         if tx.send(Ok(outcome)).is_err() {
@@ -693,6 +718,56 @@ mod tests {
             .await
             .expect("recv")
             .expect("quorum");
+    }
+
+    /// A node killed and relaunched on the same address leaves the writer's open
+    /// stream talking to the dropped service instance, which answers every write
+    /// `Failed(Shutdown)` and never ends the stream. The coordinator must drop
+    /// that stream and reopen one, or the node is refused for good — and with two
+    /// such nodes the writer never reaches a quorum again.
+    #[tokio::test]
+    async fn a_stream_to_a_dropped_instance_is_reopened() {
+        let (n1, n2, n3) = (nid(1), nid(2), nid(3));
+        let s = state(1, &[n1, n2, n3]);
+        let flag = || Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let coord = coordinator(
+            &s,
+            BTreeMap::from([
+                (n1, Resp::DroppedInstanceThenAck(flag(), s.clone())),
+                (n2, Resp::DroppedInstanceThenAck(flag(), s.clone())),
+                (n3, Resp::Ack(s.clone())),
+            ]),
+        );
+
+        // Two of three answer from a dropped instance: no quorum this time.
+        let first = coord
+            .submit(make_data(1, 100, b"hi"))
+            .await
+            .expect("recv")
+            .expect_err("two replicas are gone");
+        assert!(matches!(
+            first,
+            Error::Consensus(ConsensusError::QuorumUnreachable)
+        ));
+
+        // The streams are reopened with backoff, so a later write succeeds.
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut seed = 2u8;
+        loop {
+            let outcome = coord
+                .submit(make_data(seed, 100 + u64::from(seed), b"again"))
+                .await
+                .expect("recv");
+            if outcome.is_ok() {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "writes are still refused: the stream to the dropped instance was never reopened"
+            );
+            seed = seed.saturating_add(1);
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
     }
 
     #[tokio::test]

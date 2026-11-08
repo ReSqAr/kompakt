@@ -31,5 +31,6 @@ None of the replace-a-node tests catches the bug fixed in the writer coordinator
 writer kept a write stream open to a *killed* node's dropped service, which answered `Shutdown`
 forever). They replace nodes gracefully, so the old stream ends cleanly. Only the proptest's
 `Kill` op (a hard kill with the sockets left behind) exercised it, and only under I/O pressure.
-A deterministic regression test belongs at the coordinator, with a fake replica that answers
-`Failed(Shutdown)` on the first stream and `Accepted` on the second; that is not written yet.
+The regression test is at the coordinator now
+(`zslg-writer`, `a_stream_to_a_dropped_instance_is_reopened`): a fake replica answers `Failed(Shutdown)`
+on the first stream and `Accepted` on the next. It fails without the reconnect and passes with it.
