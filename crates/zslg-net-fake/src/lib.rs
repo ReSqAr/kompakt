@@ -365,7 +365,6 @@ error_union::error_union! {
 }
 
 error_union::error_bridge!(Error => zslg_log::Error, zslg_net::Error, zslg_raft::Error, zslg_consensus::Error; Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus);
-error_union::error_home!(Error);
 
 /// Replica stub that is always drained and caught up: cutoff at `u64::MAX`,
 /// no frontier — snapshot quorum checks pass instantly against it.

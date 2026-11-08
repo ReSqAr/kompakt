@@ -14,7 +14,6 @@
     clippy::result_large_err,
     reason = "test code"
 )]
-use crate::error::Home as _;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
@@ -65,7 +64,7 @@ async fn integrate_batch(
     // verdict as "disconnected, not yet closed" — an abort.
     closer.close();
     drop(tx);
-    store.integrate_loop(ch).await.home()
+    store.integrate_loop(ch).await.map_err(Into::into)
 }
 use crate::tests::wait_until;
 

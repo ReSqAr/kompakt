@@ -300,7 +300,6 @@ error_union::error_union! {
 }
 
 error_union::error_bridge!(Error => zslg_log::Error, zslg_snapshot::Error, zslg_consensus::Error, zslg_raft::Error, zslg_quorum_read::Error; Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus);
-error_union::error_home!(Error);
 
 impl From<rocksdb_kit::StorageError> for Error {
     fn from(e: rocksdb_kit::StorageError) -> Self {

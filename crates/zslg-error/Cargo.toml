@@ -8,7 +8,6 @@ description = "The public error union shared by every node and re-exported by th
 publish = false
 
 [dependencies]
-crossbeam-combinators = { workspace = true }
 bytesize = { workspace = true }
 error-union = { workspace = true }
 framing = { workspace = true }

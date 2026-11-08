@@ -72,8 +72,6 @@ error_union! {
     from zslg_net_server::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
 }
 
-error_union::error_home!(pub Error);
-
 macro_rules! port_error_bridge {
     ($($port:path),+ $(,)?) => {$(
         impl From<Error> for $port {

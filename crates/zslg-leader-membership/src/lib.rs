@@ -35,7 +35,6 @@ error_union::error_union! {
 }
 
 error_union::error_bridge!(Error => zslg_consensus::Error, zslg_raft::Error, zslg_net::Error; Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus);
-error_union::error_home!(Error);
 
 impl From<shutdown::Stopped> for Error {
     fn from(_: shutdown::Stopped) -> Self {

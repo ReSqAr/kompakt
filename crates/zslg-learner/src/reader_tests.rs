@@ -12,7 +12,6 @@ use super::*;
     reason = "test code"
 )]
 mod tests {
-    use crate::Home as _;
     use crossbeam_combinators::testing::ChannelTestExt as _;
     use std::sync::Arc;
     use std::time::Duration;
@@ -266,7 +265,7 @@ mod tests {
         // verdict as "disconnected, not yet closed" — an abort.
         closer.close();
         drop(tx);
-        store.integrate_loop(ch).await.home()
+        store.integrate_loop(ch).await.map_err(Into::into)
     }
 
     /// `hlc_now` reads the node's clock, the one its writes are minted from: it

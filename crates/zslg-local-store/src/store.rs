@@ -41,8 +41,8 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tracing::error;
 
+use crate::Error;
 use crate::metrics::{self, LocalWriteKind};
-use crate::{Error, Home};
 use metrics_kit::OpState;
 use zslg_consensus::NodeId;
 use zslg_log::Data;
@@ -265,7 +265,8 @@ impl zslg_log::LocalStoreMut for LocalStore {
         &self,
         records: Channel<Result<(NodeId, LogIndex, Data), zslg_log::Error>, Finite>,
     ) -> Result<(), zslg_log::Error> {
-        let mut records: Channel<Result<(NodeId, LogIndex, Data), Error>, Finite> = records.home();
+        let mut records: Channel<Result<(NodeId, LogIndex, Data), Error>, Finite> =
+            records.err_into();
         let result: Result<(), Error> = async {
             let tx = self.integrate_tx.clone();
             // Forwarding blocks on both halves (Channel::recv and a bounded
@@ -900,7 +901,7 @@ mod tests {
         // verdict as "disconnected, not yet closed" — an abort.
         closer.close();
         drop(tx);
-        store.integrate_loop(ch).await.home()
+        store.integrate_loop(ch).await.map_err(Into::into)
     }
 
     /// One `Storage` backing both this store and the stable log it reads the
@@ -1188,7 +1189,7 @@ mod tests {
         // verdict as "disconnected, not yet closed" — an abort.
         closer.close();
         drop(tx);
-        store.integrate_loop(ch).await.home()
+        store.integrate_loop(ch).await.map_err(Into::into)
     }
 
     /// Cross-batch (the global ring): the three subscriber streams each deliver

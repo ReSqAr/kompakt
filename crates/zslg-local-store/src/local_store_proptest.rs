@@ -14,7 +14,6 @@
     clippy::result_large_err,
     reason = "test code"
 )]
-use crate::Home as _;
 use crossbeam_combinators::testing::ChannelTestExt as _;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -45,7 +44,7 @@ async fn integrate_batch(
     // verdict as "disconnected, not yet closed" — an abort.
     closer.close();
     drop(tx);
-    store.integrate_loop(ch).await.home()
+    store.integrate_loop(ch).await.map_err(Into::into)
 }
 
 #[derive(Debug, Clone)]

@@ -47,9 +47,9 @@
 //! `WatermarkGate`, keeps it off the stable side: nothing at or below the
 //! current watermark.
 
+use crate::Error;
 use crate::QuorumReadDebouncer;
 use crate::metrics::{self, ReadEntrySource, ReadSource};
-use crate::{Error, Home};
 use crossbeam_combinators::{
     Cancellation, Channel, Contiguous, Finite, Gap, Infinite, NonDecreasing, Opening, Resumable,
     Seam, StrictlyIncreasing, resync,
@@ -137,7 +137,7 @@ impl Reader for GatedReader {
             if !self.ready() {
                 return Err(self.not_ready());
             }
-            self.inner.sync().await.home()
+            self.inner.sync().await.map_err(Into::into)
         }
         .await;
         result.map_err(Into::into)
@@ -169,7 +169,7 @@ impl Reader for GatedReader {
             if !self.ready() {
                 return Channel::once(Err(self.not_ready()));
             }
-            self.inner.unstable_tail().home()
+            self.inner.unstable_tail().err_into()
         };
         let result: Channel<Result<Data, Error>, Finite> = run();
         result.err_into()
@@ -181,7 +181,7 @@ impl Reader for GatedReader {
                 return Channel::once(Err(self.not_ready()))
                     .chain(Channel::aborted("gated reader"));
             }
-            self.inner.subscribe_unstable_tail().home()
+            self.inner.subscribe_unstable_tail().err_into()
         };
         let result: Channel<Result<UnstableEvent, Error>, Infinite> = run();
         result.err_into()
@@ -278,7 +278,7 @@ fn historical_replay(
         .covers(..until, "historical replay")
         .also::<NonDecreasing<Hlc>>(None, "historical replay HLC")
         .into_channel())
-    .home()
+    .err_into()
 }
 
 // ── Resyncing tail ─────────────────────────────────────────────────────────
@@ -552,7 +552,7 @@ impl Seam for UnstableSeam {
                     UnstableStep::Entry(data)
                 })
             });
-        opening.chain(scan.home())
+        opening.chain(scan.err_into())
     }
 }
 
@@ -670,7 +670,7 @@ impl Reader for ReaderImpl {
                     item
                 })
                 .until(&self.shutdown))
-            .home()
+            .err_into()
         };
         let result: Channel<Result<Data, Error>, Finite> = run();
         result.err_into()

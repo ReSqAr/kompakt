@@ -11,7 +11,6 @@
 
 use std::sync::Arc;
 
-use crate::error::Home as _;
 use crossbeam_combinators::testing::ChannelTestExt as _;
 use zslg_consensus::NodeId;
 use zslg_leader_compaction::compact;
@@ -60,7 +59,7 @@ async fn integrate_batch(
     // verdict as "disconnected, not yet closed" — an abort.
     closer.close();
     drop(tx);
-    store.integrate_loop(ch).await.home()
+    store.integrate_loop(ch).await.map_err(Into::into)
 }
 
 fn make_data(seed: u32, hlc_ms: u64, blob: &[u8]) -> Data {

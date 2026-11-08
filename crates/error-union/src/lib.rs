@@ -120,58 +120,6 @@ macro_rules! error_bridge {
     };
 }
 
-/// Declare `Home` for the union `$error`: the boundary verb that brings a value
-/// carrying a port crate's error (a `Result`, or a plain or ordered channel of
-/// results) back to `$error`, wherever `$error: From<port error>`. The calling
-/// crate needs `crossbeam-combinators`.
-#[macro_export]
-macro_rules! error_home {
-    ($vis:vis $error:ident) => {
-        $vis trait Home {
-            type Out;
-            fn home(self) -> Self::Out;
-        }
-
-        impl<T, E> Home for Result<T, E>
-        where
-            $error: From<E>,
-        {
-            type Out = Result<T, $error>;
-            fn home(self) -> Self::Out {
-                self.map_err(Into::into)
-            }
-        }
-
-        impl<A, E, K> Home for crossbeam_combinators::Channel<Result<A, E>, K>
-        where
-            A: Send + 'static,
-            $error: From<E>,
-            E: Send + 'static,
-            K: crossbeam_combinators::Kind,
-        {
-            type Out = crossbeam_combinators::Channel<Result<A, $error>, K>;
-            fn home(self) -> Self::Out {
-                self.err_into()
-            }
-        }
-
-        impl<A, E, P, K> Home for crossbeam_combinators::OrderedChannel<Result<A, E>, P, K>
-        where
-            A: Send + 'static,
-            $error: From<E>,
-            E: Send + 'static,
-            P: crossbeam_combinators::OrderPolicy,
-            P::Key: crossbeam_combinators::Key<Result<A, $error>>,
-            K: crossbeam_combinators::Kind,
-        {
-            type Out = crossbeam_combinators::OrderedChannel<Result<A, $error>, P, K>;
-            fn home(self) -> Self::Out {
-                self.err_into()
-            }
-        }
-    };
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, reason = "test code")]
 mod tests {

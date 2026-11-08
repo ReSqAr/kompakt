@@ -8,7 +8,6 @@ description = "Raft assembly: wires storage, RPC, state publishing and the node 
 publish = false
 
 [dependencies]
-crossbeam-combinators = { workspace = true }
 error-union = { workspace = true }
 raft-kit = { workspace = true }
 rocksdb-kit = { workspace = true }

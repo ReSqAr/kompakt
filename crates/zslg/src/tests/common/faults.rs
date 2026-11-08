@@ -1,4 +1,3 @@
-use crate::error::Home as _;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -130,7 +129,7 @@ impl Replica for FaultyReplica {
                             let fwd_tx = out_tx.clone();
                             std::thread::spawn(move || {
                                 while let Ok(outcome) = outcomes.recv() {
-                                    if fwd_tx.send(outcome.home()).is_err() {
+                                    if fwd_tx.send(outcome.map_err(Into::into)).is_err() {
                                         return;
                                     }
                                 }
@@ -190,7 +189,7 @@ impl Replica for FaultyReplica {
             self.inner.fetch_status().await
         }
         .await)
-            .home();
+            .map_err(Into::into);
         result.map_err(Into::into)
     }
     async fn subscribe_status(
@@ -476,7 +475,7 @@ impl Replica for DuplicateReplica {
             std::thread::spawn(move || {
                 while let Ok(outcome) = outcomes.recv() {
                     let Ok(outcome) = outcome else {
-                        let _ = out_tx.send(outcome.home());
+                        let _ = out_tx.send(outcome.map_err(Into::into));
                         return; // terminal
                     };
                     let mut guard = expected.lock();
@@ -519,7 +518,7 @@ impl Replica for DuplicateReplica {
 
     async fn fetch_status(&self) -> Result<ReplicaStatus, zslg_log::Error> {
         let result: Result<ReplicaStatus, Error> =
-            (async { self.inner.fetch_status().await }.await).home();
+            (async { self.inner.fetch_status().await }.await).map_err(Into::into);
         result.map_err(Into::into)
     }
 

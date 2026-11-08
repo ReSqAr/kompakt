@@ -12,7 +12,6 @@ shutdown = { workspace = true }
 pace-kit = { workspace = true }
 zslg-quorum-read = { workspace = true }
 async-trait = { workspace = true }
-crossbeam-combinators = { workspace = true }
 error-union = { workspace = true }
 futures = { workspace = true }
 metrics-kit = { workspace = true }

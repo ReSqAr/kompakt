@@ -11,7 +11,6 @@ publish = false
 zslg-quorum-read = { workspace = true }
 warn-throttle = { workspace = true }
 backoff-kit = { workspace = true }
-crossbeam-combinators = { workspace = true }
 error-union = { workspace = true }
 metrics-kit = { workspace = true }
 tokio = { workspace = true, features = ["rt", "sync", "time", "macros"] }
@@ -26,10 +25,10 @@ zslg-snapshot = { workspace = true }
 zslg-time = { workspace = true }
 
 [dev-dependencies]
+crossbeam-combinators = { workspace = true, features = ["tokio", "testing"] }
 async-trait = { workspace = true }
 futures = { workspace = true }
 crossbeam-channel = { workspace = true }
-crossbeam-combinators = { workspace = true, features = ["tokio", "testing"] }
 bytes = { workspace = true }
 zslg-consensus-fake = { workspace = true }
 zslg-time-fake = { workspace = true }

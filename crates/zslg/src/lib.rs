@@ -58,7 +58,7 @@ use {
 mod database;
 #[cfg(test)]
 pub(crate) mod error {
-    pub(crate) use zslg_error::{Error, Home};
+    pub(crate) use zslg_error::Error;
 }
 #[cfg(test)]
 mod layering;

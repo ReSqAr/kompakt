@@ -14,7 +14,6 @@
     clippy::result_large_err,
     reason = "test code"
 )]
-use crate::error::Home as _;
 use crossbeam_combinators::testing::ChannelTestExt as _;
 /// Leadership churn against an in-flight snapshot (EXPERT_REVIEW Appendix
 /// B.4): a real 3-node raft cluster, a snapshot pipeline stalled between
@@ -86,7 +85,7 @@ async fn integrate_batch(
     // verdict as "disconnected, not yet closed" — an abort.
     closer.close();
     drop(tx);
-    store.integrate_loop(ch).await.home()
+    store.integrate_loop(ch).await.map_err(Into::into)
 }
 
 /// `LocalStoreView` wrapper that pauses the snapshot pipeline inside the
@@ -148,7 +147,7 @@ impl LocalStoreView for StallingLocalStore {
         upstream: NodeId,
     ) -> Result<Option<LogIndex>, zslg_log::Error> {
         let result: Result<Option<LogIndex>, Error> =
-            (async { self.inner.subscription_cursor(upstream).await }.await).home();
+            (async { self.inner.subscription_cursor(upstream).await }.await).map_err(Into::into);
         result.map_err(Into::into)
     }
 }

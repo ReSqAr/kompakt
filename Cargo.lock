@@ -4688,7 +4688,6 @@ name = "zslg-error"
 version = "0.1.0"
 dependencies = [
  "bytesize",
- "crossbeam-combinators",
  "error-union",
  "framing",
  "rocksdb-kit",
@@ -4836,7 +4835,6 @@ name = "zslg-leader-integrator"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "crossbeam-combinators",
  "error-union",
  "metrics",
  "metrics-kit",
@@ -4859,7 +4857,6 @@ name = "zslg-leader-membership"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "crossbeam-combinators",
  "error-union",
  "futures",
  "metrics",
@@ -5406,7 +5403,6 @@ dependencies = [
 name = "zslg-raft-setup"
 version = "0.1.0"
 dependencies = [
- "crossbeam-combinators",
  "error-union",
  "raft-kit",
  "rocksdb-kit",

@@ -14,7 +14,6 @@
     clippy::result_large_err,
     reason = "test code"
 )]
-use crate::error::Home as _;
 use crossbeam_combinators::testing::ChannelTestExt as _;
 use std::sync::Arc;
 use std::time::Duration;
@@ -63,7 +62,7 @@ async fn integrate_batch(
     // verdict as "disconnected, not yet closed" — an abort.
     closer.close();
     drop(tx);
-    store.integrate_loop(ch).await.home()
+    store.integrate_loop(ch).await.map_err(Into::into)
 }
 
 use crate::tests::{boot_snapshot_harness as boot, commit_snapshot_result};
@@ -124,7 +123,8 @@ async fn snapshot_refuses_to_commit_an_aborted_window() {
             upstream: NodeId,
         ) -> Result<Option<LogIndex>, zslg_log::Error> {
             let result: Result<Option<LogIndex>, Error> =
-                (async { self.inner.subscription_cursor(upstream).await }.await).home();
+                (async { self.inner.subscription_cursor(upstream).await }.await)
+                    .map_err(Into::into);
             result.map_err(Into::into)
         }
     }
@@ -654,7 +654,8 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
             upstream: NodeId,
         ) -> Result<Option<LogIndex>, zslg_log::Error> {
             let result: Result<Option<LogIndex>, Error> =
-                (async { self.inner.subscription_cursor(upstream).await }.await).home();
+                (async { self.inner.subscription_cursor(upstream).await }.await)
+                    .map_err(Into::into);
             result.map_err(Into::into)
         }
     }

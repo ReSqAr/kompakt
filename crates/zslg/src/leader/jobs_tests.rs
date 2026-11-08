@@ -15,7 +15,6 @@
     clippy::type_complexity,
     reason = "test code"
 )]
-use crate::error::Home as _;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -81,7 +80,7 @@ async fn integrate_batch(
     // verdict as "disconnected, not yet closed" — an abort.
     closer.close();
     drop(tx);
-    store.integrate_loop(ch).await.home()
+    store.integrate_loop(ch).await.map_err(Into::into)
 }
 
 struct NoOpProbe;

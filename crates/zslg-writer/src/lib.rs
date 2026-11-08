@@ -25,4 +25,3 @@ error_union::error_union! {
 }
 
 error_union::error_bridge!(Error => zslg_log::Error, zslg_raft::Error; Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus);
-error_union::error_home!(Error);

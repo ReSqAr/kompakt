@@ -17,7 +17,6 @@
     reason = "test code"
 )]
 
-use crate::error::Home as _;
 use zslg_leader_snapshot::create::{SnapshotEntryInputs, SnapshotResult, create_snapshot_entry};
 use zslg_snapshot::CompressionLevel;
 
@@ -55,7 +54,7 @@ async fn integrate_batch(
     // verdict as "disconnected, not yet closed" — an abort.
     closer.close();
     drop(tx);
-    store.integrate_loop(ch).await.home()
+    store.integrate_loop(ch).await.map_err(Into::into)
 }
 
 #[derive(Debug, Clone)]

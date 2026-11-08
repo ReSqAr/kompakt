@@ -32,8 +32,8 @@ use zslg_log::LogError;
 use zslg_net::Router;
 use zslg_snapshot::SnapshotStore;
 
+use crate::Error;
 use crate::metrics::{self, SnapshotState, SnapshotStep};
-use crate::{Error, Home};
 use crossbeam_combinators::{Channel, Finite};
 use zslg_log::LogIndex;
 use zslg_log::SnapshotEntry;
@@ -176,7 +176,7 @@ pub async fn create_snapshot_entry(
                 SnapshotEntry { global_index, data }
             })
         });
-        Ok(Some((entries.home(), start_hlc)))
+        Ok(Some((entries.err_into(), start_hlc)))
     })
     .await
     .to_storage("snapshot stream scan panicked")??;
