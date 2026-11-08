@@ -389,6 +389,20 @@ pub enum ClockError {
     ClockSkewTooLarge { writer: Hlc, replica: Hlc },
 }
 
+impl ClockError {
+    /// A stable, low-cardinality label naming the variant — for metric labels
+    /// and structured logging. Keep these strings stable; they are a metric
+    /// label dimension.
+    #[must_use]
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::HlcCutoff(_) => "hlc_cutoff",
+            Self::HlcDriftTooLarge { .. } => "hlc_drift_too_large",
+            Self::ClockSkewTooLarge { .. } => "clock_skew_too_large",
+        }
+    }
+}
+
 /// Anything that may sit at an HLC: items of a stream ordered by HLC. `None`
 /// means the item is not positional and passes through without advancing the
 /// order (the contract of `Key`).

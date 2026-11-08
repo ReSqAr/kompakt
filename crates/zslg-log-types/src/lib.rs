@@ -473,6 +473,25 @@ pub enum LogError {
     QuorumReadTimeout { timeout: std::time::Duration },
 }
 
+impl LogError {
+    /// A stable, low-cardinality label naming the variant — for metric labels
+    /// and structured logging. Keep these strings stable; they are a metric
+    /// label dimension.
+    #[must_use]
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::QuorumReadTimeout { .. } => "quorum_read_timeout",
+            Self::Storage(_) => "storage",
+            Self::StableLogBehindManifest { .. } => "stable_log_behind_manifest",
+            Self::StableLogGap(_) => "stable_log_gap",
+            Self::SubscriptionStreamEnded { .. } => "subscription_stream_ended",
+            Self::Codec(_) => "codec",
+            Self::StreamTruncated { .. } => "stream_truncated",
+            Self::WriteTimeout { .. } => "write_timeout",
+        }
+    }
+}
+
 /// Adapt any displayable error into [`LogError::Codec`], prefixed with what was being done.
 pub trait ToCodec<T> {
     /// # Errors

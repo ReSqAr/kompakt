@@ -169,6 +169,18 @@ pub enum NetError {
     Rpc(String),
 }
 
+impl NetError {
+    /// A stable, low-cardinality label naming the variant — for metric labels
+    /// and structured logging. Keep these strings stable; they are a metric
+    /// label dimension.
+    #[must_use]
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Rpc(_) => "rpc",
+        }
+    }
+}
+
 /// Adapt any displayable error into [`NetError::Rpc`], prefixed with what was being done.
 pub trait ToRpc<T> {
     /// # Errors

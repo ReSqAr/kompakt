@@ -44,6 +44,23 @@ pub enum LifecycleError {
     NotYetImplemented(String),
 }
 
+impl LifecycleError {
+    /// A stable, low-cardinality label naming the variant — for metric labels
+    /// and structured logging. Keep these strings stable; they are a metric
+    /// label dimension.
+    #[must_use]
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Cancelled => "cancelled",
+            Self::StartupCancelled => "startup_cancelled",
+            Self::HardCrashDataLoss => "hard_crash_data_loss",
+            Self::NotYetImplemented(_) => "not_yet_implemented",
+            Self::Shutdown => "shutdown",
+            Self::NotReady(_) => "not_ready",
+        }
+    }
+}
+
 /// A configuration the node cannot run with.
 #[derive(Debug, Clone, PartialEq, Error, Serialize, Deserialize)]
 pub enum ConfigError {
@@ -54,4 +71,17 @@ pub enum ConfigError {
     /// Tracing or metrics initialization failed.
     #[error("observability init failed: {0}")]
     Observability(String),
+}
+
+impl ConfigError {
+    /// A stable, low-cardinality label naming the variant — for metric labels
+    /// and structured logging. Keep these strings stable; they are a metric
+    /// label dimension.
+    #[must_use]
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::InvalidConfiguration(_) => "invalid_configuration",
+            Self::Observability(_) => "observability",
+        }
+    }
 }

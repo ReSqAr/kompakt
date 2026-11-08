@@ -232,6 +232,19 @@ pub enum SnapshotError {
     Compression(String),
 }
 
+impl SnapshotError {
+    /// A stable, low-cardinality label naming the variant — for metric labels
+    /// and structured logging. Keep these strings stable; they are a metric
+    /// label dimension.
+    #[must_use]
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::ObjectStore(_) => "object_store",
+            Self::Compression(_) => "compression",
+        }
+    }
+}
+
 label_enum!(
     #[doc = "`reason` label of `OBJECT_STORE_TRANSFER_BYTES_TOTAL` — why the \
              transfer happened, named by the caller rather than inferred. \

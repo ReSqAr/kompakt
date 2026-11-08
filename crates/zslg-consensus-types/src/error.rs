@@ -69,6 +69,28 @@ pub enum ConsensusError {
     SubscriptionEnded(Box<SubscriptionEnded>),
 }
 
+impl ConsensusError {
+    /// A stable, low-cardinality label naming the variant — for metric labels
+    /// and structured logging. Keep these strings stable; they are a metric
+    /// label dimension.
+    #[must_use]
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::UnexpectedNodeId { .. } => "unexpected_node_id",
+            Self::QuorumUnreachable => "quorum_unreachable",
+            Self::StaleStateWrite { .. } => "stale_state_write",
+            Self::InvalidRaftState { .. } => "invalid_raft_state",
+            Self::StateRegression { .. } => "state_regression",
+            Self::NotLeader { .. } => "not_leader",
+            Self::UnknownPeer(_) => "unknown_peer",
+            Self::SubscriptionEnded { .. } => "subscription_ended",
+            Self::Raft(_) => "raft",
+            Self::NotAReplica { .. } => "not_a_replica",
+            Self::MembershipDenied { .. } => "membership_denied",
+        }
+    }
+}
+
 /// Payload of [`Error::UnexpectedNodeId`].
 #[derive(Debug, Clone, PartialEq, thiserror::Error, Serialize, Deserialize)]
 #[error("unexpected node id: expected={expected:?} actual={actual:?}")]

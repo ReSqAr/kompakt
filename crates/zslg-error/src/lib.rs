@@ -66,44 +66,18 @@ error_union! {
 impl Error {
     /// A stable, low-cardinality label naming the error variant — for metric
     /// labels (e.g. `loadgen_errors_total{kind=...}`) and structured logging.
-    /// Lives on the error type so new variants are classified next to their
-    /// definition. Keep these strings stable; they are a metric label dimension.
+    /// Each leaf error classifies its own variants; this only forwards.
+    /// Keep these strings stable; they are a metric label dimension.
     #[must_use]
     pub fn kind(&self) -> &'static str {
         match self {
-            Error::Config(ConfigError::InvalidConfiguration(_)) => "invalid_configuration",
-            Error::Config(ConfigError::Observability(_)) => "observability",
-            Error::Clock(ClockError::HlcCutoff(_)) => "hlc_cutoff",
-            Error::Clock(ClockError::HlcDriftTooLarge { .. }) => "hlc_drift_too_large",
-            Error::Consensus(ConsensusError::UnexpectedNodeId { .. }) => "unexpected_node_id",
-            Error::Clock(ClockError::ClockSkewTooLarge { .. }) => "clock_skew_too_large",
-            Error::Consensus(ConsensusError::QuorumUnreachable) => "quorum_unreachable",
-            Error::Consensus(ConsensusError::StaleStateWrite { .. }) => "stale_state_write",
-            Error::Consensus(ConsensusError::InvalidRaftState { .. }) => "invalid_raft_state",
-            Error::Log(LogError::QuorumReadTimeout { .. }) => "quorum_read_timeout",
-            Error::Consensus(ConsensusError::StateRegression { .. }) => "state_regression",
-            Error::Consensus(ConsensusError::NotLeader { .. }) => "not_leader",
-            Error::Log(LogError::Storage(_)) => "storage",
-            Error::Log(LogError::StableLogBehindManifest { .. }) => "stable_log_behind_manifest",
-            Error::Log(LogError::StableLogGap(_)) => "stable_log_gap",
-            Error::Snapshot(SnapshotError::ObjectStore(_)) => "object_store",
-            Error::Net(NetError::Rpc(_)) => "rpc",
-            Error::Consensus(ConsensusError::UnknownPeer(_)) => "unknown_peer",
-            Error::Consensus(ConsensusError::SubscriptionEnded { .. }) => "subscription_ended",
-            Error::Log(LogError::SubscriptionStreamEnded { .. }) => "subscription_stream_ended",
-            Error::Consensus(ConsensusError::Raft(_)) => "raft",
-            Error::Log(LogError::Codec(_)) => "codec",
-            Error::Snapshot(SnapshotError::Compression(_)) => "compression",
-            Error::Lifecycle(LifecycleError::Cancelled) => "cancelled",
-            Error::Lifecycle(LifecycleError::StartupCancelled) => "startup_cancelled",
-            Error::Lifecycle(LifecycleError::HardCrashDataLoss) => "hard_crash_data_loss",
-            Error::Log(LogError::StreamTruncated { .. }) => "stream_truncated",
-            Error::Log(LogError::WriteTimeout { .. }) => "write_timeout",
-            Error::Consensus(ConsensusError::NotAReplica { .. }) => "not_a_replica",
-            Error::Lifecycle(LifecycleError::NotYetImplemented(_)) => "not_yet_implemented",
-            Error::Consensus(ConsensusError::MembershipDenied { .. }) => "membership_denied",
-            Error::Lifecycle(LifecycleError::Shutdown) => "shutdown",
-            Error::Lifecycle(LifecycleError::NotReady(_)) => "not_ready",
+            Error::Lifecycle(e) => e.kind(),
+            Error::Config(e) => e.kind(),
+            Error::Clock(e) => e.kind(),
+            Error::Log(e) => e.kind(),
+            Error::Snapshot(e) => e.kind(),
+            Error::Net(e) => e.kind(),
+            Error::Consensus(e) => e.kind(),
         }
     }
 }
