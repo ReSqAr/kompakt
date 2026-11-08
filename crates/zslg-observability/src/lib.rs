@@ -522,11 +522,6 @@ error_union::error_union! {
     pub Error {
         Lifecycle(zslg_lifecycle_types::LifecycleError),
         Config(zslg_lifecycle_types::ConfigError),
-        Clock(zslg_time::ClockError),
-        Log(zslg_log::LogError),
-        Snapshot(zslg_snapshot::SnapshotError),
-        Net(zslg_net::NetError),
-        Consensus(zslg_consensus::ConsensusError),
     }
     into zslg_error::Error
 }

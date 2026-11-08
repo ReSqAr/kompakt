@@ -21,12 +21,11 @@ tracing = { workspace = true }
 zslg-consensus = { workspace = true }
 zslg-lifecycle-types = { workspace = true }
 zslg-log = { workspace = true }
-zslg-net = { workspace = true }
 zslg-raft = { workspace = true }
-zslg-snapshot = { workspace = true }
 zslg-time = { workspace = true }
 
 [dev-dependencies]
+zslg-snapshot = { workspace = true }
 proptest = { workspace = true }
 bytesize = { workspace = true }
 rocksdb-kit = { workspace = true, features = ["testing"] }

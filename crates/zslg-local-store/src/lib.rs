@@ -200,13 +200,13 @@ error_union! {
         Net(NetError),
         Consensus(ConsensusError),
     }
-    bridge zslg_time::Error
+    from zslg_time::Error { Clock }
     bridge zslg_log::Error
     bridge zslg_snapshot::Error
     bridge zslg_consensus::Error
     bridge zslg_raft::Error
     bridge zslg_net::Error
-    into zslg_error::Error
+    bridge zslg_error::Error
 }
 
 impl From<rocksdb_kit::StorageError> for Error {

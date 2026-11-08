@@ -28,6 +28,6 @@ error_union! {
         Consensus(ConsensusError),
     }
     bridge zslg_consensus::Error
-    into zslg_raft::Error
-    into zslg_error::Error
+    bridge zslg_raft::Error
+    bridge zslg_error::Error
 }

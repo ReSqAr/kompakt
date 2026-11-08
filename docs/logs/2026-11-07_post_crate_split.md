@@ -118,14 +118,33 @@ of an implementation with a fake (`start_cluster`) sit behind the owning assembl
 feature. A test-only crate that is only dev-dependencies (`zslg-cluster-tests`) keeps
 `unused_crate_dependencies` meaningful without `as _` lists.
 
-## Open: the error model is wider than it needs to be
+## The error model: narrowed as far as the ports allow
 
-Every port and implementation union still lists all seven leaves, so some conversions and
-signatures admit errors that cannot happen: `Clock::integrate` can report `Log` and `Net`, and
-`zslg-stable-log` depends on `zslg-net` and `zslg-raft` only to name variants it never raises.
-The unions were widened first so the split could land crate by crate, and were meant to be narrowed
-afterwards; that pass has not happened. It is a change across about sixty crates (each union, each
-`from`/`bridge`/`into`, and the port signatures), so it is a PR of its own.
+Unions were narrowed by a compiler-driven fixpoint: seed every union at a minimal set, regenerate
+its `from` / `bridge` / `into` clauses from the variant sets, compile the workspace, widen exactly
+what a failed `From` or a missing variant demands, repeat until clean (from two different seeds,
+the same answer). The result:
+
+| union | leaves |
+|---|---|
+| `zslg-time` (`Clock::integrate`) | `Clock` |
+| `zslg-object-store-config` | `Snapshot` |
+| `zslg-node-id` | `Config`, `Log` |
+| `zslg-observability` | `Config`, `Lifecycle` |
+| `zslg-raft-tracker` | `Config`, `Lifecycle`, `Net` |
+| `zslg-replica-service` | `Clock`, `Consensus`, `Lifecycle` |
+| `zslg-raft-setup`, `zslg-raft-storage` | `Config`, `Consensus`, `Lifecycle`, `Log` |
+| `zslg-writer` | `Config`, `Consensus`, `Lifecycle`, `Log`, `Net` |
+| everything else (the five ports `zslg-log`, `-net`, `-snapshot`, `-consensus`, `-raft` and the crates that implement or wrap them) | all seven |
+
+The reason the rest does not narrow is structural, not leftover: a port's error type is one type
+for every method and every implementation, so it must hold the union of what any implementation
+returns (the transport raises `Net`, the object store `Log`, a shut-down node `Lifecycle`, ...),
+and every crate that forwards a port error inherits that. `zslg-stable-log` keeps its `zslg-net` and
+`zslg-raft` dependencies for that reason. Narrowing further means per-method error types on the
+ports (a `StableLog` read fails with `Log` and `Snapshot`, a `Replica` write with `Net`, ...) — the
+"network of errors" that was rejected earlier — or reclassifying errors (the object store reports a
+panicked worker as `Log::Storage`, which is what pulls `Log` into the snapshot port).
 
 ## Conscious exceptions to the layering
 

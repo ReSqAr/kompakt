@@ -289,15 +289,15 @@ error_union::error_union! {
         Net(zslg_net::NetError),
         Consensus(zslg_consensus::ConsensusError),
     }
-    from zslg_local_store::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_stable_log::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_subscriber::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    bridge zslg_local_store::Error
+    bridge zslg_stable_log::Error
+    bridge zslg_subscriber::Error
     bridge zslg_log::Error
     bridge zslg_snapshot::Error
     bridge zslg_consensus::Error
     bridge zslg_raft::Error
     bridge zslg_quorum_read::Error
-    into zslg_error::Error
+    bridge zslg_error::Error
 }
 
 impl From<rocksdb_kit::StorageError> for Error {

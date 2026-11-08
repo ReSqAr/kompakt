@@ -5,9 +5,6 @@ use error_union::error_union;
 use zslg_consensus::ConsensusError;
 use zslg_lifecycle_types::{ConfigError, LifecycleError};
 use zslg_log::LogError;
-use zslg_net::NetError;
-use zslg_snapshot::SnapshotError;
-use zslg_time::ClockError;
 
 pub mod metrics;
 mod store;
@@ -22,10 +19,7 @@ error_union! {
     pub Error {
         Lifecycle(LifecycleError),
         Config(ConfigError),
-        Clock(ClockError),
         Log(LogError),
-        Snapshot(SnapshotError),
-        Net(NetError),
         Consensus(ConsensusError),
     }
     into zslg_error::Error

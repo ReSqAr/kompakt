@@ -88,6 +88,6 @@ error_union::error_union! {
         Net(zslg_net::NetError),
         Consensus(zslg_consensus::ConsensusError),
     }
-    from zslg_net_server::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    into zslg_error::Error
+    bridge zslg_net_server::Error
+    bridge zslg_error::Error
 }

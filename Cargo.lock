@@ -5348,7 +5348,6 @@ dependencies = [
  "zslg-lifecycle-types",
  "zslg-local-store",
  "zslg-log",
- "zslg-net",
  "zslg-net-client",
  "zslg-net-server",
  "zslg-net-wire",
@@ -5361,10 +5360,8 @@ dependencies = [
  "zslg-reader",
  "zslg-replica-log",
  "zslg-replica-service",
- "zslg-snapshot",
  "zslg-stable-log",
  "zslg-subscriber",
- "zslg-time",
  "zslg-writer",
 ]
 
@@ -5555,7 +5552,6 @@ dependencies = [
  "zslg-error",
  "zslg-lifecycle-types",
  "zslg-log",
- "zslg-net",
  "zslg-raft",
  "zslg-snapshot",
  "zslg-time",
@@ -5576,10 +5572,7 @@ dependencies = [
  "zslg-consensus",
  "zslg-error",
  "zslg-lifecycle-types",
- "zslg-log",
  "zslg-net",
- "zslg-snapshot",
- "zslg-time",
 ]
 
 [[package]]
@@ -5717,7 +5710,6 @@ dependencies = [
  "zslg-net",
  "zslg-quorum-read",
  "zslg-raft",
- "zslg-snapshot",
  "zslg-time",
 ]
 
@@ -5834,12 +5826,7 @@ name = "zslg-time"
 version = "0.1.0"
 dependencies = [
  "error-union",
- "zslg-consensus-types",
  "zslg-error",
- "zslg-lifecycle-types",
- "zslg-log-types",
- "zslg-net-types",
- "zslg-snapshot-types",
  "zslg-time-types",
 ]
 
@@ -5888,7 +5875,6 @@ dependencies = [
  "zslg-net-fake",
  "zslg-quorum-read",
  "zslg-raft",
- "zslg-snapshot",
  "zslg-time",
 ]
 

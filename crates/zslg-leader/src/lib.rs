@@ -217,5 +217,5 @@ error_union::error_union! {
     bridge zslg_log::Error
     bridge zslg_snapshot::Error
     bridge zslg_consensus::Error
-    into zslg_error::Error
+    bridge zslg_error::Error
 }

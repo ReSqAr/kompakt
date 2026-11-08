@@ -21,5 +21,5 @@ error_union::error_union! {
     }
     bridge zslg_consensus::Error
     bridge zslg_raft::Error
-    into zslg_error::Error
+    bridge zslg_error::Error
 }

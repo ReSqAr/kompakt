@@ -422,15 +422,11 @@ error_union::error_union! {
     #[derive(Debug, Clone, PartialEq)]
     pub Error {
         Lifecycle(zslg_lifecycle_types::LifecycleError),
-        Config(zslg_lifecycle_types::ConfigError),
         Clock(zslg_time::ClockError),
-        Log(zslg_log::LogError),
-        Snapshot(zslg_snapshot::SnapshotError),
-        Net(zslg_net::NetError),
         Consensus(zslg_consensus::ConsensusError),
     }
-    bridge zslg_log::Error
-    bridge zslg_raft::Error
-    bridge zslg_quorum_read::Error
+    into zslg_log::Error
+    into zslg_raft::Error
+    into zslg_quorum_read::Error
     into zslg_error::Error
 }

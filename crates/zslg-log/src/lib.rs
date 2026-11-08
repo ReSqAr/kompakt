@@ -34,9 +34,11 @@ pub use zslg_log_types::{
 pub use zslg_time_types::Admission;
 
 error_union! {
-    /// What the ports of this crate can fail with. Holds all seven leaf errors,
-    /// including ones no implementation raises (a clock cannot fail with a log
-    /// error); narrowing to the leaves actually raised is open work, see
+    /// What the ports of this crate can fail with. All seven leaves: the
+    /// implementations of these ports raise every one of them (a transport
+    /// fails with `Net`, the object store with `Log`, a shut-down node with
+    /// `Lifecycle`, ...), and a port's error type must hold what any of them
+    /// returns. Narrowing needs per-method error types; see
     /// `docs/logs/2026-11-07_post_crate_split.md`.
     #[derive(Debug, Clone, PartialEq)]
     pub Error {

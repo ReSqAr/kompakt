@@ -10,12 +10,9 @@ publish = false
 [dependencies]
 zslg-error = { workspace = true }
 error-union = { workspace = true }
-zslg-consensus-types = { workspace = true }
-zslg-lifecycle-types = { workspace = true }
-zslg-log-types = { workspace = true }
-zslg-net-types = { workspace = true }
-zslg-snapshot-types = { workspace = true }
 zslg-time-types = { workspace = true }
+
+[dev-dependencies]
 
 [lints]
 workspace = true

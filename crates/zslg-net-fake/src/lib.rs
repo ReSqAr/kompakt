@@ -365,8 +365,8 @@ error_union::error_union! {
     }
     bridge zslg_log::Error
     bridge zslg_net::Error
-    into zslg_raft::Error
-    into zslg_consensus::Error
+    bridge zslg_raft::Error
+    bridge zslg_consensus::Error
 }
 
 /// Replica stub that is always drained and caught up: cutoff at `u64::MAX`,

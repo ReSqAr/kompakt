@@ -27,7 +27,6 @@ zslg-leader-snapshot = { workspace = true }
 zslg-lifecycle-types = { workspace = true }
 zslg-local-store = { workspace = true }
 zslg-log = { workspace = true }
-zslg-net = { workspace = true }
 zslg-net-client = { workspace = true }
 zslg-net-server = { workspace = true }
 zslg-net-wire = { workspace = true }
@@ -40,10 +39,8 @@ zslg-raft-storage = { workspace = true }
 zslg-reader = { workspace = true }
 zslg-replica-log = { workspace = true }
 zslg-replica-service = { workspace = true }
-zslg-snapshot = { workspace = true }
 zslg-stable-log = { workspace = true }
 zslg-subscriber = { workspace = true }
-zslg-time = { workspace = true }
 zslg-writer = { workspace = true }
 
 [dev-dependencies]
