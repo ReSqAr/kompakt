@@ -1,15 +1,13 @@
-use crate::{
-    ArcReadTransaction, Error, IndexId, ProjectionId, ProjectionTypeId, ReadTransaction, Rows,
-    Store, TenantId, Watermark, WriteTransaction,
-};
+use crate::{ArcReadTransaction, ReadTransaction, Rows, Store, Watermark, WriteTransaction};
 use bytes::Bytes;
 use itertools::EitherOrBoth;
+use nvzn_types::{Error, IndexId, ProjectionId, ProjectionTypeId, TenantId};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::ops::Bound;
 
 #[derive(Clone, Copy)]
-pub(crate) enum IndexAction {
+pub enum IndexAction {
     Add,
     Remove,
 }
@@ -21,8 +19,8 @@ type OverlayIndex = BTreeMap<
 >;
 
 pub struct CommitBatch {
-    pub(in crate::store) overlay_store: OverlayStore,
-    pub(in crate::store) overlay_index: OverlayIndex,
+    pub overlay_store: OverlayStore,
+    pub overlay_index: OverlayIndex,
 }
 
 /// What a staged row costs beyond its payload: the key and the map's node.
@@ -31,16 +29,16 @@ const ROW_OVERHEAD: usize = 96;
 const INDEX_OVERHEAD: usize = 64;
 
 pub struct WriteTransactionImpl<'a> {
-    pub(in crate::store) read_txn: ArcReadTransaction<'a>,
+    pub read_txn: ArcReadTransaction<'a>,
     store: &'a dyn Store,
-    pub(in crate::store) overlay_store: OverlayStore,
-    pub(in crate::store) overlay_index: OverlayIndex,
+    pub overlay_store: OverlayStore,
+    pub overlay_index: OverlayIndex,
     /// [`Self::staged_bytes`].
     staged: usize,
 }
 
 impl<'a> WriteTransactionImpl<'a> {
-    pub(crate) fn new(read_txn: ArcReadTransaction<'a>, store: &'a dyn Store) -> Self {
+    pub fn new(read_txn: ArcReadTransaction<'a>, store: &'a dyn Store) -> Self {
         Self {
             read_txn,
             store,
@@ -53,12 +51,14 @@ impl<'a> WriteTransactionImpl<'a> {
     /// What the transaction holds in memory until it commits, estimated: every
     /// staged row's payload and key, every staged index entry. A row staged
     /// twice counts once, at its last payload.
-    pub(crate) fn staged_bytes(&self) -> usize {
+    #[must_use]
+    pub fn staged_bytes(&self) -> usize {
         self.staged
     }
 
     /// Every row written, deletions included.
-    pub(crate) fn written(&self) -> Vec<(TenantId, ProjectionTypeId, ProjectionId)> {
+    #[must_use]
+    pub fn written(&self) -> Vec<(TenantId, ProjectionTypeId, ProjectionId)> {
         self.overlay_store.keys().copied().collect()
     }
 

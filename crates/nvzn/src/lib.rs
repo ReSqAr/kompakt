@@ -23,11 +23,14 @@ mod dispatcher;
 mod events_tests;
 mod live;
 mod metrics;
-mod projection;
+#[cfg(test)]
+mod projection_tests;
+mod projector;
 mod reader;
 mod resultset;
 mod store;
-mod view;
+#[cfg(test)]
+mod store_tests;
 
 /// An in-process log and store, for testing against nvzn without a cluster.
 ///
@@ -44,18 +47,19 @@ pub use live::{Live, LiveLimits, Wait, is_live};
 #[cfg(feature = "prometheus")]
 pub use metrics::configure_prometheus;
 pub use metrics::{METRIC_NAMESPACE, describe_metrics, histogram_buckets};
+pub use nvzn_store::{AnyIndex, Index, Indices, Projection, Ref, View, Write};
+pub use nvzn_store::{
+    ArcReadTransaction, ArcStore, CommitBatch, ConfigHash, ReadTransaction, ReadTransactionExt,
+    Row, Rows, Store, StoreConfig, Watermark, WriteTransaction, WriteTransactionExt,
+    WriteTransactionImpl,
+};
 pub use nvzn_types::{
     APP_ID_LEN, Error, EventSet, INDEX_ID_LEN, IndexId, PROJECTION_ID_LEN, PROJECTION_TYPE_ID_LEN,
     ProjectionId, ProjectionTypeId, StopReason, SubEventOf, Tenant, TenantId, WithWireFormat,
     chained_from, define_events,
 };
 pub(crate) use nvzn_types::{FoldState, SubscriptionItem, Subscriptions, subset};
-pub use projection::{AnyIndex, Index, Indices, Projection, ProjectorManager, Ref, Write};
+pub use projector::ProjectorManager;
 pub use reader::{Reader, Snapshot};
 pub use resultset::{IndexJoin, Lazy, LazyRows, ResultSet};
-pub use store::{
-    ArcReadTransaction, ArcStore, CommitBatch, ConfigHash, InMemoryStore, ReadTransaction,
-    ReadTransactionExt, RocksDBStore, Row, Rows, Store, StoreConfig, Watermark, WriteTransaction,
-    WriteTransactionExt, WriteTransactionImpl,
-};
-pub use view::View;
+pub use store::{InMemoryStore, RocksDBStore};

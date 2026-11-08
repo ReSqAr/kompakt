@@ -1,0 +1,22 @@
+[package]
+name = "nvzn-store"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Store ports, the staging overlay and the projection vocabulary of nvzn"
+publish = false
+
+[dependencies]
+bytes = { workspace = true }
+itertools = { workspace = true }
+postcard = { workspace = true, features = ["alloc", "use-std"] }
+nvzn-types = { workspace = true }
+serde = { workspace = true }
+zslg = { workspace = true }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "ports"

@@ -11,7 +11,8 @@
 //! transaction, which is sound inside `next` because `next` returns an owned
 //! `Vec`: every borrow ends before the framework writes.
 
-use crate::{Error, Index, Projection, ReadTransaction, ReadTransactionExt, Ref, Rows, TenantId};
+use crate::{Index, Projection, ReadTransaction, ReadTransactionExt, Ref, Rows};
+use nvzn_types::{Error, TenantId};
 
 #[derive(Clone, Copy)]
 pub struct View<'a> {
@@ -20,7 +21,7 @@ pub struct View<'a> {
 }
 
 impl<'a> View<'a> {
-    pub(crate) fn new(tenant_id: TenantId, txn: &'a dyn ReadTransaction) -> Self {
+    pub fn new(tenant_id: TenantId, txn: &'a dyn ReadTransaction) -> Self {
         Self { tenant_id, txn }
     }
 

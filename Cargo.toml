@@ -100,6 +100,7 @@ warn-throttle = { path = "crates/warn-throttle" }
 pace-kit = { path = "crates/pace-kit" }
 zslg = { path = "crates/zslg" }
 nvzn-types = { path = "crates/nvzn-types" }
+nvzn-store = { path = "crates/nvzn-store" }
 zslg-consensus = { path = "crates/zslg-consensus" }
 zslg-consensus-types = { path = "crates/zslg-consensus-types" }
 zslg-lifecycle-types = { path = "crates/zslg-lifecycle-types" }

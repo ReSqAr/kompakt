@@ -1,4 +1,4 @@
-use crate::Error;
+use nvzn_types::Error;
 use std::path::PathBuf;
 use std::time::Duration;
 use zslg::ByteSize;
@@ -12,7 +12,7 @@ const RETIRE_SWEEP_DEFAULT: Duration = Duration::from_secs(60 * 60);
 const DEFAULT_MEMORY: ByteSize = ByteSize::from_mib(256);
 const DEFAULT_FLUSH_INTERVAL: Duration = Duration::from_secs(1);
 /// What a fold commit stages, at most, unless configured.
-pub(crate) const DEFAULT_FOLD_COMMIT: ByteSize = ByteSize::from_mib(4);
+pub const DEFAULT_FOLD_COMMIT: ByteSize = ByteSize::from_mib(4);
 
 #[derive(Debug, Clone)]
 pub struct StoreConfig {
@@ -63,7 +63,8 @@ impl StoreConfig {
         }
     }
 
-    pub(crate) fn memtable_budget(&self) -> u64 {
+    #[must_use]
+    pub fn memtable_budget(&self) -> u64 {
         // saturating: a budget large enough to overflow this is not a budget.
         self.memory
             .as_u64()
@@ -72,7 +73,8 @@ impl StoreConfig {
             .unwrap_or(0)
     }
 
-    pub(crate) fn write_buffer_bytes(&self, cf_count: usize) -> u64 {
+    #[must_use]
+    pub fn write_buffer_bytes(&self, cf_count: usize) -> u64 {
         if let Some(explicit) = self.write_buffer {
             return explicit.as_u64().max(MIN_WRITE_BUFFER_BYTES);
         }
@@ -83,25 +85,29 @@ impl StoreConfig {
             .max(MIN_WRITE_BUFFER_BYTES)
     }
 
-    pub(crate) fn target_file_size_bytes(&self, cf_count: usize) -> u64 {
+    #[must_use]
+    pub fn target_file_size_bytes(&self, cf_count: usize) -> u64 {
         match self.target_file_size {
             Some(explicit) => explicit.as_u64().max(1),
             None => self.write_buffer_bytes(cf_count).saturating_mul(2),
         }
     }
 
-    pub(crate) fn max_total_wal_bytes(&self) -> u64 {
+    #[must_use]
+    pub fn max_total_wal_bytes(&self) -> u64 {
         match self.max_total_wal {
             Some(explicit) => explicit.as_u64(),
             None => self.memtable_budget().saturating_mul(2).max(1024 * 1024),
         }
     }
 
-    pub(crate) fn background_jobs(&self) -> i32 {
+    #[must_use]
+    pub fn background_jobs(&self) -> i32 {
         self.max_background_jobs.unwrap_or(BACKGROUND_JOBS)
     }
 
-    pub(crate) fn open_files(&self) -> i32 {
+    #[must_use]
+    pub fn open_files(&self) -> i32 {
         if let Some(explicit) = self.max_open_files {
             return explicit;
         }
@@ -114,18 +120,20 @@ impl StoreConfig {
         i32::try_from(scaled).unwrap_or(64)
     }
 
-    pub(crate) fn retire_sweep_secs(&self) -> u64 {
+    #[must_use]
+    pub fn retire_sweep_secs(&self) -> u64 {
         self.retire_sweep
             .unwrap_or(RETIRE_SWEEP_DEFAULT)
             .as_secs()
             .max(1)
     }
 
-    pub(crate) fn fold_commit_bytes(&self) -> usize {
+    #[must_use]
+    pub fn fold_commit_bytes(&self) -> usize {
         usize::try_from(self.fold_commit.as_u64()).unwrap_or(usize::MAX)
     }
 
-    pub(crate) fn validate(&self) -> Result<(), Error> {
+    pub fn validate(&self) -> Result<(), Error> {
         if self.memory.as_u64() == 0 {
             return Err(Error::InvalidConfiguration("memory must be > 0".to_owned()));
         }

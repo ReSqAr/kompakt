@@ -1,9 +1,9 @@
-use crate::store::IndexAction;
 use crate::{
     ArcReadTransaction, CommitBatch, ConfigHash, Error, IndexId, ProjectionId, ProjectionTypeId,
     ReadTransaction, Rows, Store, TenantId, Watermark, WriteTransactionImpl,
 };
 use bytes::Bytes;
+use nvzn_store::IndexAction;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Bound;
 use std::sync::{Arc, RwLock};

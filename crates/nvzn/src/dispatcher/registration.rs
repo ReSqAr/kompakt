@@ -12,7 +12,7 @@
 //! state's shape. Length prefixes keep the two sets from aliasing.
 
 use super::{Dispatcher, Encoder, EventWriter};
-use crate::projection::fold_event;
+use crate::projector::fold_event;
 use crate::{
     ConfigHash, Error, IndexId, Projection, ProjectionTypeId, ProjectorManager, Reader, SubEventOf,
     TenantId, WithWireFormat, WriteTransactionImpl,

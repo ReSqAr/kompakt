@@ -33,7 +33,7 @@ use crate::APP_ID_LEN;
 use crate::FoldState;
 use crate::StopReason;
 use crate::metrics::{self, ReadKind};
-use crate::projection::{BoxedProjectorLike, fold_event};
+use crate::projector::{BoxedProjectorLike, fold_event};
 use crate::subset;
 use crate::{
     ArcStore, Error, EventSet, Projection, ProjectionTypeId, Snapshot, Tenant, TenantId, Watermark,

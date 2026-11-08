@@ -1,7 +1,7 @@
 use crate::dispatcher::PENDING_SUBSCRIBERS;
 use crate::live::{self, Live, LiveLimits};
 use crate::metrics::{self, ReadKind};
-use crate::projection::Registered;
+use crate::projector::Registered;
 use crate::subset;
 use crate::{
     ArcReadTransaction, ArcStore, Error, EventSet, Index, Projection, ProjectionTypeId,
@@ -12,13 +12,6 @@ use crossbeam_combinators::{Channel, Infinite, RegistryError};
 use std::collections::{BTreeMap, BTreeSet};
 use std::marker::PhantomData;
 use std::sync::Arc;
-
-pub(crate) fn reference_not_found<P: Projection>(r: Ref<P>) -> Error {
-    Error::ReferenceNotFound {
-        pid: r.id(),
-        type_name: std::any::type_name::<P>(),
-    }
-}
 
 /// One tenant's read side, typed by the tenant's event type `Ev` like the
 /// [`EventWriter`](crate::EventWriter) handed out beside it.

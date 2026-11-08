@@ -150,7 +150,7 @@ impl Dispatcher {
             registered_projection_types: BTreeSet::new(),
             registered_indices: BTreeSet::new(),
             flush_interval,
-            fold_commit: crate::store::DEFAULT_FOLD_COMMIT
+            fold_commit: nvzn_store::DEFAULT_FOLD_COMMIT
                 .as_u64()
                 .try_into()
                 .unwrap_or(usize::MAX),
