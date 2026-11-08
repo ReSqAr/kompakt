@@ -85,8 +85,9 @@ Deviations from design §9 (all forced by the code, not by preference):
   dump captured before the move pins names, kinds, units and help.
 - **`TestLog`** moved to `zslg-log-fake` and is published as `zslg::testing`;
   `nvzn::testing` re-exports it, so nlnr's path is unchanged.
-- **Layering:** crates named `nvzn*` may depend on the `zslg` facade (D11); no
-  other crate may.
+- **Layering:** from the nvzn family's point of view the `zslg` facade is a
+  library (D11): the role table treats the edge as `-> library`, and
+  `families_do_not_reach_into_each_other` allows nothing else of zslg.
 - **Tests:** those that need the test projections *and* the dispatcher stay in
   the facade or the dispatcher crate; white-box store tests live with the store.
 

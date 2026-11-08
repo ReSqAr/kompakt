@@ -551,7 +551,8 @@ It lands in the first commit, so every later commit is checked. A
 
 Same rules (D12). nvzn has one domain and one error leaf, so it has no
 types/ports split and no unions; its `Error` lives in `nvzn-types`. nvzn depends
-on zslg only through the `zslg` facade (D11) and may use any library.
+on zslg only through the `zslg` facade (D11), which from nvzn's point of view
+is a library, and may use any library.
 
 | crate | role | source |
 |---|---|---|

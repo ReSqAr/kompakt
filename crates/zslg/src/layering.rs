@@ -178,7 +178,14 @@ fn every_dependency_is_allowed_by_the_role_table() {
     let mut violations = Vec::new();
     for k in &krates {
         for d in &k.deps {
-            let to = roles[d.name.as_str()];
+            // From the nvzn family's point of view the `zslg` facade is a library
+            // (D11); `families_do_not_reach_into_each_other` pins that nothing else
+            // of zslg is reachable.
+            let to = if family(&k.name) == Some("nvzn") && d.name == "zslg" {
+                Role::Library
+            } else {
+                roles[d.name.as_str()]
+            };
             let mut allowed: Vec<Role> = k.role.may_depend_on().to_vec();
             if d.dev {
                 allowed.extend_from_slice(k.role.dev_extra());
@@ -192,11 +199,6 @@ fn every_dependency_is_allowed_by_the_role_table() {
             // The one ports -> ports edge (`ReplicaClient` bundles four groups);
             // `only_zslg_net_bundles_ports` pins who may have it.
             if k.name == "zslg-net" && to == Role::Ports {
-                continue;
-            }
-            // The nvzn family is built on zslg's public API (D11): it may use the
-            // `zslg` facade, and no other crate may.
-            if k.name.starts_with("nvzn") && d.name == "zslg" {
                 continue;
             }
             if !allowed.contains(&to) {
