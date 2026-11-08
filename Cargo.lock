@@ -2138,10 +2138,14 @@ dependencies = [
 name = "nvzn-fixtures"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "bytes",
+ "crossbeam-channel",
+ "crossbeam-combinators",
  "nvzn-store",
  "nvzn-types",
  "serde",
+ "zslg",
 ]
 
 [[package]]

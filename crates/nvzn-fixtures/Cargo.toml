@@ -8,6 +8,10 @@ description = "Test events and projections shared by the nvzn crates' tests"
 publish = false
 
 [dependencies]
+crossbeam-channel = { workspace = true }
+crossbeam-combinators = { workspace = true }
+async-trait = { workspace = true }
+zslg = { workspace = true }
 bytes = { workspace = true }
 nvzn-store = { workspace = true }
 nvzn-types = { workspace = true }
