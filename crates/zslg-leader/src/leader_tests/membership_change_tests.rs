@@ -24,10 +24,7 @@ use async_trait::async_trait;
 use parking_lot::Mutex as SyncMutex;
 use tokio_util::sync::CancellationToken;
 
-use crate::raft::RaftNode;
-use crate::tests::{
-    fast_raft_config as raft_config, wait_for_any_leader, wait_for_leader, wait_until,
-};
+use testing_kit::wait_until;
 use zslg_consensus::NodeId;
 use zslg_consensus::RaftStateHandle;
 use zslg_consensus::ReplicatedRaftState;
@@ -38,6 +35,10 @@ use zslg_leader_membership::{
 };
 use zslg_leader_membership::{MembershipDriver, MembershipObserver, TickOutcome};
 use zslg_net::ServerName;
+use zslg_raft_setup::RaftNode;
+use zslg_raft_setup::testing::{
+    fast_raft_config as raft_config, wait_for_any_leader, wait_for_leader,
+};
 use zslg_time::Hlc;
 
 struct LocalObserver {
@@ -48,7 +49,7 @@ struct LocalObserver {
 }
 
 impl LocalObserver {
-    fn from_systems(nodes: &BTreeMap<NodeId, crate::tests::TestNode>) -> Arc<Self> {
+    fn from_systems(nodes: &BTreeMap<NodeId, zslg_raft_setup::testing::TestNode>) -> Arc<Self> {
         let mut map = BTreeMap::new();
         for (id, sys) in nodes {
             map.insert(*id, sys.raft_state.clone());
@@ -128,7 +129,7 @@ impl StaticLeadership {
 }
 
 impl StaticLeadership {
-    pub(crate) async fn remove_member_in(&self, _node_id: NodeId) -> Result<(), crate::Error> {
+    pub(crate) async fn remove_member_in(&self, _node_id: NodeId) -> Result<(), zslg_error::Error> {
         Ok(())
     }
 }
@@ -157,7 +158,7 @@ impl RaftLeadership for StaticLeadership {
 
 fn build_inputs(
     self_id: NodeId,
-    sys: &crate::tests::TestNode,
+    sys: &zslg_raft_setup::testing::TestNode,
     observer: Arc<dyn MembershipObserver>,
     live: BTreeSet<NodeId>,
 ) -> (MembershipChangeInputs, CancellationToken) {
@@ -166,7 +167,7 @@ fn build_inputs(
 
 fn build_inputs_with_replica_count(
     self_id: NodeId,
-    sys: &crate::tests::TestNode,
+    sys: &zslg_raft_setup::testing::TestNode,
     observer: Arc<dyn MembershipObserver>,
     live: BTreeSet<NodeId>,
     replica_node_count: u32,
@@ -184,7 +185,7 @@ fn build_inputs_with_replica_count(
 
 fn build_inputs_with_leadership(
     self_id: NodeId,
-    sys: &crate::tests::TestNode,
+    sys: &zslg_raft_setup::testing::TestNode,
     observer: Arc<dyn MembershipObserver>,
     live: BTreeSet<NodeId>,
     replica_node_count: u32,
@@ -192,7 +193,7 @@ fn build_inputs_with_leadership(
 ) -> (MembershipChangeInputs, CancellationToken) {
     // The real publish path: every membership step goes through the integrator,
     // so these tests exercise its transition validation too.
-    let (intents, integrator_cancel) = crate::leader::Integrator::spawn_for_test(
+    let (intents, integrator_cancel) = crate::Integrator::spawn_for_test(
         Arc::new(RaftNode::new(
             sys.raft.clone(),
             zslg_consensus_fake::permissive_gate(),
@@ -218,18 +219,18 @@ async fn three_to_five_full_transition_via_state_handle() {
     let ids: [NodeId; 5] = std::array::from_fn(|_| NodeId::new_v4());
     let [n1, _, _, _, _] = ids;
 
-    let mut nodes = crate::tests::start_cluster(&ids, raft_config())
+    let mut nodes = zslg_raft_setup::testing::start_cluster(&ids, raft_config())
         .await
         .expect("cluster");
     let leader_raft = nodes.get(&n1).expect("n1").raft.clone();
     leader_raft
-        .initialize(crate::tests::test_membership_map(&ids))
+        .initialize(zslg_raft_fake::test_membership_map(&ids))
         .await
         .expect("init");
     wait_for_leader(&leader_raft, n1).await;
 
     let initial: BTreeSet<NodeId> = ids[..3].iter().copied().collect();
-    crate::tests::write_state_fenced(
+    zslg_raft_setup::testing::write_state_fenced(
         &leader_raft,
         &nodes.get(&n1).expect("n1").raft_state,
         ReplicatedRaftState {
@@ -334,18 +335,18 @@ async fn invariant_joint_exit_waits_for_the_old_set_to_be_drained() {
     let ids: [NodeId; 5] = std::array::from_fn(|_| NodeId::new_v4());
     let [n1, _, _, _, _] = ids;
 
-    let mut nodes = crate::tests::start_cluster(&ids, raft_config())
+    let mut nodes = zslg_raft_setup::testing::start_cluster(&ids, raft_config())
         .await
         .expect("cluster");
     let leader_raft = nodes.get(&n1).expect("n1").raft.clone();
     leader_raft
-        .initialize(crate::tests::test_membership_map(&ids))
+        .initialize(zslg_raft_fake::test_membership_map(&ids))
         .await
         .expect("init");
     wait_for_leader(&leader_raft, n1).await;
 
     let initial: BTreeSet<NodeId> = ids[..3].iter().copied().collect();
-    crate::tests::write_state_fenced(
+    zslg_raft_setup::testing::write_state_fenced(
         &leader_raft,
         &nodes.get(&n1).expect("n1").raft_state,
         ReplicatedRaftState {
@@ -485,18 +486,18 @@ async fn retarget_disarms_the_exit_condition_and_rearms_monotonically() {
     let ids: [NodeId; 5] = std::array::from_fn(|_| NodeId::new_v4());
     let [n1, _, _, _, _] = ids;
 
-    let mut nodes = crate::tests::start_cluster(&ids, raft_config())
+    let mut nodes = zslg_raft_setup::testing::start_cluster(&ids, raft_config())
         .await
         .expect("cluster");
     let leader_raft = nodes.get(&n1).expect("n1").raft.clone();
     leader_raft
-        .initialize(crate::tests::test_membership_map(&ids))
+        .initialize(zslg_raft_fake::test_membership_map(&ids))
         .await
         .expect("init");
     wait_for_leader(&leader_raft, n1).await;
 
     let initial: BTreeSet<NodeId> = ids[..3].iter().copied().collect();
-    crate::tests::write_state_fenced(
+    zslg_raft_setup::testing::write_state_fenced(
         &leader_raft,
         &nodes.get(&n1).expect("n1").raft_state,
         ReplicatedRaftState {
@@ -600,18 +601,18 @@ async fn resume_from_joint_after_leader_killed_mid_step() {
     let ids: [NodeId; 5] = std::array::from_fn(|_| NodeId::new_v4());
     let [n1, n2, _, _, _] = ids;
 
-    let mut nodes = crate::tests::start_cluster(&ids, raft_config())
+    let mut nodes = zslg_raft_setup::testing::start_cluster(&ids, raft_config())
         .await
         .expect("cluster");
     let leader_raft = nodes.get(&n1).expect("n1").raft.clone();
     leader_raft
-        .initialize(crate::tests::test_membership_map(&ids))
+        .initialize(zslg_raft_fake::test_membership_map(&ids))
         .await
         .expect("init");
     wait_for_leader(&leader_raft, n1).await;
 
     let initial: BTreeSet<NodeId> = ids[..3].iter().copied().collect();
-    crate::tests::write_state_fenced(
+    zslg_raft_setup::testing::write_state_fenced(
         &leader_raft,
         &nodes.get(&n1).expect("n1").raft_state,
         ReplicatedRaftState {
@@ -640,7 +641,7 @@ async fn resume_from_joint_after_leader_killed_mid_step() {
 
     let target: BTreeSet<NodeId> = ids.iter().copied().collect();
 
-    crate::tests::write_state_fenced(
+    zslg_raft_setup::testing::write_state_fenced(
         &leader_raft,
         &nodes.get(&n1).expect("n1").raft_state,
         ReplicatedRaftState {
@@ -731,17 +732,17 @@ async fn resume_from_joint_after_leader_killed_mid_step() {
 /// recorder.
 #[test]
 fn retarget_is_needed_only_when_an_incoming_member_is_not_live() {
-    let next: BTreeSet<NodeId> = [crate::tests::nid(3), crate::tests::nid(4)]
+    let next: BTreeSet<NodeId> = [zslg_consensus_fake::nid(3), zslg_consensus_fake::nid(4)]
         .into_iter()
         .collect();
     let all_live: BTreeSet<NodeId> = [
-        crate::tests::nid(1),
-        crate::tests::nid(3),
-        crate::tests::nid(4),
+        zslg_consensus_fake::nid(1),
+        zslg_consensus_fake::nid(3),
+        zslg_consensus_fake::nid(4),
     ]
     .into_iter()
     .collect();
-    let one_dead: BTreeSet<NodeId> = [crate::tests::nid(1), crate::tests::nid(3)]
+    let one_dead: BTreeSet<NodeId> = [zslg_consensus_fake::nid(1), zslg_consensus_fake::nid(3)]
         .into_iter()
         .collect();
     assert!(!needs_retarget(&next, &all_live));
@@ -761,18 +762,18 @@ async fn a_retarget_increments_the_retarget_counter() {
     let ids: [NodeId; 5] = std::array::from_fn(|_| NodeId::new_v4());
     let [n1, _, _, _, _] = ids;
 
-    let mut nodes = crate::tests::start_cluster(&ids, raft_config())
+    let mut nodes = zslg_raft_setup::testing::start_cluster(&ids, raft_config())
         .await
         .expect("cluster");
     let leader_raft = nodes.get(&n1).expect("n1").raft.clone();
     leader_raft
-        .initialize(crate::tests::test_membership_map(&ids))
+        .initialize(zslg_raft_fake::test_membership_map(&ids))
         .await
         .expect("init");
     wait_for_leader(&leader_raft, n1).await;
 
     let initial: BTreeSet<NodeId> = ids[..3].iter().copied().collect();
-    crate::tests::write_state_fenced(
+    zslg_raft_setup::testing::write_state_fenced(
         &leader_raft,
         &nodes.get(&n1).expect("n1").raft_state,
         ReplicatedRaftState {
@@ -885,16 +886,16 @@ async fn reconciliation_drops_evicted_member_from_the_replicated_set() {
     let [n1, n2, n3, n4, n5] = ids;
     let initial: BTreeSet<NodeId> = [n1, n2, n3].into_iter().collect();
 
-    let mut nodes = crate::tests::start_cluster(&ids, raft_config())
+    let mut nodes = zslg_raft_setup::testing::start_cluster(&ids, raft_config())
         .await
         .expect("cluster");
     let leader_raft = nodes.get(&n1).expect("n1").raft.clone();
     leader_raft
-        .initialize(crate::tests::test_membership_map(&ids))
+        .initialize(zslg_raft_fake::test_membership_map(&ids))
         .await
         .expect("init");
     wait_for_leader(&leader_raft, n1).await;
-    crate::tests::write_state_fenced(
+    zslg_raft_setup::testing::write_state_fenced(
         &leader_raft,
         &nodes.get(&n1).expect("n1").raft_state,
         ReplicatedRaftState {
@@ -955,16 +956,16 @@ async fn reconciliation_floor_no_proposal_when_voters_below_target_size() {
     let [n1, n2, n3, n4, n5] = ids;
     let initial: BTreeSet<NodeId> = [n1, n2, n3].into_iter().collect();
 
-    let mut nodes = crate::tests::start_cluster(&ids, raft_config())
+    let mut nodes = zslg_raft_setup::testing::start_cluster(&ids, raft_config())
         .await
         .expect("cluster");
     let leader_raft = nodes.get(&n1).expect("n1").raft.clone();
     leader_raft
-        .initialize(crate::tests::test_membership_map(&ids))
+        .initialize(zslg_raft_fake::test_membership_map(&ids))
         .await
         .expect("init");
     wait_for_leader(&leader_raft, n1).await;
-    crate::tests::write_state_fenced(
+    zslg_raft_setup::testing::write_state_fenced(
         &leader_raft,
         &nodes.get(&n1).expect("n1").raft_state,
         ReplicatedRaftState {
@@ -1025,12 +1026,12 @@ async fn reconciliation_retargets_a_next_member_evicted_from_voters() {
     let initial: BTreeSet<NodeId> = [n1, n2, n3].into_iter().collect();
     let next_set: BTreeSet<NodeId> = [n2, n3, n4].into_iter().collect();
 
-    let mut nodes = crate::tests::start_cluster(&ids, raft_config())
+    let mut nodes = zslg_raft_setup::testing::start_cluster(&ids, raft_config())
         .await
         .expect("cluster");
     let leader_raft = nodes.get(&n1).expect("n1").raft.clone();
     leader_raft
-        .initialize(crate::tests::test_membership_map(&ids))
+        .initialize(zslg_raft_fake::test_membership_map(&ids))
         .await
         .expect("init");
     wait_for_leader(&leader_raft, n1).await;
@@ -1041,7 +1042,7 @@ async fn reconciliation_retargets_a_next_member_evicted_from_voters() {
     // arm, so seeding `Joint` straight away is rejected as
     // `JointEntryWrongOldSet`. Same two-step shape as
     // `resume_from_joint_after_leader_killed_mid_step`.
-    crate::tests::write_state_fenced(
+    zslg_raft_setup::testing::write_state_fenced(
         &leader_raft,
         &nodes.get(&n1).expect("n1").raft_state,
         ReplicatedRaftState {
@@ -1053,7 +1054,7 @@ async fn reconciliation_retargets_a_next_member_evicted_from_voters() {
     )
     .await
     .expect("seed single");
-    crate::tests::write_state_fenced(
+    zslg_raft_setup::testing::write_state_fenced(
         &leader_raft,
         &nodes.get(&n1).expect("n1").raft_state,
         ReplicatedRaftState {

@@ -29,24 +29,25 @@ use uuid::Uuid;
 
 use zslg_log::{LocalStoreMut, StableLogSnapshot};
 
-use crate::learner::LocalStore;
-use crate::learner::integrate_manifest_for_test;
 use zslg_leader_snapshot::create::{SnapshotEntryInputs, SnapshotResult, create_snapshot_entry};
+use zslg_learner::LocalStore;
+use zslg_learner::testing::integrate_manifest_for_test;
 use zslg_log::Data;
 use zslg_log::DataId;
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use zslg_snapshot::CompressionLevel;
 
-use crate::tests::commit_snapshot_result;
-use crate::tests::fast_raft_config as raft_config;
-use crate::tests::{upstream, wait_for_leader};
+use super::snapshot_harness::commit_snapshot_result;
 use bytes::Bytes;
+use zslg_consensus_fake::upstream;
+use zslg_raft_setup::testing::fast_raft_config as raft_config;
+use zslg_raft_setup::testing::wait_for_leader;
 
 async fn integrate_batch(
     store: &LocalStore,
     source: NodeId,
     records: Vec<(LogIndex, Data)>,
-) -> Result<(), crate::Error> {
+) -> Result<(), zslg_error::Error> {
     if records.is_empty() {
         return Ok(());
     }
@@ -79,24 +80,24 @@ fn make_data(seed: u32, hlc_ms: u64, blob: &[u8]) -> Data {
 #[tokio::test]
 async fn compaction_merges_and_preserves_stable_log_contents() {
     let n1 = NodeId::new_v4();
-    let mut nodes = crate::tests::start_cluster(&[n1], raft_config())
+    let mut nodes = zslg_raft_setup::testing::start_cluster(&[n1], raft_config())
         .await
         .expect("cluster");
     nodes
         .get_mut(&n1)
         .expect("n1")
         .raft
-        .initialize(crate::tests::test_membership_map(&[n1]))
+        .initialize(zslg_raft_fake::test_membership_map(&[n1]))
         .await
         .expect("initialize");
     wait_for_leader(&nodes.get(&n1).expect("n1").raft, n1).await;
     let leader = nodes.remove(&n1).expect("n1");
 
     let dir = tempfile::tempdir().expect("tempdir");
-    let local_store = crate::tests::local_store_at(dir.path().join("local.stable"))
+    let local_store = zslg_learner::testing::local_store_at(dir.path().join("local.stable"))
         .await
         .expect("from_db");
-    let stable_log = crate::tests::stable_log_at(&dir.path().join("stable.db")).await;
+    let stable_log = zslg_learner::testing::stable_log_at(&dir.path().join("stable.db")).await;
     let object_store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
     let ss: Arc<dyn SnapshotStore> = Arc::new(RemoteSnapshotStore::new(
         SnapshotStoreConfig {
@@ -153,9 +154,10 @@ async fn compaction_merges_and_preserves_stable_log_contents() {
     let pre_state = leader.raft_state.snapshot();
     let pre_manifest_state = pre_state.manifest_state.clone();
     let learner_pre_dir = tempfile::tempdir().expect("tempdir");
-    let learner_pre = crate::tests::stable_log_engine(learner_pre_dir.path().join("stable.stable"))
-        .await
-        .expect("open stable log");
+    let learner_pre =
+        zslg_learner::testing::stable_log_engine(learner_pre_dir.path().join("stable.stable"))
+            .await
+            .expect("open stable log");
     integrate_manifest_for_test(ss.clone(), &learner_pre, &pre_manifest_state)
         .await
         .expect("load pre");
@@ -171,8 +173,8 @@ async fn compaction_merges_and_preserves_stable_log_contents() {
         .expect("range pre");
     assert_eq!(pre_entries.len(), all_entries.len());
 
-    let (intents, _integrator_cancel) = crate::leader::Integrator::spawn_for_test(
-        Arc::new(crate::raft::RaftNode::new(
+    let (intents, _integrator_cancel) = crate::Integrator::spawn_for_test(
+        Arc::new(zslg_raft_setup::RaftNode::new(
             leader.raft.clone(),
             zslg_consensus_fake::permissive_gate(),
             std::time::Duration::from_secs(30),
@@ -231,7 +233,7 @@ async fn compaction_merges_and_preserves_stable_log_contents() {
 
     let learner_post_dir = tempfile::tempdir().expect("tempdir");
     let learner_post =
-        crate::tests::stable_log_engine(learner_post_dir.path().join("stable.stable"))
+        zslg_learner::testing::stable_log_engine(learner_post_dir.path().join("stable.stable"))
             .await
             .expect("from_db");
     integrate_manifest_for_test(ss.clone(), &learner_post, &post_manifest_state)
@@ -263,24 +265,24 @@ async fn compaction_merges_and_preserves_stable_log_contents() {
 #[tokio::test]
 async fn compaction_no_op_when_no_groups_can_merge() {
     let n1 = NodeId::new_v4();
-    let mut nodes = crate::tests::start_cluster(&[n1], raft_config())
+    let mut nodes = zslg_raft_setup::testing::start_cluster(&[n1], raft_config())
         .await
         .expect("cluster");
     nodes
         .get_mut(&n1)
         .expect("n1")
         .raft
-        .initialize(crate::tests::test_membership_map(&[n1]))
+        .initialize(zslg_raft_fake::test_membership_map(&[n1]))
         .await
         .expect("initialize");
     wait_for_leader(&nodes.get(&n1).expect("n1").raft, n1).await;
     let leader = nodes.remove(&n1).expect("n1");
 
     let dir = tempfile::tempdir().expect("tempdir");
-    let local_store = crate::tests::local_store_at(dir.path().join("local.stable"))
+    let local_store = zslg_learner::testing::local_store_at(dir.path().join("local.stable"))
         .await
         .expect("from_db");
-    let stable_log = crate::tests::stable_log_at(&dir.path().join("stable.db")).await;
+    let stable_log = zslg_learner::testing::stable_log_at(&dir.path().join("stable.db")).await;
     let object_store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
     let ss: Arc<dyn SnapshotStore> = Arc::new(RemoteSnapshotStore::new(
         SnapshotStoreConfig {
@@ -314,8 +316,8 @@ async fn compaction_no_op_when_no_groups_can_merge() {
     };
     let pre_manifest = leader.raft_state.snapshot().manifest_state.manifest.clone();
 
-    let (intents, _integrator_cancel) = crate::leader::Integrator::spawn_for_test(
-        Arc::new(crate::raft::RaftNode::new(
+    let (intents, _integrator_cancel) = crate::Integrator::spawn_for_test(
+        Arc::new(zslg_raft_setup::RaftNode::new(
             leader.raft.clone(),
             zslg_consensus_fake::permissive_gate(),
             std::time::Duration::from_secs(30),

@@ -29,14 +29,7 @@ use object_store::memory::InMemory;
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
-use crate::leader::{LeaderLoopConfig, SnapshotConfig, spawn_leader_loop};
-use crate::learner::LocalStore;
-use crate::learner::StableLog;
-use crate::learner::integrate_manifest_for_test;
-use crate::network::{LocalReplicaClient, PeerRouter, RemoteRouter};
-use crate::raft::RaftNode;
-use crate::replica::ReplicaLogStore;
-use crate::replica::ReplicaService;
+use crate::{LeaderLoopConfig, SnapshotConfig, spawn_leader_loop};
 use shutdown::Shutdown;
 use zslg_consensus::NodeId;
 use zslg_consensus::ReplicaMembership;
@@ -47,27 +40,34 @@ use zslg_hlc_gate::CutoffApplier;
 use zslg_hlc_gate::HlcGate;
 use zslg_leader_membership::LivenessConfig;
 use zslg_leader_membership::MembershipConfig;
+use zslg_learner::LocalStore;
+use zslg_learner::StableLog;
+use zslg_learner::testing::integrate_manifest_for_test;
 use zslg_log::LogIndex;
 use zslg_log::SnapshotEntry;
 use zslg_log::{LocalStoreMut, StableLogSnapshot};
 use zslg_net::PeerAddr;
+use zslg_net_setup::{LocalReplicaClient, PeerRouter, RemoteRouter};
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use zslg_peers::static_peers;
+use zslg_raft_setup::RaftNode;
+use zslg_replica_log::ReplicaLogStore;
+use zslg_replica_service::ReplicaService;
 use zslg_snapshot::CompactionTier;
 use zslg_snapshot::SnapshotId;
 use zslg_snapshot::SnapshotMetadata;
 use zslg_time::{Hlc, HlcParts};
 
-use crate::tests::fast_raft_config as raft_config;
-use crate::tests::make_data;
-use crate::tests::wait_for_leader;
-use crate::tests::wait_until;
+use testing_kit::wait_until;
+use zslg_log_fake::make_data;
+use zslg_raft_setup::testing::fast_raft_config as raft_config;
+use zslg_raft_setup::testing::wait_for_leader;
 
 async fn integrate_batch(
     store: &LocalStore,
     source: NodeId,
     records: Vec<(LogIndex, Data)>,
-) -> Result<(), crate::Error> {
+) -> Result<(), zslg_error::Error> {
     if records.is_empty() {
         return Ok(());
     }
@@ -86,7 +86,7 @@ async fn integrate_batch(
 struct NoOpProbe;
 
 impl NoOpProbe {
-    pub(crate) async fn probe_in(&self) -> Result<(), crate::Error> {
+    pub(crate) async fn probe_in(&self) -> Result<(), zslg_error::Error> {
         Ok(())
     }
 }
@@ -110,13 +110,14 @@ struct PerNode {
 
 async fn build_per_node() -> PerNode {
     let tempdir = tempfile::tempdir().expect("tempdir");
-    let local_store = crate::tests::local_store_at(tempdir.path().join("local.stable"))
+    let local_store = zslg_learner::testing::local_store_at(tempdir.path().join("local.stable"))
         .await
         .expect("from_db");
 
-    let stable_log = crate::tests::stable_log_at(&tempdir.path().join("stable.db")).await;
+    let stable_log = zslg_learner::testing::stable_log_at(&tempdir.path().join("stable.db")).await;
     let (replica_log, _flush) = ReplicaLogStore::open_with_flush(
-        crate::database::open_for_test(&tempdir.path().join("replica-log")).expect("storage"),
+        super::snapshot_harness::open_replica_storage(&tempdir.path().join("replica-log"))
+            .expect("storage"),
         CancellationToken::new(),
     )
     .await
@@ -151,7 +152,7 @@ fn make_remote_router(clock: Arc<HlcClock>) -> Arc<RemoteRouter> {
 /// the token with the `Shutdown` makes that impossible to get wrong here.
 struct LeaderTasks {
     cancel: CancellationToken,
-    shutdown: Shutdown<crate::Error>,
+    shutdown: Shutdown<zslg_error::Error>,
 }
 
 impl LeaderTasks {
@@ -173,7 +174,7 @@ impl LeaderTasks {
 /// and the loopback replica client, which the router holds only by `Weak`.
 fn spawn_loop(
     self_node_id: NodeId,
-    sys: &crate::tests::TestNode,
+    sys: &zslg_raft_setup::testing::TestNode,
     storage: &PerNode,
     clock: Arc<HlcClock>,
     remote_router: Arc<RemoteRouter>,
@@ -182,7 +183,7 @@ fn spawn_loop(
     membership_poll_interval: Duration,
 ) -> (
     LeaderTasks,
-    Shutdown<crate::Error>,
+    Shutdown<zslg_error::Error>,
     Arc<dyn zslg_net::ReplicaClient>,
 ) {
     let (drained_cutoff_tx, drained_cutoff_rx) =
@@ -195,7 +196,7 @@ fn spawn_loop(
             drained_cutoff_tx,
             applier_cancel.clone(),
         )
-        .run::<crate::Error>(),
+        .run::<zslg_error::Error>(),
     );
 
     let replica = Arc::new(ReplicaService::new(
@@ -218,12 +219,12 @@ fn spawn_loop(
         )),
         Arc::new(sys.raft_state.clone()),
     ));
-    let server_addr = crate::network::bind_server(
+    let server_addr = zslg_net_setup::bind_server(
         self_client.clone(),
         clock.clone(),
-        crate::network::RpcServerConfig {
+        zslg_net_setup::RpcServerConfig {
             listen_addr: "127.0.0.1:0".parse().expect("addr"),
-            socket_opts: crate::network::SocketOpts::for_test(),
+            socket_opts: zslg_net_setup::SocketOpts::for_test(),
             node_id: self_node_id,
         },
         &mut server_shutdown,
@@ -313,18 +314,18 @@ async fn leader_loop_only_progresses_on_leader_and_resumes_after_switch() {
     let n2 = NodeId::new_v4();
     let ids = [n1, n2];
 
-    let mut nodes = crate::tests::start_cluster(&ids, raft_config())
+    let mut nodes = zslg_raft_setup::testing::start_cluster(&ids, raft_config())
         .await
         .expect("cluster");
     let n1_raft = nodes.get(&n1).expect("n1").raft.clone();
     n1_raft
-        .initialize(crate::tests::test_membership_map(&ids))
+        .initialize(zslg_raft_fake::test_membership_map(&ids))
         .await
         .expect("init");
     wait_for_leader(&n1_raft, n1).await;
 
     let replicas: std::collections::BTreeSet<NodeId> = [n1].into_iter().collect();
-    crate::tests::write_state_fenced(
+    zslg_raft_setup::testing::write_state_fenced(
         &n1_raft,
         &nodes.get(&n1).expect("n1").raft_state,
         ReplicatedRaftState {
@@ -430,12 +431,12 @@ async fn leader_loop_compacts_manifest() {
     let n1 = NodeId::new_v4();
     let ids = [n1];
 
-    let nodes = crate::tests::start_cluster(&ids, raft_config())
+    let nodes = zslg_raft_setup::testing::start_cluster(&ids, raft_config())
         .await
         .expect("cluster");
     let n1_raft = nodes.get(&n1).expect("n1").raft.clone();
     n1_raft
-        .initialize(crate::tests::test_membership_map(&ids))
+        .initialize(zslg_raft_fake::test_membership_map(&ids))
         .await
         .expect("init");
     wait_for_leader(&n1_raft, n1).await;
@@ -501,7 +502,7 @@ async fn leader_loop_compacts_manifest() {
     }
 
     let replicas: std::collections::BTreeSet<NodeId> = [n1].into_iter().collect();
-    crate::tests::write_state_fenced(
+    zslg_raft_setup::testing::write_state_fenced(
         &n1_raft,
         &nodes.get(&n1).expect("n1").raft_state,
         ReplicatedRaftState {
@@ -552,12 +553,12 @@ async fn leader_loop_completes_membership_change_via_state_events() {
     let n1 = NodeId::new_v4();
     let ids = [n1];
 
-    let nodes = crate::tests::start_cluster(&ids, raft_config())
+    let nodes = zslg_raft_setup::testing::start_cluster(&ids, raft_config())
         .await
         .expect("cluster");
     let n1_raft = nodes.get(&n1).expect("n1").raft.clone();
     n1_raft
-        .initialize(crate::tests::test_membership_map(&ids))
+        .initialize(zslg_raft_fake::test_membership_map(&ids))
         .await
         .expect("init");
     wait_for_leader(&n1_raft, n1).await;
@@ -567,7 +568,7 @@ async fn leader_loop_completes_membership_change_via_state_events() {
     // config's outgoing set to be the set that was actually in force
     // (`JointEntryWrongOldSet`), so a joint config cannot be seeded onto the
     // empty bootstrap state.
-    crate::tests::write_state_fenced(
+    zslg_raft_setup::testing::write_state_fenced(
         &n1_raft,
         &nodes.get(&n1).expect("n1").raft_state,
         ReplicatedRaftState {
@@ -581,7 +582,7 @@ async fn leader_loop_completes_membership_change_via_state_events() {
     .expect("seed single");
     // Then seed a *joint* config: the loop must take it through the generation
     // quorum, step 2b arming, the drain wait, and the final collapse.
-    crate::tests::write_state_fenced(
+    zslg_raft_setup::testing::write_state_fenced(
         &n1_raft,
         &nodes.get(&n1).expect("n1").raft_state,
         ReplicatedRaftState {
@@ -687,18 +688,18 @@ async fn a_wedged_snapshot_build_does_not_block_the_other_jobs() {
     let n1 = NodeId::new_v4();
     let ids = [n1];
 
-    let nodes = crate::tests::start_cluster(&ids, raft_config())
+    let nodes = zslg_raft_setup::testing::start_cluster(&ids, raft_config())
         .await
         .expect("cluster");
     let n1_raft = nodes.get(&n1).expect("n1").raft.clone();
     n1_raft
-        .initialize(crate::tests::test_membership_map(&ids))
+        .initialize(zslg_raft_fake::test_membership_map(&ids))
         .await
         .expect("init");
     wait_for_leader(&n1_raft, n1).await;
 
     let replicas: std::collections::BTreeSet<NodeId> = [n1].into_iter().collect();
-    crate::tests::write_state_fenced(
+    zslg_raft_setup::testing::write_state_fenced(
         &n1_raft,
         &nodes.get(&n1).expect("n1").raft_state,
         ReplicatedRaftState {
@@ -726,10 +727,10 @@ async fn a_wedged_snapshot_build_does_not_block_the_other_jobs() {
 
     // Wedge the only replica's `fetch_status`, so `await_quorum_ready` can never
     // reach a quorum and the snapshot job parks inside its build.
-    let ready = Arc::new(crate::tests::ReadyReplica {
+    let ready = Arc::new(zslg_net_fake::ReadyReplica {
         raft_state: nodes.get(&n1).expect("n1").raft_state.clone(),
     });
-    let (map_router, faults) = crate::tests::MapPeerRouter::wrap_all_faulty(
+    let (map_router, faults) = zslg_net_fake::MapPeerRouter::wrap_all_faulty(
         [(n1, ready as Arc<dyn zslg_log::Replica>)]
             .into_iter()
             .collect(),

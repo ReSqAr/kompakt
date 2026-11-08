@@ -40,6 +40,12 @@
 
 mod config;
 
+// Dev-dependencies that exist to switch on their `testing` hooks.
+#[cfg(test)]
+use {zslg_net_client as _, zslg_net_wire as _};
+
+#[cfg(test)]
+mod leader_tests;
 #[cfg(test)]
 mod pacing_tests;
 

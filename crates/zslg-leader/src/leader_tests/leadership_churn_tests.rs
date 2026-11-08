@@ -34,7 +34,7 @@ use crossbeam_combinators::testing::ChannelTestExt as _;
 ///
 /// Note on elections: openraft 0.9 rejects vote requests while the current
 /// leader's lease (= election_timeout_max) is fresh, so leadership is moved
-/// by isolating the incumbent via `crate::tests::Partition`, then triggering
+/// by isolating the incumbent via `zslg_raft_setup::testing::Partition`, then triggering
 /// elections on the successor until the reachable nodes follow it.
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -48,31 +48,32 @@ use tokio::sync::Notify;
 use tokio::sync::watch;
 use zslg_snapshot::CompressionLevel;
 
-use crate::error::Error;
-use crate::leader::{SnapshotInputs, build_snapshot};
-use crate::learner::LocalStore;
-use crate::learner::StableLog;
-use crate::learner::integrate_manifest_for_test;
-use crate::raft::RaftNode;
-use crate::tests::fast_raft_config as raft_config;
-use crate::tests::make_data;
-use crate::tests::{FixedClock, MapPeerRouter, ReadyReplica};
-use crate::tests::{Partition, TestNode};
 use zslg_consensus::NodeId;
 use zslg_consensus::ReplicaMembership;
 use zslg_consensus::ReplicatedRaftState;
+use zslg_error::Error;
 use zslg_hlc_gate::HlcGate;
+use zslg_leader_snapshot::create::{SnapshotInputs, build_snapshot};
+use zslg_learner::LocalStore;
+use zslg_learner::StableLog;
+use zslg_learner::testing::integrate_manifest_for_test;
 use zslg_log::Data;
 use zslg_log::LogIndex;
 use zslg_log::{LocalStoreMut, LocalStoreView, Replica, StableLogSnapshot};
+use zslg_log_fake::make_data;
+use zslg_net_fake::{MapPeerRouter, ReadyReplica};
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
+use zslg_raft_setup::RaftNode;
+use zslg_raft_setup::testing::fast_raft_config as raft_config;
+use zslg_raft_setup::testing::{Partition, TestNode};
 use zslg_time::{Hlc, HlcParts};
+use zslg_time_fake::FixedClock;
 
 async fn integrate_batch(
     store: &LocalStore,
     source: NodeId,
     records: Vec<(LogIndex, Data)>,
-) -> Result<(), crate::Error> {
+) -> Result<(), zslg_error::Error> {
     if records.is_empty() {
         return Ok(());
     }
@@ -169,22 +170,23 @@ const SEEDED_ENTRIES: u8 = 10;
 async fn boot_churn() -> Churn {
     let ids: [NodeId; 3] = std::array::from_fn(|_| NodeId::new_v4());
     let [n1, _, _] = ids;
-    let (nodes, partition) = crate::tests::start_cluster_with_partition(&ids, raft_config())
-        .await
-        .expect("cluster");
+    let (nodes, partition) =
+        zslg_raft_setup::testing::start_cluster_with_partition(&ids, raft_config())
+            .await
+            .expect("cluster");
     nodes
         .get(&n1)
         .expect("n1")
         .raft
-        .initialize(crate::tests::test_membership_map(&ids))
+        .initialize(zslg_raft_fake::test_membership_map(&ids))
         .await
         .expect("init");
-    crate::tests::wait_for_leader(&nodes.get(&n1).expect("n1").raft, n1).await;
+    zslg_raft_setup::testing::wait_for_leader(&nodes.get(&n1).expect("n1").raft, n1).await;
 
     // Replica set = the three nodes, so the cutoff fan-out needs a 2/3 quorum.
     // Through whoever leads, not pinned to n1: this lands during bring-up, when
     // an election can still be settling.
-    crate::tests::write_state_fenced_via_leader(
+    zslg_raft_setup::testing::write_state_fenced_via_leader(
         &nodes,
         ReplicatedRaftState {
             replica: ReplicaMembership::single(ids.iter().copied().collect()),
@@ -197,16 +199,16 @@ async fn boot_churn() -> Churn {
     .expect("seed replica set");
 
     let dir = tempfile::tempdir().expect("tempdir");
-    let local_store = crate::tests::local_store_at(dir.path().join("local.stable"))
+    let local_store = zslg_learner::testing::local_store_at(dir.path().join("local.stable"))
         .await
         .expect("from_db");
-    let stable_log = crate::tests::stable_log_at(&dir.path().join("stable.db")).await;
+    let stable_log = zslg_learner::testing::stable_log_at(&dir.path().join("stable.db")).await;
     let object_store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
 
     for i in 0..SEEDED_ENTRIES {
         integrate_batch(
             &local_store,
-            crate::tests::upstream(0),
+            zslg_consensus_fake::upstream(0),
             vec![(
                 LogIndex(u64::from(i)),
                 make_data(i, 100u64.checked_add(u64::from(i)).expect("hlc"), &[i]),
@@ -304,7 +306,7 @@ fn spawn_snapshot(
         let intent = build
             .commit_intent()
             .ok_or_else(|| Error::Log(LogError::Storage("snapshot window was empty".into())))?;
-        let (intents, _cancel) = crate::leader::Integrator::spawn_for_test(
+        let (intents, _cancel) = crate::Integrator::spawn_for_test(
             Arc::new(RaftNode::new(
                 raft.clone(),
                 zslg_consensus_fake::permissive_gate(),
@@ -420,7 +422,7 @@ async fn force_leader(nodes: &BTreeMap<NodeId, TestNode>, target: NodeId, observ
 /// anything else.
 async fn bump_generation(sys: &TestNode) {
     let cur = sys.raft_state.snapshot();
-    crate::tests::write_state_fenced(
+    zslg_raft_setup::testing::write_state_fenced(
         &sys.raft,
         &sys.raft_state,
         ReplicatedRaftState {
@@ -456,7 +458,7 @@ async fn commit_foreign_snapshot(sys: &TestNode) {
         end_index: LogIndex(start_index),
         snapshot_id: zslg_snapshot::SnapshotId::open(LogIndex(start_index)),
     });
-    crate::tests::write_state_fenced(
+    zslg_raft_setup::testing::write_state_fenced(
         &sys.raft,
         &sys.raft_state,
         ReplicatedRaftState {
@@ -473,7 +475,7 @@ async fn commit_foreign_snapshot(sys: &TestNode) {
 /// Load the committed manifest into a fresh stable log and count the entries.
 async fn covered_entries(c: &Churn, via: NodeId) -> usize {
     let dir = tempfile::tempdir().expect("tempdir");
-    let verify = crate::tests::stable_log_engine(dir.path().join("verify.stable"))
+    let verify = zslg_learner::testing::stable_log_engine(dir.path().join("verify.stable"))
         .await
         .expect("open stable log");
     let manifest_state = c
@@ -517,7 +519,7 @@ async fn covered_entries(c: &Churn, via: NodeId) -> usize {
 /// [`reelected_leader_snapshot_commit_is_refused_when_the_manifest_moved`].
 #[tokio::test(flavor = "multi_thread")]
 async fn reelected_leader_snapshot_commit_applies_when_its_premise_held() {
-    crate::tests::within(
+    testing_kit::within(
         "reelected_leader_snapshot_commit_applies_when_its_premise_held",
         CHURN_CAP,
         reelected_leader_snapshot_commit_applies_when_its_premise_held_body(),
@@ -552,7 +554,7 @@ async fn reelected_leader_snapshot_commit_applies_when_its_premise_held_body() {
     // Re-elect n1: heal, let it catch up on n2's writes, isolate n2, elect.
     c.partition.heal_all();
     let caught_up = n2sys.raft_state.snapshot().generation;
-    crate::tests::wait_until(
+    testing_kit::wait_until(
         "n1 catches up on the interim writes",
         Duration::from_secs(5),
         || async {
@@ -599,7 +601,7 @@ async fn reelected_leader_snapshot_commit_applies_when_its_premise_held_body() {
              {manifest:?} vs {manifest_before:?}",
         );
     }
-    crate::tests::wait_until("manifest converges", Duration::from_secs(5), || async {
+    testing_kit::wait_until("manifest converges", Duration::from_secs(5), || async {
         let n1m = c
             .nodes
             .get(&n1)
@@ -623,7 +625,7 @@ async fn reelected_leader_snapshot_commit_applies_when_its_premise_held_body() {
 /// coarse generation fence.
 #[tokio::test(flavor = "multi_thread")]
 async fn reelected_leader_snapshot_commit_is_refused_when_the_manifest_moved() {
-    crate::tests::within(
+    testing_kit::within(
         "reelected_leader_snapshot_commit_is_refused_when_the_manifest_moved",
         CHURN_CAP,
         reelected_leader_snapshot_commit_is_refused_when_the_manifest_moved_body(),
@@ -658,7 +660,7 @@ async fn reelected_leader_snapshot_commit_is_refused_when_the_manifest_moved_bod
     // Re-elect n1 so the publish attempt runs on a leader that can actually write.
     c.partition.heal_all();
     let caught_up = n2sys.raft_state.snapshot().generation;
-    crate::tests::wait_until(
+    testing_kit::wait_until(
         "n1 catches up on the interim manifest write",
         Duration::from_secs(5),
         || async {
@@ -718,7 +720,7 @@ async fn reelected_leader_snapshot_commit_is_refused_when_the_manifest_moved_bod
 /// and the new leader's own snapshot covers the data.
 #[tokio::test(flavor = "multi_thread")]
 async fn demoted_leader_snapshot_commit_fails_without_corruption() {
-    crate::tests::within(
+    testing_kit::within(
         "demoted_leader_snapshot_commit_fails_without_corruption",
         CHURN_CAP,
         demoted_leader_snapshot_commit_fails_without_corruption_body(),
@@ -750,7 +752,7 @@ async fn demoted_leader_snapshot_commit_fails_without_corruption_body() {
 
     // Heal and wait until n1 has accepted its demotion.
     c.partition.heal_all();
-    crate::tests::wait_until("n1 follows n2", Duration::from_secs(5), || async {
+    testing_kit::wait_until("n1 follows n2", Duration::from_secs(5), || async {
         c.nodes.get(&n1).expect("n1").raft.current_leader().await == Some(n2)
     })
     .await;

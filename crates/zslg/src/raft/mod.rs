@@ -3,5 +3,3 @@
 
 #[cfg(test)]
 mod tests;
-
-pub(crate) use zslg_raft_setup::RaftNode;

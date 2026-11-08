@@ -45,46 +45,29 @@ zslg-net-wire = { workspace = true, features = ["testing"] }
 zslg-net-client = { workspace = true, features = ["testing"] }
 tracing = { workspace = true }
 shutdown = { workspace = true }
-zslg-leader = { workspace = true }
-zslg-leader-compaction = { workspace = true }
-zslg-leader-membership = { workspace = true, features = ["testing"] }
-zslg-leader-snapshot = { workspace = true }
 zslg-net-setup = { workspace = true }
 zslg-node-id = { workspace = true }
-zslg-raft = { workspace = true }
-crossbeam-channel = { workspace = true }
 dashmap = { workspace = true }
 futures = { workspace = true }
 object_store = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "fs", "signal", "net", "test-util"] }
 tokio-util = { workspace = true, features = ["io-util"] }
-zslg-hlc-gate = { workspace = true }
 zslg-object-store = { workspace = true }
-zslg-peers = { workspace = true }
 metrics = { workspace = true }
-raft-kit = { workspace = true }
-async-trait = { workspace = true }
-parking_lot = { workspace = true }
 rand = { workspace = true }
 bytes = { workspace = true }
-zslg-replica-service = { workspace = true }
 zslg-replica-log = { workspace = true, features = ["testing"] }
-zslg-net-fake = { workspace = true }
-zslg-raft-fake = { workspace = true }
-zslg-time-fake = { workspace = true }
 zslg-consensus-fake = { workspace = true }
 testing-kit = { workspace = true }
 zslg-log-fake = { workspace = true }
 zslg-raft-storage = { workspace = true, features = ["testing"] }
 crossbeam-combinators = { workspace = true, features = ["testing"] }
-uuid = { workspace = true, features = ["serde"] }
 rocksdb-kit = { workspace = true, features = ["testing"] }
 clap = { workspace = true, features = ["env"] }
 tracing-subscriber = { workspace = true, features = ["json"] }
 http-body-util = { workspace = true }
 hyper = { workspace = true }
 hyper-util = { workspace = true }
-metrics-util = { workspace = true }
 pprof = { workspace = true }
 proptest = { workspace = true }
 tempfile = { workspace = true }

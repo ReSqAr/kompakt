@@ -4,16 +4,15 @@
 /// and stable-order property tests can drive the same pipeline.
 use std::sync::Arc;
 
-use crate::leader::SnapshotResult;
-use crate::learner::LocalStore;
-use crate::learner::StableLog;
 use object_store::ObjectStore;
 use object_store::memory::InMemory;
 use raft_kit::Config;
 use zslg_consensus::NodeId;
 use zslg_consensus::RaftStateHandle;
 use zslg_consensus::ReplicatedRaftState;
-use zslg_hlc_gate::HlcGate;
+use zslg_leader_snapshot::create::SnapshotResult;
+use zslg_learner::LocalStore;
+use zslg_learner::StableLog;
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use zslg_raft::Raft;
 
@@ -22,7 +21,6 @@ pub(crate) struct SnapshotHarness {
     pub(crate) local_store: Arc<LocalStore>,
     pub(crate) stable_log: Arc<StableLog>,
     pub(crate) object_store: Arc<dyn ObjectStore>,
-    pub(crate) hlc_gate: HlcGate,
     pub(crate) raft: Raft,
     pub(crate) raft_state: RaftStateHandle,
     pub(crate) leader_id: NodeId,
@@ -54,36 +52,34 @@ fn default_raft_config() -> Arc<Config> {
 
 pub(crate) async fn boot_snapshot_harness() -> SnapshotHarness {
     let n1 = NodeId::new_v4();
-    let mut nodes = super::start_cluster(&[n1], default_raft_config())
+    let mut nodes = zslg_raft_setup::testing::start_cluster(&[n1], default_raft_config())
         .await
         .expect("cluster");
     nodes
         .get_mut(&n1)
         .expect("n1")
         .raft
-        .initialize(super::test_membership_map(&[n1]))
+        .initialize(zslg_raft_fake::test_membership_map(&[n1]))
         .await
         .expect("initialize");
-    super::wait_for_leader(&nodes.get(&n1).expect("n1").raft, n1).await;
+    zslg_raft_setup::testing::wait_for_leader(&nodes.get(&n1).expect("n1").raft, n1).await;
 
     let sys = nodes.remove(&n1).expect("n1");
 
     let dir = tempfile::tempdir().expect("tempdir");
     let local_path = dir.path().join("local.db");
     let stable_path = dir.path().join("stable.db");
-    let local_store = crate::tests::local_store_at(local_path.with_extension("stable"))
+    let local_store = zslg_learner::testing::local_store_at(local_path.with_extension("stable"))
         .await
         .expect("from_db");
-    let stable_log = crate::tests::stable_log_at(&stable_path).await;
+    let stable_log = zslg_learner::testing::stable_log_at(&stable_path).await;
     let object_store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
-    let hlc_gate = HlcGate::new();
 
     SnapshotHarness {
         _dir: dir,
         local_store,
         stable_log,
         object_store,
-        hlc_gate,
         raft: sys.raft,
         raft_state: sys.raft_state,
         leader_id: n1,
@@ -109,7 +105,7 @@ pub(crate) async fn commit_snapshot_result(
         if let Some(written) = object {
             manifest.push(written.entry.clone());
         }
-        super::write_state_fenced(
+        zslg_raft_setup::testing::write_state_fenced(
             raft,
             raft_state,
             ReplicatedRaftState {
@@ -122,4 +118,19 @@ pub(crate) async fn commit_snapshot_result(
         .await
         .expect("client_write after snapshot");
     }
+}
+
+/// A storage root carrying the replica-log column family.
+pub(super) fn open_replica_storage(
+    root: &std::path::Path,
+) -> Result<Arc<rocksdb_kit::Storage>, zslg_error::Error> {
+    let cfs = [rocksdb_kit::CfSpec {
+        cf: zslg_replica_log::REPLICA_LOG_CF,
+        compress: false,
+    }];
+    Ok(rocksdb_kit::Storage::open(
+        root,
+        rocksdb_kit::StorageConfig::new(bytesize::ByteSize::from_mib(64)),
+        &cfs,
+    )?)
 }

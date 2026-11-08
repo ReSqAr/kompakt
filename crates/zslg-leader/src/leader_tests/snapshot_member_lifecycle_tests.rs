@@ -26,24 +26,24 @@ use object_store::memory::InMemory;
 use parking_lot::Mutex as SyncMutex;
 use tempfile::TempDir;
 
-use crate::learner::LocalStore;
-use crate::learner::StableLog;
-use crate::raft::RaftNode;
-use crate::tests::fast_raft_config as raft_config;
-use crate::tests::make_data;
-use crate::tests::upstream;
-use crate::tests::wait_for_leader;
 use zslg_consensus::NodeId;
 use zslg_consensus::RaftStateHandle;
 use zslg_consensus::ReplicatedRaftState;
 use zslg_consensus::SpareSelectionStrategy;
+use zslg_consensus_fake::upstream;
 use zslg_hlc_gate::HlcGate;
 use zslg_leader_membership::{LivenessQuery, MembershipChangeInputs, MembershipChangeManager};
 use zslg_leader_membership::{MembershipDriver, MembershipObserver, TickOutcome};
 use zslg_leader_snapshot::create::{SnapshotEntryInputs, SnapshotResult, create_snapshot_entry};
+use zslg_learner::LocalStore;
+use zslg_learner::StableLog;
 use zslg_log::LocalStoreMut;
 use zslg_log::LogIndex;
+use zslg_log_fake::make_data;
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
+use zslg_raft_setup::RaftNode;
+use zslg_raft_setup::testing::fast_raft_config as raft_config;
+use zslg_raft_setup::testing::wait_for_leader;
 use zslg_snapshot::CompressionLevel;
 use zslg_time::Hlc;
 
@@ -51,7 +51,7 @@ async fn integrate_batch(
     store: &LocalStore,
     source: NodeId,
     records: Vec<(LogIndex, Data)>,
-) -> Result<(), crate::Error> {
+) -> Result<(), zslg_error::Error> {
     if records.is_empty() {
         return Ok(());
     }
@@ -66,7 +66,7 @@ async fn integrate_batch(
     drop(tx);
     store.integrate_loop(ch).await.map_err(Into::into)
 }
-use crate::tests::wait_until;
+use testing_kit::wait_until;
 
 struct LocalObserver {
     states: SyncMutex<BTreeMap<NodeId, RaftStateHandle>>,
@@ -76,7 +76,7 @@ struct LocalObserver {
 }
 
 impl LocalObserver {
-    fn from_systems(nodes: &BTreeMap<NodeId, crate::tests::TestNode>) -> Arc<Self> {
+    fn from_systems(nodes: &BTreeMap<NodeId, zslg_raft_setup::testing::TestNode>) -> Arc<Self> {
         let mut map = BTreeMap::new();
         for (id, sys) in nodes {
             map.insert(*id, sys.raft_state.clone());
@@ -132,11 +132,12 @@ struct LeaderWorkspace {
 async fn build_workspace(dir: &std::path::Path, id: NodeId) -> LeaderWorkspace {
     LeaderWorkspace {
         local_store: {
-            crate::tests::local_store_at(dir.join(format!("local-{id}.stable")))
+            zslg_learner::testing::local_store_at(dir.join(format!("local-{id}.stable")))
                 .await
                 .expect("from_db")
         },
-        stable_log: crate::tests::stable_log_at(&dir.join(format!("stable-{id}.db"))).await,
+        stable_log: zslg_learner::testing::stable_log_at(&dir.join(format!("stable-{id}.db")))
+            .await,
         hlc_gate: Arc::new(HlcGate::new()),
         object_store: Arc::new(InMemory::new()),
     }
@@ -156,12 +157,12 @@ async fn full_lifecycle_bootstrap_snapshot_churn_failure() {
     let ids: [NodeId; 5] = std::array::from_fn(|_| NodeId::new_v4());
     let [n1, n2, n3, n4, n5] = ids;
 
-    let mut nodes = crate::tests::start_cluster(&ids, raft_config())
+    let mut nodes = zslg_raft_setup::testing::start_cluster(&ids, raft_config())
         .await
         .expect("cluster");
     let leader_raft = nodes.get(&n1).expect("n1").raft.clone();
     leader_raft
-        .initialize(crate::tests::test_membership_map(&ids))
+        .initialize(zslg_raft_fake::test_membership_map(&ids))
         .await
         .expect("init");
     wait_for_leader(&leader_raft, n1).await;
@@ -169,7 +170,7 @@ async fn full_lifecycle_bootstrap_snapshot_churn_failure() {
     let initial_replicas: BTreeSet<NodeId> = [n1, n2, n3].into_iter().collect();
     // Through whoever leads, not pinned to n1: this write lands right after
     // cluster bring-up, when an election can still be settling under load.
-    crate::tests::write_state_fenced_via_leader(
+    zslg_raft_setup::testing::write_state_fenced_via_leader(
         &nodes,
         ReplicatedRaftState {
             replica: ReplicaMembership::single(initial_replicas.clone()),
@@ -246,7 +247,7 @@ async fn full_lifecycle_bootstrap_snapshot_churn_failure() {
             // a whole machine's worth of parallel test load), and pinning the
             // write to the pre-snapshot leader asserts that race rather than
             // the write.
-            crate::tests::write_state_fenced_via_leader(
+            zslg_raft_setup::testing::write_state_fenced_via_leader(
                 &nodes,
                 ReplicatedRaftState {
                     replica: current.replica.clone(),
@@ -296,7 +297,7 @@ async fn full_lifecycle_bootstrap_snapshot_churn_failure() {
     let mut _integrator_cancel: Option<tokio_util::sync::CancellationToken> = None;
     let manager = {
         let all_live: BTreeSet<NodeId> = ids.iter().copied().collect();
-        let (intents, integrator_cancel) = crate::leader::Integrator::spawn_for_test(
+        let (intents, integrator_cancel) = crate::Integrator::spawn_for_test(
             Arc::new(RaftNode::new(
                 leader_raft.clone(),
                 zslg_consensus_fake::permissive_gate(),

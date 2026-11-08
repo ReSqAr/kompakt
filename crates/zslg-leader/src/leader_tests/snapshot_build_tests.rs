@@ -28,11 +28,11 @@ use uuid::Uuid;
 
 use zslg_log::{LocalStoreMut, StableLogSnapshot};
 
-use crate::learner::LocalStore;
-use crate::learner::StableLog;
-use crate::learner::integrate_manifest_for_test;
-use crate::tests::{SnapshotHarness, boot_snapshot_harness, commit_snapshot_result};
+use super::snapshot_harness::{SnapshotHarness, boot_snapshot_harness, commit_snapshot_result};
 use zslg_consensus::NodeId;
+use zslg_learner::LocalStore;
+use zslg_learner::StableLog;
+use zslg_learner::testing::integrate_manifest_for_test;
 use zslg_log::Data;
 use zslg_log::{DataId, LogIndex};
 use zslg_time::Hlc;
@@ -41,7 +41,7 @@ async fn integrate_batch(
     store: &LocalStore,
     source: NodeId,
     records: Vec<(LogIndex, Data)>,
-) -> Result<(), crate::Error> {
+) -> Result<(), zslg_error::Error> {
     if records.is_empty() {
         return Ok(());
     }
@@ -117,7 +117,7 @@ fn entry_data(id: u128, hlc: u64, origin: u8) -> Data {
 }
 
 async fn fresh_stable_log(dir: &std::path::Path, name: &str) -> StableLog {
-    crate::tests::stable_log_engine(dir.join(format!("{name}.stable")))
+    zslg_learner::testing::stable_log_engine(dir.join(format!("{name}.stable")))
         .await
         .expect("open stable log")
 }

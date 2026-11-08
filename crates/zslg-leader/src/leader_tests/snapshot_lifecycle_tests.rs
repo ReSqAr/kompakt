@@ -25,31 +25,31 @@ use zslg_snapshot::{CleanupReport, SnapshotStore, SnapshotWrite};
 use bytes::Bytes;
 use uuid::Uuid;
 
-use crate::learner::LocalStore;
-use crate::learner::integrate_manifest_for_test;
-use crate::raft::RaftNode;
 use zslg_consensus::NodeId;
 use zslg_consensus::RaftStateHandle;
 use zslg_consensus::ReplicaMembership;
 use zslg_consensus::ReplicatedRaftState;
 use zslg_leader_snapshot::create::{SnapshotEntryInputs, SnapshotResult, create_snapshot_entry};
+use zslg_learner::LocalStore;
+use zslg_learner::testing::integrate_manifest_for_test;
 use zslg_log::Data;
 use zslg_log::{DataId, LogIndex};
 use zslg_log::{LocalStoreMut, StableLogSnapshot};
 use zslg_net::PeerAddr;
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use zslg_raft::Raft;
+use zslg_raft_setup::RaftNode;
 use zslg_snapshot::CompressionLevel;
 use zslg_time::Hlc;
 
-use crate::tests::make_data;
-use crate::tests::upstream;
+use zslg_consensus_fake::upstream;
+use zslg_log_fake::make_data;
 
 async fn integrate_batch(
     store: &LocalStore,
     source: NodeId,
     records: Vec<(LogIndex, Data)>,
-) -> Result<(), crate::Error> {
+) -> Result<(), zslg_error::Error> {
     if records.is_empty() {
         return Ok(());
     }
@@ -65,7 +65,7 @@ async fn integrate_batch(
     store.integrate_loop(ch).await.map_err(Into::into)
 }
 
-use crate::tests::{boot_snapshot_harness as boot, commit_snapshot_result};
+use super::snapshot_harness::{boot_snapshot_harness as boot, commit_snapshot_result};
 
 async fn append_entries(local_store: &LocalStore, entries: &[Data]) {
     for (i, d) in entries.iter().enumerate() {
@@ -84,8 +84,8 @@ async fn append_entries(local_store: &LocalStore, entries: &[Data]) {
 /// bound and be lost for good.
 #[tokio::test]
 async fn snapshot_refuses_to_commit_an_aborted_window() {
-    use crate::error::Error;
     use crossbeam_combinators::Channel;
+    use zslg_error::Error;
     use zslg_log::LocalStoreView;
 
     use tokio::sync::watch;
@@ -212,7 +212,7 @@ async fn snapshot_round_trip_through_object_store() {
 
     let learner_dir = tempfile::tempdir().expect("tempdir");
     let learner_path = learner_dir.path().join("stable.db");
-    let learner_stable = crate::tests::stable_log_at(&learner_path).await;
+    let learner_stable = zslg_learner::testing::stable_log_at(&learner_path).await;
 
     integrate_manifest_for_test(
         h.snapshot_store(),
@@ -365,9 +365,10 @@ async fn second_snapshot_extends_stable_log_via_load() {
     let manifest_state_after_second = h.raft_state.snapshot().manifest_state.clone();
     let learner_dir = tempfile::tempdir().expect("tempdir");
     let learner_path = learner_dir.path().join("stable.db");
-    let learner_stable = crate::tests::stable_log_engine(learner_path.with_extension("stable"))
-        .await
-        .expect("open stable log");
+    let learner_stable =
+        zslg_learner::testing::stable_log_engine(learner_path.with_extension("stable"))
+            .await
+            .expect("open stable log");
     integrate_manifest_for_test(
         h.snapshot_store(),
         &learner_stable,
@@ -414,9 +415,10 @@ async fn integrate_manifest_is_idempotent() {
 
     let learner_dir = tempfile::tempdir().expect("tempdir");
     let learner_path = learner_dir.path().join("stable.db");
-    let learner_stable = crate::tests::stable_log_engine(learner_path.with_extension("stable"))
-        .await
-        .expect("from_db");
+    let learner_stable =
+        zslg_learner::testing::stable_log_engine(learner_path.with_extension("stable"))
+            .await
+            .expect("from_db");
 
     integrate_manifest_for_test(h.snapshot_store(), &learner_stable, &manifest_state)
         .await
@@ -483,9 +485,10 @@ async fn invariant_stable_order_is_hlc_order() {
 
     // Load into a fresh learner and verify the stable order.
     let learner_dir = tempfile::tempdir().expect("tempdir");
-    let learner_stable = crate::tests::stable_log_engine(learner_dir.path().join("stable.stable"))
-        .await
-        .expect("from_db");
+    let learner_stable =
+        zslg_learner::testing::stable_log_engine(learner_dir.path().join("stable.stable"))
+            .await
+            .expect("from_db");
     integrate_manifest_for_test(
         h.snapshot_store(),
         &learner_stable,
@@ -524,7 +527,7 @@ async fn fenced_write_rejected_on_stale_generation() {
 
     // Seed once (bumps the applied generation past ZERO).
     let seeded: std::collections::BTreeSet<NodeId> = [NodeId::new_v4()].into_iter().collect();
-    crate::tests::write_state_fenced(
+    zslg_raft_setup::testing::write_state_fenced(
         &h.raft,
         &h.raft_state,
         ReplicatedRaftState {
@@ -584,9 +587,9 @@ async fn fenced_write_rejected_on_stale_generation() {
 async fn invariant_stale_snapshot_commit_is_fenced() {
     use std::sync::atomic::AtomicBool;
 
-    use crate::error::Error;
     use zslg_consensus::NodeId;
     use zslg_consensus::RaftGeneration;
+    use zslg_error::Error;
     use zslg_leader_snapshot::create::{SnapshotInputs, build_snapshot};
     use zslg_log::LocalStoreView;
     use zslg_log::LogIndex;
@@ -595,7 +598,8 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
     use zslg_snapshot::SnapshotMetadata;
     use zslg_time::{Hlc, HlcParts};
 
-    use crate::tests::{FixedClock, ReadyReplica};
+    use zslg_net_fake::ReadyReplica;
+    use zslg_time_fake::FixedClock;
 
     use tokio::sync::watch;
 
@@ -608,7 +612,7 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
         fn register_peer(&self, _node_id: NodeId, _peer_addr: PeerAddr) {}
 
         fn remote(&self, _node_id: NodeId) -> Arc<dyn zslg_net::ReplicaClient> {
-            crate::tests::replica_only(self.replica.clone())
+            zslg_net_fake::replica_only(self.replica.clone())
         }
 
         fn remote_direct(&self, _peer_addr: PeerAddr) -> Arc<dyn zslg_net::ReplicaClient> {
@@ -665,7 +669,7 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
 
     // Seed a one-node replica set so the quorum fan-out has a target.
     let replica_id = NodeId::new_v4();
-    crate::tests::write_state_fenced(
+    zslg_raft_setup::testing::write_state_fenced(
         &h.raft,
         &h.raft_state,
         ReplicatedRaftState {
@@ -752,7 +756,7 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
     let build = build_snapshot(&inputs, clock.now)
         .await
         .expect("the build itself succeeds; only publishing is refused");
-    let (intents, _cancel) = crate::leader::Integrator::spawn_for_test(
+    let (intents, _cancel) = crate::Integrator::spawn_for_test(
         Arc::new(RaftNode::new(
             h.raft.clone(),
             zslg_consensus_fake::permissive_gate(),
@@ -801,14 +805,15 @@ async fn snapshot_quorum_tolerates_one_wedged_replica() {
     use zslg_log::Replica;
     use zslg_time::HlcParts;
 
-    use crate::tests::{FaultyReplica, FixedClock, MapPeerRouter, ReadyReplica};
+    use zslg_net_fake::{FaultyReplica, MapPeerRouter, ReadyReplica};
+    use zslg_time_fake::FixedClock;
 
     let h = boot().await;
     let _ = h.leader_id;
 
     // Three-replica set: quorum is 2.
     let replica_ids: [NodeId; 3] = std::array::from_fn(|_| NodeId::new_v4());
-    crate::tests::write_state_fenced(
+    zslg_raft_setup::testing::write_state_fenced(
         &h.raft,
         &h.raft_state,
         ReplicatedRaftState {
@@ -895,13 +900,13 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use crate::error::Error;
-    use crate::tests::ReadyReplica;
     use crossbeam_combinators::Channel;
+    use zslg_error::Error;
     use zslg_leader_snapshot::create::{SnapshotInputs, build_snapshot};
     use zslg_log::Replica;
     use zslg_log::SnapshotEntry;
     use zslg_net::ServerName;
+    use zslg_net_fake::ReadyReplica;
     use zslg_snapshot::SnapshotId;
 
     /// Replica stub: always drained, no end_index — quorum checks pass instantly.
@@ -913,7 +918,7 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
         fn register_peer(&self, _node_id: NodeId, _peer_addr: PeerAddr) {}
 
         fn remote(&self, _node_id: NodeId) -> Arc<dyn zslg_net::ReplicaClient> {
-            crate::tests::replica_only(self.replica.clone())
+            zslg_net_fake::replica_only(self.replica.clone())
         }
 
         fn remote_direct(&self, _peer_addr: PeerAddr) -> Arc<dyn zslg_net::ReplicaClient> {
@@ -1052,7 +1057,7 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
     // row so the window is non-empty (an empty window would take the earlier
     // `NoopEmptyWindow` return and never reach the re-check).
     let replica_id = NodeId::new_v4();
-    crate::tests::write_state_fenced(
+    zslg_raft_setup::testing::write_state_fenced(
         &h.raft,
         &h.raft_state,
         ReplicatedRaftState {

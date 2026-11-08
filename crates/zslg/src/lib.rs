@@ -21,8 +21,8 @@
 use tracing_subscriber as _;
 #[cfg(test)]
 use {
-    clap as _, dashmap as _, http_body_util as _, hyper as _, hyper_util as _, pprof as _,
-    time as _, tokio_metrics as _,
+    clap as _, dashmap as _, http_body_util as _, hyper as _, hyper_util as _, metrics as _,
+    pprof as _, shutdown as _, time as _, tokio_metrics as _,
 };
 
 // Used by `examples/common`, not here; a normal dependency only because Cargo
@@ -60,8 +60,6 @@ mod database;
 pub(crate) mod error {
     pub(crate) use zslg_error::Error;
 }
-#[cfg(test)]
-pub(crate) mod leader;
 #[cfg(test)]
 pub(crate) mod learner;
 #[cfg(test)]
