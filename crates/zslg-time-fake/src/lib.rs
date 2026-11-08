@@ -2,6 +2,9 @@
 //! monotonic stamps, absorbing any peer without a skew check. For tests that
 //! need *a* clock rather than the production one.
 
+mod skew;
+pub use skew::SharedClockController;
+
 use parking_lot::Mutex;
 use zslg_time::{Clock, Hlc};
 

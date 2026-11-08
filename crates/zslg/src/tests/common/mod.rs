@@ -14,6 +14,8 @@
     clippy::result_large_err,
     reason = "test code"
 )]
+pub(crate) use testing_kit::{init_logging, reserve_port, wait_until, wait_until_sync, within};
+pub(crate) use zslg_raft_fake::{MemFabric, Partition, test_membership_map};
 mod cluster;
 pub(crate) use cluster::{Cluster, ClusterConfig, NodePlacement, default_fast_config};
 mod invariants;
@@ -40,190 +42,21 @@ pub(crate) use zslg_time_fake::FixedClock;
 use crate::Error;
 
 use crossbeam_combinators::Channel;
-use dashmap::DashMap;
 use raft_kit::Config;
-use raft_kit::RaftNetwork;
-use raft_kit::RaftNetworkFactory;
-use raft_kit::error::{InstallSnapshotError, RPCError, RaftError, RemoteError, Unreachable};
-use raft_kit::network::RPCOption;
-use raft_kit::raft::{
-    AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
-    VoteRequest, VoteResponse,
-};
 use zslg_consensus::NodeId;
 use zslg_consensus::RaftState;
 use zslg_consensus::RaftStateHandle;
 use zslg_log::Data;
 use zslg_log::DataId;
 use zslg_log::{Replica, StampedWrite, WriteOutcome};
-use zslg_net::PeerAddr;
-use zslg_raft::{NodeInfo, Raft, TypeConfig};
+use zslg_raft::Raft;
 use zslg_raft_storage::build_raft_for_test;
-// ── fault injection: pairwise partitions ─────────────────────────────
-
-/// Shared handle that cuts and heals in-process network links. Cloned into
-/// every node's `MemRouter`; cutting a pair makes both directions of raft
-/// traffic between those nodes fail with `Unreachable` until healed.
-#[derive(Clone, Default)]
-pub(crate) struct Partition {
-    cut: Arc<DashMap<(NodeId, NodeId), ()>>,
-}
-
-impl Partition {
-    /// Cut the link between `a` and `b` (both directions).
-    pub(crate) fn cut(&self, a: NodeId, b: NodeId) {
-        self.cut.insert((a, b), ());
-        self.cut.insert((b, a), ());
-    }
-
-    /// Restore the link between `a` and `b`.
-    pub(crate) fn heal(&self, a: NodeId, b: NodeId) {
-        self.cut.remove(&(a, b));
-        self.cut.remove(&(b, a));
-    }
-
-    /// Cut `node` off from every node in `others`.
-    pub(crate) fn isolate(&self, node: NodeId, others: &[NodeId]) {
-        for &other in others {
-            if other != node {
-                self.cut(node, other);
-            }
-        }
-    }
-
-    /// Restore all links.
-    pub(crate) fn heal_all(&self) {
-        self.cut.clear();
-    }
-
-    fn is_cut(&self, from: NodeId, to: NodeId) -> bool {
-        self.cut.contains_key(&(from, to))
-    }
-}
-
-// ── in-memory Raft transport ──────────────────────────────────────────
-
-#[derive(Clone)]
-pub(crate) struct MemRouter {
-    nodes: Arc<DashMap<NodeId, Raft>>,
-    source: NodeId,
-    partition: Partition,
-}
-
-impl RaftNetworkFactory<TypeConfig> for MemRouter {
-    type Network = MemNetwork;
-    async fn new_client(&mut self, target: NodeId, _node: &NodeInfo) -> Self::Network {
-        MemNetwork {
-            router: self.nodes.clone(),
-            source: self.source,
-            target,
-            partition: self.partition.clone(),
-        }
-    }
-}
-
-pub(crate) struct MemNetwork {
-    router: Arc<DashMap<NodeId, Raft>>,
-    source: NodeId,
-    target: NodeId,
-    partition: Partition,
-}
-
-impl MemNetwork {
-    // mirrors the RaftNetwork method signatures, whose error type is openraft's
-    fn check_link<E: std::error::Error>(&self) -> Result<(), RPCError<NodeId, NodeInfo, E>> {
-        if self.partition.is_cut(self.source, self.target) {
-            return Err(RPCError::Unreachable(Unreachable::new(&UnreachableMsg(
-                "partitioned".into(),
-            ))));
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-struct UnreachableMsg(String);
-impl std::fmt::Display for UnreachableMsg {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-impl std::error::Error for UnreachableMsg {}
-
-impl RaftNetwork<TypeConfig> for MemNetwork {
-    async fn append_entries(
-        &mut self,
-        rpc: AppendEntriesRequest<TypeConfig>,
-        _: RPCOption,
-    ) -> Result<AppendEntriesResponse<NodeId>, RPCError<NodeId, NodeInfo, RaftError<NodeId>>> {
-        self.check_link()?;
-        match self.router.get(&self.target) {
-            Some(raft) => raft
-                .append_entries(rpc)
-                .await
-                .map_err(|e| RPCError::RemoteError(RemoteError::new(self.target, e))),
-            None => Err(RPCError::Unreachable(Unreachable::new(&UnreachableMsg(
-                "not registered".into(),
-            )))),
-        }
-    }
-    async fn install_snapshot(
-        &mut self,
-        rpc: InstallSnapshotRequest<TypeConfig>,
-        _: RPCOption,
-    ) -> Result<
-        InstallSnapshotResponse<NodeId>,
-        RPCError<NodeId, NodeInfo, RaftError<NodeId, InstallSnapshotError>>,
-    > {
-        self.check_link()?;
-        match self.router.get(&self.target) {
-            Some(raft) => raft
-                .install_snapshot(rpc)
-                .await
-                .map_err(|e| RPCError::RemoteError(RemoteError::new(self.target, e))),
-            None => Err(RPCError::Unreachable(Unreachable::new(&UnreachableMsg(
-                "not registered".into(),
-            )))),
-        }
-    }
-    async fn vote(
-        &mut self,
-        rpc: VoteRequest<NodeId>,
-        _: RPCOption,
-    ) -> Result<VoteResponse<NodeId>, RPCError<NodeId, NodeInfo, RaftError<NodeId>>> {
-        self.check_link()?;
-        match self.router.get(&self.target) {
-            Some(raft) => raft
-                .vote(rpc)
-                .await
-                .map_err(|e| RPCError::RemoteError(RemoteError::new(self.target, e))),
-            None => Err(RPCError::Unreachable(Unreachable::new(&UnreachableMsg(
-                "not registered".into(),
-            )))),
-        }
-    }
-}
-
 // ── cluster helpers ───────────────────────────────────────────────────
 
 pub(crate) struct TestNode {
     pub(crate) raft: Raft,
     pub(crate) raft_state: RaftStateHandle,
     pub(crate) _tempdir: tempfile::TempDir,
-}
-
-pub(crate) fn test_membership_map(ids: &[NodeId]) -> BTreeMap<NodeId, NodeInfo> {
-    ids.iter()
-        .map(|id| {
-            (
-                *id,
-                NodeInfo(Some(PeerAddr {
-                    addr: "127.0.0.1:0".into(),
-                    server_name: "localhost".into(),
-                })),
-            )
-        })
-        .collect()
 }
 
 pub(crate) async fn start_cluster(
@@ -240,15 +73,11 @@ pub(crate) async fn start_cluster_with_partition(
     ids: &[NodeId],
     cfg: Arc<Config>,
 ) -> Result<(BTreeMap<NodeId, TestNode>, Partition), Box<dyn std::error::Error>> {
-    let shared_nodes: Arc<DashMap<NodeId, Raft>> = Arc::new(DashMap::new());
-    let partition = Partition::default();
+    let fabric = MemFabric::default();
+    let partition = fabric.partition();
     let mut nodes = BTreeMap::new();
     for &id in ids {
-        let router = MemRouter {
-            nodes: shared_nodes.clone(),
-            source: id,
-            partition: partition.clone(),
-        };
+        let router = fabric.router(id);
         let tempdir = tempfile::tempdir()?;
         let raft_state = RaftStateHandle::new();
         let raft = build_raft_for_test(
@@ -260,7 +89,7 @@ pub(crate) async fn start_cluster_with_partition(
         )
         .await
         .map_err(|e| format!("Raft::new: {e}"))?;
-        shared_nodes.insert(id, raft.clone());
+        fabric.register(id, raft.clone());
         nodes.insert(
             id,
             TestNode {
@@ -274,50 +103,6 @@ pub(crate) async fn start_cluster_with_partition(
 }
 
 // ── deadline-bounded wait helpers ─────────────────────────────────────
-
-/// Poll `pred` every 20ms until it returns true; panic with `label` after
-/// `timeout`.
-pub(crate) async fn wait_until<F, Fut>(label: &str, timeout: std::time::Duration, mut pred: F)
-where
-    F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = bool>,
-{
-    let deadline = tokio::time::Instant::now()
-        .checked_add(timeout)
-        .expect("Instant + timeout does not overflow");
-    loop {
-        if pred().await {
-            return;
-        }
-        if tokio::time::Instant::now() >= deadline {
-            panic!("wait_until timed out: {label}");
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-}
-
-/// Run a whole test body under a hard cap, failing when it expires.
-///
-/// A test that neither passes nor fails is worse than one that fails: the
-/// harness reports it as "still running" and the run never terminates, so
-/// there is no failure to read and no stack to look at. Every wait inside a
-/// cluster test is supposed to carry its own deadline, which makes reaching
-/// this cap a bug report in itself — one that names the test and the cap
-/// instead of leaving a hung process behind.
-///
-/// The cap is the outer backstop, not the diagnosis: a wait that can fail for
-/// a knowable reason should still say so itself (see
-/// `leader::leadership_churn_tests::await_stall`), because "did not finish in
-/// 120 s" localises nothing.
-pub(crate) async fn within<F>(what: &str, cap: std::time::Duration, body: F) -> F::Output
-where
-    F: std::future::Future,
-{
-    match tokio::time::timeout(cap, body).await {
-        Ok(out) => out,
-        Err(_) => panic!("{what}: did not finish within {cap:?}"),
-    }
-}
 
 /// Wait until `raft` observes `expected` as the leader.
 pub(crate) async fn wait_for_leader(raft: &Raft, expected: NodeId) {
@@ -480,87 +265,11 @@ pub(crate) async fn write_state_fenced_via_leader(
 
 // ── shared test utilities ─────────────────────────────────────────────
 
-/// Reserve an OS-assigned TCP port on localhost (the RPC server binds TCP).
-/// Returns the bound address after releasing the listener.
-///
-/// # The race this closes, and the one it does not
-///
-/// Asking the OS for a port, dropping the listener and handing the address to a
-/// caller that binds it later is a time-of-check/time-of-use gap by
-/// construction: nothing holds the port in between. It cannot be closed here —
-/// keeping the listener alive would mean handing it to `ReplicaNode::start`,
-/// which is production surface this tier does not add.
-///
-/// What *is* closable is the dominant case. Tests run many nodes across
-/// parallel threads of one process, and the OS will happily hand the same
-/// freed port to two callers; each then races to bind it and one loses with
-/// `Address already in use`. Remembering every port handed out in this process
-/// and refusing to return one twice removes that entirely. A cross-process
-/// collision remains possible and is rare enough to live with.
-pub(crate) fn reserve_port() -> std::net::SocketAddr {
-    /// Ports already handed out in this process. Never pruned: a test binary is
-    /// short-lived, and reusing a port whose node has since shut down is the
-    /// very thing this exists to prevent.
-    static HANDED_OUT: std::sync::Mutex<Option<std::collections::HashSet<u16>>> =
-        std::sync::Mutex::new(None);
-
-    // Bounded: each attempt that loses is a port already claimed, and the OS
-    // has ~64k to draw from, so exhausting this many means something else is
-    // wrong and a clear panic beats an infinite loop.
-    for _ in 0..64 {
-        let sock = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-        let addr = sock.local_addr().expect("addr");
-        drop(sock);
-        let mut guard = HANDED_OUT
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if guard
-            .get_or_insert_with(Default::default)
-            .insert(addr.port())
-        {
-            return addr;
-        }
-    }
-    panic!("reserve_port: 64 consecutive attempts all returned an already-issued port");
-}
-
 /// Build a deterministic [`NodeId`] from a single byte seed.
 pub(crate) fn nid(byte: u8) -> zslg_consensus::NodeId {
     let mut bytes = [0u8; 16];
     bytes[15] = byte;
     zslg_consensus::NodeId::from_uuid(uuid::Uuid::from_bytes(bytes))
-}
-
-/// Convenience wrapper around [`wait_until`] for sync `FnMut() -> bool`
-/// predicates (no async needed).
-pub(crate) async fn wait_until_sync(
-    label: &str,
-    deadline: std::time::Duration,
-    mut predicate: impl FnMut() -> bool,
-) {
-    let stop = tokio::time::Instant::now()
-        .checked_add(deadline)
-        .expect("Instant + deadline");
-    loop {
-        if predicate() {
-            return;
-        }
-        if tokio::time::Instant::now() >= stop {
-            panic!("{label}: deadline elapsed without predicate becoming true");
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-}
-
-/// Initialise `tracing_subscriber` for test output (no-op if already set).
-pub(crate) fn init_logging() {
-    use tracing_subscriber::EnvFilter;
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),
-        )
-        .with_test_writer()
-        .try_init();
 }
 
 /// Fast raft config suitable for in-memory tests:

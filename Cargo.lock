@@ -3606,6 +3606,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "testing-kit"
+version = "0.1.0"
+dependencies = [
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4610,6 +4618,7 @@ dependencies = [
  "rocksdb-kit",
  "shutdown",
  "tempfile",
+ "testing-kit",
  "tikv-jemalloc-ctl",
  "tikv-jemallocator",
  "time",
@@ -4646,6 +4655,7 @@ dependencies = [
  "zslg-observability",
  "zslg-peers",
  "zslg-raft",
+ "zslg-raft-fake",
  "zslg-raft-node",
  "zslg-raft-rpc",
  "zslg-raft-setup",
@@ -5122,10 +5132,13 @@ name = "zslg-net-fake"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "crossbeam-channel",
  "crossbeam-combinators",
  "error-union",
  "futures",
+ "parking_lot 0.13.0",
  "raft-kit",
+ "tokio",
  "zslg-consensus",
  "zslg-lifecycle-types",
  "zslg-log",
@@ -5378,6 +5391,17 @@ dependencies = [
  "zslg-raft-types",
  "zslg-snapshot-types",
  "zslg-time-types",
+]
+
+[[package]]
+name = "zslg-raft-fake"
+version = "0.1.0"
+dependencies = [
+ "dashmap",
+ "raft-kit",
+ "zslg-consensus",
+ "zslg-net",
+ "zslg-raft",
 ]
 
 [[package]]

@@ -98,6 +98,7 @@ raft-kit = { path = "crates/raft-kit" }
 shutdown = { path = "crates/shutdown" }
 warn-throttle = { path = "crates/warn-throttle" }
 pace-kit = { path = "crates/pace-kit" }
+testing-kit = { path = "crates/testing-kit" }
 zslg = { path = "crates/zslg" }
 nvzn-types = { path = "crates/nvzn-types" }
 nvzn-projection = { path = "crates/nvzn-projection" }
@@ -134,6 +135,7 @@ zslg-snapshot-types = { path = "crates/zslg-snapshot-types" }
 zslg-time = { path = "crates/zslg-time" }
 zslg-time-fake = { path = "crates/zslg-time-fake" }
 zslg-net-fake = { path = "crates/zslg-net-fake" }
+zslg-raft-fake = { path = "crates/zslg-raft-fake" }
 zslg-log-fake = { path = "crates/zslg-log-fake" }
 zslg-time-types = { path = "crates/zslg-time-types" }
 

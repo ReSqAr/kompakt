@@ -5,6 +5,9 @@
 //! In-memory stand-ins for the net ports: clients that answer one facet and
 //! refuse the rest, and routers that hand them out.
 
+mod faults;
+pub use faults::{DuplicateHandle, DuplicateReplica, FaultHandle, FaultyReplica, MapPeerRouter};
+
 use std::sync::Arc;
 
 use crossbeam_combinators::{Channel, Finite, Infinite};

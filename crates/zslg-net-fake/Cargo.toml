@@ -10,6 +10,9 @@ publish = false
 [dependencies]
 error-union = { workspace = true }
 async-trait = { workspace = true }
+crossbeam-channel = { workspace = true }
+parking_lot = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
 crossbeam-combinators = { workspace = true }
 futures = { workspace = true }
 raft-kit = { workspace = true }
