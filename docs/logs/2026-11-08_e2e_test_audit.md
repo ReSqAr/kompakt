@@ -1,6 +1,6 @@
 # zslg end-to-end tests: overlap audit
 
-After the move into `zslg-cluster-tests` (32 tests, ~108 s). What each test adds, and
+After the move into `zslg-cluster-tests` (32 tests, ~108 s; 22 and ~81 s after the merges below). What each test adds, and
 what is already covered elsewhere. Read from the test bodies, not the names.
 
 ## Done
@@ -8,22 +8,36 @@ what is already covered elsewhere. Read from the test bodies, not the names.
 - `multi_node_writes::three_node_tcp_write_round_trip` removed. It brought up three nodes, wrote
   through the leader and read the entry back from the unstable tail — a strict subset of
   `cluster_bringup::three_node_cluster_brought_up_via_public_api` (bring-up + write + invariants)
-  and of `writer_integration` (which reads back through `unstable_tail`).
+  and of `read_paths` (now `read_paths`, which reads back through `unstable_tail`).
 - `full_restart::rpc_server_accepts_connections_while_raft_startup_is_blocked` and
   `::cancelling_the_shutdown_token_stops_a_node_that_never_becomes_ready` drive **one** node with an
   unreachable peer and never touched the cluster harness. They now live in `zslg-replica-node`
   (`node_tests/blocked_startup.rs`) beside the other single-node startup tests.
 
-## Candidates (not done; each changes what is asserted, so it is your call)
+## Candidates, done
 
-| tests | overlap | suggestion |
-|---|---|---|
-| `tcp_failure_detection` ×2, `rolling_replacement`, proptest `full_replacement_transfers_membership_and_data` | all replace nodes on the same address while writes continue and then check the cluster still commits | keep the proptest script and `rolling_replacement`; fold the "sustained writes survive a follower replacement" assertion into `rolling_replacement` and drop `tcp_failure_detection` |
-| `reconciliation` ×1, `decommission::evicted_node_survives_a_denied_rejoin` | same arrangement: trim a server name from every other node's `config.peers` so the leader evicts it for real; `decommission` says so in its own doc comment | one file, one setup helper, both assertions |
-| `writer_integration`, `learner_integration`, `stable_read::writes_appear_in_stable_log_across_all_nodes` | each boots three nodes, writes, and reads back through a different reader (writer node, learner node, stable log) | share one cluster in a `read_paths` file: saves two or three boots |
-| `leader_failover::follower_loss_does_not_block_writes` | the proptest's degraded windows cover a follower down while writes continue | drop; keep `leader_failover_writes_recover` (it asserts the cutoff observer) |
+All four were taken (22 tests, ~81 s, down from 32 / ~108 s). Each changes what is asserted where, not
+what is asserted:
 
-Estimated effect: 32 → ~24 tests, ~108 s → ~70 s.
+- **Replace-a-node tests.** `tcp_failure_detection` (restart a follower on the same address, then
+  pooled writes survive it) is folded into `rolling_replacement`: after every one of the three
+  rotations it now writes a batch through the leader and checks the *replaced* node sees it in its own
+  tail. The proptest `full_replacement_transfers_membership_and_data` stays as it was.
+- **Eviction.** `reconciliation` and `decommission::evicted_node_survives_a_denied_rejoin` shared the
+  arrangement (trim the victim's name from every other node's peers, relaunch them with fast election
+  timers). They are one test now, `eviction::evicted_member_leaves_the_set_is_refused_reads_and_stays_up`:
+  the replicated set shrinks, the victim's reads are refused with `NotReady`, and its supervision tree
+  stays up for 30 s. It runs on four nodes (the reconciliation shape). `decommission` keeps the
+  demote-to-learner test and `unwanted_leader_evicts_itself`.
+- **Read paths.** `writer_integration`, both `learner_integration` tests and
+  `stable_read::writes_appear_in_stable_log_across_all_nodes` are `read_paths::every_read_path_sees_the_writes`:
+  external writer -> replica tail, replica writer -> learner tail (the learner's clean start/stop
+  included), stable log on every node, durability chain. `stable_read` keeps the teeth check for the chain.
+- **`leader_failover::follower_loss_does_not_block_writes`** is dropped; the proptest's degraded windows
+  and `rolling_replacement` cover it.
+
+Cost: the merged tests are longer and a failure names a step, not a test. They are written as ordered
+sections with a comment per claim for that reason.
 
 ## One thing the audit surfaced
 

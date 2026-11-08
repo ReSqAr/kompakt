@@ -1103,7 +1103,7 @@ impl ReplicaNode {
     /// production correctness: `retain: false` removes the node from
     /// openraft's membership map entirely, so the leader stops replicating to
     /// it and the victim's own view of `voters` can legitimately lag forever
-    /// (`tests::reconciliation` hits exactly this and asserts on the
+    /// (`eviction` hits exactly this and asserts on the
     /// *remaining* nodes instead). `retain: true` keeps it as a learner, which
     /// still receives `AppendEntries` — so its own metrics promptly reflect
     /// the demotion, which is what this test needs to assert on.

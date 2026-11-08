@@ -294,7 +294,7 @@ impl Cluster {
     ///
     /// Nodes already running keep the config they started with, which is the
     /// point: this is how a test gives one node different timings from the
-    /// rest (see `tests::reconciliation`, which relaunches every node but one
+    /// rest (see `eviction`, which relaunches every node but one
     /// with a faster election timeout so the odd one out never wins a vote).
     pub(crate) fn set_base_config(&mut self, cfg: ReplicaNodeConfig) {
         self.config.base_config = Some(cfg);

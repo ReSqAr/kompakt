@@ -14,10 +14,20 @@
     clippy::result_large_err,
     reason = "test code"
 )]
-//! The replicated `ReplicaMembership` follows the openraft voter set: a node
-//! evicted from the voters (operator removes it from `config.peers`) leaves
-//! the replicated set through the normal joint transition, while the evicted
-//! node is still running.
+//! A node evicted from the voters (the operator removes it from every other
+//! node's `config.peers`) while it keeps running:
+//!
+//! 1. the replicated `ReplicaMembership` follows the voter set and shrinks through
+//!    the normal joint transition (the voter-only spare fills the vacancy);
+//! 2. the evicted node's rejoin is affirmatively denied, so it stops serving
+//!    client reads (`Error::NotReady`) ...
+//! 3. ... but its supervision tree stays up: removal is the group's decision, ending
+//!    the process is the orchestrator's.
+//!
+//! One arrangement, three claims, so one cluster bring-up. Step 3 needs a denial that
+//! is *affirmative* (`JoinAttempt::Denied`), which only the real eviction path
+//! produces: a contacted peer's own `config.peers` no longer names the victim. The
+//! demote-to-learner shortcut in `decommission` changes the voter set without that.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -29,12 +39,13 @@ use crate::{
     Cluster, ClusterConfig, assert_cluster_invariants, default_fast_config, wait_until_sync,
 };
 use zslg_consensus::NodeId;
+use zslg_error::LifecycleError;
 
 /// Removing one member from every other node's `config.peers` evicts it from
 /// the voter set; the leader then shrinks the replicated set `{A,B,C}` →
 /// `{B,C,D}` via the joint transition, with the evicted node still running.
 #[tokio::test(flavor = "multi_thread")]
-async fn evicted_member_leaves_the_replicated_set_while_still_running() {
+async fn evicted_member_leaves_the_set_is_refused_reads_and_stays_up() {
     crate::init_logging();
     // 4 nodes, distinct names: node-0 bootstraps, node-3 is a voter-only spare
     // (replica_node_count = 3). `distinct_names` is required — the eviction
@@ -222,5 +233,75 @@ async fn evicted_member_leaves_the_replicated_set_while_still_running() {
     );
 
     assert_cluster_invariants(&cluster);
+
+    // THE READ-GATE CLAIM, checked BEFORE extraction (still gated through
+    // `Cluster`): `can_serve_clients` must go false and `sync_quorum` must
+    // return `NotReady` once — and only once — a reachable peer has
+    // AFFIRMATIVELY denied this node's rejoin (`JoinAttempt::Denied`,
+    // published as `EvictionStatus`). This is a `wait_until_sync`, not an
+    // immediate check, because the victim's own openraft voter-set view can
+    // legitimately never converge (see above) — a gate that (incorrectly)
+    // read that view would read `can_serve_clients() == true` forever and
+    // this wait would time out rather than pass. That is exactly the bug the
+    // formal review caught: reads served from a view that would never
+    // advance. Bounded by grace (15s) + reconcile (5s) + margin, same as
+    // below.
+    wait_until_sync(
+        "victim's own gate reports it cannot serve clients (Denied observed)",
+        Duration::from_secs(30),
+        || !cluster.node(victim).can_serve_clients(),
+    )
+    .await;
+    let err = cluster
+        .node(victim)
+        .reader()
+        .sync()
+        .await
+        .expect_err("a denied node must refuse client reads");
+    assert!(
+        matches!(err, zslg_log::Error::Lifecycle(LifecycleError::NotReady(_))),
+        "expected NotReady, got {err:?}"
+    );
+
+    // Extract the victim so its OWN supervision tree can be observed —
+    // `Cluster` cannot answer this question (see the doc comment above).
+    let victim_node = cluster.take_running(victim);
+    let token = victim_node.shutdown_token();
+    let handle = tokio::spawn(victim_node.run());
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(
+        !handle.is_finished(),
+        "the node must still be running right after being taken over — \
+         otherwise this test proves nothing",
+    );
+
+    // `raft::startup::rejoin::REJOIN_LEADERLESS_GRACE` is 15s and
+    // `REJOIN_RECONCILE_INTERVAL` is 5s (both hardcoded, not config-driven).
+    // 30s covers grace + at least one more reconcile tick + margin for the
+    // denied `AddMember` round-trip.
+    tokio::time::sleep(Duration::from_secs(30)).await;
+
+    // THE CLAIM: a denied rejoin must not have torn the supervision tree
+    // down. With the old fatal `return Err(Error::MembershipDenied { .. })`
+    // restored, `handle` completes here and this assertion fires.
+    assert!(
+        !handle.is_finished(),
+        "a node denied re-join by the group must not terminate itself \
+         (removal is the group's decision, not the node's)",
+    );
+
+    // Clean up: request shutdown and confirm the node still stops gracefully
+    // on request — this is not the claim under test, just hygiene.
+    token.cancel();
+    let result = tokio::time::timeout(Duration::from_secs(30), handle)
+        .await
+        .expect("cancellation must stop the node, not merely be recorded")
+        .expect("victim's run() task must not panic");
+    assert!(
+        result.is_ok(),
+        "graceful shutdown must still return Ok(()), got {result:?}"
+    );
+
     cluster.shutdown().await.expect("clean shutdown");
 }

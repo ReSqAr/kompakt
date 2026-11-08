@@ -19,11 +19,9 @@ pub(crate) use common::{
 mod cluster_bringup;
 mod cluster_proptest;
 mod decommission;
+mod eviction;
 mod full_restart;
 mod leader_failover;
-mod learner_integration;
-mod reconciliation;
+mod read_paths;
 mod rolling_replacement;
 mod stable_read;
-mod tcp_failure_detection;
-mod writer_integration;

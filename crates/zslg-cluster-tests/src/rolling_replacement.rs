@@ -2,8 +2,14 @@
 //!
 //! Each replica node is shut down in turn and replaced by a new node with a
 //! fresh `NodeId` on the same listen address. The replacement node joins Raft,
-//! catches up, and the replica set converges. Continuous background writes run
-//! throughout; all written DataIds must appear in the stable log afterward.
+//! catches up, and the replica set converges. Writes through the leader are
+//! made after every replacement: the pooled write path must reopen its connections
+//! to the new instance on the same address (a node restarted behind a stable name,
+//! as a Kubernetes pod is) and the replaced node must see the writes in its own tail.
+//!
+//! Fast connection-refused failure and socket-option application are covered by
+//! unit tests in `zslg-net-client`; true packet-level blackhole detection (kernel
+//! keepalive / `TCP_USER_TIMEOUT`) is left to the docker harness.
 
 #![allow(
     dead_code,
@@ -26,6 +32,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
+use crossbeam_combinators::testing::ChannelTestExt as _;
+use futures::StreamExt as _;
 use object_store::ObjectStore;
 use tracing_subscriber::EnvFilter;
 
@@ -70,6 +78,49 @@ fn fast_rolling_config() -> ReplicaNodeConfig {
     // byte-identical to what this test has always run on.
     cfg.write_timeout = Duration::from_secs(30);
     cfg
+}
+
+/// The id of the current leader (`find_map` on the leader *id*, not "some node
+/// knows a leader exists").
+fn leader_of(cluster: &Cluster) -> NodeId {
+    cluster
+        .nodes()
+        .find_map(|n| n.state_handle().snapshot().leader)
+        .expect("no leader")
+}
+
+/// Write `n` tagged entries through the current leader; each must reach quorum.
+async fn write_batch(cluster: &Cluster, tag: u8, n: u8) {
+    let writer = cluster.node(leader_of(cluster)).writer();
+    for i in 0..n {
+        writer
+            .write(Bytes::from(vec![tag, i]))
+            .await
+            .expect("write must reach quorum");
+    }
+}
+
+/// Wait until `node` sees an entry whose first byte is `tag` in its unstable tail.
+async fn assert_tail_sees(cluster: &Cluster, node: NodeId, tag: u8) {
+    let reader = cluster.node(node).reader();
+    let seen = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let mut stream = reader.unstable_tail().into_test_stream();
+            while let Some(item) = stream.next().await {
+                if let Ok(d) = item
+                    && d.blob.first() == Some(&tag)
+                {
+                    return;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await;
+    assert!(
+        seen.is_ok(),
+        "{node:?} never observed a write tagged {tag:#x}"
+    );
 }
 
 // ── test ──────────────────────────────────────────────────────────────
@@ -152,12 +203,17 @@ async fn rolling_replacement_survives_full_node_rotation() {
     let ids: Vec<NodeId> = cluster.node_ids().into_iter().collect();
 
     // Rolling replacement: rotate each of the original nodes out.
+    write_batch(&cluster, 0, 5).await;
     for (i, &old_id) in ids.iter().enumerate() {
         eprintln!("  replace #{i}: {old_id:?}");
         let _new_id = cluster.replace(old_id).await.expect("replace");
         eprintln!("  replace #{i}: {old_id:?} → {_new_id:?}");
         cluster.wait_for_convergence(Duration::from_secs(60)).await;
         eprintln!("  replace #{i}: converged");
+        // Sustained writes survive the replacement, and the replacement sees them.
+        let tag = u8::try_from(i + 1).expect("few rotations");
+        write_batch(&cluster, tag, 5).await;
+        assert_tail_sees(&cluster, _new_id, tag).await;
         // See fragility notes at top of file.
         tokio::time::sleep(Duration::from_secs(2)).await;
     }

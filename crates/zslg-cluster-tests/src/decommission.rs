@@ -30,7 +30,6 @@
 
 use std::sync::Arc;
 use std::time::Duration;
-use zslg_error::LifecycleError;
 
 use object_store::memory::InMemory;
 
@@ -44,7 +43,7 @@ use crate::{Cluster, ClusterConfig, default_fast_config, wait_until_sync};
 /// exactly that) but freezes solid under a REAL (`retain: false`) eviction,
 /// because the leader stops replicating to the removed node entirely, so its
 /// own view of `voters` never converges (see
-/// `evicted_node_survives_a_denied_rejoin`, which drives the real mechanism
+/// `eviction::evicted_member_leaves_the_set_is_refused_reads_and_stays_up`, which drives the real mechanism
 /// and is where the affirmative-`NotReady` claim actually lives). Demoting to
 /// learner here changes the voter set without an eviction — see
 /// `RaftNode::demote_to_learner_for_test` — precisely so this test can prove
@@ -130,216 +129,13 @@ async fn voter_set_change_alone_does_not_gate_reads() {
     cluster.shutdown().await.expect("clean shutdown");
 }
 
-/// The claim `removed_node_stays_up_and_refuses_reads` cannot prove: that a
-/// DENIED REJOIN — the only path that used to return `Error::MembershipDenied`
-/// and fatally exit `raft::startup::rejoin::RejoinMonitor::run` — no longer
-/// tears down the node's supervision tree.
-///
-/// Two things `Cluster` structurally cannot answer, which is why this test
-/// does not use it for the assertion:
-/// - `Cluster::node_ids()` is a static map, never pruned by an internal task
-///   failing; restoring the old fatal `Err` return does not change what it
-///   reports.
-/// - Nothing in `Cluster` ever calls a *kept* node's `run()` — the method
-///   that polls `Shutdown`'s `JoinSet` and reacts to a background task's
-///   fatal exit — so even a genuinely fatal error sits unnoticed in the
-///   `JoinSet` for the rest of the test.
-///
-/// So the victim is extracted with [`Cluster::take_running`] and its `run()`
-/// is spawned by hand, mirroring
-/// `tests::full_restart::cancelling_the_shutdown_token_stops_a_node_that_never_becomes_ready`:
-/// hold the node outside the harness, spawn its lifecycle future, assert on
-/// the `JoinHandle`.
-///
-/// And a `JoinAttempt::Denied` specifically (not just "not a voter") requires
-/// the REAL eviction path: trim the victim's server name from every other
-/// node's `config.peers` (`tests::reconciliation`'s exact arrangement), which
-/// both evicts it via the production `leader:voters` job AND makes the
-/// victim's own rejoin handshake come back denied — a contacted peer's own
-/// `config.peers` no longer names it. The demote-to-learner shortcut the
-/// other test in this file uses does not reach `JoinAttempt::Denied` at all:
-/// `config.peers` is untouched, so a rejoin attempt is accepted.
-#[tokio::test(flavor = "multi_thread")]
-async fn evicted_node_survives_a_denied_rejoin() {
-    crate::init_logging();
-    let mut base = default_fast_config();
-    base.membership_forced_node_removal_timeout = Duration::from_millis(200);
-    base.membership_poll_interval = Duration::from_millis(100);
-    base.liveness_probe_interval = Duration::from_millis(100);
-
-    let mut cluster = Cluster::new(ClusterConfig {
-        count: 3,
-        distinct_names: true,
-        object_store: Arc::new(InMemory::new()),
-        base_config: Some(base),
-    })
-    .await
-    .expect("Cluster::new");
-    cluster.wait_for_leader(Duration::from_secs(30)).await;
-    cluster.wait_for_convergence(Duration::from_secs(30)).await;
-
-    let leader = cluster
-        .nodes()
-        .find_map(|n| n.state_handle().snapshot().leader)
-        .expect("leader");
-    let victim = cluster
-        .node_ids()
-        .into_iter()
-        .find(|id| *id != leader)
-        .expect("a non-leader node");
-    let victim_name = cluster.placement_of(victim).server_name;
-
-    // Every OTHER node's peer list, minus the victim's name. Computed once,
-    // before any kill (`kill` shrinks placements as it goes).
-    let trimmed_peers: Vec<zslg_net::PeerAddr> = cluster
-        .peer_addrs()
-        .into_iter()
-        .filter(|p| p.server_name != victim_name)
-        .collect();
-
-    // Relaunch every non-victim node with the trimmed list, at a faster
-    // election timeout so the victim (still on the untrimmed default timers)
-    // never wins an election and self-exempts from its own eviction job —
-    // same reasoning as `tests::reconciliation`.
-    let mut fast_election = default_fast_config();
-    fast_election.membership_forced_node_removal_timeout = Duration::from_millis(200);
-    fast_election.membership_poll_interval = Duration::from_millis(100);
-    fast_election.liveness_probe_interval = Duration::from_millis(100);
-    fast_election.raft_election_timeout_min = Duration::from_millis(150);
-    fast_election.raft_election_timeout_max = Duration::from_millis(300);
-    fast_election.raft_heartbeat_interval = Duration::from_millis(50);
-    cluster.set_base_config(fast_election);
-
-    let to_relaunch: Vec<_> = cluster
-        .node_ids()
-        .into_iter()
-        .filter(|id| *id != victim)
-        .collect();
-    for id in to_relaunch {
-        let placement = cluster.kill(id).await;
-        let relaunched = cluster
-            .relaunch_with_peers(placement, &trimmed_peers)
-            .await
-            .expect("relaunch with trimmed peers");
-        assert_eq!(
-            relaunched, id,
-            "relaunch must resume the same NodeId (db-path reuse ⇒ Rejoin)"
-        );
-        cluster.wait_for_leader(Duration::from_secs(30)).await;
-    }
-
-    wait_until_sync(
-        "leadership on a trimmed node",
-        Duration::from_secs(30),
-        || {
-            cluster.nodes().any(|n| {
-                n.state_handle()
-                    .snapshot()
-                    .leader
-                    .is_some_and(|l| l != victim)
-            })
-        },
-    )
-    .await;
-
-    // NOT the victim's own view: once the surviving quorum removes it
-    // (`retain: false`, matching production), the leader stops replicating to
-    // it at all (openraft "remove all replication") — so the victim's own
-    // `state_handle().snapshot().voters` can legitimately never converge, the
-    // same reason `tests::reconciliation` asserts on the *remaining* nodes
-    // rather than the victim. Wait on the surviving quorum instead: that is
-    // the actual "eviction has landed" signal.
-    wait_until_sync(
-        "the surviving quorum's replicated state drops the victim from voters",
-        Duration::from_secs(30),
-        || {
-            cluster
-                .nodes()
-                .filter(|n| n.node_id() != victim)
-                .all(|n| !n.state_handle().snapshot().voters.contains(&victim))
-        },
-    )
-    .await;
-
-    // THE READ-GATE CLAIM, checked BEFORE extraction (still gated through
-    // `Cluster`): `can_serve_clients` must go false and `sync_quorum` must
-    // return `NotReady` once — and only once — a reachable peer has
-    // AFFIRMATIVELY denied this node's rejoin (`JoinAttempt::Denied`,
-    // published as `EvictionStatus`). This is a `wait_until_sync`, not an
-    // immediate check, because the victim's own openraft voter-set view can
-    // legitimately never converge (see above) — a gate that (incorrectly)
-    // read that view would read `can_serve_clients() == true` forever and
-    // this wait would time out rather than pass. That is exactly the bug the
-    // formal review caught: reads served from a view that would never
-    // advance. Bounded by grace (15s) + reconcile (5s) + margin, same as
-    // below.
-    wait_until_sync(
-        "victim's own gate reports it cannot serve clients (Denied observed)",
-        Duration::from_secs(30),
-        || !cluster.node(victim).can_serve_clients(),
-    )
-    .await;
-    let err = cluster
-        .node(victim)
-        .reader()
-        .sync()
-        .await
-        .expect_err("a denied node must refuse client reads");
-    assert!(
-        matches!(err, zslg_log::Error::Lifecycle(LifecycleError::NotReady(_))),
-        "expected NotReady, got {err:?}"
-    );
-
-    // Extract the victim so its OWN supervision tree can be observed —
-    // `Cluster` cannot answer this question (see the doc comment above).
-    let victim_node = cluster.take_running(victim);
-    let token = victim_node.shutdown_token();
-    let handle = tokio::spawn(victim_node.run());
-
-    tokio::time::sleep(Duration::from_secs(1)).await;
-    assert!(
-        !handle.is_finished(),
-        "the node must still be running right after being taken over — \
-         otherwise this test proves nothing",
-    );
-
-    // `raft::startup::rejoin::REJOIN_LEADERLESS_GRACE` is 15s and
-    // `REJOIN_RECONCILE_INTERVAL` is 5s (both hardcoded, not config-driven).
-    // 30s covers grace + at least one more reconcile tick + margin for the
-    // denied `AddMember` round-trip.
-    tokio::time::sleep(Duration::from_secs(30)).await;
-
-    // THE CLAIM: a denied rejoin must not have torn the supervision tree
-    // down. With the old fatal `return Err(Error::MembershipDenied { .. })`
-    // restored, `handle` completes here and this assertion fires.
-    assert!(
-        !handle.is_finished(),
-        "a node denied re-join by the group must not terminate itself \
-         (removal is the group's decision, not the node's)",
-    );
-
-    // Clean up: request shutdown and confirm the node still stops gracefully
-    // on request — this is not the claim under test, just hygiene.
-    token.cancel();
-    let result = tokio::time::timeout(Duration::from_secs(30), handle)
-        .await
-        .expect("cancellation must stop the node, not merely be recorded")
-        .expect("victim's run() task must not panic");
-    assert!(
-        result.is_ok(),
-        "graceful shutdown must still return Ok(()), got {result:?}"
-    );
-
-    cluster.shutdown().await.expect("clean shutdown");
-}
-
 /// The hazard: a leader absent from every other node's `config.peers` cannot be
 /// evicted by anyone else — its own job skips itself, and no other node's job
 /// runs. It must remove itself.
 ///
 /// 4 nodes, distinct names: 3 replicated + a voter-only spare (`replica_node_count
-/// = 3`), same shape as `tests::reconciliation::
-/// evicted_member_leaves_the_replicated_set_while_still_running`. This is not
+/// = 3`), same shape as `eviction::
+/// evicted_member_leaves_the_set_is_refused_reads_and_stays_up`. This is not
 /// optional headroom: `leader::jobs::membership::change::maybe_initiate` only
 /// proposes a new replicated set when enough LIVE voters remain to fill
 /// `replica_node_count` (CLAUDE.md §12's "bounded by `replica_node_count` as a
@@ -353,11 +149,11 @@ async fn evicted_node_survives_a_denied_rejoin() {
 /// restart churn makes it plausible one of them wins an election before the
 /// old leader's next heartbeat lands — if that happens, the PRE-EXISTING
 /// peer-eviction pass (`leader::jobs::voters`, exercised by
-/// `tests::reconciliation`) evicts the old leader from the new leader's view
+/// `eviction`) evicts the old leader from the new leader's view
 /// in ~200ms, and every assertion below goes green without
 /// `tick_self_eviction` ever running. So the relaunched followers get a much
 /// LONGER election timeout than the untouched leader (mirroring
-/// `evicted_member_leaves_the_replicated_set_while_still_running`, which does
+/// `evicted_member_leaves_the_set_is_refused_reads_and_stays_up`, which does
 /// the inverse — there the victim must lose the race, here the victim must
 /// win it): the leader keeps `default_fast_config`'s 1000-2000ms timers and
 /// 250ms heartbeat, so its heartbeats reset the followers' election timers

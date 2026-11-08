@@ -18,95 +18,12 @@
     reason = "test code"
 )]
 
-use crossbeam_combinators::testing::ChannelTestExt as _;
 use std::sync::Arc;
 use std::time::Duration;
 
 use crate::{Cluster, ClusterConfig, assert_cluster_invariants_with_acks, default_fast_config};
 use bytes::Bytes;
-use futures::StreamExt;
 use object_store::memory::InMemory;
-use zslg_log::StableLogEvent;
-
-/// Write data, wait for a snapshot (stable prefix), and verify the data
-/// appears in every node's stable tail.
-#[tokio::test(flavor = "multi_thread")]
-async fn writes_appear_in_stable_log_across_all_nodes() {
-    let mut base = default_fast_config();
-    base.snapshot_interval = Duration::from_millis(200);
-
-    let cluster = Cluster::new(ClusterConfig {
-        count: 3,
-        distinct_names: false,
-        object_store: Arc::new(InMemory::new()),
-        base_config: Some(base),
-    })
-    .await
-    .expect("Cluster::new");
-
-    cluster.wait_for_leader(Duration::from_secs(20)).await;
-    cluster.wait_for_convergence(Duration::from_secs(20)).await;
-
-    let leader = cluster
-        .nodes()
-        .find(|n| n.state_handle().snapshot().leader.is_some())
-        .map(|n| n.node_id())
-        .expect("no leader");
-
-    let payload = Bytes::from_static(b"stable-read-test");
-    let acked_id = cluster
-        .node(leader)
-        .writer()
-        .write(payload.clone())
-        .await
-        .expect("write");
-
-    // Wait for the snapshot to be created (stable prefix covers this write).
-    crate::wait_until_sync("snapshot created", Duration::from_secs(15), || {
-        cluster.nodes().any(|n| {
-            n.state_handle()
-                .snapshot()
-                .manifest_state
-                .manifest_watermark
-                .is_some()
-        })
-    })
-    .await;
-
-    // Every node's stable tail must contain the written entry.
-    for node in cluster.nodes() {
-        let found = tokio::time::timeout(Duration::from_secs(10), async {
-            loop {
-                let mut stream = node
-                    .reader()
-                    .subscribe_stable_log(None)
-                    .into_channel()
-                    .filter_map(|item| match item {
-                        Ok(StableLogEvent::Appended { index, data }) => Some(Ok((index, data))),
-                        Ok(StableLogEvent::Watermark(_)) => None,
-                        Err(e) => Some(Err(e)),
-                    })
-                    .into_test_stream();
-                while let Some(item) = stream.next().await {
-                    if let Ok((_, d)) = item
-                        && d.blob == payload
-                    {
-                        return d;
-                    }
-                }
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }
-        })
-        .await
-        .expect("entry not found in stable log");
-
-        assert_eq!(found.blob.as_ref(), payload.as_ref());
-    }
-
-    let _ = assert_cluster_invariants_with_acks(&cluster, &[(acked_id, payload.clone())]).await;
-
-    cluster.shutdown().await.expect("clean shutdown");
-}
 
 /// A wrong payload under a correct `DataId` must fail the durability chain —
 /// the check is content, not presence.
