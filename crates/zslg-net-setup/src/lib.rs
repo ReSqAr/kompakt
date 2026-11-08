@@ -88,11 +88,5 @@ error_union::error_union! {
         Net(zslg_net::NetError),
         Consensus(zslg_consensus::ConsensusError),
     }
-    from zslg_time::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_log::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_snapshot::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_consensus::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_net::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_net_server::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_net_client::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
 }

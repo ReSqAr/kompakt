@@ -29,16 +29,12 @@ error_union::error_union! {
         Net(zslg_net::NetError),
         Consensus(zslg_consensus::ConsensusError),
     }
-    from zslg_time::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_log::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_snapshot::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_consensus::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_raft::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_net::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
-    from zslg_quorum_read::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
 }
 
-error_union::error_bridge!(Error => zslg_time::Error, zslg_log::Error, zslg_snapshot::Error, zslg_consensus::Error, zslg_raft::Error, zslg_net::Error, zslg_quorum_read::Error; Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus);
+error_union::error_bridge!(Error => zslg_consensus::Error, zslg_raft::Error, zslg_net::Error; Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus);
 error_union::error_home!(Error);
 
 impl From<shutdown::Stopped> for Error {
