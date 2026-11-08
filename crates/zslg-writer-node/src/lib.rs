@@ -1,9 +1,9 @@
 //! A free-standing writer node.
 //!
-//! `WriterNode` is the write half of [`ReplicaNode`](crate::replica_node::ReplicaNode)
+//! `WriterNode` is the write half of `ReplicaNode`
 //! with none of the storage or consensus: it joins no Raft, owns no replica log
 //! or local store, and persists nothing. It tracks the cluster's `RaftState` by
-//! streaming from the configured peers over RPC (see [`crate::raft`]) and
+//! streaming from the configured peers over RPC (see `zslg-raft-tracker`) and
 //! fans writes out to a quorum of replicas via `WriterService`.
 //!
 //! Its identity is ephemeral (a fresh [`NodeId`] each start) — a writer has no
@@ -18,14 +18,13 @@ use zslg_lifecycle_types::ConfigError;
 
 use std::num::NonZeroUsize;
 
-use crate::ByteSize;
-use crate::Error;
+use bytesize::ByteSize;
 
-use crate::network::setup_router;
 use shutdown::Shutdown;
+use zslg_consensus::NodeId;
 use zslg_hlc_clock::{HlcClock, run_clock_gauges};
-use zslg_net_types::PeerAddr;
-use zslg_node_types::NodeId;
+use zslg_net::PeerAddr;
+use zslg_net_setup::setup_router;
 use zslg_raft_tracker::{RaftTracker, RaftTrackerConfig, spawn_raft_tracker_streamer};
 use zslg_writer::WriterService;
 
@@ -116,7 +115,7 @@ impl WriterNode {
 
     /// Clone of the global [`CancellationToken`]; cancelling it triggers a
     /// graceful shutdown of every background task (mirrors
-    /// [`ReplicaNode::shutdown_token`](crate::replica_node::ReplicaNode::shutdown_token)).
+    /// `ReplicaNode::shutdown_token`).
     #[must_use]
     pub fn shutdown_token(&self) -> CancellationToken {
         self.shutdown.token()
@@ -212,7 +211,7 @@ impl WriterNodeConfig {
 
     /// Produce the raft-tracker subsystem config.
     #[must_use]
-    pub(crate) fn raft_tracker_config(&self) -> RaftTrackerConfig {
+    pub fn raft_tracker_config(&self) -> RaftTrackerConfig {
         RaftTrackerConfig {
             peers: self.peers_watcher(),
             min_backoff: self.raft_tracker_min_backoff,
@@ -225,8 +224,8 @@ impl WriterNodeConfig {
     /// fields from the flat `network_*` prefix feed directly into the flat
     /// [`RpcClientConfig`].
     #[must_use]
-    pub(crate) fn router_config(&self) -> crate::network::RpcClientConfig {
-        crate::network::RpcClientConfig {
+    pub fn router_config(&self) -> zslg_net_setup::RpcClientConfig {
+        zslg_net_setup::RpcClientConfig {
             tcp_keepalive_interval: self.keepalive_interval,
             #[cfg(target_os = "linux")]
             tcp_user_timeout: self.user_timeout,
@@ -243,13 +242,13 @@ impl WriterNodeConfig {
 
     /// Produce the persistent peers watcher from the flat peer list.
     #[must_use]
-    pub(crate) fn peers_watcher(&self) -> Arc<dyn zslg_net::PeersWatcher> {
+    pub fn peers_watcher(&self) -> Arc<dyn zslg_net::PeersWatcher> {
         zslg_peers::static_peers(self.peers.clone())
     }
 
     /// Produce the writer constructor config.
     #[must_use]
-    pub(crate) fn writer_config(&self, node_id: NodeId) -> zslg_writer::WriterConfig {
+    pub fn writer_config(&self, node_id: NodeId) -> zslg_writer::WriterConfig {
         zslg_writer::WriterConfig {
             node_id,
             write_timeout: self.write_timeout,
@@ -271,5 +270,36 @@ impl WriterNodeConfig {
             )));
         }
         Ok(())
+    }
+}
+
+error_union::error_union! {
+    /// What this node assembly can fail with.
+    #[derive(Debug, Clone, PartialEq)]
+    pub Error {
+        Lifecycle(zslg_lifecycle_types::LifecycleError),
+        Config(zslg_lifecycle_types::ConfigError),
+        Clock(zslg_time::ClockError),
+        Log(zslg_log::LogError),
+        Snapshot(zslg_snapshot::SnapshotError),
+        Net(zslg_net::NetError),
+        Consensus(zslg_consensus::ConsensusError),
+    }
+    from zslg_time::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_log::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_snapshot::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_consensus::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_net::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_net_client::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_net_setup::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_observability::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_raft_tracker::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_writer::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_raft::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+}
+
+impl From<shutdown::Stopped> for Error {
+    fn from(_: shutdown::Stopped) -> Self {
+        Self::Lifecycle(zslg_lifecycle_types::LifecycleError::Shutdown)
     }
 }

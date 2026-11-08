@@ -60,13 +60,11 @@ pub(crate) mod replica_node;
 #[cfg(test)]
 #[cfg(test)]
 mod tests;
-pub(crate) mod writer_node;
 
 pub use crate::error::Error;
 pub use crate::follower_node::{FollowerNode, FollowerNodeConfig};
 pub use crate::learner_node::{LearnerNode, LearnerNodeConfig};
 pub use crate::replica_node::{InitialisingReplicaNode, ReplicaNode, ReplicaNodeConfig};
-pub use crate::writer_node::{WriterNode, WriterNodeConfig};
 pub use bytesize::ByteSize;
 pub use zslg_consensus::RaftStateView;
 pub use zslg_consensus_types::{
@@ -85,6 +83,7 @@ pub use zslg_snapshot_types::{
     CompactionTier, CompressionLevel, SnapshotError, SnapshotId, SnapshotMetadata,
 };
 pub use zslg_time_types::{ClockError, Hlc};
+pub use zslg_writer_node::{WriterNode, WriterNodeConfig};
 
 /// Apply this crate's histogram buckets to a Prometheus builder.
 ///

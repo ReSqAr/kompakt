@@ -4530,6 +4530,7 @@ dependencies = [
  "zslg-time-fake",
  "zslg-time-types",
  "zslg-writer",
+ "zslg-writer-node",
 ]
 
 [[package]]
@@ -5548,6 +5549,31 @@ dependencies = [
  "zslg-raft",
  "zslg-snapshot",
  "zslg-time",
+]
+
+[[package]]
+name = "zslg-writer-node"
+version = "0.1.0"
+dependencies = [
+ "bytesize",
+ "error-union",
+ "shutdown",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-hlc-clock",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-net-client",
+ "zslg-net-setup",
+ "zslg-observability",
+ "zslg-peers",
+ "zslg-raft",
+ "zslg-raft-tracker",
+ "zslg-snapshot",
+ "zslg-time",
+ "zslg-writer",
 ]
 
 [[package]]

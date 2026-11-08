@@ -6,7 +6,7 @@
 //! | [`ReplicaNode`] | raft voter + replica log + writer + reader |
 //! | [`FollowerNode`](crate::follower_node) | writer + reader, no raft, no replica log |
 //! | [`LearnerNode`](crate::learner_node) | reader only |
-//! | [`WriterNode`](crate::writer_node) | writer only, no durable state |
+//! | `WriterNode` | writer only, no durable state |
 //!
 //! This file is composition, not logic: it validates config, opens the stores in
 //! dependency order, and hands every long-lived task to [`Shutdown`] so that any
