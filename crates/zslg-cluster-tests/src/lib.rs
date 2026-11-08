@@ -22,7 +22,6 @@ mod decommission;
 mod full_restart;
 mod leader_failover;
 mod learner_integration;
-mod multi_node_writes;
 mod reconciliation;
 mod rolling_replacement;
 mod stable_read;

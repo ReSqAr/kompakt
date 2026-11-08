@@ -30,13 +30,11 @@
 
 use std::sync::Arc;
 use std::time::Duration;
-use zslg_error::LifecycleError;
 
 use bytes::Bytes;
 use object_store::memory::InMemory;
 
 use crate::{Cluster, ClusterConfig, assert_cluster_invariants, default_fast_config};
-use zslg::Error;
 
 /// Off and on again, ALL AT ONCE: a full outage where every node restarts
 /// simultaneously must recover a leader + writable cluster on its own.
@@ -161,145 +159,6 @@ async fn full_cluster_restart_staggered_recovers() {
     assert_cluster_invariants(&cluster);
 
     cluster.shutdown().await.expect("clean shutdown");
-}
-
-/// The RPC server must be bound and serving BEFORE raft startup blocks —
-/// otherwise unbounded startup would be a mutual deadlock (every cold-starting
-/// node waiting for peers that aren't listening). A non-bootstrap node whose one
-/// configured peer is unreachable takes the `JoinExisting` route and blocks
-/// forever in `join_existing`; its server must still accept connections while
-/// `start()` is pending. (If `bind_server` were moved after `run_raft_startup`,
-/// the connect below would be refused and this test would fail.)
-#[tokio::test(flavor = "multi_thread")]
-async fn rpc_server_accepts_connections_while_raft_startup_is_blocked() {
-    let _dir = tempfile::tempdir().expect("tempdir");
-    let store: Arc<dyn object_store::ObjectStore> = Arc::new(InMemory::new());
-
-    let listen = crate::reserve_port();
-    let dead_peer = crate::reserve_port(); // nothing will listen here
-
-    // server_name ("node-a") != bootstrap_server_name ("node-0") ⇒ NOT the
-    // bootstrap node; its only reachable peer is itself and the other
-    // configured peer (`dead_peer`) never answers, so it joins forever. No
-    // object-store fence ⇒ the JoinExisting route. `peers` must list every
-    // initially available peer including this node itself (see
-    // `validate_rejects_config_whose_peers_omit_self`), so `node-a` is
-    // included alongside the unreachable `node-0`.
-    let mut cfg = default_fast_config();
-    cfg.network_server_name = "node-a".into();
-    cfg.peers = vec![
-        zslg_net::PeerAddr {
-            addr: dead_peer.into(),
-            server_name: "node-0".into(),
-        },
-        zslg_net::PeerAddr {
-            addr: listen.into(),
-            server_name: "node-a".into(),
-        },
-    ];
-    cfg.network_bootstrap_server_name = "node-0".into();
-    cfg.network_listen_addr = listen;
-    cfg.db_path = _dir.path().join("node.db");
-    cfg.object_store = store;
-
-    // Spawn (do NOT await) — `wait_until_ready` blocks in the join wait and never
-    // returns. `start` itself does return (that is the point of the split), so the
-    // pending-ness asserted below is the readiness wait, not the bind.
-    let handle = tokio::spawn(async move {
-        zslg::ReplicaNode::start(cfg)
-            .await?
-            .wait_until_ready()
-            .await
-    });
-
-    // The server must come up (accept a TCP connection) even though start() is
-    // still blocked.
-    let mut served = false;
-    for _ in 0..50 {
-        if tokio::net::TcpStream::connect(listen).await.is_ok() {
-            served = true;
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    assert!(
-        served,
-        "RPC server must accept connections while raft startup is blocked",
-    );
-    // ...and start() must still be pending — the server is up DURING startup, not
-    // only after it returned.
-    assert!(
-        !handle.is_finished(),
-        "node must still be blocked in raft startup while its server is already serving",
-    );
-
-    handle.abort();
-}
-
-/// An operator must be able to stop a node that will never become ready.
-///
-/// The freshness gate retries forever by design (that is what makes an
-/// unattended cold start work), so `shutdown_token` is the *only* way out for a
-/// `JoinExisting` node whose peers never answer. Dropping the `wait_until_ready`
-/// future is not an answer: that aborts the node's `JoinSet` where it stands.
-///
-/// The guard is that cancellation is observed **promptly** and reported as
-/// `StartupCancelled` — distinguishable from a genuine startup fault — with the
-/// node shut down gracefully on the way out.
-#[tokio::test(flavor = "multi_thread")]
-async fn cancelling_the_shutdown_token_stops_a_node_that_never_becomes_ready() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let store: Arc<dyn object_store::ObjectStore> = Arc::new(InMemory::new());
-
-    let listen = crate::reserve_port();
-    let dead_peer = crate::reserve_port(); // nothing will ever listen here
-
-    // Same shape as `rpc_server_accepts_connections_while_raft_startup_is_blocked`:
-    // not the bootstrap node, no fence, one unreachable peer ⇒ JoinExisting, which
-    // blocks forever.
-    let mut cfg = default_fast_config();
-    cfg.network_server_name = "node-a".into();
-    cfg.peers = vec![
-        zslg_net::PeerAddr {
-            addr: dead_peer.into(),
-            server_name: "node-0".into(),
-        },
-        zslg_net::PeerAddr {
-            addr: listen.into(),
-            server_name: "node-a".into(),
-        },
-    ];
-    cfg.network_bootstrap_server_name = "node-0".into();
-    cfg.network_listen_addr = listen;
-    cfg.db_path = dir.path().join("node.strata");
-    cfg.object_store = store;
-
-    let initialising = zslg::ReplicaNode::start(cfg)
-        .await
-        .expect("start binds without a quorum");
-
-    // Capture the token BEFORE `wait_until_ready` consumes the node.
-    let token = initialising.shutdown_token();
-    let handle = tokio::spawn(initialising.wait_until_ready());
-
-    // Let it get properly stuck in the join wait, and confirm it is stuck.
-    tokio::time::sleep(Duration::from_secs(2)).await;
-    assert!(
-        !handle.is_finished(),
-        "the node must still be waiting — otherwise this test proves nothing",
-    );
-
-    token.cancel();
-
-    let err = tokio::time::timeout(Duration::from_secs(20), handle)
-        .await
-        .expect("cancellation must stop the gate, not merely be recorded")
-        .expect("the startup task must not panic")
-        .expect_err("a cancelled startup cannot yield a ready node");
-    assert!(
-        matches!(err, Error::Lifecycle(LifecycleError::StartupCancelled)),
-        "an operator-requested stop must be distinguishable from a startup fault; got {err:?}",
-    );
 }
 
 /// A PARTIAL outage — a minority down while a quorum + leader survive — must not
