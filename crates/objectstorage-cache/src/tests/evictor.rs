@@ -135,15 +135,26 @@ async fn a_room_request_is_served_before_the_next_drain_batch() {
             ..Scan::default()
         },
     );
+    // Hold the evictor inside the first batch, so what happens next does not
+    // depend on how the runtime and the blocking pool happen to interleave.
+    let gate = core.hold_deletes();
     while core.entries() == 4096 {
         tokio::task::yield_now().await;
     }
-    core.ask_room(1).await;
+    // The request is queued while the first batch is still under way; only then
+    // is that one batch let go. The gate then holds the evictor again at the
+    // next batch (its victims are already out of the table, its deletion is
+    // not), so what the request cost is read off a drain that cannot run on
+    // while this test task waits to be scheduled.
+    tokio::join!(core.ask_room(1), async {
+        gate.add_permits(1);
+    });
     assert!(
         core.entries() >= 4096 - 2 * 1024,
         "at most the batch under way and the next: {} left",
         core.entries()
     );
+    gate.add_permits(1 << 20);
     core.settled().await;
     assert_eq!(core.entries(), 0);
 }
