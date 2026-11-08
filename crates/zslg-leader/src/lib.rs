@@ -46,8 +46,6 @@ use {zslg_net_client as _, zslg_net_wire as _};
 
 #[cfg(test)]
 mod leader_tests;
-#[cfg(test)]
-mod pacing_tests;
 
 use std::sync::Arc;
 use std::time::Duration;

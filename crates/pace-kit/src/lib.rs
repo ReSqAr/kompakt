@@ -48,6 +48,18 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn back_to_back_iterations_are_spaced_by_the_floor() {
+        let floor = Duration::from_millis(100);
+        let mut pace = Pace::new(floor);
+        let start = Instant::now();
+        for _ in 0..5 {
+            pace.wait().await;
+        }
+        // 5 iterations => 4 gaps. Exact, because virtual time only moves for timers.
+        assert_eq!(start.elapsed(), floor * 4);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn an_iteration_that_outran_the_floor_waits_for_nothing() {
         let mut pace = Pace::new(Duration::from_secs(1));
         pace.wait().await;

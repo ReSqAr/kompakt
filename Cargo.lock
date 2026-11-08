@@ -4801,7 +4801,6 @@ dependencies = [
  "metrics",
  "metrics-util",
  "object_store",
- "pace-kit",
  "parking_lot 0.13.0",
  "proptest",
  "raft-kit",
@@ -4812,7 +4811,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "uuid",
- "warn-throttle",
  "zslg-consensus",
  "zslg-consensus-fake",
  "zslg-error",
@@ -4922,6 +4920,8 @@ dependencies = [
 name = "zslg-leader-snapshot"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "crossbeam-channel",
  "crossbeam-combinators",
  "error-union",
  "metrics",
@@ -4938,6 +4938,7 @@ dependencies = [
  "zslg-lifecycle-types",
  "zslg-log",
  "zslg-net",
+ "zslg-net-fake",
  "zslg-quorum-read",
  "zslg-raft",
  "zslg-snapshot",

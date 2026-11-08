@@ -28,6 +28,9 @@ zslg-snapshot = { workspace = true }
 zslg-time = { workspace = true }
 
 [dev-dependencies]
+async-trait = { workspace = true }
+crossbeam-channel = { workspace = true }
+zslg-net-fake = { workspace = true }
 metrics = { workspace = true }
 metrics-util = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }

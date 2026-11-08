@@ -116,3 +116,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod pacing_tests;
