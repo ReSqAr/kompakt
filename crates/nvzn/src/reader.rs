@@ -1,7 +1,6 @@
 use crate::dispatcher::PENDING_SUBSCRIBERS;
 use crate::live::{self, Live, LiveLimits};
 use crate::metrics::{self, ReadKind};
-use crate::projector::Registered;
 use crate::subset;
 use crate::{
     ArcReadTransaction, ArcStore, Error, EventSet, Index, Projection, ProjectionTypeId,
@@ -9,6 +8,7 @@ use crate::{
 };
 use crate::{FoldState, Subscriptions};
 use crossbeam_combinators::{Channel, Infinite, RegistryError};
+use nvzn_projector::Registered;
 use std::collections::{BTreeMap, BTreeSet};
 use std::marker::PhantomData;
 use std::sync::Arc;

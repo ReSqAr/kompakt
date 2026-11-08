@@ -2115,6 +2115,7 @@ dependencies = [
  "metrics-exporter-prometheus",
  "metrics-kit",
  "metrics-util",
+ "nvzn-projector",
  "nvzn-store",
  "nvzn-types",
  "postcard",
@@ -2128,6 +2129,16 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "zslg",
+]
+
+[[package]]
+name = "nvzn-projector"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "metrics-kit",
+ "nvzn-store",
+ "nvzn-types",
 ]
 
 [[package]]

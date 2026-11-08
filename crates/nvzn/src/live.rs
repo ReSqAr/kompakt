@@ -33,13 +33,13 @@ use crate::APP_ID_LEN;
 use crate::FoldState;
 use crate::StopReason;
 use crate::metrics::{self, ReadKind};
-use crate::projector::{BoxedProjectorLike, fold_event};
 use crate::subset;
 use crate::{
     ArcStore, Error, EventSet, Projection, ProjectionTypeId, Snapshot, Tenant, TenantId, Watermark,
     WithWireFormat, WriteTransactionImpl,
 };
 use crossbeam_combinators::{AbortReason, Channel, Finite, Infinite, Key, Seam, Segment};
+use nvzn_projector::{BoxedProjectorLike, fold_event};
 use nvzn_types::contains;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};

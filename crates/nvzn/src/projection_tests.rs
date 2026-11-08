@@ -9,7 +9,6 @@ mod next_tests;
     reason = "test code"
 )]
 mod tests {
-    use crate::projector::*;
     use crate::{
         ReadTransactionExt,
         testsupport::{
@@ -17,6 +16,7 @@ mod tests {
             tenant, tenant_id,
         },
     };
+    use nvzn_projector::*;
     use nvzn_store::*;
     use nvzn_types::*;
     use serde::{Deserialize, Serialize};

@@ -7,7 +7,7 @@ use nvzn_store::{AnyIndex, Projection, View, Write, WriteTransaction, WriteTrans
 use nvzn_types::{Error, IndexId, ProjectionTypeId, SubEventOf, Tenant};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub(crate) trait ProjectorLike<Ev, Txn>: Sync + Send + 'static
+pub trait ProjectorLike<Ev, Txn>: Sync + Send + 'static
 where
     Txn: WriteTransaction,
 {
@@ -23,16 +23,15 @@ where
 }
 
 /// The storing half of one projection's fold of one event.
-pub(crate) type Apply<'p, Txn> = Box<dyn FnOnce(&mut Txn) -> Result<(), Error> + 'p>;
+pub type Apply<'p, Txn> = Box<dyn FnOnce(&mut Txn) -> Result<(), Error> + 'p>;
 
-pub(crate) type BoxedProjectorLike<Ev> =
-    Box<dyn for<'a> ProjectorLike<Ev, WriteTransactionImpl<'a>>>;
+pub type BoxedProjectorLike<Ev> = Box<dyn for<'a> ProjectorLike<Ev, WriteTransactionImpl<'a>>>;
 
 /// Folds one event into every projection. Each `next` reads the state before
 /// the event — none sees another's writes for it — and the writes are stored
 /// together afterwards, so the result does not depend on the order of the
 /// projections.
-pub(crate) fn fold_event<Ev: 'static>(
+pub fn fold_event<Ev: 'static>(
     projectors: &BTreeMap<ProjectionTypeId, BoxedProjectorLike<Ev>>,
     tenant: Tenant,
     event: &Ev,
@@ -50,12 +49,12 @@ pub(crate) fn fold_event<Ev: 'static>(
 
 /// Folds one projection type: runs its `next` and maintains its
 /// [`Projection::INDICES`].
-pub(crate) struct Projector<P: 'static> {
+pub struct Projector<P: 'static> {
     indices: BTreeMap<IndexId, &'static dyn AnyIndex<P>>,
 }
 
 impl<P: Projection> Projector<P> {
-    pub(crate) fn new() -> Result<Self, Error> {
+    pub fn new() -> Result<Self, Error> {
         let mut indices = BTreeMap::new();
         for index in P::INDICES {
             if indices.insert(index.id(), *index).is_some() {
@@ -160,9 +159,9 @@ impl<P: Projection> Projector<P> {
 
 /// What a live view needs of a registered projection: the events it folds,
 /// and how to build a projector of its own (the fold keeps the first one).
-pub(crate) struct Registered<Ev> {
-    pub(crate) events: &'static [u32],
-    pub(crate) make: fn() -> Result<BoxedProjectorLike<Ev>, Error>,
+pub struct Registered<Ev> {
+    pub events: &'static [u32],
+    pub make: fn() -> Result<BoxedProjectorLike<Ev>, Error>,
 }
 
 fn make_projector<P, Ev>() -> Result<BoxedProjectorLike<Ev>, Error>
@@ -174,11 +173,11 @@ where
 }
 
 pub struct ProjectorManager<Ev> {
-    pub(crate) tenant: Tenant,
-    pub(crate) projectors: BTreeMap<ProjectionTypeId, BoxedProjectorLike<Ev>>,
-    pub(crate) registered: BTreeMap<ProjectionTypeId, Registered<Ev>>,
-    pub(crate) registered_projection_types: BTreeSet<ProjectionTypeId>,
-    pub(crate) registered_indices: BTreeSet<(ProjectionTypeId, IndexId)>,
+    pub tenant: Tenant,
+    pub projectors: BTreeMap<ProjectionTypeId, BoxedProjectorLike<Ev>>,
+    pub registered: BTreeMap<ProjectionTypeId, Registered<Ev>>,
+    pub registered_projection_types: BTreeSet<ProjectionTypeId>,
+    pub registered_indices: BTreeSet<(ProjectionTypeId, IndexId)>,
 }
 
 impl<Ev> ProjectorManager<Ev> {

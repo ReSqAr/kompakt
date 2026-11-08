@@ -1,7 +1,7 @@
 //! Canonical metric registry.
 //!
 //! Every metric this crate emits is declared here as a [`MetricDef`] in
-//! [`ALL_METRICS`] — name, kind, unit and help — and every emission goes
+//! [`all_metrics`] — name, kind, unit and help — and every emission goes
 //! through one of the helpers below, never a raw `counter!`/`gauge!` at a call
 //! site. Because the helpers are `pub(crate)`, an unwired metric is an unused
 //! function and `clippy -D warnings` rejects it.
@@ -39,11 +39,9 @@ pub(crate) const METRIC_PREFIX: &str = "nvzn_";
 // ---------------------------------------------------------------------------
 
 const LABEL_TENANT: &str = "tenant";
-const LABEL_PROJECTION: &str = "projection";
 const LABEL_OUTCOME: &str = "outcome";
 const LABEL_REASON: &str = "reason";
 const LABEL_KIND: &str = "kind";
-const LABEL_OP: &str = "op";
 const LABEL_CF: &str = "cf";
 const LABEL_STATE: &str = "state";
 
@@ -99,21 +97,6 @@ impl ReadKind {
         match self {
             Self::Stable => "stable",
             Self::Live => "live",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum RowOp {
-    Upsert,
-    Delete,
-}
-
-impl RowOp {
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Self::Upsert => "upsert",
-            Self::Delete => "delete",
         }
     }
 }
@@ -179,9 +162,6 @@ metrics!("nvzn_", nvzn; {
         "Fold-loop exits by reason. `poison_entry` and `non_monotone_data_id` \
                are permanent: the entry stays in the log, so a restart fails \
                identically and the read model is frozen until an operator acts.";
-    custom projection_rows_total PROJECTION_ROWS_TOTAL "projection_rows_total" Counter None
-        "Projection rows written by the fold loop, by tenant, projection type and \
-               operation. The churn each projection actually sees.";
     custom store_fence_total STORE_FENCE_TOTAL "store_fence_total" Counter None
         "Store fsyncs by outcome. `failed` is terminal — nothing this dispatcher \
                commits can be made durable any more, so the fold loop stops.";
@@ -206,7 +186,15 @@ metrics!("nvzn_", nvzn; {
                batch size a caller is actually achieving.";
 });
 
-pub(crate) const ALL_METRICS: &[MetricDef] = &nvzn!();
+const OWN_METRICS: &[MetricDef] = &nvzn!();
+
+/// Every metric the nvzn crates declare: this facade's slice, then each
+/// emitting crate's.
+pub(crate) fn all_metrics() -> impl Iterator<Item = &'static MetricDef> {
+    OWN_METRICS
+        .iter()
+        .chain(nvzn_projector::metrics::METRICS.iter())
+}
 
 /// The namespace every metric this crate owns is exported under.
 pub const METRIC_NAMESPACE: &str = "nvzn_";
@@ -237,8 +225,7 @@ const fn buckets_for(unit: Option<Unit>) -> &'static [f64] {
 /// Recorder-agnostic; `metrics-exporter-prometheus` users want
 /// [`configure_prometheus`], which applies exactly this.
 pub fn histogram_buckets() -> impl Iterator<Item = (&'static str, &'static [f64])> {
-    ALL_METRICS
-        .iter()
+    all_metrics()
         .filter(|d| d.kind == MetricKind::Histogram)
         .map(|d| (d.name, buckets_for(d.unit)))
 }
@@ -284,7 +271,7 @@ pub fn configure_prometheus(
 /// Call once, **after** installing a recorder: descriptions sent to the no-op
 /// recorder are dropped, not replayed.
 pub fn describe_metrics() {
-    for def in ALL_METRICS {
+    for def in all_metrics() {
         match def.kind {
             MetricKind::Counter => match def.unit {
                 Some(u) => metrics::describe_counter!(def.name, u, def.help),
@@ -305,15 +292,6 @@ pub fn describe_metrics() {
 // ---------------------------------------------------------------------------
 // Conversions
 // ---------------------------------------------------------------------------
-
-/// The last `::` segment of a type's path — `Todo`, not
-/// `my_app::projections::Todo`. Label values, so readability beats fidelity;
-/// a generic projection would render its last parameter, which none of them
-/// are.
-pub(crate) fn short_type_name<P: ?Sized>() -> &'static str {
-    let full = std::any::type_name::<P>();
-    full.rsplit("::").next().unwrap_or(full)
-}
 
 // ---------------------------------------------------------------------------
 // Emission
@@ -342,16 +320,6 @@ pub(crate) fn fold_entry(outcome: EntryOutcome) {
 
 pub(crate) fn fold_stopped(reason: StopReason) {
     metrics::counter!(FOLD_STOPPED_TOTAL, LABEL_REASON => reason.as_str()).increment(1);
-}
-
-pub(crate) fn projection_row(tenant: Tenant, projection: &'static str, op: RowOp) {
-    metrics::counter!(
-        PROJECTION_ROWS_TOTAL,
-        LABEL_TENANT => tenant.name(),
-        LABEL_PROJECTION => projection,
-        LABEL_OP => op.as_str(),
-    )
-    .increment(1);
 }
 
 pub(crate) fn store_fence(outcome: FenceOutcome, elapsed: Duration) {
@@ -422,7 +390,7 @@ mod tests {
     /// crate shares an endpoint with zslg, whose own names are `zslg_`.
     #[test]
     fn every_metric_is_namespaced() {
-        for def in ALL_METRICS {
+        for def in all_metrics() {
             assert!(
                 def.name.starts_with(METRIC_PREFIX),
                 "{} is outside the {METRIC_PREFIX} namespace",
@@ -433,7 +401,7 @@ mod tests {
 
     #[test]
     fn naming_conventions_hold() {
-        for def in ALL_METRICS {
+        for def in all_metrics() {
             match def.kind {
                 MetricKind::Counter => assert!(
                     def.name.ends_with("_total"),
@@ -483,8 +451,7 @@ mod tests {
         }
         assert_eq!(
             seen,
-            ALL_METRICS
-                .iter()
+            all_metrics()
                 .filter(|d| d.kind == MetricKind::Histogram)
                 .count(),
             "every registered histogram must be bucketed",
@@ -559,11 +526,15 @@ mod tests {
 
     #[test]
     fn all_metric_names_are_unique() {
-        let mut names: Vec<&str> = ALL_METRICS.iter().map(|d| d.name).collect();
+        let mut names: Vec<&str> = all_metrics().map(|d| d.name).collect();
         let before = names.len();
         names.sort_unstable();
         names.dedup();
-        assert_eq!(before, names.len(), "duplicate metric name in ALL_METRICS");
+        assert_eq!(
+            before,
+            names.len(),
+            "duplicate metric name in all_metrics()"
+        );
     }
 
     /// Every helper, once, under a local recorder: the names and label sets a
@@ -585,7 +556,11 @@ mod tests {
             fold_batch(3, 1_000, Duration::from_millis(1));
             fold_entry(EntryOutcome::Applied);
             fold_stopped(StopReason::PoisonEntry);
-            projection_row(tenant, "Todo", RowOp::Upsert);
+            nvzn_projector::metrics::projection_row(
+                tenant,
+                "Todo",
+                nvzn_projector::metrics::RowOp::Upsert,
+            );
             store_fence(FenceOutcome::Ok, Duration::from_millis(1));
             store_live_sst_files_size_bytes("store", 4096);
             store_reset();
@@ -600,7 +575,7 @@ mod tests {
 
         let snapshot = snapshotter.snapshot().into_hashmap();
         let emitted: Vec<&str> = snapshot.keys().map(|k| k.key().name()).collect();
-        for def in ALL_METRICS {
+        for def in all_metrics() {
             assert!(
                 emitted.contains(&def.name),
                 "{} is registered but no helper emitted it",
@@ -623,7 +598,7 @@ mod tests {
             ls
         };
         assert_eq!(
-            labels(PROJECTION_ROWS_TOTAL),
+            labels(nvzn_projector::metrics::PROJECTION_ROWS_TOTAL),
             vec!["op=upsert", "projection=Todo", "tenant=acct"],
         );
         assert_eq!(labels(STORE_LIVE_SST_FILES_SIZE_BYTES), vec!["cf=store"]);
@@ -636,7 +611,10 @@ mod tests {
 
     #[test]
     fn short_type_name_takes_the_last_segment() {
-        assert_eq!(short_type_name::<crate::testsupport::Todo>(), "Todo");
+        assert_eq!(
+            nvzn_projector::metrics::short_type_name::<crate::testsupport::Todo>(),
+            "Todo"
+        );
     }
 
     const GOLDEN_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/src/metrics.golden");
@@ -646,8 +624,7 @@ mod tests {
     /// emits them must not change it. `UPDATE_GOLDEN=1` rewrites the file.
     #[test]
     fn the_registry_matches_the_golden_dump() {
-        let mut lines: Vec<String> = ALL_METRICS
-            .iter()
+        let mut lines: Vec<String> = all_metrics()
             .map(|def| {
                 format!(
                     "{}\t{:?}\t{:?}\t{}\n",

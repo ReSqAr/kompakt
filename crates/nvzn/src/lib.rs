@@ -25,7 +25,6 @@ mod live;
 mod metrics;
 #[cfg(test)]
 mod projection_tests;
-mod projector;
 mod reader;
 mod resultset;
 mod store;
@@ -47,6 +46,7 @@ pub use live::{Live, LiveLimits, Wait, is_live};
 #[cfg(feature = "prometheus")]
 pub use metrics::configure_prometheus;
 pub use metrics::{METRIC_NAMESPACE, describe_metrics, histogram_buckets};
+pub use nvzn_projector::ProjectorManager;
 pub use nvzn_store::{AnyIndex, Index, Indices, Projection, Ref, View, Write};
 pub use nvzn_store::{
     ArcReadTransaction, ArcStore, CommitBatch, ConfigHash, ReadTransaction, ReadTransactionExt,
@@ -59,7 +59,6 @@ pub use nvzn_types::{
     chained_from, define_events,
 };
 pub(crate) use nvzn_types::{FoldState, SubscriptionItem, Subscriptions, subset};
-pub use projector::ProjectorManager;
 pub use reader::{Reader, Snapshot};
 pub use resultset::{IndexJoin, Lazy, LazyRows, ResultSet};
 pub use store::{InMemoryStore, RocksDBStore};

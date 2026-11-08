@@ -12,13 +12,13 @@
     reason = "test code"
 )]
 
-use crate::projector::*;
 use crate::{
     ReadTransactionExt, Store, WriteTransactionExt,
     testsupport::{
         NewTodoV1, TodoId, User, UserDeletedV1, UserId, event, inmemory, tenant, tenant_id,
     },
 };
+use nvzn_projector::*;
 use nvzn_store::*;
 use nvzn_types::*;
 use serde::{Deserialize, Serialize};
