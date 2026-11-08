@@ -1240,7 +1240,8 @@ impl ReplicaNode {
     /// fails if any of these items is `pub`.
     ///
     /// ```no_run
-    /// use zslg::{RaftStateView, ReplicaMembership, ReplicaNode};
+    /// use zslg_consensus::{RaftStateView, ReplicaMembership};
+    /// use zslg_replica_node::ReplicaNode;
     ///
     /// fn inspect(node: &ReplicaNode) {
     ///     // Inherent methods, no trait import needed…
