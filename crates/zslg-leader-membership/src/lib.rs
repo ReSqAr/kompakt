@@ -9,7 +9,7 @@ mod job;
 mod liveness;
 mod voters;
 
-pub use change::{LivenessQuery, MembershipChangeInputs, MembershipChangeManager, needs_retarget};
+pub use change::{LivenessQuery, MembershipChangeInputs, MembershipChangeManager};
 pub use config::MembershipConfig;
 pub use job::{
     MEMBERSHIP_STEP_FLOOR, MembershipDriver, MembershipHandles, MembershipJob, MembershipObserver,

@@ -30,9 +30,7 @@ use zslg_consensus::RaftStateHandle;
 use zslg_consensus::ReplicatedRaftState;
 use zslg_consensus::SpareSelectionStrategy;
 use zslg_consensus::{Exit, ReplicaMembership, ReplicaStatus};
-use zslg_leader_membership::{
-    LivenessQuery, MembershipChangeInputs, MembershipChangeManager, needs_retarget,
-};
+use zslg_leader_membership::{LivenessQuery, MembershipChangeInputs, MembershipChangeManager};
 use zslg_leader_membership::{MembershipDriver, MembershipObserver, TickOutcome};
 use zslg_net::ServerName;
 use zslg_raft_setup::RaftNode;
@@ -718,29 +716,6 @@ async fn resume_from_joint_after_leader_killed_mid_step() {
     for sys in nodes.values_mut() {
         let _ = sys.raft.shutdown().await;
     }
-}
-
-/// Whether the incoming set of a joint config must be recomputed because it is
-/// no longer fully live. Split out from `maybe_initiate` so the retarget
-/// decision — the one that discards step 2 — is assertable without a metrics
-/// recorder.
-#[test]
-fn retarget_is_needed_only_when_an_incoming_member_is_not_live() {
-    let next: BTreeSet<NodeId> = [zslg_consensus_fake::nid(3), zslg_consensus_fake::nid(4)]
-        .into_iter()
-        .collect();
-    let all_live: BTreeSet<NodeId> = [
-        zslg_consensus_fake::nid(1),
-        zslg_consensus_fake::nid(3),
-        zslg_consensus_fake::nid(4),
-    ]
-    .into_iter()
-    .collect();
-    let one_dead: BTreeSet<NodeId> = [zslg_consensus_fake::nid(1), zslg_consensus_fake::nid(3)]
-        .into_iter()
-        .collect();
-    assert!(!needs_retarget(&next, &all_live));
-    assert!(needs_retarget(&next, &one_dead));
 }
 
 /// A retarget throws away the step-2 generation quorum and disarms `exit_hlc`,

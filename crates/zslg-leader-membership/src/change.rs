@@ -267,7 +267,7 @@ impl MembershipChangeManager {
 /// decision — the one that discards step 2 — is assertable without a metrics
 /// recorder.
 #[must_use]
-pub fn needs_retarget(current_next: &BTreeSet<NodeId>, live: &BTreeSet<NodeId>) -> bool {
+pub(crate) fn needs_retarget(current_next: &BTreeSet<NodeId>, live: &BTreeSet<NodeId>) -> bool {
     !current_next.is_subset(live)
 }
 
@@ -491,6 +491,13 @@ mod tests {
 
     fn set(ids: &[NodeId]) -> BTreeSet<NodeId> {
         ids.iter().copied().collect()
+    }
+
+    #[test]
+    fn retarget_is_needed_only_when_an_incoming_member_is_not_live() {
+        let next = set(&[nid(3), nid(4)]);
+        assert!(!needs_retarget(&next, &set(&[nid(1), nid(3), nid(4)])));
+        assert!(needs_retarget(&next, &set(&[nid(1), nid(3)])));
     }
 
     #[test]
