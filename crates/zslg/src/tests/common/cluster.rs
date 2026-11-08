@@ -35,7 +35,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use zslg_consensus_types::ConsensusError;
+use zslg_consensus::ConsensusError;
 
 use object_store::ObjectStore;
 use object_store::memory::InMemory;
@@ -43,8 +43,8 @@ use tempfile::TempDir;
 
 use crate::error::Error;
 use crate::replica_node::{ReplicaNode, ReplicaNodeConfig};
-use zslg_net_types::{PeerAddr, ServerName};
-use zslg_node_types::NodeId;
+use zslg_consensus::NodeId;
+use zslg_net::{PeerAddr, ServerName};
 
 use super::reserve_port;
 
@@ -726,7 +726,7 @@ impl Cluster {
 
 pub(crate) fn default_fast_config() -> ReplicaNodeConfig {
     let snapshot_interval = Duration::from_millis(500);
-    let tier0: zslg_snapshot_types::CompactionTier = snapshot_interval.into();
+    let tier0: zslg_snapshot::CompactionTier = snapshot_interval.into();
     // Placeholder identity/storage — every real node replaces these in
     // build_config().
     let mut cfg = ReplicaNodeConfig::new(

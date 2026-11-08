@@ -19,7 +19,7 @@ use crossbeam_combinators::testing::ChannelTestExt as _;
 use std::sync::Arc;
 use std::time::Duration;
 use zslg_consensus::RaftLeadership;
-use zslg_log_types::LogError;
+use zslg_log::LogError;
 use zslg_net::Router;
 use zslg_snapshot::{CleanupReport, SnapshotStore, SnapshotWrite};
 
@@ -29,19 +29,19 @@ use uuid::Uuid;
 use crate::learner::LocalStore;
 use crate::learner::integrate_manifest_for_test;
 use crate::raft::RaftNode;
-use zslg_consensus_types::RaftStateHandle;
-use zslg_consensus_types::ReplicaMembership;
-use zslg_consensus_types::ReplicatedRaftState;
+use zslg_consensus::NodeId;
+use zslg_consensus::RaftStateHandle;
+use zslg_consensus::ReplicaMembership;
+use zslg_consensus::ReplicatedRaftState;
 use zslg_leader_snapshot::create::{SnapshotEntryInputs, SnapshotResult, create_snapshot_entry};
+use zslg_log::Data;
+use zslg_log::{DataId, LogIndex};
 use zslg_log::{LocalStoreMut, StableLogSnapshot};
-use zslg_log_types::Data;
-use zslg_log_types::{DataId, LogIndex};
-use zslg_net_types::PeerAddr;
-use zslg_node_types::NodeId;
+use zslg_net::PeerAddr;
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use zslg_raft::Raft;
-use zslg_snapshot_types::CompressionLevel;
-use zslg_time_types::Hlc;
+use zslg_snapshot::CompressionLevel;
+use zslg_time::Hlc;
 
 use crate::tests::make_data;
 use crate::tests::upstream;
@@ -115,7 +115,7 @@ async fn snapshot_refuses_to_commit_an_aborted_window() {
         }
         fn subscribe_unstable(
             &self,
-        ) -> crossbeam_combinators::Channel<zslg_log_types::Data, crossbeam_combinators::Infinite>
+        ) -> crossbeam_combinators::Channel<zslg_log::Data, crossbeam_combinators::Infinite>
         {
             self.inner.subscribe_unstable()
         }
@@ -224,7 +224,7 @@ async fn snapshot_round_trip_through_object_store() {
 
     assert_eq!(learner_stable.end_hlc(), Some(Hlc(300)));
     assert_eq!(learner_stable.end_index(), Some(LogIndex(2)));
-    let stable_entries: Vec<(zslg_log_types::LogIndex, zslg_log_types::Data)> = learner_stable
+    let stable_entries: Vec<(zslg_log::LogIndex, zslg_log::Data)> = learner_stable
         .range(None, LogIndex(3))
         .items()
         .filter_map(|r| r.ok())
@@ -378,7 +378,7 @@ async fn second_snapshot_extends_stable_log_via_load() {
     assert_eq!(learner_stable.end_index(), Some(LogIndex(3)));
     assert_eq!(learner_stable.end_hlc(), Some(Hlc(210)));
 
-    let entries: Vec<(zslg_log_types::LogIndex, zslg_log_types::Data)> = learner_stable
+    let entries: Vec<(zslg_log::LogIndex, zslg_log::Data)> = learner_stable
         .range(None, LogIndex(4))
         .items()
         .filter_map(|r| r.ok())
@@ -516,7 +516,7 @@ async fn invariant_stable_order_is_hlc_order() {
 
 #[tokio::test]
 async fn fenced_write_rejected_on_stale_generation() {
-    use zslg_consensus_types::RaftGeneration;
+    use zslg_consensus::RaftGeneration;
     use zslg_raft::{FencedStateWrite, RaftResponse};
 
     let h = boot().await;
@@ -585,15 +585,15 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
     use std::sync::atomic::AtomicBool;
 
     use crate::error::Error;
-    use zslg_consensus_types::RaftGeneration;
+    use zslg_consensus::NodeId;
+    use zslg_consensus::RaftGeneration;
     use zslg_leader_snapshot::create::{SnapshotInputs, build_snapshot};
     use zslg_log::LocalStoreView;
+    use zslg_log::LogIndex;
     use zslg_log::Replica;
-    use zslg_log_types::LogIndex;
-    use zslg_node_types::NodeId;
-    use zslg_snapshot_types::SnapshotId;
-    use zslg_snapshot_types::SnapshotMetadata;
-    use zslg_time_types::{Hlc, HlcParts};
+    use zslg_snapshot::SnapshotId;
+    use zslg_snapshot::SnapshotMetadata;
+    use zslg_time::{Hlc, HlcParts};
 
     use crate::tests::{FixedClock, ReadyReplica};
 
@@ -644,7 +644,7 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
 
         fn subscribe_unstable(
             &self,
-        ) -> crossbeam_combinators::Channel<zslg_log_types::Data, crossbeam_combinators::Infinite>
+        ) -> crossbeam_combinators::Channel<zslg_log::Data, crossbeam_combinators::Infinite>
         {
             self.inner.subscribe_unstable()
         }
@@ -798,7 +798,7 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
 async fn snapshot_quorum_tolerates_one_wedged_replica() {
     use zslg_leader_snapshot::create::{SnapshotInputs, build_snapshot};
     use zslg_log::Replica;
-    use zslg_time_types::HlcParts;
+    use zslg_time::HlcParts;
 
     use crate::tests::{FaultyReplica, FixedClock, MapPeerRouter, ReadyReplica};
 
@@ -899,9 +899,9 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
     use crossbeam_combinators::Channel;
     use zslg_leader_snapshot::create::{SnapshotInputs, build_snapshot};
     use zslg_log::Replica;
-    use zslg_log_types::SnapshotEntry;
-    use zslg_net_types::ServerName;
-    use zslg_snapshot_types::SnapshotId;
+    use zslg_log::SnapshotEntry;
+    use zslg_net::ServerName;
+    use zslg_snapshot::SnapshotId;
 
     /// Replica stub: always drained, no end_index — quorum checks pass instantly.
     struct OnePeerRouter {
@@ -961,7 +961,7 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
 
         async fn remove_member(
             &self,
-            node_id: zslg_node_types::NodeId,
+            node_id: zslg_consensus::NodeId,
         ) -> Result<(), zslg_consensus::Error> {
             self.remove_member_in(node_id).await.map_err(Into::into)
         }
@@ -998,7 +998,7 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
                 crossbeam_combinators::Finite,
             >,
             compression: CompressionLevel,
-            reason: zslg_snapshot_types::ObjectStoreReason,
+            reason: zslg_snapshot::ObjectStoreReason,
         ) -> Result<SnapshotWrite, zslg_snapshot::Error> {
             self.writes.fetch_add(1, Ordering::Relaxed);
             let _ = reason;
@@ -1007,21 +1007,21 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
                     id,
                     entries,
                     compression,
-                    zslg_snapshot_types::ObjectStoreReason::SnapshotCreate,
+                    zslg_snapshot::ObjectStoreReason::SnapshotCreate,
                 )
                 .await
         }
         async fn read_snapshot(
             &self,
             id: SnapshotId,
-            reason: zslg_snapshot_types::ObjectStoreReason,
+            reason: zslg_snapshot::ObjectStoreReason,
         ) -> Result<
             Channel<Result<SnapshotEntry, zslg_snapshot::Error>, crossbeam_combinators::Finite>,
             zslg_snapshot::Error,
         > {
             let _ = reason;
             self.inner
-                .read_snapshot(id, zslg_snapshot_types::ObjectStoreReason::ArchiveRead)
+                .read_snapshot(id, zslg_snapshot::ObjectStoreReason::ArchiveRead)
                 .await
         }
         fn shutdown_token(&self) -> tokio_util::sync::CancellationToken {

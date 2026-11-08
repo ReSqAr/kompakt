@@ -16,7 +16,7 @@
 )]
 use crossbeam_combinators::testing::ChannelTestExt as _;
 use std::time::Duration;
-use zslg_time_types::ClockError;
+use zslg_time::ClockError;
 
 use std::path::PathBuf;
 
@@ -27,13 +27,13 @@ use tempfile::TempDir;
 use crate::Error;
 use crate::ReplicaNode;
 use crate::replica_node::ReplicaNodeConfig;
-use zslg_log_types::DataId;
-use zslg_log_types::{Data, StableLogEvent};
-use zslg_net_types::PeerAddr;
-use zslg_node_types::NodeId;
+use zslg_consensus::NodeId;
+use zslg_log::DataId;
+use zslg_log::{Data, StableLogEvent};
+use zslg_net::PeerAddr;
 use zslg_object_store_config::ObjectStoreConfig;
-use zslg_snapshot_types::CompactionTier;
-use zslg_time_types::Hlc;
+use zslg_snapshot::CompactionTier;
+use zslg_time::Hlc;
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(30);
 

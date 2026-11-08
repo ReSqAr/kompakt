@@ -17,14 +17,14 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use zslg_lifecycle_types::LifecycleError;
+use zslg_error::LifecycleError;
 
 use object_store::ObjectStore;
 
 use crate::replica_node::ReplicaNodeConfig;
 use crate::{Error, ReplicaNode};
-use zslg_net_types::PeerAddr;
-use zslg_node_types::NodeId;
+use zslg_consensus::NodeId;
+use zslg_net::PeerAddr;
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use zslg_snapshot::SnapshotStore as _;
 

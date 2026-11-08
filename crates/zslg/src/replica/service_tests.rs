@@ -16,9 +16,9 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::sync::watch;
+    use zslg_consensus::RaftStateHandle;
     use zslg_consensus::{ConsensusError, NodeId};
-    use zslg_consensus_types::RaftStateHandle;
-    use zslg_consensus_types::{RaftState, ReplicaMembership};
+    use zslg_consensus::{RaftState, ReplicaMembership};
     use zslg_hlc_clock::HlcClock;
     use zslg_hlc_gate::HlcGate;
     use zslg_log::{LogIndex, StampedWrite, WriteOutcome};
@@ -270,7 +270,7 @@ mod tests {
         assert!(matches!(
             err,
             Error::Clock(ClockError::HlcCutoff(
-                zslg_time_types::CutoffError::AtOrBeforeCutoff { .. }
+                zslg_time::CutoffError::AtOrBeforeCutoff { .. }
             ))
         ));
 

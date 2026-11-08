@@ -26,7 +26,7 @@ use zslg_consensus::AddMemberOutcome;
 /// monitor logs (throttled) and survives rather than treats as fatal
 /// (`raft::startup::rejoin`; group removal is the group's decision, ending the
 /// process is the orchestrator's).
-use zslg_consensus_types::ConsensusError;
+use zslg_consensus::ConsensusError;
 use zslg_net::Router;
 
 use crate::ReplicaNode;
@@ -35,9 +35,9 @@ use crate::network::RemoteRouter;
 use crate::replica_node::ReplicaNodeConfig;
 use crate::tests::reserve_port;
 use crate::tests::wait_until_sync as wait_until;
+use zslg_consensus::NodeId;
 use zslg_hlc_clock::HlcClock;
-use zslg_net_types::PeerAddr;
-use zslg_node_types::NodeId;
+use zslg_net::PeerAddr;
 
 const SERVER_NAME: &str = "localhost";
 

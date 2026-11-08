@@ -14,30 +14,27 @@ path = "src/lib.rs"
 workspace = true
 
 [dependencies]
+zslg-log-fake = { workspace = true, optional = true }
+zslg-net = { workspace = true }
+zslg-snapshot = { workspace = true }
+zslg-time = { workspace = true }
 bytesize = { workspace = true }
 console-subscriber = { workspace = true, optional = true }
 metrics-exporter-prometheus = { workspace = true, optional = true }
 tikv-jemalloc-ctl = { workspace = true, optional = true }
 tikv-jemallocator = { workspace = true, optional = true }
 zslg-consensus = { workspace = true }
-zslg-consensus-types = { workspace = true }
-zslg-lifecycle-types = { workspace = true }
 zslg-log = { workspace = true }
-zslg-log-types = { workspace = true }
-zslg-net-types = { workspace = true }
-zslg-node-types = { workspace = true }
 zslg-object-store-config = { workspace = true }
-zslg-hlc-clock = { workspace = true }
 zslg-observability = { workspace = true }
 zslg-error = { workspace = true }
 zslg-follower-node = { workspace = true }
 zslg-learner-node = { workspace = true }
 zslg-replica-node = { workspace = true, features = ["testing"] }
 zslg-writer-node = { workspace = true }
-zslg-snapshot-types = { workspace = true }
-zslg-time-types = { workspace = true }
 
 [dev-dependencies]
+zslg-hlc-clock = { workspace = true }
 zslg-raft-setup = { workspace = true, features = ["testing"] }
 zslg-learner = { workspace = true, features = ["testing"] }
 zslg-leader-integrator = { workspace = true, features = ["testing"] }
@@ -52,13 +49,10 @@ zslg-leader = { workspace = true }
 zslg-leader-compaction = { workspace = true }
 zslg-leader-membership = { workspace = true, features = ["testing"] }
 zslg-leader-snapshot = { workspace = true }
-zslg-net = { workspace = true }
 zslg-net-setup = { workspace = true }
 zslg-node-id = { workspace = true }
 zslg-raft = { workspace = true }
 zslg-replica-service = { workspace = true }
-zslg-snapshot = { workspace = true }
-zslg-time = { workspace = true }
 crossbeam-channel = { workspace = true }
 futures = { workspace = true }
 object_store = { workspace = true }
@@ -98,6 +92,8 @@ tokio-metrics = { workspace = true }
 
 
 [features]
+# zslg's deliberate public testing surface (`zslg::testing`): an in-memory log.
+testing = ["dep:zslg-log-fake"]
 default = []
 s3 = ["zslg-object-store-config/s3"]
 prometheus = ["dep:metrics-exporter-prometheus", "zslg-observability/prometheus"]
@@ -121,4 +117,4 @@ path = "examples/loadgen.rs"
 required-features = ["prometheus"]
 
 [package.metadata.layer]
-role = "monolith"
+role = "facade"

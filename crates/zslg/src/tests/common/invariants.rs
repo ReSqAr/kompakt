@@ -33,10 +33,10 @@ use bytes::Bytes;
 use futures::StreamExt;
 
 use crate::tests::common::Cluster;
-use zslg_consensus_types::{RaftState, ReplicaMembership};
-use zslg_log_types::DataId;
-use zslg_log_types::StableLogEvent;
-use zslg_node_types::NodeId;
+use zslg_consensus::NodeId;
+use zslg_consensus::{RaftState, ReplicaMembership};
+use zslg_log::DataId;
+use zslg_log::StableLogEvent;
 
 /// Assert every global invariant that holds of a quiesced cluster.
 ///
@@ -235,7 +235,7 @@ pub(crate) async fn assert_unstable_above_watermark(cluster: &Cluster) -> bool {
 
 /// CLAUDE.md §8: the manifest tiles the index space from 0 with no gap and no
 /// overlap. A consumer (`learner`'s seamless append) relies on this.
-fn assert_manifest_contiguous(id: zslg_node_types::NodeId, state: &RaftState) {
+fn assert_manifest_contiguous(id: zslg_consensus::NodeId, state: &RaftState) {
     let mut expected: u64 = 0;
     for meta in &state.manifest_state.manifest {
         assert_eq!(
@@ -259,7 +259,7 @@ fn assert_manifest_contiguous(id: zslg_node_types::NodeId, state: &RaftState) {
 
 /// CLAUDE.md §12: a committed `manifest_watermark > hlc_cutoff` would admit
 /// writes no snapshot can ever cover.
-fn assert_watermark_below_cutoff(id: zslg_node_types::NodeId, state: &RaftState) {
+fn assert_watermark_below_cutoff(id: zslg_consensus::NodeId, state: &RaftState) {
     if let (Some(w), Some(c)) = (
         state.manifest_state.manifest_watermark,
         state.manifest_state.hlc_cutoff,
@@ -273,7 +273,7 @@ fn assert_watermark_below_cutoff(id: zslg_node_types::NodeId, state: &RaftState)
 
 /// A joint config's two sets must differ — otherwise the transition is a no-op
 /// that can never make progress toward collapse.
-pub(crate) fn assert_membership_well_formed(id: zslg_node_types::NodeId, state: &RaftState) {
+pub(crate) fn assert_membership_well_formed(id: zslg_consensus::NodeId, state: &RaftState) {
     match &state.replica {
         ReplicaMembership::Single { .. } => {}
         ReplicaMembership::Joint { old, next }
@@ -295,10 +295,10 @@ pub(crate) fn assert_membership_well_formed(id: zslg_node_types::NodeId, state: 
 /// collapsed. Observing one still armed at quiesce means the leader's step 3
 /// is not firing — the drain bound is doing its job, but nothing is consuming
 /// it, which stalls membership change indefinitely.
-fn assert_no_satisfied_drain_left_armed(id: zslg_node_types::NodeId, state: &RaftState) {
+fn assert_no_satisfied_drain_left_armed(id: zslg_consensus::NodeId, state: &RaftState) {
     if let ReplicaMembership::JointDraining { exit, .. } = &state.replica {
         assert!(
-            !zslg_consensus_types::drain_satisfied(state.manifest_state.manifest_watermark, *exit),
+            !zslg_consensus::drain_satisfied(state.manifest_state.manifest_watermark, *exit),
             "node {id}: drain satisfied but config still joint — collapse is not firing"
         );
     }

@@ -59,10 +59,10 @@ use tokio_util::sync::CancellationToken;
 
 use crate::tests::common::Cluster;
 use crate::tests::common::invariants::assert_membership_well_formed;
-use zslg_consensus_types::RaftState;
-use zslg_consensus_types::RaftStateHandle;
-use zslg_node_types::NodeId;
-use zslg_time_types::Hlc;
+use zslg_consensus::NodeId;
+use zslg_consensus::RaftState;
+use zslg_consensus::RaftStateHandle;
+use zslg_time::Hlc;
 
 /// Every node's state handle, paired with its `NodeId`.
 type Handles = Vec<(NodeId, RaftStateHandle)>;
@@ -371,7 +371,7 @@ mod tests {
     /// this is where that assertion earns its keep.
     #[tokio::test(flavor = "multi_thread")]
     async fn joint_states_are_counted_and_checked_live() {
-        use zslg_consensus_types::ReplicaMembership;
+        use zslg_consensus::ReplicaMembership;
 
         let node_id = crate::tests::nid(1);
         let handle = RaftStateHandle::new();

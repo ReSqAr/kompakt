@@ -78,27 +78,33 @@ pub(crate) use zslg_replica_node as replica_node;
 mod tests;
 
 pub use bytesize::ByteSize;
+pub use zslg_consensus::NodeId;
 pub use zslg_consensus::RaftStateView;
-pub use zslg_consensus_types::{
+pub use zslg_consensus::{
     ConsensusError, Exit, RaftGeneration, RaftManifestState, RaftState, RaftStateHandle,
     ReplicaMembership, SpareSelectionStrategy,
 };
 pub use zslg_error::Error;
+
+/// An in-process log serving [`Reader`] and [`Writer`], so a consumer can test
+/// against zslg without a cluster. Behind the `testing` feature.
+#[cfg(feature = "testing")]
+pub mod testing {
+    pub use zslg_log_fake::{TestLog, data_id};
+}
+pub use zslg_error::{ConfigError, LifecycleError};
 pub use zslg_follower_node::{FollowerNode, FollowerNodeConfig};
-pub use zslg_hlc_clock::HlcClock;
 pub use zslg_learner_node::{LearnerNode, LearnerNodeConfig};
-pub use zslg_lifecycle_types::{ConfigError, LifecycleError};
+pub use zslg_log::{Data, DataId, LogError, LogIndex, StableLogEvent, UnstableEvent};
 pub use zslg_log::{Error as LogApiError, Reader, StableStream, Writer};
-pub use zslg_log_types::{Data, DataId, LogError, LogIndex, StableLogEvent, UnstableEvent};
-pub use zslg_net_types::{HostPort, NetError, PeerAddr, ServerName};
-pub use zslg_node_types::NodeId;
+pub use zslg_net::{HostPort, NetError, PeerAddr, ServerName};
 pub use zslg_object_store_config::{IntoArcObjectStore, ObjectStoreConfig};
 pub use zslg_observability::{METRIC_NAMESPACE, describe_metrics, histogram_buckets};
 pub use zslg_replica_node::{InitialisingReplicaNode, ReplicaNode, ReplicaNodeConfig};
-pub use zslg_snapshot_types::{
+pub use zslg_snapshot::{
     CompactionTier, CompressionLevel, SnapshotError, SnapshotId, SnapshotMetadata,
 };
-pub use zslg_time_types::{ClockError, Hlc};
+pub use zslg_time::{ClockError, Hlc};
 pub use zslg_writer_node::{WriterNode, WriterNodeConfig};
 
 /// Apply this crate's histogram buckets to a Prometheus builder.

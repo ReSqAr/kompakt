@@ -30,7 +30,7 @@
 
 use std::sync::Arc;
 use std::time::Duration;
-use zslg_lifecycle_types::LifecycleError;
+use zslg_error::LifecycleError;
 
 use bytes::Bytes;
 use object_store::memory::InMemory;
@@ -188,11 +188,11 @@ async fn rpc_server_accepts_connections_while_raft_startup_is_blocked() {
     let mut cfg = default_fast_config();
     cfg.network_server_name = "node-a".into();
     cfg.peers = vec![
-        zslg_net_types::PeerAddr {
+        zslg_net::PeerAddr {
             addr: dead_peer.into(),
             server_name: "node-0".into(),
         },
-        zslg_net_types::PeerAddr {
+        zslg_net::PeerAddr {
             addr: listen.into(),
             server_name: "node-a".into(),
         },
@@ -260,11 +260,11 @@ async fn cancelling_the_shutdown_token_stops_a_node_that_never_becomes_ready() {
     let mut cfg = default_fast_config();
     cfg.network_server_name = "node-a".into();
     cfg.peers = vec![
-        zslg_net_types::PeerAddr {
+        zslg_net::PeerAddr {
             addr: dead_peer.into(),
             server_name: "node-0".into(),
         },
-        zslg_net_types::PeerAddr {
+        zslg_net::PeerAddr {
             addr: listen.into(),
             server_name: "node-a".into(),
         },

@@ -18,9 +18,9 @@ use crate::error::Home as _;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
-use zslg_consensus_types::ConsensusError;
-use zslg_consensus_types::{ReplicaMembership, ReplicaStatus};
-use zslg_log_types::Data;
+use zslg_consensus::ConsensusError;
+use zslg_consensus::{ReplicaMembership, ReplicaStatus};
+use zslg_log::Data;
 
 use async_trait::async_trait;
 use object_store::memory::InMemory;
@@ -34,19 +34,19 @@ use crate::tests::fast_raft_config as raft_config;
 use crate::tests::make_data;
 use crate::tests::upstream;
 use crate::tests::wait_for_leader;
-use zslg_consensus_types::RaftStateHandle;
-use zslg_consensus_types::ReplicatedRaftState;
-use zslg_consensus_types::SpareSelectionStrategy;
+use zslg_consensus::NodeId;
+use zslg_consensus::RaftStateHandle;
+use zslg_consensus::ReplicatedRaftState;
+use zslg_consensus::SpareSelectionStrategy;
 use zslg_hlc_gate::HlcGate;
 use zslg_leader_membership::{LivenessQuery, MembershipChangeInputs, MembershipChangeManager};
 use zslg_leader_membership::{MembershipDriver, MembershipObserver, TickOutcome};
 use zslg_leader_snapshot::create::{SnapshotEntryInputs, SnapshotResult, create_snapshot_entry};
 use zslg_log::LocalStoreMut;
-use zslg_log_types::LogIndex;
-use zslg_node_types::NodeId;
+use zslg_log::LogIndex;
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
-use zslg_snapshot_types::CompressionLevel;
-use zslg_time_types::Hlc;
+use zslg_snapshot::CompressionLevel;
+use zslg_time::Hlc;
 
 async fn integrate_batch(
     store: &LocalStore,
@@ -281,15 +281,13 @@ async fn full_lifecycle_bootstrap_snapshot_churn_failure() {
 
     struct StaticLiveness(BTreeSet<NodeId>);
     impl LivenessQuery for StaticLiveness {
-        fn candidates(
-            &self,
-        ) -> std::collections::BTreeMap<NodeId, zslg_consensus_types::CandidateInfo> {
+        fn candidates(&self) -> std::collections::BTreeMap<NodeId, zslg_consensus::CandidateInfo> {
             self.0
                 .iter()
                 .map(|&node_id| {
                     (
                         node_id,
-                        zslg_consensus_types::CandidateInfo { node_id, rtt: None },
+                        zslg_consensus::CandidateInfo { node_id, rtt: None },
                     )
                 })
                 .collect()

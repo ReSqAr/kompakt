@@ -20,10 +20,10 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 use zslg_consensus::{RaftLeadership, StateReplicator};
-use zslg_log_types::Data;
+use zslg_log::Data;
 use zslg_net::{LivenessProbe, Router};
+use zslg_snapshot::CompressionLevel;
 use zslg_snapshot::SnapshotStore;
-use zslg_snapshot_types::CompressionLevel;
 
 use object_store::ObjectStore;
 use object_store::memory::InMemory;
@@ -39,25 +39,25 @@ use crate::raft::RaftNode;
 use crate::replica::ReplicaLogStore;
 use crate::replica::ReplicaService;
 use shutdown::Shutdown;
-use zslg_consensus_types::ReplicaMembership;
-use zslg_consensus_types::ReplicatedRaftState;
-use zslg_consensus_types::SpareSelectionStrategy;
+use zslg_consensus::NodeId;
+use zslg_consensus::ReplicaMembership;
+use zslg_consensus::ReplicatedRaftState;
+use zslg_consensus::SpareSelectionStrategy;
 use zslg_hlc_clock::HlcClock;
 use zslg_hlc_gate::CutoffApplier;
 use zslg_hlc_gate::HlcGate;
 use zslg_leader_membership::LivenessConfig;
 use zslg_leader_membership::MembershipConfig;
+use zslg_log::LogIndex;
+use zslg_log::SnapshotEntry;
 use zslg_log::{LocalStoreMut, StableLogSnapshot};
-use zslg_log_types::LogIndex;
-use zslg_log_types::SnapshotEntry;
-use zslg_net_types::PeerAddr;
-use zslg_node_types::NodeId;
+use zslg_net::PeerAddr;
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use zslg_peers::static_peers;
-use zslg_snapshot_types::CompactionTier;
-use zslg_snapshot_types::SnapshotId;
-use zslg_snapshot_types::SnapshotMetadata;
-use zslg_time_types::{Hlc, HlcParts};
+use zslg_snapshot::CompactionTier;
+use zslg_snapshot::SnapshotId;
+use zslg_snapshot::SnapshotMetadata;
+use zslg_time::{Hlc, HlcParts};
 
 use crate::tests::fast_raft_config as raft_config;
 use crate::tests::make_data;
@@ -187,7 +187,7 @@ fn spawn_loop(
     Arc<dyn zslg_net::ReplicaClient>,
 ) {
     let (drained_cutoff_tx, drained_cutoff_rx) =
-        tokio::sync::watch::channel::<Option<zslg_time_types::Hlc>>(None);
+        tokio::sync::watch::channel::<Option<zslg_time::Hlc>>(None);
     let applier_cancel = CancellationToken::new();
     tokio::spawn(
         CutoffApplier::new(
@@ -495,7 +495,7 @@ async fn leader_loop_compacts_manifest() {
                 meta.snapshot_id,
                 crossbeam_combinators::Channel::once(Ok::<_, zslg_snapshot::Error>(entry)),
                 CompressionLevel::fast(),
-                zslg_snapshot_types::ObjectStoreReason::SnapshotCreate,
+                zslg_snapshot::ObjectStoreReason::SnapshotCreate,
             )
             .await
             .expect("write seeded snapshot file");

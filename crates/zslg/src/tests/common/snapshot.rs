@@ -10,10 +10,10 @@ use crate::learner::StableLog;
 use object_store::ObjectStore;
 use object_store::memory::InMemory;
 use raft_kit::Config;
-use zslg_consensus_types::RaftStateHandle;
-use zslg_consensus_types::ReplicatedRaftState;
+use zslg_consensus::NodeId;
+use zslg_consensus::RaftStateHandle;
+use zslg_consensus::ReplicatedRaftState;
 use zslg_hlc_gate::HlcGate;
-use zslg_node_types::NodeId;
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use zslg_raft::Raft;
 

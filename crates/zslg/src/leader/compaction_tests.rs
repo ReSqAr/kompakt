@@ -13,12 +13,12 @@ use std::sync::Arc;
 
 use crate::error::Home as _;
 use crossbeam_combinators::testing::ChannelTestExt as _;
+use zslg_consensus::NodeId;
 use zslg_leader_compaction::compact;
-use zslg_log_types::LogIndex;
-use zslg_node_types::NodeId;
+use zslg_log::LogIndex;
+use zslg_snapshot::CompactionTier;
 use zslg_snapshot::SnapshotStore;
-use zslg_snapshot_types::CompactionTier;
-use zslg_time_types::{Hlc, HlcParts};
+use zslg_time::{Hlc, HlcParts};
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -33,10 +33,10 @@ use zslg_log::{LocalStoreMut, StableLogSnapshot};
 use crate::learner::LocalStore;
 use crate::learner::integrate_manifest_for_test;
 use zslg_leader_snapshot::create::{SnapshotEntryInputs, SnapshotResult, create_snapshot_entry};
-use zslg_log_types::Data;
-use zslg_log_types::DataId;
+use zslg_log::Data;
+use zslg_log::DataId;
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
-use zslg_snapshot_types::CompressionLevel;
+use zslg_snapshot::CompressionLevel;
 
 use crate::tests::commit_snapshot_result;
 use crate::tests::fast_raft_config as raft_config;
@@ -66,7 +66,7 @@ async fn integrate_batch(
 fn make_data(seed: u32, hlc_ms: u64, blob: &[u8]) -> Data {
     Data {
         data_id: DataId::from_parts(
-            Hlc::from_parts(zslg_time_types::HlcParts {
+            Hlc::from_parts(zslg_time::HlcParts {
                 physical_ms: hlc_ms,
                 logical: 0,
             }),

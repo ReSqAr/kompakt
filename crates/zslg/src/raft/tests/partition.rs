@@ -21,12 +21,12 @@
 )]
 use std::collections::BTreeSet;
 use std::time::Duration;
-use zslg_consensus_types::ReplicaMembership;
+use zslg_consensus::ReplicaMembership;
 
 use crate::tests::fast_raft_config as raft_config;
-use zslg_consensus_types::ReplicatedRaftState;
-use zslg_node_types::NodeId;
-use zslg_time_types::Hlc;
+use zslg_consensus::NodeId;
+use zslg_consensus::ReplicatedRaftState;
+use zslg_time::Hlc;
 
 fn state_with_cutoff(replicas: &BTreeSet<NodeId>, cutoff: u64) -> ReplicatedRaftState {
     ReplicatedRaftState {

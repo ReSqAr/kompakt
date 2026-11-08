@@ -19,7 +19,7 @@
 
 use crate::error::Home as _;
 use zslg_leader_snapshot::create::{SnapshotEntryInputs, SnapshotResult, create_snapshot_entry};
-use zslg_snapshot_types::CompressionLevel;
+use zslg_snapshot::CompressionLevel;
 
 use crossbeam_combinators::testing::ChannelTestExt as _;
 
@@ -33,10 +33,10 @@ use crate::learner::LocalStore;
 use crate::learner::StableLog;
 use crate::learner::integrate_manifest_for_test;
 use crate::tests::{SnapshotHarness, boot_snapshot_harness, commit_snapshot_result};
-use zslg_log_types::Data;
-use zslg_log_types::{DataId, LogIndex};
-use zslg_node_types::NodeId;
-use zslg_time_types::Hlc;
+use zslg_consensus::NodeId;
+use zslg_log::Data;
+use zslg_log::{DataId, LogIndex};
+use zslg_time::Hlc;
 
 async fn integrate_batch(
     store: &LocalStore,

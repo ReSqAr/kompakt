@@ -28,7 +28,7 @@ use crate::tests::{
 use bytes::Bytes;
 use futures::StreamExt;
 use object_store::memory::InMemory;
-use zslg_log_types::StableLogEvent;
+use zslg_log::StableLogEvent;
 
 /// Write data, wait for a snapshot (stable prefix), and verify the data
 /// appears in every node's stable tail.

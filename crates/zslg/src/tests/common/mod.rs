@@ -33,8 +33,8 @@ pub(crate) use cutoff_observer::CutoffObserver;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 pub(crate) use zslg_learner::testing::{local_store_at, stable_log_at, stable_log_engine};
+use zslg_net::NetError;
 pub(crate) use zslg_net_fake::{ReadyReplica, replica_only};
-use zslg_net_types::NetError;
 pub(crate) use zslg_time_fake::FixedClock;
 
 use crate::Error;
@@ -50,13 +50,13 @@ use raft_kit::raft::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
     VoteRequest, VoteResponse,
 };
-use zslg_consensus_types::RaftState;
-use zslg_consensus_types::RaftStateHandle;
+use zslg_consensus::NodeId;
+use zslg_consensus::RaftState;
+use zslg_consensus::RaftStateHandle;
+use zslg_log::Data;
+use zslg_log::DataId;
 use zslg_log::{Replica, StampedWrite, WriteOutcome};
-use zslg_log_types::Data;
-use zslg_log_types::DataId;
-use zslg_net_types::PeerAddr;
-use zslg_node_types::NodeId;
+use zslg_net::PeerAddr;
 use zslg_raft::{NodeInfo, Raft, TypeConfig};
 use zslg_raft_storage::build_raft_for_test;
 // ── fault injection: pairwise partitions ─────────────────────────────
@@ -379,7 +379,7 @@ pub(crate) async fn replica_write<R: Replica + ?Sized>(
 pub(crate) async fn write_state_fenced(
     raft: &Raft,
     raft_state: &RaftStateHandle,
-    state: zslg_consensus_types::ReplicatedRaftState,
+    state: zslg_consensus::ReplicatedRaftState,
 ) -> Result<(), String> {
     use zslg_raft::{FencedStateWrite, RaftResponse};
     // The transient outcomes keep different clocks, and only one of them is
@@ -458,7 +458,7 @@ pub(crate) async fn write_state_fenced(
 /// or immediately on a non-transient one.
 pub(crate) async fn write_state_fenced_via_leader(
     nodes: &BTreeMap<NodeId, TestNode>,
-    state: zslg_consensus_types::ReplicatedRaftState,
+    state: zslg_consensus::ReplicatedRaftState,
 ) -> Result<(), String> {
     let deadline = tokio::time::Instant::now()
         .checked_add(std::time::Duration::from_secs(30))
@@ -525,10 +525,10 @@ pub(crate) fn reserve_port() -> std::net::SocketAddr {
 }
 
 /// Build a deterministic [`NodeId`] from a single byte seed.
-pub(crate) fn nid(byte: u8) -> zslg_node_types::NodeId {
+pub(crate) fn nid(byte: u8) -> zslg_consensus::NodeId {
     let mut bytes = [0u8; 16];
     bytes[15] = byte;
-    zslg_node_types::NodeId::from_uuid(uuid::Uuid::from_bytes(bytes))
+    zslg_consensus::NodeId::from_uuid(uuid::Uuid::from_bytes(bytes))
 }
 
 /// Convenience wrapper around [`wait_until`] for sync `FnMut() -> bool`
@@ -601,7 +601,7 @@ pub(crate) fn upstream(seed: u8) -> NodeId {
 /// needed.
 pub(crate) fn make_meta(seed: u8, hlc: u64) -> DataId {
     DataId::from_parts(
-        zslg_time_types::Hlc(hlc),
+        zslg_time::Hlc(hlc),
         NodeId::from_uuid(uuid::Uuid::nil()),
         u64::from(seed),
     )

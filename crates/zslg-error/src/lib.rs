@@ -14,7 +14,7 @@
 use error_union::error_union;
 use serde::{Deserialize, Serialize};
 use zslg_consensus::ConsensusError;
-use zslg_lifecycle_types::{ConfigError, LifecycleError};
+pub use zslg_lifecycle_types::{ConfigError, LifecycleError};
 use zslg_log::LogError;
 use zslg_net::NetError;
 use zslg_snapshot::SnapshotError;

@@ -3,13 +3,13 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
-use zslg_log_types::LogError;
-use zslg_net::Router;
+use zslg_log::LogError;
 /// Fault-injection doubles at the `Replica` trait seam, shared by the
 /// integration tests. Two modes, matching what the tests need:
 /// `fail_next(n)` (the next n calls error like a dropped RPC) and
 /// `wedge()`/`unwedge()` (calls hang until released — a slow replica).
-use zslg_net_types::NetError;
+use zslg_net::NetError;
+use zslg_net::Router;
 
 use async_trait::async_trait;
 use futures::stream::BoxStream;
@@ -20,14 +20,14 @@ use crate::error::Error;
 use crate::replica::ReplicaLogStore;
 use crate::replica::ReplicaService;
 use crossbeam_combinators::{Channel, Finite, Infinite};
-use zslg_consensus_types::RaftStateHandle;
-use zslg_consensus_types::{RaftState, ReplicaMembership, ReplicaStatus};
+use zslg_consensus::NodeId;
+use zslg_consensus::RaftStateHandle;
+use zslg_consensus::{RaftState, ReplicaMembership, ReplicaStatus};
 use zslg_hlc_clock::HlcClock;
 use zslg_hlc_gate::HlcGate;
+use zslg_log::{DataId, LogIndex};
 use zslg_log::{Replica, StampedWrite, WriteOutcome};
-use zslg_log_types::{DataId, LogIndex};
-use zslg_net_types::PeerAddr;
-use zslg_node_types::NodeId;
+use zslg_net::PeerAddr;
 
 /// Control handle for a [`FaultyReplica`]. Clone freely; clones share state.
 #[derive(Clone)]
@@ -540,7 +540,7 @@ pub(crate) struct ReplicaServiceHarness {
     pub(crate) hlc_gate: Arc<HlcGate>,
     /// Publisher for the replica's effective-cutoff watch. Held so tests can
     /// drive cutoff advances (and so the watch isn't closed from the start).
-    pub(crate) cutoff_tx: tokio::sync::watch::Sender<Option<zslg_time_types::Hlc>>,
+    pub(crate) cutoff_tx: tokio::sync::watch::Sender<Option<zslg_time::Hlc>>,
     _dir: tempfile::TempDir,
     _flush: tokio::task::JoinHandle<Result<(), zslg_replica_log::Error>>,
 }
@@ -619,10 +619,10 @@ mod tests {
     use bytes::Bytes;
 
     use crate::tests::nid;
+    use zslg_consensus::NodeId;
+    use zslg_log::DataId;
     use zslg_log::Replica;
-    use zslg_log_types::DataId;
-    use zslg_node_types::NodeId;
-    use zslg_time_types::Hlc;
+    use zslg_time::Hlc;
 
     use super::{DuplicateReplica, MapPeerRouter, ReplicaServiceHarness};
     use zslg_net_fake::ReadyReplica;
@@ -631,11 +631,11 @@ mod tests {
         [NodeId::new_v4(), NodeId::new_v4(), NodeId::new_v4()]
     }
 
-    fn dummy_raft_state() -> zslg_consensus_types::RaftStateHandle {
-        let h = zslg_consensus_types::RaftStateHandle::new();
-        h.replace(zslg_consensus_types::RaftState {
-            replica: zslg_consensus_types::ReplicaMembership::single(Default::default()),
-            ..zslg_consensus_types::RaftState::empty()
+    fn dummy_raft_state() -> zslg_consensus::RaftStateHandle {
+        let h = zslg_consensus::RaftStateHandle::new();
+        h.replace(zslg_consensus::RaftState {
+            replica: zslg_consensus::ReplicaMembership::single(Default::default()),
+            ..zslg_consensus::RaftState::empty()
         });
         h
     }
@@ -663,7 +663,7 @@ mod tests {
         let transport = router.remote(n2);
         let err = crate::tests::common::replica_write(
             &*transport,
-            zslg_log_types::Data {
+            zslg_log::Data {
                 data_id: DataId::from_parts(Hlc(0), n1, 0),
                 blob: Bytes::from_static(b"x"),
             },
@@ -734,7 +734,7 @@ mod tests {
         // Next write is sent twice, concurrently.
         dup_handle.duplicate_next(1, 2);
 
-        let data = zslg_log_types::Data {
+        let data = zslg_log::Data {
             data_id: DataId::from_parts(clock.hlc_clock().now(), me, 0),
             blob: Bytes::from_static(b"duplicate-write"),
         };
@@ -747,7 +747,7 @@ mod tests {
         // Data is stored exactly once (the single write got index 0).
         let mut ch = harness
             .replica
-            .subscribe_from(Some(zslg_log_types::LogIndex::ZERO));
+            .subscribe_from(Some(zslg_log::LogIndex::ZERO));
         let first = ch.recv();
         assert!(
             first.is_ok_and(|r| r.is_ok()),

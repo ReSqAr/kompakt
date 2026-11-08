@@ -17,8 +17,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
+use zslg_consensus::ConsensusError;
 use zslg_consensus::RaftLeadership;
-use zslg_consensus_types::ConsensusError;
 
 use async_trait::async_trait;
 use parking_lot::Mutex as SyncMutex;
@@ -28,17 +28,17 @@ use crate::raft::RaftNode;
 use crate::tests::{
     fast_raft_config as raft_config, wait_for_any_leader, wait_for_leader, wait_until,
 };
-use zslg_consensus_types::RaftStateHandle;
-use zslg_consensus_types::ReplicatedRaftState;
-use zslg_consensus_types::SpareSelectionStrategy;
-use zslg_consensus_types::{Exit, ReplicaMembership, ReplicaStatus};
+use zslg_consensus::NodeId;
+use zslg_consensus::RaftStateHandle;
+use zslg_consensus::ReplicatedRaftState;
+use zslg_consensus::SpareSelectionStrategy;
+use zslg_consensus::{Exit, ReplicaMembership, ReplicaStatus};
 use zslg_leader_membership::{
     LivenessQuery, MembershipChangeInputs, MembershipChangeManager, needs_retarget,
 };
 use zslg_leader_membership::{MembershipDriver, MembershipObserver, TickOutcome};
-use zslg_net_types::ServerName;
-use zslg_node_types::NodeId;
-use zslg_time_types::Hlc;
+use zslg_net::ServerName;
+use zslg_time::Hlc;
 
 struct LocalObserver {
     states: SyncMutex<BTreeMap<NodeId, RaftStateHandle>>,
@@ -95,15 +95,13 @@ impl MembershipObserver for LocalObserver {
 struct StaticLiveness(BTreeSet<NodeId>);
 
 impl LivenessQuery for StaticLiveness {
-    fn candidates(
-        &self,
-    ) -> std::collections::BTreeMap<NodeId, zslg_consensus_types::CandidateInfo> {
+    fn candidates(&self) -> std::collections::BTreeMap<NodeId, zslg_consensus::CandidateInfo> {
         self.0
             .iter()
             .map(|&node_id| {
                 (
                     node_id,
-                    zslg_consensus_types::CandidateInfo { node_id, rtt: None },
+                    zslg_consensus::CandidateInfo { node_id, rtt: None },
                 )
             })
             .collect()
@@ -151,7 +149,7 @@ impl RaftLeadership for StaticLeadership {
 
     async fn remove_member(
         &self,
-        node_id: zslg_node_types::NodeId,
+        node_id: zslg_consensus::NodeId,
     ) -> Result<(), zslg_consensus::Error> {
         self.remove_member_in(node_id).await.map_err(Into::into)
     }

@@ -31,13 +31,13 @@ use tracing_subscriber::EnvFilter;
 
 use crate::replica_node::ReplicaNodeConfig;
 use crate::tests::{Cluster, ClusterConfig, assert_cluster_invariants};
-use zslg_node_types::NodeId;
+use zslg_consensus::NodeId;
 
 // ── helpers ───────────────────────────────────────────────────────────
 
 fn fast_rolling_config() -> ReplicaNodeConfig {
     let snapshot_interval = Duration::from_millis(100);
-    let tier0: zslg_snapshot_types::CompactionTier = snapshot_interval.into();
+    let tier0: zslg_snapshot::CompactionTier = snapshot_interval.into();
     let mut cfg = ReplicaNodeConfig::new(
         "localhost".into(),
         vec![],

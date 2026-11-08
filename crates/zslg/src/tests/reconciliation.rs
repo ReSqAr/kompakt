@@ -28,7 +28,7 @@ use object_store::memory::InMemory;
 use crate::tests::{
     Cluster, ClusterConfig, assert_cluster_invariants, default_fast_config, wait_until_sync,
 };
-use zslg_node_types::NodeId;
+use zslg_consensus::NodeId;
 
 /// Removing one member from every other node's `config.peers` evicts it from
 /// the voter set; the leader then shrinks the replicated set `{A,B,C}` →
@@ -97,7 +97,7 @@ async fn evicted_member_leaves_the_replicated_set_while_still_running() {
     // Build a peer list of every placement EXCEPT the victim's server name.
     // Computed ONCE, before any kill: `kill` removes the node's placement, so
     // `peer_addrs()` shrinks as we go.
-    let trimmed_peers: Vec<zslg_net_types::PeerAddr> = cluster
+    let trimmed_peers: Vec<zslg_net::PeerAddr> = cluster
         .peer_addrs()
         .into_iter()
         .filter(|p| p.server_name != victim_name)

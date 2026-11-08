@@ -40,14 +40,14 @@ use crossbeam_combinators::testing::ChannelTestExt as _;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
-use zslg_log_types::LogError;
+use zslg_log::LogError;
 use zslg_net::Router;
 
 use object_store::ObjectStore;
 use object_store::memory::InMemory;
 use tokio::sync::Notify;
 use tokio::sync::watch;
-use zslg_snapshot_types::CompressionLevel;
+use zslg_snapshot::CompressionLevel;
 
 use crate::error::Error;
 use crate::leader::{SnapshotInputs, build_snapshot};
@@ -59,15 +59,15 @@ use crate::tests::fast_raft_config as raft_config;
 use crate::tests::make_data;
 use crate::tests::{FixedClock, MapPeerRouter, ReadyReplica};
 use crate::tests::{Partition, TestNode};
-use zslg_consensus_types::ReplicaMembership;
-use zslg_consensus_types::ReplicatedRaftState;
+use zslg_consensus::NodeId;
+use zslg_consensus::ReplicaMembership;
+use zslg_consensus::ReplicatedRaftState;
 use zslg_hlc_gate::HlcGate;
+use zslg_log::Data;
+use zslg_log::LogIndex;
 use zslg_log::{LocalStoreMut, LocalStoreView, Replica, StableLogSnapshot};
-use zslg_log_types::Data;
-use zslg_log_types::LogIndex;
-use zslg_node_types::NodeId;
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
-use zslg_time_types::{Hlc, HlcParts};
+use zslg_time::{Hlc, HlcParts};
 
 async fn integrate_batch(
     store: &LocalStore,
@@ -139,7 +139,7 @@ impl LocalStoreView for StallingLocalStore {
 
     fn subscribe_unstable(
         &self,
-    ) -> crossbeam_combinators::Channel<zslg_log_types::Data, crossbeam_combinators::Infinite> {
+    ) -> crossbeam_combinators::Channel<zslg_log::Data, crossbeam_combinators::Infinite> {
         self.inner.subscribe_unstable()
     }
 
@@ -450,12 +450,12 @@ async fn commit_foreign_snapshot(sys: &TestNode) {
         logical: 0,
     });
     let mut manifest = cur.manifest_state.manifest.clone();
-    manifest.push(zslg_snapshot_types::SnapshotMetadata {
+    manifest.push(zslg_snapshot::SnapshotMetadata {
         start_hlc: hlc,
         end_hlc: hlc,
         start_index: LogIndex(start_index),
         end_index: LogIndex(start_index),
-        snapshot_id: zslg_snapshot_types::SnapshotId::open(LogIndex(start_index)),
+        snapshot_id: zslg_snapshot::SnapshotId::open(LogIndex(start_index)),
     });
     crate::tests::write_state_fenced(
         &sys.raft,

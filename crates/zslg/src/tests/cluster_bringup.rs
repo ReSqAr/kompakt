@@ -22,7 +22,7 @@ use object_store::memory::InMemory;
 
 use crate::replica_node::ReplicaNodeConfig;
 use crate::tests::{Cluster, ClusterConfig, assert_cluster_invariants};
-use zslg_net_types::PeerAddr;
+use zslg_net::PeerAddr;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn three_node_cluster_brought_up_via_public_api() {
@@ -81,8 +81,7 @@ fn bringup_configs(
     count: usize,
 ) -> (tempfile::TempDir, Vec<ReplicaNodeConfig>) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let names: Vec<zslg_net_types::ServerName> =
-        (0..count).map(|i| format!("node-{i}").into()).collect();
+    let names: Vec<zslg_net::ServerName> = (0..count).map(|i| format!("node-{i}").into()).collect();
     let addrs: Vec<std::net::SocketAddr> =
         (0..count).map(|_| crate::tests::reserve_port()).collect();
     let peers: Vec<PeerAddr> = names

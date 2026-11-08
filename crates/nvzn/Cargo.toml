@@ -53,7 +53,7 @@ default = []
 prometheus = ["dep:metrics-exporter-prometheus", "zslg/prometheus"]
 # An in-process log and store (`nvzn::testing`), so a consumer can test
 # against nvzn without standing up zslg. For `[dev-dependencies]`.
-testing = []
+testing = ["zslg/testing"]
 
 [package.metadata.layer]
 role = "facade"

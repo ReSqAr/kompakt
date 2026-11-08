@@ -13,7 +13,6 @@
     dead_code
 )]
 
-#[cfg(not(any(test, feature = "testing")))]
 use crossbeam_channel as _;
 use {async_trait as _, futures as _, tokio as _, tokio_util as _};
 #[cfg(test)]

@@ -21,10 +21,10 @@ use futures::StreamExt;
 
 use crate::tests::nid;
 use crate::tests::{self as faults, ReplicaServiceHarness};
-use zslg_consensus_types::RaftGeneration;
+use zslg_consensus::RaftGeneration;
 use zslg_log::Replica;
-use zslg_net_types::{HostPort, PeerAddr};
-use zslg_time_types::Hlc;
+use zslg_net::{HostPort, PeerAddr};
+use zslg_time::Hlc;
 
 /// `subscribe_status` must yield the current baseline immediately and then push
 /// a fresh status on every subsequent `RaftState` change. A long-lived

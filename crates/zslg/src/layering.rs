@@ -34,9 +34,6 @@ enum Role {
     Implementation,
     Assembly,
     Facade,
-    /// Transitional: `zslg` while implementations still live in it. Removed when
-    /// the facade is reduced to re-exports (design §11 step 14).
-    Monolith,
     Application,
 }
 
@@ -52,7 +49,6 @@ impl Role {
             "implementation" => Role::Implementation,
             "assembly" => Role::Assembly,
             "facade" => Role::Facade,
-            "monolith" => Role::Monolith,
             "application" => Role::Application,
             _ => return None,
         })
@@ -78,16 +74,7 @@ impl Role {
                 Implementation,
                 Assembly,
             ],
-            Facade => &[Library, Ports, Config, Assembly, Facade, Monolith],
-            Monolith => &[
-                Library,
-                Types,
-                Ports,
-                Procedure,
-                Config,
-                Implementation,
-                Assembly,
-            ],
+            Facade => &[Library, Ports, Config, Assembly, Facade],
             Application => &[
                 Library,
                 Types,
@@ -98,7 +85,6 @@ impl Role {
                 Implementation,
                 Assembly,
                 Facade,
-                Monolith,
                 Application,
             ],
         }
@@ -109,7 +95,7 @@ impl Role {
         use Role::*;
         match self {
             Library | Types | Ports | Procedure | Config | Fake | Implementation => &[Fake],
-            Assembly | Facade | Monolith | Application => {
+            Assembly | Facade | Application => {
                 &[Fake, Implementation, Assembly, Facade, Procedure, Types]
             }
         }

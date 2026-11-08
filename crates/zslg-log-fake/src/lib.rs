@@ -1,6 +1,10 @@
 //! In-memory implementations of the log ports, for tests of the crates that
 //! consume them.
 
+mod test_log;
+
+pub use test_log::{TestLog, data_id};
+
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
