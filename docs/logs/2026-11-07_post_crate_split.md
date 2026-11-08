@@ -97,3 +97,23 @@ Deviations from design §9 (all forced by the code, not by preference):
   comparison (design §8).
 - Revisit the error model once everything has landed (user asked to do this
   last).
+
+## Where the tests live (after the facade was emptied of them)
+
+The `zslg` facade has no tests; its dev-dependencies are only what `examples/` needs.
+
+| tests | now in | why |
+|---|---|---|
+| layering (`kompakt-workspace-checks`) | `kompakt-workspace-checks/tests` | reads every manifest, `btrb` included |
+| Raft partition / replicated state / TCP | `zslg-raft-setup` | the assembly that owns `RaftNode`; the in-process cluster is its `testing` feature |
+| replica service, subscribe-status, clock skew, duplicates | `zslg-replica-node` | the real clock + gate + log stack |
+| single-node bootstrap, restart, startup routes, membership gate | `zslg-replica-node` | one node, no cluster harness |
+| leader jobs (membership, snapshot, compaction, churn) | `zslg-leader` | the leader assembly, on the raft-setup test cluster |
+| fault-injection decorators | `zslg-net-fake` | they decorate the `Replica` / `Router` ports |
+| multi-node scenarios, the fault proptest | `zslg-cluster-tests` | need several real nodes at once |
+
+Fixtures were split by what they fake, not collected in one crate: the in-process Raft
+network is `zslg-raft-fake`; the generic waits, ports and logging are `testing-kit`; compositions
+of an implementation with a fake (`start_cluster`) sit behind the owning assembly's `testing`
+feature. A test-only crate that is only dev-dependencies (`zslg-cluster-tests`) keeps
+`unused_crate_dependencies` meaningful without `as _` lists.

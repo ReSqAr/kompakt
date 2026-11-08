@@ -1,6 +1,6 @@
 # Crates
 
-Every directory here is a crate; each declares its layer in `[package.metadata.layer] role` and the test `layering` test (in `crates/kompakt-workspace-checks/tests/layering.rs`) rejects a dependency its role does not allow. Design: `docs/logs/2026-11-07_design_crate_split.md`, decisions: `docs/logs/2026-11-07_log_crate_split.md`, what changed on the way: `docs/logs/2026-11-07_post_crate_split.md`.
+Every directory here is a crate; each declares its layer in `[package.metadata.layer] role` and the test layering test (in `crates/kompakt-workspace-checks/tests/layering.rs`) rejects a dependency its role does not allow. Design: `docs/logs/2026-11-07_design_crate_split.md`, decisions: `docs/logs/2026-11-07_log_crate_split.md`, what changed on the way: `docs/logs/2026-11-07_post_crate_split.md`.
 
 ```text
 library < types < ports < procedure < implementation < assembly < facade
@@ -26,6 +26,7 @@ The `nvzn*` crates are built on the `zslg` facade (D11) and may depend on it; no
 | `backoff-kit` | Jitter for retry delays |
 | `bytesize` | Byte-size and non-zero quantity newtypes for configuration |
 | `crossbeam-combinators` | Blocking channel pipelines: a composable read/write pair, verdicts, and a subscribe/cut/range seam |
+| `testing-kit` | Deadline-bounded waits, collision-free ports and log setup for async tests |
 | `error-union` | Flat unions of leaf errors, with compiler-checked conversions between unions |
 | `framing` | CRC32 frame integrity: [record \| crc32(4)] |
 | `metrics-kit` | Metric registry mechanism: definitions, row macros, label enums, probes |
@@ -87,8 +88,9 @@ The `nvzn*` crates are built on the `zslg` facade (D11) and may depend on it; no
 | `nvzn-store-fake` | An in-memory nvzn Store |
 | `zslg-consensus-fake` | In-memory consensus ports for tests |
 | `zslg-log-fake` | In-memory log ports for tests |
-| `zslg-net-fake` | In-memory net ports for tests |
-| `zslg-time-fake` | In-memory Clock for tests |
+| `zslg-net-fake` | In-memory net ports for tests, with replica fault-injection decorators |
+| `zslg-raft-fake` | An in-process Raft network with pairwise partitions, for tests |
+| `zslg-time-fake` | In-memory Clock for tests, and a controllable wall-clock source |
 
 ## implementation
 
@@ -150,3 +152,5 @@ The `nvzn*` crates are built on the `zslg` facade (D11) and may depend on it; no
 | crate | purpose |
 |---|---|
 | `btrb` | The host runtime for btrb applications |
+| `kompakt-workspace-checks` | Checks over the whole workspace (crate layering) |
+| `zslg-cluster-tests` | End-to-end tests: real multi-node zslg clusters over TCP |
