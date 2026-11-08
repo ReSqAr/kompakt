@@ -9,11 +9,15 @@
 //!   error_union! {
 //!       pub ReadError { Log(LogError), Snapshot(SnapshotError) }
 //!       from ArchiveError { Log, Snapshot }      // ArchiveError ⊆ ReadError
+//!       into PortError                           // ReadError ⊆ PortError (same variant names)
 //!   }
 //! ```
 //!
 //! The macro generates the enum, `From<Leaf>` per variant, `Display`,
-//! `Error::source`, and `From<Source>` for each `from` clause. The compiler
+//! `Error::source`, `From<Source>` for each `from` clause and `From<Union>` for
+//! each `into` destination (the destination must have every variant of the union;
+//! use `into` where the destination, such as a port crate's union, cannot name
+//! this crate). The compiler
 //! checks the subset rule in both directions:
 //!
 //! ```text
@@ -51,10 +55,22 @@
 /// Declare a union of leaf errors. See the crate documentation.
 #[macro_export]
 macro_rules! error_union {
+    (@into $name:ident, [$($variant:ident),+];) => {};
+    (@into $name:ident, [$($variant:ident),+]; $dest:path $(, $rest:path)*) => {
+        impl ::core::convert::From<$name> for $dest {
+            fn from(error: $name) -> Self {
+                match error {
+                    $($name::$variant(leaf) => Self::$variant(leaf)),+
+                }
+            }
+        }
+        $crate::error_union!(@into $name, [$($variant),+]; $($rest),*);
+    };
     (
         $(#[$meta:meta])*
         $vis:vis $name:ident { $($variant:ident($leaf:ty)),+ $(,)? }
         $(from $source:path { $($from_variant:ident),+ $(,)? })*
+        $(into $dest:path)*
     ) => {
         $(#[$meta])*
         $vis enum $name {
@@ -95,28 +111,8 @@ macro_rules! error_union {
                 }
             }
         )*
-    };
-}
 
-/// Narrow a union into a wider-or-equal one declared elsewhere: generates
-/// `From<$src> for $dst` for each destination, mapping each named variant to
-/// the variant of the same name. The compiler's exhaustiveness check enforces
-/// that `$variant` lists every variant of `$src`. For use where the
-/// destination cannot name the source (a port crate's union), so the source
-/// side declares the conversion.
-#[macro_export]
-macro_rules! error_bridge {
-    (@one $src:ident, $dst:path, [$($variant:ident),+]) => {
-        impl From<$src> for $dst {
-            fn from(e: $src) -> Self {
-                match e { $( $src::$variant(x) => Self::$variant(x), )+ }
-            }
-        }
-    };
-    ($src:ident => ; $($variant:ident),+ $(,)?) => {};
-    ($src:ident => $dst:path $(, $rest:path)* $(,)? ; $($variant:ident),+ $(,)?) => {
-        $crate::error_bridge!(@one $src, $dst, [$($variant),+]);
-        $crate::error_bridge!($src => $($rest),* ; $($variant),+);
+        $crate::error_union!(@into $name, [$($variant),+]; $($dest),*);
     };
 }
 
@@ -189,5 +185,29 @@ mod tests {
         let e = ReadError::Lifecycle(LifecycleError::NotReady);
         assert_eq!(e.to_string(), "not ready");
         assert_eq!(e.source().unwrap().to_string(), "not ready");
+    }
+
+    error_union! {
+        #[derive(Debug, PartialEq)]
+        NarrowError { Log(LogError), Snapshot(SnapshotError) }
+        into ArchiveError
+        into WideError
+    }
+
+    error_union! {
+        #[derive(Debug, PartialEq)]
+        WideError { Log(LogError), Snapshot(SnapshotError) }
+    }
+
+    #[test]
+    fn into_converts_to_each_named_destination() {
+        assert_eq!(
+            ArchiveError::from(NarrowError::Snapshot(SnapshotError::ObjectStore)),
+            ArchiveError::Snapshot(SnapshotError::ObjectStore)
+        );
+        assert_eq!(
+            WideError::from(NarrowError::Log(LogError::Gap)),
+            WideError::Log(LogError::Gap)
+        );
     }
 }

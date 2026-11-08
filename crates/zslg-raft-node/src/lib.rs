@@ -2,7 +2,7 @@
 //! the raft and consensus ports — RPC passthroughs, leadership queries, fenced
 //! writes and the cluster-formation verbs startup needs.
 
-use error_union::{error_bridge, error_union};
+use error_union::error_union;
 use zslg_consensus::ConsensusError;
 use zslg_lifecycle_types::{ConfigError, LifecycleError};
 use zslg_log::LogError;
@@ -28,6 +28,6 @@ error_union! {
         Consensus(ConsensusError),
     }
     from zslg_consensus::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    into zslg_consensus::Error
+    into zslg_raft::Error
 }
-
-error_bridge!(Error => zslg_consensus::Error, zslg_raft::Error; Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus);

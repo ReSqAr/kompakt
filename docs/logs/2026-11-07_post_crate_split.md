@@ -22,7 +22,7 @@ examples; it depends on no type crate and no implementation. The layering test
 | `HasHlc` | n/a | trait in `zslg-time` | keeps the clock port free of log types |
 | facade role | — | transitional `monolith` role until step 14 | allowed the split to land crate by crate; removed in step 14 |
 | error size bar | `size_of::<Error>() <= size_of::<DataId>() + 8` | bar kept at 40 bytes | measured; user-approved |
-| `Home` / `err_into` | — | `error_home!` (`.home()` on Result and channels) | boundary conversions without per-site `map_err` |
+| conversion to the port error | — | `into <PortError>` clause in `error_union!`; boundaries use `map_err(Into::into)` and `Channel::err_into` | the union knows its variants, so no separate bridge macro or `Home` trait |
 | spare selection | `SpareSelector` trait | `SpareSelectionStrategy::rank` + `CandidateInfo` in consensus-types | trait had one implementer |
 | extra ports | — | `RaftMetricsSource`, `ClusterBootstrap` (raft); `WriteGate`/`Admission` (time); `ReplicaLog` (log); `IntentSubmitter` (consensus) | each removed an implementation→implementation edge |
 | shared metrics | one crate per emitter | `log_writes`, `log_index_frontier`, `purged_entries` in `zslg-log-types`; leader-job heartbeat in `zslg-consensus-types` | emitted by several implementations |
@@ -35,7 +35,6 @@ examples; it depends on no type crate and no implementation. The layering test
 | `HlcClock` | removed from the facade API | removed | §5.6 |
 | tests needing two implementations | move to the lowest assembly | learner tests moved to `zslg-learner`; pacing tests to `zslg-leader`; those needing a *cluster* (leader snapshot/compaction/membership, replica service, raft cluster tests) stay in the facade as end-to-end tests | the cluster harness serves the e2e suites too; decided per test with the user |
 | `testing` features | on owning implementation | also on assemblies (`zslg-learner`, `zslg-raft-setup`, `zslg-replica-node`); the layering test allows an assembly an *optional* fake dependency | assemblies export real-engine test helpers |
-| `error_home!` | `pub(crate)` trait | takes a visibility | `zslg-error` exports it |
 
 ## Workflow notes
 

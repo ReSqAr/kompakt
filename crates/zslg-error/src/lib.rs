@@ -70,36 +70,15 @@ error_union! {
     from zslg_raft_storage::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_net_client::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_net_server::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    into zslg_time::Error
+    into zslg_log::Error
+    into zslg_snapshot::Error
+    into zslg_consensus::Error
+    into zslg_raft::Error
+    into zslg_net::Error
+    into zslg_net_wire::Error
+    into zslg_quorum_read::Error
 }
-
-macro_rules! port_error_bridge {
-    ($($port:path),+ $(,)?) => {$(
-        impl From<Error> for $port {
-            fn from(e: Error) -> Self {
-                match e {
-                    Error::Lifecycle(x) => Self::Lifecycle(x),
-                    Error::Config(x) => Self::Config(x),
-                    Error::Clock(x) => Self::Clock(x),
-                    Error::Log(x) => Self::Log(x),
-                    Error::Snapshot(x) => Self::Snapshot(x),
-                    Error::Net(x) => Self::Net(x),
-                    Error::Consensus(x) => Self::Consensus(x),
-                }
-            }
-        }
-    )+};
-}
-
-port_error_bridge!(
-    zslg_time::Error,
-    zslg_log::Error,
-    zslg_snapshot::Error,
-    zslg_consensus::Error,
-    zslg_raft::Error,
-    zslg_net::Error,
-    zslg_net_wire::Error,
-    zslg_quorum_read::Error
-);
 
 // ── Boxed variant payloads ────────────────────────────────────────────────────
 //

@@ -1,7 +1,7 @@
 //! The RPC server: accept, dispatch to the ports, and the two streaming
 //! handlers.
 
-use error_union::{error_bridge, error_union};
+use error_union::error_union;
 use zslg_consensus::ConsensusError;
 use zslg_lifecycle_types::{ConfigError, LifecycleError};
 use zslg_log::LogError;
@@ -33,6 +33,11 @@ error_union! {
     from zslg_raft::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_net::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_net_wire::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    into zslg_time::Error
+    into zslg_log::Error
+    into zslg_snapshot::Error
+    into zslg_consensus::Error
+    into zslg_raft::Error
+    into zslg_net::Error
+    into zslg_net_wire::Error
 }
-
-error_bridge!(Error => zslg_time::Error, zslg_log::Error, zslg_snapshot::Error, zslg_consensus::Error, zslg_raft::Error, zslg_net::Error, zslg_net_wire::Error; Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus);

@@ -211,6 +211,7 @@ error_union::error_union! {
     from zslg_log::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_snapshot::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
     from zslg_consensus::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    into zslg_log::Error
+    into zslg_snapshot::Error
+    into zslg_consensus::Error
 }
-
-error_union::error_bridge!(Error => zslg_log::Error, zslg_snapshot::Error, zslg_consensus::Error; Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus);
