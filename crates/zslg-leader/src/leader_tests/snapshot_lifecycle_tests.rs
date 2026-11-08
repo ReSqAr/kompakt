@@ -65,7 +65,10 @@ async fn integrate_batch(
     store.integrate_loop(ch).await.map_err(Into::into)
 }
 
-use super::snapshot_harness::{boot_snapshot_harness as boot, commit_snapshot_result};
+use super::snapshot_harness::{
+    boot_fake_snapshot_harness as boot_fake, boot_snapshot_harness as boot,
+    commit_snapshot_result_via,
+};
 
 async fn append_entries(local_store: &LocalStore, entries: &[Data]) {
     for (i, d) in entries.iter().enumerate() {
@@ -129,7 +132,7 @@ async fn snapshot_refuses_to_commit_an_aborted_window() {
         }
     }
 
-    let h = boot().await;
+    let h = boot_fake().await;
     append_entries(
         &h.local_store,
         &[
@@ -172,8 +175,7 @@ async fn snapshot_refuses_to_commit_an_aborted_window() {
 
 #[tokio::test]
 async fn snapshot_round_trip_through_object_store() {
-    let h = boot().await;
-    let _ = h.leader_id;
+    let h = boot_fake().await;
 
     let entries = vec![
         make_data(1, 100, b"a"),
@@ -194,7 +196,7 @@ async fn snapshot_round_trip_through_object_store() {
     let result = create_snapshot_entry(&inputs, Hlc(300))
         .await
         .expect("create");
-    commit_snapshot_result(&h.raft, &h.raft_state, &result).await;
+    commit_snapshot_result_via(h.consensus.as_ref(), &h.raft_state, &result).await;
     let SnapshotResult::Committed {
         new_watermark,
         entries: written,
@@ -241,8 +243,7 @@ async fn snapshot_round_trip_through_object_store() {
 
 #[tokio::test]
 async fn snapshot_watermark_advances_even_with_no_new_entries() {
-    let h = boot().await;
-    let _ = h.leader_id;
+    let h = boot_fake().await;
 
     let entries = vec![make_data(1, 100, b"a"), make_data(2, 200, b"b")];
     append_entries(&h.local_store, &entries).await;
@@ -259,13 +260,13 @@ async fn snapshot_watermark_advances_even_with_no_new_entries() {
     let first = create_snapshot_entry(&inputs, Hlc(200))
         .await
         .expect("first");
-    commit_snapshot_result(&h.raft, &h.raft_state, &first).await;
+    commit_snapshot_result_via(h.consensus.as_ref(), &h.raft_state, &first).await;
     assert!(matches!(first, SnapshotResult::Committed { .. }));
 
     let second = create_snapshot_entry(&inputs, Hlc(300))
         .await
         .expect("second");
-    commit_snapshot_result(&h.raft, &h.raft_state, &second).await;
+    commit_snapshot_result_via(h.consensus.as_ref(), &h.raft_state, &second).await;
     assert!(
         matches!(
             second,
@@ -283,8 +284,7 @@ async fn snapshot_watermark_advances_even_with_no_new_entries() {
 
 #[tokio::test]
 async fn snapshot_rejects_backwards_cutoff() {
-    let h = boot().await;
-    let _ = h.leader_id;
+    let h = boot_fake().await;
 
     append_entries(
         &h.local_store,
@@ -304,7 +304,7 @@ async fn snapshot_rejects_backwards_cutoff() {
     let first = create_snapshot_entry(&inputs, Hlc(200))
         .await
         .expect("first");
-    commit_snapshot_result(&h.raft, &h.raft_state, &first).await;
+    commit_snapshot_result_via(h.consensus.as_ref(), &h.raft_state, &first).await;
 
     let result = create_snapshot_entry(&inputs, Hlc(150))
         .await
@@ -314,8 +314,7 @@ async fn snapshot_rejects_backwards_cutoff() {
 
 #[tokio::test]
 async fn second_snapshot_extends_stable_log_via_load() {
-    let h = boot().await;
-    let _ = h.leader_id;
+    let h = boot_fake().await;
 
     let batch1 = vec![make_data(1, 100, b"a"), make_data(2, 110, b"b")];
     append_entries(&h.local_store, &batch1).await;
@@ -332,7 +331,7 @@ async fn second_snapshot_extends_stable_log_via_load() {
     let first = create_snapshot_entry(&inputs, Hlc(110))
         .await
         .expect("first");
-    commit_snapshot_result(&h.raft, &h.raft_state, &first).await;
+    commit_snapshot_result_via(h.consensus.as_ref(), &h.raft_state, &first).await;
     assert!(matches!(first, SnapshotResult::Committed { .. }));
     let manifest_state_after_first = h.raft_state.snapshot().manifest_state.clone();
 
@@ -356,7 +355,7 @@ async fn second_snapshot_extends_stable_log_via_load() {
     let second = create_snapshot_entry(&inputs, Hlc(210))
         .await
         .expect("second");
-    commit_snapshot_result(&h.raft, &h.raft_state, &second).await;
+    commit_snapshot_result_via(h.consensus.as_ref(), &h.raft_state, &second).await;
     let SnapshotResult::Committed { new_watermark, .. } = second else {
         panic!("expected Committed");
     };
@@ -391,8 +390,7 @@ async fn second_snapshot_extends_stable_log_via_load() {
 
 #[tokio::test]
 async fn integrate_manifest_is_idempotent() {
-    let h = boot().await;
-    let _ = h.leader_id;
+    let h = boot_fake().await;
 
     append_entries(&h.local_store, &[make_data(1, 100, b"a")]).await;
 
@@ -438,8 +436,7 @@ async fn integrate_manifest_is_idempotent() {
 /// by (HLC, data_id). The HLC is embedded in DataId and dominates the sort.
 #[tokio::test]
 async fn invariant_stable_order_is_hlc_order() {
-    let h = boot().await;
-    let _ = h.leader_id;
+    let h = boot_fake().await;
 
     // Anti-correlated HLC and random byte order to stress ordering.
     let entries: Vec<Data> = (0u8..10)
@@ -466,7 +463,7 @@ async fn invariant_stable_order_is_hlc_order() {
     let result = create_snapshot_entry(&inputs, Hlc(1_000))
         .await
         .expect("create");
-    commit_snapshot_result(&h.raft, &h.raft_state, &result).await;
+    commit_snapshot_result_via(h.consensus.as_ref(), &h.raft_state, &result).await;
 
     // Snapshot metadata must carry the true HLC range.
     let snap = h.raft_state.snapshot();

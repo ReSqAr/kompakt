@@ -35,6 +35,7 @@ use zslg_consensus::NodeId;
 use zslg_consensus::ReplicaMembership;
 use zslg_consensus::ReplicatedRaftState;
 use zslg_consensus::SpareSelectionStrategy;
+use zslg_consensus_fake::SingleNodeConsensus;
 use zslg_hlc_clock::HlcClock;
 use zslg_hlc_gate::CutoffApplier;
 use zslg_hlc_gate::HlcGate;
@@ -686,31 +687,24 @@ async fn leader_loop_completes_membership_change_via_state_events() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_wedged_snapshot_build_does_not_block_the_other_jobs() {
     let n1 = NodeId::new_v4();
-    let ids = [n1];
 
-    let nodes = zslg_raft_setup::testing::start_cluster(&ids, raft_config())
-        .await
-        .expect("cluster");
-    let n1_raft = nodes.get(&n1).expect("n1").raft.clone();
-    n1_raft
-        .initialize(zslg_raft_fake::test_membership_map(&ids))
-        .await
-        .expect("init");
-    wait_for_leader(&n1_raft, n1).await;
+    let consensus = Arc::new(SingleNodeConsensus::new(n1));
+    let raft_state = consensus.state();
 
     let replicas: std::collections::BTreeSet<NodeId> = [n1].into_iter().collect();
-    zslg_raft_setup::testing::write_state_fenced(
-        &n1_raft,
-        &nodes.get(&n1).expect("n1").raft_state,
-        ReplicatedRaftState {
-            replica: ReplicaMembership::single(replicas.clone()),
-            manifest: Vec::new(),
-            manifest_watermark: None,
-            hlc_cutoff: None,
-        },
-    )
-    .await
-    .expect("seed replica set");
+    consensus
+        .replicate_state(
+            ReplicatedRaftState {
+                replica: ReplicaMembership::single(replicas.clone()),
+                manifest: Vec::new(),
+                manifest_watermark: None,
+                hlc_cutoff: None,
+            },
+            raft_state.snapshot().generation,
+            "seed replica set",
+        )
+        .await
+        .expect("seed replica set");
 
     let storage = build_per_node().await;
     let clock = Arc::new(HlcClock::new(Duration::from_secs(60)));
@@ -728,7 +722,7 @@ async fn a_wedged_snapshot_build_does_not_block_the_other_jobs() {
     // Wedge the only replica's `fetch_status`, so `await_quorum_ready` can never
     // reach a quorum and the snapshot job parks inside its build.
     let ready = Arc::new(zslg_net_fake::ReadyReplica {
-        raft_state: nodes.get(&n1).expect("n1").raft_state.clone(),
+        raft_state: raft_state.clone(),
     });
     let (map_router, faults) = zslg_net_fake::MapPeerRouter::wrap_all_faulty(
         [(n1, ready as Arc<dyn zslg_log::Replica>)]
@@ -739,16 +733,8 @@ async fn a_wedged_snapshot_build_does_not_block_the_other_jobs() {
     faults.wedge();
     let router: Arc<dyn Router> = Arc::new(map_router);
 
-    let leadership: Arc<dyn RaftLeadership> = Arc::new(RaftNode::new(
-        n1_raft.clone(),
-        zslg_consensus_fake::permissive_gate(),
-        std::time::Duration::from_secs(30),
-    ));
-    let state_replicator: Arc<dyn StateReplicator> = Arc::new(RaftNode::new(
-        n1_raft.clone(),
-        zslg_consensus_fake::permissive_gate(),
-        std::time::Duration::from_secs(30),
-    ));
+    let leadership: Arc<dyn RaftLeadership> = consensus.clone();
+    let state_replicator: Arc<dyn StateReplicator> = consensus.clone();
     let mut leader_shutdown = Shutdown::new();
     let leader_cancel = leader_shutdown.token();
     spawn_leader_loop(
@@ -759,7 +745,7 @@ async fn a_wedged_snapshot_build_does_not_block_the_other_jobs() {
         storage.snapshot_store.clone(),
         leadership,
         state_replicator,
-        Arc::new(nodes.get(&n1).expect("n1").raft_state.clone()),
+        Arc::new(raft_state.clone()),
         router,
         LeaderLoopConfig {
             snapshot: SnapshotConfig {
@@ -793,7 +779,7 @@ async fn a_wedged_snapshot_build_does_not_block_the_other_jobs() {
         },
     );
 
-    let apply = nodes.get(&n1).expect("n1").raft_state.clone();
+    let apply = raft_state.clone();
     // The cutoff job is independent of the wedged build, so the cutoff must keep
     // advancing. Requiring several distinct advances rules off a single lucky one.
     let seen: Arc<parking_lot::Mutex<std::collections::BTreeSet<Hlc>>> =
@@ -840,7 +826,4 @@ async fn a_wedged_snapshot_build_does_not_block_the_other_jobs() {
     }
     .stop()
     .await;
-    for sys in nodes.into_values() {
-        let _ = sys.raft.shutdown().await;
-    }
 }

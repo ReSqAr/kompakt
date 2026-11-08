@@ -37,11 +37,9 @@ use zslg_log::DataId;
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
 use zslg_snapshot::CompressionLevel;
 
-use super::snapshot_harness::commit_snapshot_result;
+use super::snapshot_harness::commit_snapshot_result_via;
 use bytes::Bytes;
-use zslg_consensus_fake::upstream;
-use zslg_raft_setup::testing::fast_raft_config as raft_config;
-use zslg_raft_setup::testing::wait_for_leader;
+use zslg_consensus_fake::{SingleNodeConsensus, upstream};
 
 async fn integrate_batch(
     store: &LocalStore,
@@ -80,18 +78,8 @@ fn make_data(seed: u32, hlc_ms: u64, blob: &[u8]) -> Data {
 #[tokio::test]
 async fn compaction_merges_and_preserves_stable_log_contents() {
     let n1 = NodeId::new_v4();
-    let mut nodes = zslg_raft_setup::testing::start_cluster(&[n1], raft_config())
-        .await
-        .expect("cluster");
-    nodes
-        .get_mut(&n1)
-        .expect("n1")
-        .raft
-        .initialize(zslg_raft_fake::test_membership_map(&[n1]))
-        .await
-        .expect("initialize");
-    wait_for_leader(&nodes.get(&n1).expect("n1").raft, n1).await;
-    let leader = nodes.remove(&n1).expect("n1");
+    let consensus = Arc::new(SingleNodeConsensus::new(n1));
+    let raft_state = consensus.state();
 
     let dir = tempfile::tempdir().expect("tempdir");
     let local_store = zslg_learner::testing::local_store_at(dir.path().join("local.stable"))
@@ -133,7 +121,7 @@ async fn compaction_merges_and_preserves_stable_log_contents() {
             local_store: local_store.as_ref(),
             stable_log: stable_log.as_ref(),
             snapshot_store: ss.as_ref(),
-            raft_state: &leader.raft_state,
+            raft_state: &raft_state,
             compression: CompressionLevel::fast(),
         };
         let cutoff_hlc = Hlc::from_parts(HlcParts {
@@ -143,15 +131,15 @@ async fn compaction_merges_and_preserves_stable_log_contents() {
         let result = create_snapshot_entry(&inputs, cutoff_hlc)
             .await
             .expect("create");
-        commit_snapshot_result(&leader.raft, &leader.raft_state, &result).await;
+        commit_snapshot_result_via(consensus.as_ref(), &raft_state, &result).await;
         assert!(matches!(result, SnapshotResult::Committed { .. }));
-        let manifest_state = leader.raft_state.snapshot().manifest_state.clone();
+        let manifest_state = raft_state.snapshot().manifest_state.clone();
         integrate_manifest_for_test(ss.clone(), stable_log.as_ref(), &manifest_state)
             .await
             .expect("load on leader");
     }
 
-    let pre_state = leader.raft_state.snapshot();
+    let pre_state = raft_state.snapshot();
     let pre_manifest_state = pre_state.manifest_state.clone();
     let learner_pre_dir = tempfile::tempdir().expect("tempdir");
     let learner_pre =
@@ -173,20 +161,14 @@ async fn compaction_merges_and_preserves_stable_log_contents() {
         .expect("range pre");
     assert_eq!(pre_entries.len(), all_entries.len());
 
-    let (intents, _integrator_cancel) = crate::Integrator::spawn_for_test(
-        Arc::new(zslg_raft_setup::RaftNode::new(
-            leader.raft.clone(),
-            zslg_consensus_fake::permissive_gate(),
-            std::time::Duration::from_secs(30),
-        )),
-        Arc::new(leader.raft_state.clone()),
-    );
+    let (intents, _integrator_cancel) =
+        crate::Integrator::spawn_for_test(consensus.clone(), Arc::new(raft_state.clone()));
     let tiers: [CompactionTier; 1] = [Duration::from_millis(350).into()];
     let outcome = tokio::time::timeout(
         Duration::from_secs(30),
         compact(
             &ss,
-            &leader.raft_state,
+            &raft_state,
             &tiers,
             CompressionLevel::fast(),
             intents.as_ref(),
@@ -198,7 +180,7 @@ async fn compaction_merges_and_preserves_stable_log_contents() {
     assert_eq!(outcome.merges_performed, 2);
     assert_eq!(outcome.final_manifest_len, 2);
 
-    let post_state = leader.raft_state.snapshot();
+    let post_state = raft_state.snapshot();
     let post_manifest_state = post_state.manifest_state.clone();
     assert_ne!(
         post_manifest_state.manifest.len(),
@@ -258,25 +240,13 @@ async fn compaction_merges_and_preserves_stable_log_contents() {
     assert_eq!(learner_post.end_hlc(), learner_pre.end_hlc());
 
     let _ = BTreeMap::<u64, u64>::new();
-
-    let _ = leader.raft.shutdown().await;
 }
 
 #[tokio::test]
 async fn compaction_no_op_when_no_groups_can_merge() {
     let n1 = NodeId::new_v4();
-    let mut nodes = zslg_raft_setup::testing::start_cluster(&[n1], raft_config())
-        .await
-        .expect("cluster");
-    nodes
-        .get_mut(&n1)
-        .expect("n1")
-        .raft
-        .initialize(zslg_raft_fake::test_membership_map(&[n1]))
-        .await
-        .expect("initialize");
-    wait_for_leader(&nodes.get(&n1).expect("n1").raft, n1).await;
-    let leader = nodes.remove(&n1).expect("n1");
+    let consensus = Arc::new(SingleNodeConsensus::new(n1));
+    let raft_state = consensus.state();
 
     let dir = tempfile::tempdir().expect("tempdir");
     let local_store = zslg_learner::testing::local_store_at(dir.path().join("local.stable"))
@@ -301,7 +271,7 @@ async fn compaction_no_op_when_no_groups_can_merge() {
         local_store: local_store.as_ref(),
         stable_log: stable_log.as_ref(),
         snapshot_store: ss.as_ref(),
-        raft_state: &leader.raft_state,
+        raft_state: &raft_state,
         compression: CompressionLevel::fast(),
     };
     let cutoff_hlc = Hlc::from_parts(HlcParts {
@@ -314,20 +284,14 @@ async fn compaction_no_op_when_no_groups_can_merge() {
     else {
         panic!("expected Committed");
     };
-    let pre_manifest = leader.raft_state.snapshot().manifest_state.manifest.clone();
+    let pre_manifest = raft_state.snapshot().manifest_state.manifest.clone();
 
-    let (intents, _integrator_cancel) = crate::Integrator::spawn_for_test(
-        Arc::new(zslg_raft_setup::RaftNode::new(
-            leader.raft.clone(),
-            zslg_consensus_fake::permissive_gate(),
-            std::time::Duration::from_secs(30),
-        )),
-        Arc::new(leader.raft_state.clone()),
-    );
+    let (intents, _integrator_cancel) =
+        crate::Integrator::spawn_for_test(consensus.clone(), Arc::new(raft_state.clone()));
     let tiers: [CompactionTier; 1] = [Duration::from_secs(10).into()];
     let outcome = compact(
         &ss,
-        &leader.raft_state,
+        &raft_state,
         &tiers,
         CompressionLevel::fast(),
         intents.as_ref(),
@@ -337,10 +301,5 @@ async fn compaction_no_op_when_no_groups_can_merge() {
     assert_eq!(outcome.merges_performed, 0);
     assert_eq!(outcome.final_manifest_len, pre_manifest.len());
 
-    assert_eq!(
-        leader.raft_state.snapshot().manifest_state.manifest,
-        pre_manifest
-    );
-
-    let _ = leader.raft.shutdown().await;
+    assert_eq!(raft_state.snapshot().manifest_state.manifest, pre_manifest);
 }

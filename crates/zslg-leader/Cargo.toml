@@ -23,6 +23,7 @@ zslg-snapshot = { workspace = true }
 zslg-time = { workspace = true }
 
 [dev-dependencies]
+rocksdb-kit = { workspace = true, features = ["testing"] }
 parking_lot = { workspace = true }
 uuid = { workspace = true }
 proptest = { workspace = true }
@@ -43,7 +44,6 @@ bytes = { workspace = true }
 bytesize = { workspace = true }
 object_store = { workspace = true }
 raft-kit = { workspace = true }
-rocksdb-kit = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
 testing-kit = { workspace = true }
 zslg-consensus-fake = { workspace = true }

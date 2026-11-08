@@ -1,5 +1,9 @@
 //! In-memory stand-ins for the consensus ports.
 
+mod single_node;
+
+pub use single_node::SingleNodeConsensus;
+
 use std::sync::Arc;
 use zslg_consensus::{MembershipGate, NodeId};
 use zslg_net::PeerAddr;

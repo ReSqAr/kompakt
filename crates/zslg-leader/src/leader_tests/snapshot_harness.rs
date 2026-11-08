@@ -26,17 +26,6 @@ pub(crate) struct SnapshotHarness {
     pub(crate) leader_id: NodeId,
 }
 
-impl SnapshotHarness {
-    pub(crate) fn snapshot_store(&self) -> Arc<RemoteSnapshotStore> {
-        Arc::new(RemoteSnapshotStore::new(
-            SnapshotStoreConfig {
-                object_store: self.object_store.clone(),
-            },
-            tokio_util::sync::CancellationToken::new(),
-        ))
-    }
-}
-
 fn default_raft_config() -> Arc<Config> {
     Arc::new(
         Config {
@@ -86,11 +75,11 @@ pub(crate) async fn boot_snapshot_harness() -> SnapshotHarness {
     }
 }
 
-/// Commit a `SnapshotResult` through the real raft, exactly as the leader
-/// loop's snapshot tick would (manifest + watermark + cutoff in one fenced
-/// state write).
-pub(crate) async fn commit_snapshot_result(
-    raft: &Raft,
+/// Commit a `SnapshotResult` exactly as the leader loop's snapshot tick would
+/// (manifest + watermark + cutoff in one state write), fenced on the generation
+/// read just before it.
+pub(crate) async fn commit_snapshot_result_via(
+    replicator: &dyn zslg_consensus::StateReplicator,
     raft_state: &RaftStateHandle,
     result: &SnapshotResult,
 ) {
@@ -105,18 +94,64 @@ pub(crate) async fn commit_snapshot_result(
         if let Some(written) = object {
             manifest.push(written.entry.clone());
         }
-        zslg_raft_setup::testing::write_state_fenced(
-            raft,
-            raft_state,
-            ReplicatedRaftState {
-                replica: current.replica.clone(),
-                manifest,
-                manifest_watermark: Some(*new_watermark),
-                hlc_cutoff: Some(*new_watermark),
+        replicator
+            .replicate_state(
+                ReplicatedRaftState {
+                    replica: current.replica.clone(),
+                    manifest,
+                    manifest_watermark: Some(*new_watermark),
+                    hlc_cutoff: Some(*new_watermark),
+                },
+                current.generation,
+                "test snapshot commit",
+            )
+            .await
+            .expect("replicate state after snapshot");
+    }
+}
+
+/// The snapshot pipeline's stores plus a single-node consensus fake: for the
+/// tests that are about building and committing snapshots, not about Raft.
+/// The fake enforces the same generation fence on the committed state; the
+/// tests that need a real log (leadership changes, the apply fence itself) use
+/// [`SnapshotHarness`].
+pub(crate) struct FakeSnapshotHarness {
+    pub(crate) _dir: tempfile::TempDir,
+    pub(crate) local_store: Arc<LocalStore>,
+    pub(crate) stable_log: Arc<StableLog>,
+    pub(crate) object_store: Arc<dyn ObjectStore>,
+    pub(crate) consensus: Arc<zslg_consensus_fake::SingleNodeConsensus>,
+    pub(crate) raft_state: RaftStateHandle,
+}
+
+impl FakeSnapshotHarness {
+    pub(crate) fn snapshot_store(&self) -> Arc<RemoteSnapshotStore> {
+        Arc::new(RemoteSnapshotStore::new(
+            SnapshotStoreConfig {
+                object_store: self.object_store.clone(),
             },
-        )
-        .await
-        .expect("client_write after snapshot");
+            tokio_util::sync::CancellationToken::new(),
+        ))
+    }
+}
+
+pub(crate) async fn boot_fake_snapshot_harness() -> FakeSnapshotHarness {
+    let consensus = Arc::new(zslg_consensus_fake::SingleNodeConsensus::new(
+        NodeId::new_v4(),
+    ));
+    let dir = tempfile::tempdir().expect("tempdir");
+    let local_store =
+        zslg_learner::testing::local_store_at(dir.path().join("local.db").with_extension("stable"))
+            .await
+            .expect("from_db");
+    let stable_log = zslg_learner::testing::stable_log_at(&dir.path().join("stable.db")).await;
+    FakeSnapshotHarness {
+        _dir: dir,
+        local_store,
+        stable_log,
+        object_store: Arc::new(InMemory::new()),
+        raft_state: consensus.state(),
+        consensus,
     }
 }
 

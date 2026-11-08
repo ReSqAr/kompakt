@@ -4679,6 +4679,9 @@ dependencies = [
 name = "zslg-consensus-fake"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "parking_lot 0.13.0",
+ "tokio",
  "uuid",
  "zslg-consensus",
  "zslg-net",

@@ -28,7 +28,9 @@ use uuid::Uuid;
 
 use zslg_log::{LocalStoreMut, StableLogSnapshot};
 
-use super::snapshot_harness::{SnapshotHarness, boot_snapshot_harness, commit_snapshot_result};
+use super::snapshot_harness::{
+    FakeSnapshotHarness, boot_fake_snapshot_harness, commit_snapshot_result_via,
+};
 use zslg_consensus::NodeId;
 use zslg_learner::LocalStore;
 use zslg_learner::StableLog;
@@ -141,7 +143,7 @@ fn run_case(case: &Case) {
         .expect("rt");
 
     rt.block_on(async {
-        let h: SnapshotHarness = boot_snapshot_harness().await;
+        let h: FakeSnapshotHarness = boot_fake_snapshot_harness().await;
         let learner_dir = tempfile::tempdir().expect("tempdir");
         let learner_a = fresh_stable_log(learner_dir.path(), "a.db").await;
         let learner_b = fresh_stable_log(learner_dir.path(), "b.db").await;
@@ -193,7 +195,7 @@ fn run_case(case: &Case) {
                 let result = create_snapshot_entry(&inputs, Hlc(cutoff))
                     .await
                     .expect("create snapshot");
-                commit_snapshot_result(&h.raft, &h.raft_state, &result).await;
+                commit_snapshot_result_via(h.consensus.as_ref(), &h.raft_state, &result).await;
 
                 let manifest_state = h.raft_state.snapshot().manifest_state.clone();
                 integrate_manifest_for_test(
@@ -270,7 +272,7 @@ proptest! {
 /// stable prefix.
 #[tokio::test]
 async fn an_over_cap_window_advances_the_watermark_only_to_what_it_wrote() {
-    let h: SnapshotHarness = boot_snapshot_harness().await;
+    let h: FakeSnapshotHarness = boot_fake_snapshot_harness().await;
     // 10 entries spread over 10 distinct HLCs.
     for i in 0u64..10 {
         integrate_batch(
@@ -317,7 +319,7 @@ async fn an_over_cap_window_advances_the_watermark_only_to_what_it_wrote() {
 /// entry lost or duplicated at a chunk boundary.
 #[tokio::test]
 async fn chunked_builds_cover_the_window_exactly_once() {
-    let h: SnapshotHarness = boot_snapshot_harness().await;
+    let h: FakeSnapshotHarness = boot_fake_snapshot_harness().await;
     for i in 0u64..10 {
         integrate_batch(
             &h.local_store,
@@ -351,7 +353,7 @@ async fn chunked_builds_cover_the_window_exactly_once() {
         if let SnapshotResult::Committed { entries, .. } = &result {
             total = total.checked_add(*entries).expect("count");
         }
-        commit_snapshot_result(&h.raft, &h.raft_state, &result).await;
+        commit_snapshot_result_via(h.consensus.as_ref(), &h.raft_state, &result).await;
         let manifest_state = h.raft_state.snapshot().manifest_state.clone();
         integrate_manifest_for_test(h.snapshot_store(), h.stable_log.as_ref(), &manifest_state)
             .await
