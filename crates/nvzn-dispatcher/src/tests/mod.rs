@@ -13,7 +13,7 @@ use crate::StopReason;
 use crate::{Encoder, EventWriter, Syncer};
 use crate::{
     ReadTransactionExt, Ref, Store, WithWireFormat,
-    testkit::{
+    testing::{
         self, FLUSH_INTERVAL, TestLog, Todo, TodoId, User, UserId, event, inmemory, payload,
         tenant, tenant_id,
     },
@@ -29,7 +29,7 @@ use zslg::StableLogEvent;
 pub(super) const SYNC: Duration = Duration::from_secs(5);
 
 pub(super) fn new_user(id: u128, name: &str) -> event::Event {
-    event::Event::NewUser(testkit::NewUserV3 {
+    event::Event::NewUser(testing::NewUserV3 {
         id: UserId(id),
         name: name.to_string(),
         address: None,
@@ -134,7 +134,7 @@ pub(super) async fn stop(log: &TestLog, handle: tokio::task::JoinHandle<Result<(
 pub(super) async fn scripted_dispatcher(
     store: &Arc<dyn Store>,
     log: &TestLog,
-    scripted: Arc<testkit::ScriptedReader>,
+    scripted: Arc<testing::ScriptedReader>,
 ) -> (Dispatcher, crate::Reader<event::Event>) {
     let mut dispatcher = Dispatcher::from_db(
         store.clone(),

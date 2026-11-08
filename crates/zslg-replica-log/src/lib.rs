@@ -11,7 +11,7 @@ use zslg_lifecycle_types::ConfigError;
 mod log;
 pub mod metrics;
 #[cfg(test)]
-mod testutil;
+mod testing;
 
 pub use log::PendingWrite;
 pub use log::{REPLICA_LOG_CF, ReplicaLogStore, flush_loop};

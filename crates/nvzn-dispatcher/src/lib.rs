@@ -40,7 +40,7 @@ mod registration;
 mod subscribers;
 mod supervisor;
 #[cfg(test)]
-mod testkit;
+mod testing;
 
 // Result sets (filter, map, joins) over a dispatcher fed by a `TestLog`.
 #[cfg(test)]

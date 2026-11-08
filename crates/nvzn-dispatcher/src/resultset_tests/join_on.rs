@@ -10,7 +10,7 @@
 use crate::{
     Store,
     resultset_tests::test_support::{rig, seed, user},
-    testkit::{Todo, TodoId, User, UserId, commit_row, tenant_id},
+    testing::{Todo, TodoId, User, UserId, commit_row, tenant_id},
 };
 use nvzn_projection::*;
 use nvzn_store::WriteTransaction;

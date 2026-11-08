@@ -9,7 +9,7 @@
 
 use crate::{
     resultset_tests::test_support::{rig, seed},
-    testkit::{Todo, UserId},
+    testing::{Todo, UserId},
 };
 
 #[tokio::test]

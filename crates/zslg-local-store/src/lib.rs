@@ -40,7 +40,7 @@ mod purge;
 mod recent_ids;
 mod store;
 #[cfg(test)]
-mod testutil;
+mod testing;
 
 #[cfg(test)]
 mod local_store_proptest;

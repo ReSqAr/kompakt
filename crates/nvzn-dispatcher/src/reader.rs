@@ -305,7 +305,7 @@ mod tests {
     use super::*;
     use crate::{
         Dispatcher, Store,
-        testkit::{
+        testing::{
             self, FLUSH_INTERVAL, TestLog, User, UserId, commit_row, event, inmemory, tenant,
             tenant_id,
         },
@@ -313,7 +313,7 @@ mod tests {
     use std::sync::Arc;
 
     fn new_user(id: u128, name: &str) -> event::Event {
-        event::Event::NewUser(testkit::NewUserV3 {
+        event::Event::NewUser(testing::NewUserV3 {
             id: UserId(id),
             name: name.to_string(),
             address: None,
@@ -463,7 +463,7 @@ mod tests {
         use super::*;
         use crate::{
             EventWriter, StopReason,
-            testkit::{NewTodoV1, Todo, TodoDeletedV1, TodoId},
+            testing::{NewTodoV1, Todo, TodoDeletedV1, TodoId},
         };
         use crossbeam_combinators::{AbortReason, Infinite};
         use tokio::time::{Duration, timeout};

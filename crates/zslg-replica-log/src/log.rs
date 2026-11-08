@@ -1100,7 +1100,7 @@ mod tests {
         Error,
     > {
         ReplicaLogStore::open_with_flush(
-            crate::testutil::open_for_test(&dir)?,
+            crate::testing::open_for_test(&dir)?,
             CancellationToken::new(),
         )
         .await
@@ -1906,7 +1906,7 @@ mod tests {
     async fn max_hlc_folds_every_entry_of_one_batch() {
         let dir = tempfile::tempdir().expect("tempdir");
         let storage =
-            crate::testutil::open_for_test(&dir.path().join("replica-log")).expect("storage");
+            crate::testing::open_for_test(&dir.path().join("replica-log")).expect("storage");
         let (tx, rx) = crossbeam_channel::bounded(4);
         let store = Arc::new(
             ReplicaLogStore::open_sized(storage, tx.clone(), 16, 16)
@@ -2072,7 +2072,7 @@ mod tests {
 
         {
             let (store, flush) = ReplicaLogStore::open_with_flush(
-                crate::testutil::open_for_test(&path).expect("storage"),
+                crate::testing::open_for_test(&path).expect("storage"),
                 CancellationToken::new(),
             )
             .await
@@ -2091,7 +2091,7 @@ mod tests {
         }
 
         let (store, _flush) = ReplicaLogStore::open_with_flush(
-            crate::testutil::open_for_test(&path).expect("storage"),
+            crate::testing::open_for_test(&path).expect("storage"),
             CancellationToken::new(),
         )
         .await

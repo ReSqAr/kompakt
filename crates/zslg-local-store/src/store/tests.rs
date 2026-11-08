@@ -44,7 +44,7 @@ async fn integrate_batch(
 /// One `Storage` backing both this store and the stable log it reads the
 /// watermark from — the production shape.
 async fn shared_storage(root: &Path) -> (Arc<Storage>, Arc<dyn StableLogSnapshot>) {
-    let storage = crate::testutil::open_storage(root).expect("open storage");
+    let storage = crate::testing::open_storage(root).expect("open storage");
     let stable_log: Arc<dyn StableLogSnapshot> = Arc::new(zslg_log_fake::FakeStableLog::new());
     (storage, stable_log)
 }
@@ -52,7 +52,7 @@ async fn shared_storage(root: &Path) -> (Arc<Storage>, Arc<dyn StableLogSnapshot
 async fn fresh_store() -> (TempDir, Arc<LocalStore>) {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("local.db");
-    let store = crate::testutil::simple_at(path.with_extension("stable"))
+    let store = crate::testing::simple_at(path.with_extension("stable"))
         .await
         .expect("from_db");
     (dir, store)
@@ -60,8 +60,8 @@ async fn fresh_store() -> (TempDir, Arc<LocalStore>) {
 
 /// A store whose integration worker can be drained — required before
 /// reopening the same root (see [`super::open_test_local_store`]).
-async fn store_at(path: &Path) -> (Arc<LocalStore>, crate::testutil::TestWorker) {
-    crate::testutil::open_test_local_store(path)
+async fn store_at(path: &Path) -> (Arc<LocalStore>, crate::testing::TestWorker) {
+    crate::testing::open_test_local_store(path)
         .await
         .expect("open")
 }
@@ -858,7 +858,7 @@ async fn local_store_subscription_cursor_persists_across_reopen() {
     let path = dir.path().join("local.db");
 
     {
-        let (store, worker) = crate::testutil::open_test_local_store(&path)
+        let (store, worker) = crate::testing::open_test_local_store(&path)
             .await
             .expect("open");
         for i in 1..=5u8 {
@@ -876,7 +876,7 @@ async fn local_store_subscription_cursor_persists_across_reopen() {
         worker.stop().await;
     }
 
-    let (store, worker) = crate::testutil::open_test_local_store(&path)
+    let (store, worker) = crate::testing::open_test_local_store(&path)
         .await
         .expect("reopen");
     assert_eq!(

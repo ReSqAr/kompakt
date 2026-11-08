@@ -2,7 +2,7 @@
 
 use super::coverage::Held;
 use super::*;
-use crate::testkit::{
+use crate::testing::{
     FLUSH_INTERVAL, NewTodoV1, NewUserV3, PingedV1, TestLog, Todo, TodoId, User, UserId, data_id,
     event, hlc, inmemory, payload, tenant, tenant_id,
 };
@@ -227,7 +227,7 @@ async fn not_started_serves_the_stable_snapshot_and_a_wait_times_out() {
         email: None,
         last_ping: None,
     };
-    crate::testkit::commit_row(&store, tenant_id(), Ref::new(UserId(1).into()), &holden);
+    crate::testing::commit_row(&store, tenant_id(), Ref::new(UserId(1).into()), &holden);
     let d = log.push_unstable(blob(&[new_user(2, "naomi")]));
     assert_eq!(
         live.wait_for(d, Duration::from_millis(50)).await,
@@ -247,7 +247,7 @@ async fn the_start_retries_a_failed_sync() {
     let store = inmemory();
     let log = TestLog::new();
     let failing: Arc<dyn zslg::Reader> =
-        Arc::new(crate::testkit::FailingSyncReader::new(log.reader(), 2));
+        Arc::new(crate::testing::FailingSyncReader::new(log.reader(), 2));
     let mut dispatcher = Dispatcher::from_db(
         store,
         log.writer(),

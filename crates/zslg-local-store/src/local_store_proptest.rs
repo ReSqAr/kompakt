@@ -21,7 +21,7 @@ use bytes::Bytes;
 use proptest::prelude::*;
 
 use super::store::LocalStore;
-use crate::testutil::open_test_local_store;
+use crate::testing::open_test_local_store;
 use zslg_consensus::NodeId;
 use zslg_log::Data;
 use zslg_log::{DataId, LogIndex};

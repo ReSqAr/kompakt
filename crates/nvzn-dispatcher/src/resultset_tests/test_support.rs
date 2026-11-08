@@ -9,7 +9,7 @@
 
 use crate::{
     Dispatcher, Index, IndexId, Projection, ProjectionId, Reader, Ref, Store, Watermark,
-    testkit::{
+    testing::{
         FLUSH_INTERVAL, TestLog, Todo, TodoId, User, UserId, commit_row, event, inmemory, tenant,
         tenant_id,
     },

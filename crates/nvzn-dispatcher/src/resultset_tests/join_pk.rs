@@ -9,7 +9,7 @@
 
 use crate::{
     resultset_tests::test_support::{rig, seed, todo, user},
-    testkit::{Todo, TodoId, UserId, commit_row, tenant_id},
+    testing::{Todo, TodoId, UserId, commit_row, tenant_id},
 };
 use nvzn_projection::*;
 
