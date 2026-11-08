@@ -1,13 +1,12 @@
 pub(crate) mod common;
 pub(crate) use common::{
     Cluster, ClusterConfig, CutoffObserver, FaultyReplica, FixedClock, MapPeerRouter,
-    NodePlacement, Partition, ReadyReplica, ReplicaServiceHarness, SharedClockController,
-    SkewedClock, SnapshotHarness, TestNode, assert_cluster_invariants,
+    NodePlacement, Partition, ReadyReplica, SnapshotHarness, TestNode, assert_cluster_invariants,
     assert_cluster_invariants_with_acks, assert_durability_chain_on, boot_snapshot_harness,
     commit_snapshot_result, default_fast_config, fast_raft_config, init_logging, local_store_at,
-    make_data, nid, replica_only, reserve_port, skewed_clock_pair, stable_log_at,
-    stable_log_engine, start_cluster, start_cluster_with_partition, test_membership_map, upstream,
-    wait_for_any_leader, wait_for_leader, wait_until, wait_until_sync, within, write_state_fenced,
+    make_data, nid, replica_only, reserve_port, stable_log_at, stable_log_engine, start_cluster,
+    start_cluster_with_partition, test_membership_map, upstream, wait_for_any_leader,
+    wait_for_leader, wait_until, wait_until_sync, within, write_state_fenced,
     write_state_fenced_via_leader,
 };
 

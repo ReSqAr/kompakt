@@ -403,3 +403,115 @@ impl Replica for DuplicateReplica {
         self.inner.subscribe_status().await
     }
 }
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "test code"
+)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use bytes::Bytes;
+    use zslg_consensus::NodeId;
+    use zslg_log::DataId;
+    use zslg_net::Router as _;
+    use zslg_time::Hlc;
+
+    use super::MapPeerRouter;
+    use crate::ReadyReplica;
+
+    fn nids() -> [NodeId; 3] {
+        [NodeId::new_v4(), NodeId::new_v4(), NodeId::new_v4()]
+    }
+
+    fn dummy_raft_state() -> zslg_consensus::RaftStateHandle {
+        let h = zslg_consensus::RaftStateHandle::new();
+        h.replace(zslg_consensus::RaftState {
+            replica: zslg_consensus::ReplicaMembership::single(Default::default()),
+            ..zslg_consensus::RaftState::empty()
+        });
+        h
+    }
+
+    #[tokio::test]
+    async fn quorum_write_succeeds_despite_one_failing_write() {
+        let ids = nids();
+        let [n1, n2, _n3] = ids;
+
+        let mut replicas: BTreeMap<NodeId, Arc<dyn zslg_log::Replica>> = BTreeMap::new();
+        for &id in &ids {
+            replicas.insert(
+                id,
+                Arc::new(ReadyReplica {
+                    raft_state: dummy_raft_state(),
+                }),
+            );
+        }
+        let (router, handles) = MapPeerRouter::wrap_all_faulty(replicas);
+
+        // Make n2 fail its next write.
+        handles[&n2].fail_next(1);
+
+        // Verify n2's transport fails the first call.
+        let transport = router.remote(n2);
+        let err = zslg_log_fake::replica_write(
+            &*transport,
+            zslg_log::Data {
+                data_id: DataId::from_parts(Hlc(0), n1, 0),
+                blob: Bytes::from_static(b"x"),
+            },
+        )
+        .await
+        .expect_err("fail_next(1) should inject error");
+        assert!(
+            err.to_string().contains("injected fault"),
+            "expected injected fault, got {err:?}"
+        );
+
+        // After the budget is exhausted, the replica works again.
+        transport
+            .fetch_status()
+            .await
+            .expect("should recover after fail budget exhausted");
+    }
+
+    #[tokio::test]
+    async fn wedged_replica_unblocks_after_unwedge() {
+        let ids = nids();
+        let [n1, _n2, _n3] = ids;
+
+        let mut replicas: BTreeMap<NodeId, Arc<dyn zslg_log::Replica>> = BTreeMap::new();
+        for &id in &ids {
+            replicas.insert(
+                id,
+                Arc::new(ReadyReplica {
+                    raft_state: dummy_raft_state(),
+                }),
+            );
+        }
+        let (router, handles) = MapPeerRouter::wrap_all_faulty(replicas);
+
+        // Wedge n1.
+        handles[&n1].wedge();
+
+        let transport = router.remote(n1);
+        let call = tokio::spawn(async move { transport.fetch_status().await });
+
+        // The call should hang while wedged.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!call.is_finished(), "wedged call must block");
+
+        // Unwedge — call completes.
+        handles[&n1].unwedge();
+        let result = tokio::time::timeout(Duration::from_secs(1), call)
+            .await
+            .expect("call did not complete after unwedge")
+            .expect("task join");
+        assert!(result.is_ok(), "unwedged call should succeed: {result:?}");
+    }
+}

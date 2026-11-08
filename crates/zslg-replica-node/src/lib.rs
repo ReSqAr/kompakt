@@ -17,6 +17,10 @@
 //! unconditionally and gates on leadership itself (`zslg-leader`), so
 //! promotion and demotion move no tasks.
 
+// Dev-dependency that exists to switch on its `testing` hooks.
+#[cfg(test)]
+use zslg_raft_node as _;
+
 use futures::FutureExt as _;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -1547,3 +1551,6 @@ mod compression_default_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod replica_tests;

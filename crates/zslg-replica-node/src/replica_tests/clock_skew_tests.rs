@@ -16,9 +16,10 @@
 use std::time::Duration;
 use zslg_time::ClockError;
 
-use crate::tests::{SharedClockController, SkewedClock};
+use super::harness::SkewedClock;
 use zslg_time::Clock;
 use zslg_time::{Hlc, HlcParts};
+use zslg_time_fake::SharedClockController;
 
 #[tokio::test]
 async fn peer_clock_diverged_beyond_drift_limit_fails_integrate() {

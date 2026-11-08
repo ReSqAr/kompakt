@@ -5057,6 +5057,7 @@ dependencies = [
  "uuid",
  "zslg-consensus",
  "zslg-log",
+ "zslg-net",
  "zslg-time",
 ]
 
@@ -5131,6 +5132,7 @@ name = "zslg-net-fake"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bytes",
  "crossbeam-channel",
  "crossbeam-combinators",
  "error-union",
@@ -5141,6 +5143,7 @@ dependencies = [
  "zslg-consensus",
  "zslg-lifecycle-types",
  "zslg-log",
+ "zslg-log-fake",
  "zslg-net",
  "zslg-raft",
  "zslg-snapshot",
@@ -5626,16 +5629,20 @@ dependencies = [
 name = "zslg-replica-node"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "bytesize",
  "crossbeam-channel",
+ "crossbeam-combinators",
  "futures",
  "object_store",
  "rocksdb-kit",
  "shutdown",
+ "tempfile",
  "tokio",
  "tokio-util",
  "tracing",
  "zslg-consensus",
+ "zslg-consensus-fake",
  "zslg-error",
  "zslg-hlc-clock",
  "zslg-hlc-gate",
@@ -5644,7 +5651,9 @@ dependencies = [
  "zslg-learner",
  "zslg-lifecycle-types",
  "zslg-log",
+ "zslg-log-fake",
  "zslg-net",
+ "zslg-net-fake",
  "zslg-net-setup",
  "zslg-node-id",
  "zslg-object-store",
@@ -5659,6 +5668,7 @@ dependencies = [
  "zslg-replica-service",
  "zslg-snapshot",
  "zslg-time",
+ "zslg-time-fake",
  "zslg-writer",
 ]
 

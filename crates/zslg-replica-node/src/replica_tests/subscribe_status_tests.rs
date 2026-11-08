@@ -19,9 +19,9 @@ use std::time::Duration;
 
 use futures::StreamExt;
 
-use crate::tests::nid;
-use crate::tests::{self as faults, ReplicaServiceHarness};
+use super::harness::{ReplicaServiceHarness, skewed_clock_pair};
 use zslg_consensus::RaftGeneration;
+use zslg_consensus_fake::nid;
 use zslg_log::Replica;
 use zslg_net::{HostPort, PeerAddr};
 use zslg_time::Hlc;
@@ -33,7 +33,7 @@ use zslg_time::Hlc;
 #[tokio::test]
 async fn subscribe_status_streams_baseline_then_updates() {
     let me = nid(1);
-    let (clock, _ctl) = faults::skewed_clock_pair(Duration::from_millis(100));
+    let (clock, _ctl) = skewed_clock_pair(Duration::from_millis(100));
     let harness = ReplicaServiceHarness::new(me, &[me], clock.hlc_clock())
         .await
         .expect("harness");
@@ -73,7 +73,7 @@ async fn subscribe_status_streams_baseline_then_updates() {
 #[tokio::test]
 async fn subscribe_status_streams_cutoff_advances() {
     let me = nid(1);
-    let (clock, _ctl) = faults::skewed_clock_pair(Duration::from_millis(100));
+    let (clock, _ctl) = skewed_clock_pair(Duration::from_millis(100));
     let harness = ReplicaServiceHarness::new(me, &[me], clock.hlc_clock())
         .await
         .expect("harness");
@@ -118,7 +118,7 @@ async fn subscribe_status_streams_cutoff_advances() {
 #[tokio::test]
 async fn fetch_status_reports_configured_peer_names() {
     let me = nid(1);
-    let (clock, _ctl) = faults::skewed_clock_pair(Duration::from_millis(100));
+    let (clock, _ctl) = skewed_clock_pair(Duration::from_millis(100));
     let configured_peers = vec![
         PeerAddr {
             addr: HostPort::new("node-a.internal", 7000),

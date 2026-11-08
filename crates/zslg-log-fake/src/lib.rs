@@ -1,7 +1,10 @@
 //! In-memory implementations of the log ports, for tests of the crates that
 //! consume them.
 
+mod replica_write;
 mod test_log;
+
+pub use replica_write::replica_write;
 
 pub use test_log::{TestLog, data_id};
 

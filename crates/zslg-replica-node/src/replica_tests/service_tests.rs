@@ -10,8 +10,6 @@ mod tests {
     use crossbeam_combinators::testing::ChannelTestExt as _;
     use tokio_util::sync::CancellationToken;
 
-    use crate::error::Error;
-    use crate::tests::{make_data, nid};
     use crossbeam_combinators::Channel;
     use std::sync::Arc;
     use std::time::Duration;
@@ -19,10 +17,13 @@ mod tests {
     use zslg_consensus::RaftStateHandle;
     use zslg_consensus::{ConsensusError, NodeId};
     use zslg_consensus::{RaftState, ReplicaMembership};
+    use zslg_consensus_fake::nid;
     use zslg_hlc_clock::HlcClock;
     use zslg_hlc_gate::HlcGate;
+    use zslg_log::Error;
     use zslg_log::{LogIndex, StampedWrite, WriteOutcome};
     use zslg_log::{Replica, ReplicaLog as _};
+    use zslg_log_fake::make_data;
     use zslg_replica_log::{ReplicaLogConfig, ReplicaLogStore};
     use zslg_replica_service::ReplicaService;
     use zslg_time::{ClockError, Hlc};
@@ -99,7 +100,7 @@ mod tests {
     async fn rig(self_id: NodeId, replicas: &[NodeId], clock_ms: u64, max_skew: Duration) -> Rig {
         let dir = tempfile::tempdir().expect("tempdir");
         let (store, flush) = ReplicaLogStore::open_with_flush(
-            crate::database::open_for_test(&dir.path().join("replica-log")).expect("storage"),
+            super::super::harness::open_storage(&dir.path().join("replica-log")).expect("storage"),
             CancellationToken::new(),
         )
         .await
@@ -230,7 +231,7 @@ mod tests {
         // Replica set contains other nodes, not `me`.
         let (node, _raft_state, _dir, _flush) =
             replica_with(me, &[nid(2), nid(3)], 1_000, Duration::from_secs(10)).await;
-        let err = crate::tests::common::replica_write(&*node, make_data(0, 1_000, b"payload"))
+        let err = zslg_log_fake::replica_write(&*node, make_data(0, 1_000, b"payload"))
             .await
             .expect_err("must reject");
         assert!(
@@ -242,7 +243,7 @@ mod tests {
     async fn write_accepted_when_in_replica_set() {
         let me = nid(1);
         let rig = rig(me, &[me, nid(2), nid(3)], 1_000, Duration::from_secs(10)).await;
-        let st = crate::tests::common::replica_write(&*rig.node, make_data(0, 1_000, b"payload"))
+        let st = zslg_log_fake::replica_write(&*rig.node, make_data(0, 1_000, b"payload"))
             .await
             .expect("write accepted");
         assert!(st.replica.current().contains(&me));
@@ -264,7 +265,7 @@ mod tests {
         let node = rig.node.clone();
         assert!(rig.gate.set_cutoff(Hlc(1_000)).await, "advance from None");
 
-        let err = crate::tests::common::replica_write(&*node, make_data(0, 1_000, b"payload"))
+        let err = zslg_log_fake::replica_write(&*node, make_data(0, 1_000, b"payload"))
             .await
             .expect_err("== cutoff must reject");
         assert!(matches!(
@@ -275,7 +276,7 @@ mod tests {
         ));
 
         // Strictly above the cutoff is accepted.
-        crate::tests::common::replica_write(&*node, make_data(0, 1_001, b"payload"))
+        zslg_log_fake::replica_write(&*node, make_data(0, 1_001, b"payload"))
             .await
             .expect("> cutoff accepted");
     }
@@ -293,7 +294,7 @@ mod tests {
             ),
             ..RaftState::empty()
         });
-        crate::tests::common::replica_write(&*node, make_data(0, 1_000, b"payload"))
+        zslg_log_fake::replica_write(&*node, make_data(0, 1_000, b"payload"))
             .await
             .expect("joint-set member may write");
     }

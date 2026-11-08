@@ -43,6 +43,22 @@ zslg-snapshot = { workspace = true }
 zslg-time = { workspace = true }
 zslg-writer = { workspace = true }
 
+[dev-dependencies]
+bytes = { workspace = true }
+bytesize = { workspace = true }
+crossbeam-combinators = { workspace = true, features = ["testing"] }
+futures = { workspace = true }
+rocksdb-kit = { workspace = true, features = ["testing"] }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "test-util"] }
+tokio-util = { workspace = true }
+zslg-consensus-fake = { workspace = true }
+zslg-log-fake = { workspace = true }
+zslg-net-fake = { workspace = true }
+zslg-replica-log = { workspace = true, features = ["testing"] }
+zslg-raft-node = { workspace = true, features = ["testing"] }
+zslg-time-fake = { workspace = true }
+
 [features]
 testing = ["dep:zslg-raft-node", "zslg-raft-node/testing"]
 
