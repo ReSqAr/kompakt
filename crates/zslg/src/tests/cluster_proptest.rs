@@ -1443,6 +1443,7 @@ proptest! {
         write_capacity_pick in 0u64..=1000,
         ops in script_strategy(),
     ) {
+        crate::tests::init_logging();
         let (snap_r, elec_r) = regime_ranges(regime);
         let snapshot_ms = pick(&snap_r, snapshot_pick);
         let election_min_ms = pick(&elec_r, election_pick);

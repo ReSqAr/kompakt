@@ -226,7 +226,6 @@ fn run_replica(weak: Weak<Coordinator>, node: NodeId, mut ids_rx: Receiver<DataI
             let Some(this) = weak.upgrade() else {
                 return;
             };
-            backoff = REOPEN_BACKOFF;
             let data_id = outcome.data_id();
 
             zslg_quorum_read::metrics::write_fanout_response(fanout_state(&outcome));
@@ -243,9 +242,34 @@ fn run_replica(weak: Weak<Coordinator>, node: NodeId, mut ids_rx: Receiver<DataI
             }
             this.streams.reconcile_if_newer(weak.clone());
 
+            let dead_instance = matches!(
+                &outcome,
+                WriteOutcome::Failed {
+                    error: zslg_log::Error::Lifecycle(
+                        zslg_lifecycle_types::LifecycleError::Shutdown
+                    ),
+                    ..
+                }
+            );
+            if !dead_instance {
+                backoff = REOPEN_BACKOFF;
+            }
             match &outcome {
                 WriteOutcome::Accepted { .. } => this.pending.ack(data_id, node),
                 _ => this.pending.neg(data_id, node),
+            }
+
+            // A replica that answers `Shutdown` is a service instance that has
+            // been dropped while this connection to it stayed open (a killed or
+            // relaunched node: the relaunch binds the same address, but an
+            // established stream keeps talking to the dead instance). It will
+            // answer every further write the same way and never ends the stream
+            // itself, so without reconnecting here the writer would be refused
+            // by that node for good and, with two such nodes, never reach quorum.
+            // Leaving the loop drops the connection; the code below resends
+            // from `pending` on a fresh one.
+            if dead_instance {
+                break;
             }
         }
 
