@@ -29,16 +29,18 @@
 //! Spec: nlnr `docs/logs/2026-10-26_spec_nvzn_live_views.md`; the deferred
 //! start and `wait_for`: nlnr `docs/logs/2026-10-28_design_read_after_write.md`.
 
-use crate::dispatcher::FoldState;
-use crate::events::{contains, subset};
-use crate::ids::APP_ID_LEN;
-use crate::metrics::{self, ReadKind, StopReason};
+use crate::APP_ID_LEN;
+use crate::FoldState;
+use crate::StopReason;
+use crate::metrics::{self, ReadKind};
 use crate::projection::{BoxedProjectorLike, fold_event};
+use crate::subset;
 use crate::{
     ArcStore, Error, EventSet, Projection, ProjectionTypeId, Snapshot, Tenant, TenantId, Watermark,
     WithWireFormat, WriteTransactionImpl,
 };
 use crossbeam_combinators::{AbortReason, Channel, Finite, Infinite, Key, Seam, Segment};
+use nvzn_types::contains;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};

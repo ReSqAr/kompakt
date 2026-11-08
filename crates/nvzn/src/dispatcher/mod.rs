@@ -13,7 +13,6 @@
 //! taken after.
 
 mod fold;
-mod fold_state;
 mod handles;
 mod registration;
 mod subscribers;
@@ -27,13 +26,11 @@ mod supervisor;
 )]
 mod tests;
 
-pub(crate) use fold_state::FoldState;
+use crate::{FoldState, SubscriptionItem, Subscriptions};
 pub use handles::{Encoder, EventWriter, Syncer};
 pub use registration::AssociatedProjectorManager;
 use registration::compute_config_hash;
-pub(crate) use subscribers::{
-    PENDING_SUBSCRIBERS, SUBSCRIBER_CAPACITY, Subscribers, SubscriptionItem, Subscriptions,
-};
+pub(crate) use subscribers::{PENDING_SUBSCRIBERS, SUBSCRIBER_CAPACITY, Subscribers};
 
 use crate::{
     ArcStore, Error, IndexId, ProjectionTypeId, ProjectorManager, RocksDBStore, StoreConfig,

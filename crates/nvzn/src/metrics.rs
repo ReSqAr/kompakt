@@ -22,7 +22,7 @@
 //! or with hosts. (`cf` takes the store's column-family name constants, which
 //! are as fixed as an enum.)
 
-use crate::Tenant;
+use crate::{StopReason, Tenant};
 use metrics_kit::{MetricDef, MetricKind, Unit, lossy_f64, metrics, unix_now_secs};
 use std::time::Duration;
 
@@ -67,57 +67,6 @@ impl EntryOutcome {
             Self::Replayed => "replayed",
             Self::ForeignTenant => "foreign_tenant",
             Self::Watermark => "watermark",
-        }
-    }
-}
-
-/// Why the fold loop stopped. Every variant means the read model is frozen
-/// from that point on; `cancelled` is the one that was asked for. Carried to readers as [`crate::Error::FoldStopped`], so a
-/// call that cannot be served says which of these ended the fold.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StopReason {
-    SubscriptionAborted,
-    Cancelled,
-    /// A `data_id` went backwards: zslg's ordering guarantee is broken.
-    NonMonotoneDataId,
-    /// A payload this dispatcher cannot decode. Permanent — see the crate
-    /// review's §1: the entry stays in the log and a restart re-reads it.
-    PoisonEntry,
-    StoreError,
-    /// The store went away under the fold — the dispatcher was dropped.
-    StoreDropped,
-    /// zslg handed the fold an error item instead of an entry.
-    Upstream,
-    /// The fold task itself died — a projection handler panicked under
-    /// `panic = "unwind"` — without reaching any of the other exits.
-    Panicked,
-    /// A live view's unstable-tail subscription ended: zslg resyncs a slow
-    /// consumer inside the stream, so an end means the node's reader broke,
-    /// and a live view that stopped integrating would serve a stale world as
-    /// fresh. Stops the dispatcher so the process goes down.
-    UnstableTailEnded,
-    /// A live view's cold-start scan of the stable log ended before reaching
-    /// the stable watermark it set out for; as `UnstableTailEnded`.
-    LiveScanEnded,
-    /// A live view's merged scan/tail stream ended; the `End` names the source.
-    LiveStreamEnded,
-}
-
-impl StopReason {
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::SubscriptionAborted => "subscription_aborted",
-            Self::Cancelled => "cancelled",
-            Self::NonMonotoneDataId => "non_monotone_data_id",
-            Self::PoisonEntry => "poison_entry",
-            Self::StoreError => "store_error",
-            Self::StoreDropped => "store_dropped",
-            Self::Upstream => "upstream",
-            Self::Panicked => "panicked",
-            Self::UnstableTailEnded => "unstable_tail_ended",
-            Self::LiveScanEnded => "live_scan_ended",
-            Self::LiveStreamEnded => "live_stream_ended",
         }
     }
 }

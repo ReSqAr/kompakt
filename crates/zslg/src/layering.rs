@@ -194,6 +194,17 @@ fn every_dependency_is_allowed_by_the_role_table() {
             if k.name == "zslg-net" && to == Role::Ports {
                 continue;
             }
+            // The nvzn family is built on zslg's public API (D11): it may use the
+            // `zslg` facade, and no other crate may.
+            if k.name.starts_with("nvzn") && d.name == "zslg" {
+                continue;
+            }
+            // Transitional (nvzn split in progress): the nvzn facade still holds
+            // implementation code and so reaches below the assemblies. Removed
+            // when the split is complete.
+            if k.name == "nvzn" && d.name.starts_with("nvzn-") {
+                continue;
+            }
             if !allowed.contains(&to) {
                 violations.push(format!(
                     "{} ({:?}) -> {} ({:?}){}",
@@ -253,7 +264,10 @@ fn no_cross_group_dependency_on_a_types_crate_from_above_the_ports_layer() {
     let mut violations = Vec::new();
     for k in krates.iter().filter(|k| above.contains(&k.role)) {
         for d in &k.deps {
-            if d.name.ends_with("-types") && d.name != "zslg-lifecycle-types" {
+            if d.name.ends_with("-types")
+                && d.name != "zslg-lifecycle-types"
+                && !d.name.starts_with("nvzn-")
+            {
                 violations.push(format!(
                     "{} -> {} (import through the ports crate)",
                     k.name, d.name

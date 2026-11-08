@@ -1,0 +1,29 @@
+[package]
+name = "nvzn-types"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Identifiers, event sets, the error and the shared cells of nvzn"
+publish = false
+
+[dependencies]
+const-fnv1a-hash = { workspace = true }
+crossbeam-combinators = { workspace = true }
+postcard = { workspace = true, features = ["alloc", "use-std"] }
+rust-rocksdb = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+tokio-util = { workspace = true }
+uuid = { workspace = true }
+zslg = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "types"

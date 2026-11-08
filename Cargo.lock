@@ -2108,7 +2108,6 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
- "const-fnv1a-hash",
  "crossbeam-channel",
  "crossbeam-combinators",
  "futures",
@@ -2117,17 +2116,33 @@ dependencies = [
  "metrics-exporter-prometheus",
  "metrics-kit",
  "metrics-util",
+ "nvzn-types",
  "postcard",
  "proptest",
  "rust-rocksdb",
  "serde",
  "sha2",
  "tempfile",
- "thiserror 2.0.21",
  "tokio",
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "zslg",
+]
+
+[[package]]
+name = "nvzn-types"
+version = "0.1.0"
+dependencies = [
+ "const-fnv1a-hash",
+ "crossbeam-combinators",
+ "postcard",
+ "proptest",
+ "rust-rocksdb",
+ "serde",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
  "uuid",
  "zslg",
 ]

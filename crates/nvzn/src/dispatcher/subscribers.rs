@@ -14,38 +14,10 @@
 //! A stream ends with `Aborted(ProducerGone)` when the fan-out stops. A caller
 //! that wants `Cancelled` binds its own `Cancellation` with `until`.
 
-use crate::metrics::StopReason;
-use crate::{ProjectionId, ProjectionTypeId, TenantId};
-use crossbeam_combinators::{CancelHandle, Cancellation, Fanout, KeyedRegistry};
+use crate::StopReason;
+use crate::{ProjectionId, ProjectionTypeId, SubscriptionItem, TenantId};
+use crossbeam_combinators::{CancelHandle, Fanout};
 use std::sync::Arc;
-
-/// A registration key.
-pub(crate) type SubscriptionKey = (TenantId, ProjectionTypeId);
-/// A written ref: the key plus the projection id.
-pub(crate) type SubscriptionItem = (TenantId, ProjectionTypeId, ProjectionId);
-/// The reader side: the subscribe registry plus the live-view cancellation.
-/// The cancellation is not the fan-out's; it stops live views when the fold
-/// stops. The armed handle keeps the cancellation from firing during teardown.
-#[derive(Clone)]
-pub(crate) struct Subscriptions {
-    pub(crate) registry: KeyedRegistry<SubscriptionKey, SubscriptionItem>,
-    pub(crate) cancelled: Cancellation,
-    _keep_armed: Arc<CancelHandle>,
-}
-
-impl Subscriptions {
-    pub(crate) fn new(
-        registry: KeyedRegistry<SubscriptionKey, SubscriptionItem>,
-        cancelled: Cancellation,
-        keep_armed: Arc<CancelHandle>,
-    ) -> Self {
-        Self {
-            registry,
-            cancelled,
-            _keep_armed: keep_armed,
-        }
-    }
-}
 
 /// Registrations waiting in the bounded queue.
 pub(crate) const PENDING_SUBSCRIBERS: usize = 1024;

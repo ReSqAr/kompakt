@@ -8,14 +8,13 @@
 //!
 //! Progress is the dispatcher's `watch` (`Syncer::watermark`), not kept here.
 
-use crate::Error;
-use crate::metrics::StopReason;
+use crate::{Error, StopReason};
 use std::sync::Arc;
 
 /// The fold's terminal state, shared with every reader built from
 /// the same dispatcher.
 #[derive(Clone)]
-pub(crate) struct FoldState(Arc<FoldShared>);
+pub struct FoldState(Arc<FoldShared>);
 
 struct FoldShared {
     stopped: std::sync::OnceLock<StopReason>,
@@ -28,14 +27,15 @@ struct FoldShared {
 }
 
 impl FoldState {
-    pub(super) fn new(cancel: tokio_util::sync::CancellationToken) -> Self {
+    #[must_use]
+    pub fn new(cancel: tokio_util::sync::CancellationToken) -> Self {
         Self(Arc::new(FoldShared {
             stopped: std::sync::OnceLock::new(),
             cancel,
         }))
     }
 
-    pub(super) fn stop(&self, reason: StopReason) {
+    pub fn stop(&self, reason: StopReason) {
         let _ = self.0.stopped.set(reason);
     }
 
@@ -44,23 +44,25 @@ impl FoldState {
     /// then cancel. The fold takes the recorded reason as why it stopped, and
     /// as a failure, so the dispatcher's task ends with [`Error::FoldStopped`]
     /// and the process notices as for any fold stop.
-    pub(crate) fn halt(&self, reason: StopReason) {
+    pub fn halt(&self, reason: StopReason) {
         self.stop(reason);
         self.0.cancel.cancel();
     }
 
     /// The dispatcher's cancellation, for the supervisor.
-    pub(super) fn cancellation(&self) -> tokio_util::sync::CancellationToken {
+    #[must_use]
+    pub fn cancellation(&self) -> tokio_util::sync::CancellationToken {
         self.0.cancel.clone()
     }
 
     /// Why the fold stopped, once it has: the first reason recorded.
-    pub(super) fn reason(&self) -> Option<StopReason> {
+    #[must_use]
+    pub fn reason(&self) -> Option<StopReason> {
         self.0.stopped.get().copied()
     }
 
     /// `Err` once the fold has stopped, naming why.
-    pub(crate) fn check(&self) -> Result<(), Error> {
+    pub fn check(&self) -> Result<(), Error> {
         match self.0.stopped.get() {
             Some(reason) => Err(Error::FoldStopped(*reason)),
             None => Ok(()),

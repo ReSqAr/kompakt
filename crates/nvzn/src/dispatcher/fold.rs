@@ -29,8 +29,9 @@
 //! The fold holds the store weakly, so dropping the dispatcher's store ends it.
 
 use super::{FoldState, InnerHandler, Subscribers};
-use crate::ids::APP_ID_LEN;
-use crate::metrics::{self, EntryOutcome, StopReason};
+use crate::APP_ID_LEN;
+use crate::StopReason;
+use crate::metrics::{self, EntryOutcome};
 use crate::{Error, ReadTransaction, Store, TenantId, Watermark, WriteTransactionImpl};
 use bytes::Bytes;
 use crossbeam_combinators::{AbortReason, Channel, Infinite};

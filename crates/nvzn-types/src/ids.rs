@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub(crate) const PROJECTION_TYPE_ID_LEN: usize = 4;
+pub const PROJECTION_TYPE_ID_LEN: usize = 4;
 
 #[derive(Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Copy, Hash)]
 pub struct ProjectionTypeId([u8; PROJECTION_TYPE_ID_LEN]);
@@ -33,7 +33,7 @@ impl ProjectionTypeId {
     }
 }
 
-pub(crate) const PROJECTION_ID_LEN: usize = 16;
+pub const PROJECTION_ID_LEN: usize = 16;
 
 #[derive(Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Copy, Hash)]
 pub struct ProjectionId([u8; PROJECTION_ID_LEN]);
@@ -73,7 +73,7 @@ impl ProjectionId {
     }
 }
 
-pub(crate) const INDEX_ID_LEN: usize = 4;
+pub const INDEX_ID_LEN: usize = 4;
 
 #[derive(Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq, Debug, Clone, Copy, Hash)]
 pub struct IndexId([u8; INDEX_ID_LEN]);
@@ -134,7 +134,7 @@ impl Tenant {
     }
 }
 
-pub(crate) const APP_ID_LEN: usize = 16;
+pub const APP_ID_LEN: usize = 16;
 
 #[derive(Ord, PartialOrd, Eq, PartialEq, Clone, Copy, Debug)]
 pub struct TenantId([u8; APP_ID_LEN]);

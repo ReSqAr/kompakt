@@ -1,23 +1,22 @@
-use crate::dispatcher::{FoldState, PENDING_SUBSCRIBERS, Subscriptions};
-use crate::events::subset;
+use crate::dispatcher::PENDING_SUBSCRIBERS;
 use crate::live::{self, Live, LiveLimits};
 use crate::metrics::{self, ReadKind};
 use crate::projection::Registered;
+use crate::subset;
 use crate::{
     ArcReadTransaction, ArcStore, Error, EventSet, Index, Projection, ProjectionTypeId,
     ReadTransactionExt, Ref, ResultSet, SubEventOf, Syncer, Tenant, TenantId, View, WithWireFormat,
 };
+use crate::{FoldState, Subscriptions};
 use crossbeam_combinators::{Channel, Infinite, RegistryError};
 use std::collections::{BTreeMap, BTreeSet};
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-impl Error {
-    pub(crate) fn reference_not_found<P: Projection>(r: Ref<P>) -> Self {
-        Error::ReferenceNotFound {
-            pid: r.id(),
-            type_name: std::any::type_name::<P>(),
-        }
+pub(crate) fn reference_not_found<P: Projection>(r: Ref<P>) -> Error {
+    Error::ReferenceNotFound {
+        pid: r.id(),
+        type_name: std::any::type_name::<P>(),
     }
 }
 

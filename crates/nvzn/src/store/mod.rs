@@ -3,7 +3,7 @@ mod inmemory;
 mod overlay;
 mod rocksdb;
 
-use crate::ids::ProjectionId;
+use crate::ProjectionId;
 use crate::{Error, IndexId, Projection, ProjectionTypeId, Ref, TenantId};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -84,7 +84,7 @@ pub trait ReadTransactionExt: ReadTransaction {
 
     fn resolve<P: Projection>(&self, tenant_id: TenantId, r: Ref<P>) -> Result<P, Error> {
         self.get(tenant_id, r)?
-            .ok_or_else(|| Error::reference_not_found(r))
+            .ok_or_else(|| crate::reader::reference_not_found(r))
     }
 
     fn scan<P: Projection>(&self, tenant_id: TenantId) -> Rows<'_, P> {

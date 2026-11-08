@@ -1,8 +1,8 @@
-use crate::ids::{APP_ID_LEN, INDEX_ID_LEN, PROJECTION_ID_LEN, PROJECTION_TYPE_ID_LEN};
 use crate::metrics;
 use crate::store::IndexAction;
 use crate::store::config::StoreConfig;
 use crate::store::overlay::WriteTransactionImpl;
+use crate::{APP_ID_LEN, INDEX_ID_LEN, PROJECTION_ID_LEN, PROJECTION_TYPE_ID_LEN};
 use crate::{
     ArcReadTransaction, CommitBatch, ConfigHash, Error, IndexId, ProjectionId, ProjectionTypeId,
     ReadTransaction, Rows, Store, TenantId, Watermark,

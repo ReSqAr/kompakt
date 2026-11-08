@@ -9,7 +9,7 @@ mod registration;
 mod supervisor;
 
 use super::*;
-use crate::metrics::StopReason;
+use crate::StopReason;
 use crate::{
     ReadTransactionExt, Ref, Store, WithWireFormat,
     testsupport::{

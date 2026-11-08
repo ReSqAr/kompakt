@@ -10,7 +10,7 @@
 //! fold's own progress, so it fails rather than blocks once the fold has
 //! stopped.
 
-use super::FoldState;
+use crate::FoldState;
 use crate::metrics;
 use crate::{Error, Tenant, WithWireFormat};
 use std::marker::PhantomData;

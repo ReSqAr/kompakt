@@ -17,7 +17,8 @@
 
 use super::fold::{self, FoldInputs};
 use super::{Dispatcher, compute_config_hash};
-use crate::metrics::{self, FenceOutcome, StopReason};
+use crate::StopReason;
+use crate::metrics::{self, FenceOutcome};
 use crate::{ArcStore, Error};
 use crossbeam_combinators::Cancellation;
 use std::sync::Arc;
