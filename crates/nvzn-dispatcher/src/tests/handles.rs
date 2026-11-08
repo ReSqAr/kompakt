@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn encoder_prepends_tenant_id() {
-    let events = [event::Event::Pinged(testsupport::PingedV1 {
+    let events = [event::Event::Pinged(testkit::PingedV1 {
         id: UserId(1),
         ts: 0,
     })];

@@ -1,5 +1,5 @@
+use crate::PENDING_SUBSCRIBERS;
 use crate::Syncer;
-use crate::dispatcher::PENDING_SUBSCRIBERS;
 use crate::live::{self, Live, LiveLimits};
 use crate::metrics::{self, ReadKind};
 use crate::subset;
@@ -79,7 +79,7 @@ impl<Ev> Reader<Ev> {
     /// snapshot taken after that includes those writes:
     ///
     /// ```no_run
-    /// # async fn f<Ev>(reader: &nvzn::Reader<Ev>) -> Result<(), nvzn::Error> {
+    /// # async fn f<Ev>(reader: &nvzn_dispatcher::Reader<Ev>) -> Result<(), nvzn_types::Error> {
     /// let now = reader.hlc_now();
     /// let mut folded = reader.folded_watermark();
     /// let _ = folded.wait_for(|w| w.is_some_and(|w| w >= now)).await;
@@ -133,7 +133,7 @@ impl<Ev> Reader<Ev> {
     /// A projection over unrelated events does not compile:
     ///
     /// ```compile_fail
-    /// fn subscribe<Ev, P: nvzn::Projection>(reader: &nvzn::Reader<Ev>) {
+    /// fn subscribe<Ev, P: nvzn_store::Projection>(reader: &nvzn_dispatcher::Reader<Ev>) {
     ///     let _ = reader.subscribe_stable_log::<P>();
     /// }
     /// ```
@@ -141,10 +141,10 @@ impl<Ev> Reader<Ev> {
     /// whereas with the bound it does:
     ///
     /// ```
-    /// fn subscribe<Ev, P>(reader: &nvzn::Reader<Ev>)
+    /// fn subscribe<Ev, P>(reader: &nvzn_dispatcher::Reader<Ev>)
     /// where
-    ///     P: nvzn::Projection,
-    ///     for<'a> P::Event<'a>: nvzn::SubEventOf<'a, Ev>,
+    ///     P: nvzn_store::Projection,
+    ///     for<'a> P::Event<'a>: nvzn_types::SubEventOf<'a, Ev>,
     /// {
     ///     let _ = reader.subscribe_stable_log::<P>();
     /// }
@@ -305,7 +305,7 @@ mod tests {
     use super::*;
     use crate::{
         Dispatcher, Store,
-        testsupport::{
+        testkit::{
             self, FLUSH_INTERVAL, TestLog, User, UserId, commit_row, event, inmemory, tenant,
             tenant_id,
         },
@@ -313,7 +313,7 @@ mod tests {
     use std::sync::Arc;
 
     fn new_user(id: u128, name: &str) -> event::Event {
-        event::Event::NewUser(testsupport::NewUserV3 {
+        event::Event::NewUser(testkit::NewUserV3 {
             id: UserId(id),
             name: name.to_string(),
             address: None,
@@ -463,7 +463,7 @@ mod tests {
         use super::*;
         use crate::{
             EventWriter, StopReason,
-            testsupport::{NewTodoV1, Todo, TodoDeletedV1, TodoId},
+            testkit::{NewTodoV1, Todo, TodoDeletedV1, TodoId},
         };
         use crossbeam_combinators::{AbortReason, Infinite};
         use tokio::time::{Duration, timeout};

@@ -12,10 +12,30 @@
 //! stop reason, so a reader taken before `finalise` sees the same fold as one
 //! taken after.
 
+pub mod metrics;
+
+// The names the moved modules reach for as `crate::X`.
+pub(crate) use nvzn_resultset::ResultSet;
+pub(crate) use nvzn_store::{
+    ArcReadTransaction, ConfigHash, Index, Projection, ReadTransactionExt, Ref, View, Watermark,
+};
+#[cfg(test)]
+pub(crate) use nvzn_store::{Store, Write};
+#[cfg(test)]
+pub(crate) use nvzn_types::ProjectionId;
+pub(crate) use nvzn_types::{
+    APP_ID_LEN, Encoder, EventSet, EventWriter, StopReason, SubEventOf, WithWireFormat, subset,
+};
+
 mod fold;
+mod live;
+mod reader;
 mod registration;
 mod subscribers;
 mod supervisor;
+#[cfg(test)]
+mod testkit;
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -25,15 +45,17 @@ mod supervisor;
 )]
 mod tests;
 
-use crate::{FoldState, SubscriptionItem, Subscriptions, Syncer};
+pub use live::{Live, LiveLimits, Wait, is_live};
+use nvzn_types::{FoldState, SubscriptionItem, Subscriptions, Syncer};
+pub use reader::{Reader, Snapshot};
 pub use registration::AssociatedProjectorManager;
 use registration::compute_config_hash;
 pub(crate) use subscribers::{PENDING_SUBSCRIBERS, SUBSCRIBER_CAPACITY, Subscribers};
 
-use crate::{
-    ArcStore, Error, IndexId, ProjectionTypeId, ProjectorManager, RocksDBStore, StoreConfig,
-    Tenant, TenantId, WriteTransactionImpl,
-};
+use nvzn_projector::ProjectorManager;
+use nvzn_store::{ArcStore, StoreConfig, WriteTransactionImpl};
+use nvzn_store_rocksdb::RocksDBStore;
+use nvzn_types::{Error, IndexId, ProjectionTypeId, Tenant, TenantId};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
@@ -46,6 +68,10 @@ pub(crate) type InnerHandler = Arc<
         + Send
         + Sync,
 >;
+
+/// Long enough that the fence never fires mid-test; the tests that care about
+/// it set their own.
+pub const FLUSH_INTERVAL: Duration = Duration::from_secs(60);
 
 pub struct Dispatcher {
     store: ArcStore,
@@ -83,37 +109,38 @@ impl Dispatcher {
         Ok(dispatcher)
     }
 
-    /// A dispatcher over [`InMemoryStore`](crate::InMemoryStore), for tests.
+    /// A dispatcher over `InMemoryStore`, for tests.
     ///
     /// The projection side only: `writer` and `reader` are still whatever the
     /// caller supplies, so pair it with
-    /// [`testing::TestLog`](crate::testing::TestLog) for a rig with no zslg in
+    /// `testing::TestLog` for a rig with no zslg in
     /// it at all.
     ///
     /// ```no_run
-    /// # async fn f() -> Result<(), nvzn::Error> {
-    /// let log = nvzn::testing::TestLog::new();
-    /// let mut dispatcher = nvzn::Dispatcher::in_memory(log.writer(), log.reader()).await?;
+    /// # async fn f() -> Result<(), nvzn_types::Error> {
+    /// let log = zslg::testing::TestLog::new();
+    /// let mut dispatcher = nvzn_dispatcher::Dispatcher::in_memory(log.writer(), log.reader()).await?;
     /// // ... register projections on `dispatcher`, then `finalise`.
     /// # Ok(()) }
     /// ```
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(feature = "testing")]
     pub async fn in_memory(
         writer: Arc<dyn zslg::Writer>,
         reader: Arc<dyn zslg::Reader>,
     ) -> Result<Self, Error> {
         Self::from_db(
-            Arc::new(crate::InMemoryStore::default()),
+            Arc::new(nvzn_store_fake::InMemoryStore::default()),
             writer,
             reader,
-            crate::testing::FLUSH_INTERVAL,
+            FLUSH_INTERVAL,
             // A test rig has no node to stop: its shutdown is the root.
             &CancellationToken::new(),
         )
         .await
     }
 
-    pub(crate) async fn from_db(
+    /// A dispatcher over an already-open `store`.
+    pub async fn from_db(
         store: ArcStore,
         writer: Arc<dyn zslg::Writer>,
         reader: Arc<dyn zslg::Reader>,

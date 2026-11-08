@@ -14,18 +14,17 @@
 )]
 
 use crossbeam_channel as _;
+#[cfg(test)]
+use tracing as _;
 use {async_trait as _, futures as _, tokio as _, tokio_util as _};
 #[cfg(test)]
 use {metrics_util as _, proptest as _, tempfile as _, tracing_subscriber as _};
 
-mod dispatcher;
 #[cfg(test)]
 mod events_tests;
-mod live;
 mod metrics;
 #[cfg(test)]
 mod projection_tests;
-mod reader;
 #[cfg(test)]
 mod resultset_tests;
 #[cfg(test)]
@@ -41,11 +40,12 @@ pub mod testing;
 #[cfg(test)]
 pub(crate) mod testsupport;
 
-pub use dispatcher::{AssociatedProjectorManager, Dispatcher};
-pub use live::{Live, LiveLimits, Wait, is_live};
 #[cfg(feature = "prometheus")]
 pub use metrics::configure_prometheus;
 pub use metrics::{METRIC_NAMESPACE, describe_metrics, histogram_buckets};
+pub use nvzn_dispatcher::{AssociatedProjectorManager, Dispatcher};
+pub use nvzn_dispatcher::{Live, LiveLimits, Wait, assert_live, is_live};
+pub use nvzn_dispatcher::{Reader, Snapshot};
 pub use nvzn_projector::ProjectorManager;
 pub use nvzn_resultset::{IndexJoin, Lazy, LazyRows, ResultSet};
 pub use nvzn_store::{AnyIndex, Index, Indices, Projection, Ref, View, Write};
@@ -61,5 +61,3 @@ pub use nvzn_types::{
     PROJECTION_TYPE_ID_LEN, ProjectionId, ProjectionTypeId, StopReason, SubEventOf, Syncer, Tenant,
     TenantId, WithWireFormat, chained_from, define_events,
 };
-pub(crate) use nvzn_types::{FoldState, SubscriptionItem, Subscriptions, subset};
-pub use reader::{Reader, Snapshot};

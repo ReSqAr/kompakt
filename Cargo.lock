@@ -2115,6 +2115,7 @@ dependencies = [
  "metrics-exporter-prometheus",
  "metrics-kit",
  "metrics-util",
+ "nvzn-dispatcher",
  "nvzn-fixtures",
  "nvzn-projector",
  "nvzn-resultset",
@@ -2125,12 +2126,37 @@ dependencies = [
  "postcard",
  "proptest",
  "serde",
- "sha2",
  "tempfile",
  "tokio",
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "zslg",
+]
+
+[[package]]
+name = "nvzn-dispatcher"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "metrics-kit",
+ "nvzn-fixtures",
+ "nvzn-projector",
+ "nvzn-resultset",
+ "nvzn-store",
+ "nvzn-store-fake",
+ "nvzn-store-rocksdb",
+ "nvzn-types",
+ "proptest",
+ "serde",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
  "zslg",
 ]
 

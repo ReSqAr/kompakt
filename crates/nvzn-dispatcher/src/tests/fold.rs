@@ -1,5 +1,5 @@
 use super::*;
-use crate::dispatcher::fold;
+use crate::fold;
 
 #[tokio::test]
 async fn dispatcher_routes_by_tenant_prefix() {
@@ -28,7 +28,7 @@ async fn dispatcher_routes_by_tenant_prefix() {
 
     user_writer.write(&[new_user(1, "holden")]).await.unwrap();
     todo_writer
-        .write(&[event::Event::NewTodo(testsupport::NewTodoV1 {
+        .write(&[event::Event::NewTodo(testkit::NewTodoV1 {
             id: TodoId(1),
             user_id: UserId(1),
             title: "t".to_string(),
@@ -123,8 +123,8 @@ async fn dispatcher_watermark_covers_exactly_the_applied_prefix() {
     let store = inmemory();
     let (mut log, _writer, syncer, handle) = user_dispatcher(&store).await;
 
-    let d0 = testsupport::data_id(10, 10);
-    let d1 = testsupport::data_id(20, 20);
+    let d0 = testkit::data_id(10, 10);
+    let d1 = testkit::data_id(20, 20);
     log.append_at(0, d0, payload(tenant_id(), &[new_user(1, "one")]));
     log.append_at(1, d1, payload(tenant_id(), &[new_user(2, "two")]));
     log.watermark(30);
@@ -189,7 +189,7 @@ async fn next_error_stops_the_fold() {
 
     log.append(payload(
         tenant_id(),
-        &[event::Event::NewTodo(testsupport::NewTodoV1 {
+        &[event::Event::NewTodo(testkit::NewTodoV1 {
             id: TodoId(1),
             user_id: UserId(1),
             title: "t".to_string(),
@@ -233,12 +233,12 @@ async fn dispatcher_rejects_a_non_monotone_data_id() {
 
     log.append_at(
         0,
-        testsupport::data_id(5, 5),
+        testkit::data_id(5, 5),
         payload(tenant_id(), &[new_user(1, "first")]),
     );
     log.append_at(
         1,
-        testsupport::data_id(3, 3),
+        testkit::data_id(3, 3),
         payload(tenant_id(), &[new_user(2, "second")]),
     );
 
@@ -278,9 +278,8 @@ async fn dispatcher_skips_a_foreign_tenant_and_keeps_going() {
 
 #[tokio::test]
 async fn dispatcher_batches_a_burst_into_one_commit() {
-    let calls = testsupport::calls();
-    let store: Arc<dyn Store> =
-        Arc::new(testsupport::ObservingStore::new(inmemory(), calls.clone()));
+    let calls = testkit::calls();
+    let store: Arc<dyn Store> = Arc::new(testkit::ObservingStore::new(inmemory(), calls.clone()));
     let (mut log, _writer, syncer, handle) = user_dispatcher(&store).await;
 
     const N: usize = 16;
@@ -297,7 +296,7 @@ async fn dispatcher_batches_a_burst_into_one_commit() {
             .is_some()
     );
 
-    let seen = testsupport::recorded(&calls)
+    let seen = testkit::recorded(&calls)
         .iter()
         .filter(|c| **c == "commit")
         .count();
@@ -355,9 +354,8 @@ impl crate::Projection for Echo {
 const PINGS: u128 = 100;
 
 async fn commits_for_a_burst(fold_commit: usize) -> usize {
-    let calls = testsupport::calls();
-    let store: Arc<dyn Store> =
-        Arc::new(testsupport::ObservingStore::new(inmemory(), calls.clone()));
+    let calls = testkit::calls();
+    let store: Arc<dyn Store> = Arc::new(testkit::ObservingStore::new(inmemory(), calls.clone()));
     let mut log = TestLog::new();
     let mut dispatcher = Dispatcher::from_db(
         store.clone(),
@@ -377,7 +375,7 @@ async fn commits_for_a_burst(fold_commit: usize) -> usize {
     for ts in 0..PINGS {
         let entry = payload(
             tenant_id(),
-            &[event::Event::Pinged(testsupport::PingedV1 {
+            &[event::Event::Pinged(testkit::PingedV1 {
                 id: UserId(1),
                 ts,
             })],
@@ -390,7 +388,7 @@ async fn commits_for_a_burst(fold_commit: usize) -> usize {
         "the burst weighs {payload_bytes} bytes"
     );
     let commits = || {
-        testsupport::recorded(&calls)
+        testkit::recorded(&calls)
             .iter()
             .filter(|c| **c == "commit")
             .count()

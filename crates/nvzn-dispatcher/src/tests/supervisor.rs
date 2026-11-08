@@ -40,7 +40,7 @@ async fn dispatcher_resets_and_refolds_when_the_config_changes() {
     stop(&log, handle).await;
 
     let marker = crate::TenantId::from_string_hash("marker", 0);
-    testsupport::commit_row(
+    testkit::commit_row(
         &store,
         marker,
         Ref::new(UserId(9).into()),
@@ -74,7 +74,7 @@ async fn dispatcher_resets_and_refolds_when_the_config_changes() {
 #[tokio::test]
 async fn dispatcher_fences_on_the_flush_interval() {
     let dir = tempfile::TempDir::new().unwrap();
-    let rocks = testsupport::rocksdb_store(dir.path());
+    let rocks = testkit::rocksdb_store(dir.path());
     let store: Arc<dyn Store> = Arc::new(rocks.clone());
     let log = TestLog::new();
 
@@ -98,7 +98,7 @@ async fn dispatcher_fences_on_the_flush_interval() {
 #[tokio::test]
 async fn dispatcher_fences_once_more_when_it_stops() {
     let dir = tempfile::TempDir::new().unwrap();
-    let rocks = testsupport::rocksdb_store(dir.path());
+    let rocks = testkit::rocksdb_store(dir.path());
     let store: Arc<dyn Store> = Arc::new(rocks.clone());
     let log = TestLog::new();
 
@@ -118,7 +118,7 @@ async fn dispatcher_fences_once_more_when_it_stops() {
 
 #[tokio::test]
 async fn dispatcher_stops_when_the_fence_fails() {
-    let store: Arc<dyn Store> = Arc::new(testsupport::UnfenceableStore::new(inmemory()));
+    let store: Arc<dyn Store> = Arc::new(testkit::UnfenceableStore::new(inmemory()));
     let log = TestLog::new();
 
     let (writer, syncer, handle) =
@@ -143,7 +143,7 @@ async fn dispatcher_stops_when_the_fence_fails() {
 async fn finalise_waits_for_the_fold_to_replay_the_stable_log() {
     let store = inmemory();
     let log = TestLog::new();
-    let (scripted, feed) = testsupport::ScriptedReader::new();
+    let (scripted, feed) = testkit::ScriptedReader::new();
     scripted.set_stable_watermark(10);
     let (dispatcher, reader) = scripted_dispatcher(&store, &log, scripted).await;
 
@@ -157,12 +157,12 @@ async fn finalise_waits_for_the_fold_to_replay_the_stable_log() {
     feed.send(Ok(StableLogEvent::Appended {
         index: LogIndex::ZERO,
         data: zslg::Data {
-            data_id: testsupport::data_id(10, 1),
+            data_id: testkit::data_id(10, 1),
             blob: payload(tenant_id(), &[new_user(1, "holden")]),
         },
     }))
     .unwrap();
-    feed.send(Ok(StableLogEvent::Watermark(testsupport::hlc(10))))
+    feed.send(Ok(StableLogEvent::Watermark(testkit::hlc(10))))
         .unwrap();
 
     let _handle = timeout(SYNC, finalise)
@@ -184,7 +184,7 @@ async fn finalise_waits_for_the_fold_to_replay_the_stable_log() {
 async fn finalise_fails_when_the_fold_stops_during_replay() {
     let store = inmemory();
     let log = TestLog::new();
-    let (scripted, feed) = testsupport::ScriptedReader::new();
+    let (scripted, feed) = testkit::ScriptedReader::new();
     scripted.set_stable_watermark(10);
     let (dispatcher, _reader) = scripted_dispatcher(&store, &log, scripted).await;
 

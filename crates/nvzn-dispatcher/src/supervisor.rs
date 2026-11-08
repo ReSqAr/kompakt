@@ -17,10 +17,11 @@
 
 use super::fold::{self, FoldInputs};
 use super::{Dispatcher, compute_config_hash};
-use crate::StopReason;
 use crate::metrics::{self, FenceOutcome};
-use crate::{ArcStore, Error};
 use crossbeam_combinators::Cancellation;
+use nvzn_store::ArcStore;
+use nvzn_types::Error;
+use nvzn_types::StopReason;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tracing::{error, info};

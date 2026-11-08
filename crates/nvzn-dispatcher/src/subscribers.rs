@@ -14,9 +14,9 @@
 //! A stream ends with `Aborted(ProducerGone)` when the fan-out stops. A caller
 //! that wants `Cancelled` binds its own `Cancellation` with `until`.
 
-use crate::StopReason;
-use crate::{ProjectionId, ProjectionTypeId, SubscriptionItem, TenantId};
 use crossbeam_combinators::{CancelHandle, Fanout};
+use nvzn_types::StopReason;
+use nvzn_types::{ProjectionId, ProjectionTypeId, SubscriptionItem, TenantId};
 use std::sync::Arc;
 
 /// Registrations waiting in the bounded queue.

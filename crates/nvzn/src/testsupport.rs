@@ -4,9 +4,8 @@
     reason = "crate-internal fixtures; `pub` items are consumed within the crate"
 )]
 
-pub use crate::testing::{FLUSH_INTERVAL, TestLog, data_id, inmemory, rocksdb, rocksdb_store};
+pub use crate::testing::{FLUSH_INTERVAL, TestLog, data_id, inmemory, rocksdb};
 pub use nvzn_fixtures::{
-    FailingSyncReader, NewTodoV1, NewUserV1, NewUserV2, NewUserV3, ObservingStore, PingedV1,
-    ScriptedReader, Todo, TodoDeletedV1, TodoId, UnfenceableStore, User, UserDeletedV1, UserId,
-    calls, commit_row, event, hlc, payload, recorded, tenant, tenant_id,
+    NewTodoV1, NewUserV1, NewUserV2, NewUserV3, PingedV1, Todo, TodoDeletedV1, TodoId, User,
+    UserDeletedV1, UserId, commit_row, event, hlc, tenant, tenant_id,
 };

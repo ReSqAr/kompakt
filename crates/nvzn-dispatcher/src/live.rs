@@ -63,10 +63,11 @@ pub const fn is_live<P: Projection, S: EventSet>() -> bool {
 ///
 /// ```
 /// # use serde::{Deserialize, Serialize};
-/// # use nvzn::{Error, Projection, ProjectionTypeId, Ref, View, Write};
+/// # use nvzn_store::{Projection, Ref, View, Write};
+/// # use nvzn_types::{Error, ProjectionTypeId};
 /// # #[derive(Debug, Serialize, Deserialize, Clone)] struct NoteSetV1 { id: u128 }
 /// # #[derive(Debug, Serialize, Deserialize, Clone)] struct FileSeenV1 { id: u128 }
-/// nvzn::define_events! {
+/// nvzn_types::define_events! {
 ///     event::Event = {
 ///         event 1 := NoteSet { version 1 => NoteSetV1 }
 ///         event 2 := FileSeen { version 1 => FileSeenV1 }
@@ -81,23 +82,24 @@ pub const fn is_live<P: Projection, S: EventSet>() -> bool {
 /// #     impl Projection for $name {
 /// #         type Event<'a> = event::$ev<'a>;
 /// #         const TYPE_ID: ProjectionTypeId = ProjectionTypeId::from_string_hash(stringify!($name), $n);
-/// #         fn id(&self) -> Ref<Self> { Ref::new(nvzn::ProjectionId::from_u128(self.id)) }
+/// #         fn id(&self) -> Ref<Self> { Ref::new(nvzn_types::ProjectionId::from_u128(self.id)) }
 /// #         fn next(_: &event::$ev, _: &View<'_>) -> Result<Vec<Write<Self>>, Error> { Ok(vec![]) }
 /// #     }
 /// # } }
 /// // `Note` folds `NoteSet` only; `Mixed` also folds `FileSeen`.
 /// # projection!(Note, NoteEvent, 0);
 /// # projection!(Mixed, MixedEvent, 0);
-/// nvzn::assert_live!(event::LiveEvent<'static>, [Note]);
+/// nvzn_dispatcher::assert_live!(event::LiveEvent<'static>, [Note]);
 /// # fn main() {}
 /// ```
 ///
 /// ```compile_fail
 /// # use serde::{Deserialize, Serialize};
-/// # use nvzn::{Error, Projection, ProjectionTypeId, Ref, View, Write};
+/// # use nvzn_store::{Projection, Ref, View, Write};
+/// # use nvzn_types::{Error, ProjectionTypeId};
 /// # #[derive(Debug, Serialize, Deserialize, Clone)] struct NoteSetV1 { id: u128 }
 /// # #[derive(Debug, Serialize, Deserialize, Clone)] struct FileSeenV1 { id: u128 }
-/// nvzn::define_events! {
+/// nvzn_types::define_events! {
 ///     event::Event = {
 ///         event 1 := NoteSet { version 1 => NoteSetV1 }
 ///         event 2 := FileSeen { version 1 => FileSeenV1 }
@@ -112,14 +114,14 @@ pub const fn is_live<P: Projection, S: EventSet>() -> bool {
 /// #     impl Projection for $name {
 /// #         type Event<'a> = event::$ev<'a>;
 /// #         const TYPE_ID: ProjectionTypeId = ProjectionTypeId::from_string_hash(stringify!($name), $n);
-/// #         fn id(&self) -> Ref<Self> { Ref::new(nvzn::ProjectionId::from_u128(self.id)) }
+/// #         fn id(&self) -> Ref<Self> { Ref::new(nvzn_types::ProjectionId::from_u128(self.id)) }
 /// #         fn next(_: &event::$ev, _: &View<'_>) -> Result<Vec<Write<Self>>, Error> { Ok(vec![]) }
 /// #     }
 /// # } }
 /// // `Note` folds `NoteSet` only; `Mixed` also folds `FileSeen`.
 /// # projection!(Note, NoteEvent, 0);
 /// # projection!(Mixed, MixedEvent, 0);
-/// nvzn::assert_live!(event::LiveEvent<'static>, [Note, Mixed]);
+/// nvzn_dispatcher::assert_live!(event::LiveEvent<'static>, [Note, Mixed]);
 /// # fn main() {}
 /// ```
 #[macro_export]
@@ -917,7 +919,7 @@ impl<Ev> Inner<Ev> {
 )]
 mod tests {
     use super::*;
-    use crate::testsupport::{
+    use crate::testkit::{
         FLUSH_INTERVAL, NewTodoV1, NewUserV3, PingedV1, TestLog, Todo, TodoId, User, UserId,
         data_id, event, hlc, inmemory, payload, tenant, tenant_id,
     };
@@ -1138,7 +1140,7 @@ mod tests {
             email: None,
             last_ping: None,
         };
-        crate::testsupport::commit_row(&store, tenant_id(), Ref::new(UserId(1).into()), &holden);
+        crate::testkit::commit_row(&store, tenant_id(), Ref::new(UserId(1).into()), &holden);
         let d = log.push_unstable(blob(&[new_user(2, "naomi")]));
         assert_eq!(
             live.wait_for(d, Duration::from_millis(50)).await,
@@ -1158,7 +1160,7 @@ mod tests {
         let store = inmemory();
         let log = TestLog::new();
         let failing: Arc<dyn zslg::Reader> =
-            Arc::new(crate::testsupport::FailingSyncReader::new(log.reader(), 2));
+            Arc::new(crate::testkit::FailingSyncReader::new(log.reader(), 2));
         let mut dispatcher = Dispatcher::from_db(
             store,
             log.writer(),
