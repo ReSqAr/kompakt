@@ -19,25 +19,23 @@
 //! shape wants a different lifetime anyway.
 //!
 //! The `RpcClient` is deliberately unexported: [`setup_router`] captures it and
-//! hands back a [`Router`], so the rest of the crate names peers by `NodeId` and
-//! cannot reach the wire directly.
+//! hands back a [`Router`], so callers name peers by `NodeId` and cannot reach
+//! the wire directly.
 
 use std::sync::Arc;
 use zslg_net::{ReplicaClient, Router};
 
 use tokio_util::sync::CancellationToken;
 
-use crate::Error;
-
 use shutdown::Shutdown;
-pub(crate) use zslg_net_client::RemoteRouter;
+pub use zslg_net_client::RemoteRouter;
 use zslg_net_client::RpcClient;
-pub(crate) use zslg_net_client::RpcClientConfig;
-pub(crate) use zslg_net_router::{LocalReplicaClient, PeerRouter};
+pub use zslg_net_client::RpcClientConfig;
+pub use zslg_net_router::{LocalReplicaClient, PeerRouter};
 use zslg_net_server::DispatchHandler;
 use zslg_net_server::RpcServer;
-pub(crate) use zslg_net_server::RpcServerConfig;
-pub(crate) use zslg_net_wire::tcp::SocketOpts;
+pub use zslg_net_server::RpcServerConfig;
+pub use zslg_net_wire::tcp::SocketOpts;
 use zslg_time::Clock;
 
 /// Build an outbound [`Router`] from the client tuning config. The `RpcClient`
@@ -48,7 +46,7 @@ use zslg_time::Clock;
 /// only be stopped by closing its socket, and nothing inside a parked
 /// `read(2)` can notice a token on its own. Outbound streams were the half
 /// that had no way to be told.
-pub(crate) fn setup_router(
+pub fn setup_router(
     clock: Arc<dyn Clock>,
     config: RpcClientConfig,
     cancel: CancellationToken,
@@ -57,19 +55,44 @@ pub(crate) fn setup_router(
     Ok(Arc::new(RemoteRouter::new(rpc_client)))
 }
 
-pub(crate) fn bind_server(
+pub fn bind_server<E>(
     client: Arc<dyn ReplicaClient>,
     hlc_clock: Arc<dyn Clock>,
     server_config: RpcServerConfig,
-    shutdown: &mut Shutdown<Error>,
-) -> Result<std::net::SocketAddr, Error> {
+    shutdown: &mut Shutdown<E>,
+) -> Result<std::net::SocketAddr, Error>
+where
+    E: From<zslg_net_server::Error> + From<shutdown::Stopped> + std::fmt::Display + Send + 'static,
+{
     let handler = Arc::new(DispatchHandler::new(client));
     let server = RpcServer::bind(handler, hlc_clock, server_config, shutdown.token())?;
 
     let server_addr = server.local_addr();
-    shutdown.spawn("rpc_server", async move {
-        server.run().await.map_err(Error::from)
-    });
+    shutdown.spawn(
+        "rpc_server",
+        async move { server.run().await.map_err(E::from) },
+    );
 
     Ok(server_addr)
+}
+
+error_union::error_union! {
+    /// What the network assembly can fail with.
+    #[derive(Debug, Clone, PartialEq)]
+    pub Error {
+        Lifecycle(zslg_lifecycle_types::LifecycleError),
+        Config(zslg_lifecycle_types::ConfigError),
+        Clock(zslg_time::ClockError),
+        Log(zslg_log::LogError),
+        Snapshot(zslg_snapshot::SnapshotError),
+        Net(zslg_net::NetError),
+        Consensus(zslg_consensus::ConsensusError),
+    }
+    from zslg_time::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_log::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_snapshot::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_consensus::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_net::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_net_server::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
+    from zslg_net_client::Error { Lifecycle, Config, Clock, Log, Snapshot, Net, Consensus }
 }

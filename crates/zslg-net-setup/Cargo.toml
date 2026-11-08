@@ -1,0 +1,29 @@
+[package]
+name = "zslg-net-setup"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Network assembly: builds the outbound router and binds the RPC server"
+publish = false
+
+[dependencies]
+error-union = { workspace = true }
+shutdown = { workspace = true }
+tokio-util = { workspace = true }
+zslg-consensus = { workspace = true }
+zslg-lifecycle-types = { workspace = true }
+zslg-log = { workspace = true }
+zslg-net = { workspace = true }
+zslg-net-client = { workspace = true }
+zslg-net-router = { workspace = true }
+zslg-net-server = { workspace = true }
+zslg-net-wire = { workspace = true }
+zslg-snapshot = { workspace = true }
+zslg-time = { workspace = true }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "assembly"

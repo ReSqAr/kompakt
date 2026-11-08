@@ -53,7 +53,7 @@ mod layering;
 pub(crate) mod leader;
 pub(crate) mod learner;
 pub(crate) mod learner_node;
-pub(crate) mod network;
+pub(crate) use zslg_net_setup as network;
 pub(crate) mod raft;
 pub(crate) mod replica;
 pub(crate) mod replica_node;

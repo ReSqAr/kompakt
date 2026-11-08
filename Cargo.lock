@@ -4500,8 +4500,8 @@ dependencies = [
  "zslg-net",
  "zslg-net-client",
  "zslg-net-fake",
- "zslg-net-router",
  "zslg-net-server",
+ "zslg-net-setup",
  "zslg-net-types",
  "zslg-net-wire",
  "zslg-node-id",
@@ -4957,6 +4957,25 @@ dependencies = [
  "zslg-net",
  "zslg-net-wire",
  "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-net-setup"
+version = "0.1.0"
+dependencies = [
+ "error-union",
+ "shutdown",
+ "tokio-util",
+ "zslg-consensus",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-net-client",
+ "zslg-net-router",
+ "zslg-net-server",
+ "zslg-net-wire",
  "zslg-snapshot",
  "zslg-time",
 ]

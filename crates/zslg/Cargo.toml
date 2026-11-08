@@ -48,7 +48,6 @@ zslg-hlc-clock = { workspace = true }
 zslg-hlc-gate = { workspace = true }
 zslg-net-client = { workspace = true }
 zslg-net-server = { workspace = true }
-zslg-net-router = { workspace = true }
 zslg-raft-storage = { workspace = true }
 zslg-peers = { workspace = true }
 zslg-raft-tracker = { workspace = true }
@@ -56,6 +55,7 @@ zslg-raft-node = { workspace = true }
 zslg-raft-setup = { workspace = true, features = ["testing"] }
 zslg-raft-startup = { workspace = true }
 zslg-leader = { workspace = true }
+zslg-net-setup = { workspace = true }
 zslg-observability = { workspace = true }
 zslg-learner = { workspace = true, features = ["testing"] }
 zslg-local-store = { workspace = true }
