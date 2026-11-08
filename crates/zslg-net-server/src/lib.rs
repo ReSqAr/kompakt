@@ -9,10 +9,13 @@ use zslg_net::NetError;
 use zslg_snapshot::SnapshotError;
 use zslg_time::ClockError;
 
+mod handlers;
 pub mod metrics;
 mod server;
+mod stream_handler;
 
-pub use server::{DispatchHandler, RpcHandlers, RpcServer, RpcServerConfig};
+pub use handlers::{DispatchHandler, RpcHandlers};
+pub use server::{RpcServer, RpcServerConfig};
 
 error_union! {
     /// What this crate can fail with.

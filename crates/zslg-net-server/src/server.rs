@@ -46,11 +46,7 @@ use zslg_net_wire::tcp::{self, SocketOpts};
 use zslg_net_wire::{AsyncFrameSink, AsyncFrameStream};
 use zslg_time::Clock;
 
-mod handlers;
-mod stream_handler;
-
-pub use handlers::{DispatchHandler, RpcHandlers};
-pub(crate) use stream_handler::{run_subscribe, run_write};
+use crate::handlers::RpcHandlers;
 
 pub struct RpcServerConfig {
     pub listen_addr: SocketAddr,
