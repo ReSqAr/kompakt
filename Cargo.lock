@@ -2117,6 +2117,7 @@ dependencies = [
  "metrics-util",
  "nvzn-dispatcher",
  "nvzn-fixtures",
+ "nvzn-projection",
  "nvzn-projector",
  "nvzn-store",
  "nvzn-store-rocksdb",
@@ -2142,6 +2143,7 @@ dependencies = [
  "crossbeam-combinators",
  "metrics-kit",
  "nvzn-fixtures",
+ "nvzn-projection",
  "nvzn-projector",
  "nvzn-resultset",
  "nvzn-store",
@@ -2166,8 +2168,20 @@ dependencies = [
  "bytes",
  "crossbeam-channel",
  "crossbeam-combinators",
+ "nvzn-projection",
  "nvzn-store",
  "nvzn-types",
+ "serde",
+ "zslg",
+]
+
+[[package]]
+name = "nvzn-projection"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "nvzn-types",
+ "postcard",
  "serde",
  "zslg",
 ]
@@ -2178,6 +2192,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "metrics-kit",
+ "nvzn-projection",
  "nvzn-store",
  "nvzn-types",
 ]
@@ -2186,7 +2201,7 @@ dependencies = [
 name = "nvzn-resultset"
 version = "0.1.0"
 dependencies = [
- "nvzn-store",
+ "nvzn-projection",
  "nvzn-types",
 ]
 
@@ -2196,9 +2211,8 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "itertools 0.14.0",
+ "nvzn-projection",
  "nvzn-types",
- "postcard",
- "serde",
  "zslg",
 ]
 
@@ -2207,6 +2221,7 @@ name = "nvzn-store-fake"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "nvzn-projection",
  "nvzn-store",
  "nvzn-types",
 ]
@@ -2220,6 +2235,7 @@ dependencies = [
  "metrics-kit",
  "metrics-util",
  "nvzn-fixtures",
+ "nvzn-projection",
  "nvzn-store",
  "nvzn-types",
  "postcard",

@@ -3,10 +3,8 @@
 pub mod metrics;
 
 use bytes::Bytes;
-use nvzn_store::{
-    ArcReadTransaction, CommitBatch, ConfigHash, IndexAction, ReadTransaction, Rows, Store,
-    StoreConfig, Watermark, WriteTransactionImpl,
-};
+use nvzn_projection::{ArcReadTransaction, ReadTransaction, Rows, Watermark};
+use nvzn_store::{CommitBatch, ConfigHash, IndexAction, Store, StoreConfig, WriteTransactionImpl};
 use nvzn_types::{
     APP_ID_LEN, Error, INDEX_ID_LEN, IndexId, PROJECTION_ID_LEN, PROJECTION_TYPE_ID_LEN,
     ProjectionId, ProjectionTypeId, TenantId,

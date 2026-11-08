@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 nvzn-dispatcher = { workspace = true }
+nvzn-projection = { workspace = true }
 nvzn-store = { workspace = true }
 metrics-kit = { workspace = true }
 async-trait = { workspace = true }

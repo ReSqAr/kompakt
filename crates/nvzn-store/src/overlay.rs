@@ -1,6 +1,7 @@
-use crate::{ArcReadTransaction, ReadTransaction, Rows, Store, Watermark, WriteTransaction};
+use crate::{Store, WriteTransaction};
 use bytes::Bytes;
 use itertools::EitherOrBoth;
+use nvzn_projection::{ArcReadTransaction, ReadTransaction, Rows, Watermark};
 use nvzn_types::{Error, IndexId, ProjectionId, ProjectionTypeId, TenantId};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;

@@ -49,11 +49,13 @@ pub use nvzn_dispatcher::{
     AssociatedProjectorManager, Dispatcher, IndexJoin, Lazy, LazyRows, Live, LiveLimits,
     ProjectorManager, Reader, ResultSet, RocksDBStore, Snapshot, Wait, assert_live, is_live,
 };
+pub use nvzn_projection::{
+    APP_ID_LEN, AnyIndex, ArcReadTransaction, Encoder, Error, EventSet, EventWriter, INDEX_ID_LEN,
+    Index, IndexId, Indices, PROJECTION_ID_LEN, PROJECTION_TYPE_ID_LEN, Projection, ProjectionId,
+    ProjectionTypeId, ReadTransaction, ReadTransactionExt, Ref, Row, Rows, StopReason, SubEventOf,
+    Syncer, Tenant, TenantId, View, Watermark, WithWireFormat, Write, chained_from, define_events,
+};
 pub use nvzn_store::{
-    APP_ID_LEN, AnyIndex, ArcReadTransaction, ArcStore, CommitBatch, ConfigHash, Encoder, Error,
-    EventSet, EventWriter, INDEX_ID_LEN, Index, IndexId, Indices, PROJECTION_ID_LEN,
-    PROJECTION_TYPE_ID_LEN, Projection, ProjectionId, ProjectionTypeId, ReadTransaction,
-    ReadTransactionExt, Ref, Row, Rows, StopReason, Store, StoreConfig, SubEventOf, Syncer, Tenant,
-    TenantId, View, Watermark, WithWireFormat, Write, WriteTransaction, WriteTransactionExt,
-    WriteTransactionImpl, chained_from, define_events,
+    ArcStore, CommitBatch, ConfigHash, Store, StoreConfig, WriteTransaction, WriteTransactionExt,
+    WriteTransactionImpl,
 };

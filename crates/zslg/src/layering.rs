@@ -196,9 +196,13 @@ fn every_dependency_is_allowed_by_the_role_table() {
             if matches!(k.role, Role::Assembly | Role::Facade) && to == Role::Fake && d.optional {
                 continue;
             }
-            // The one ports -> ports edge (`ReplicaClient` bundles four groups);
-            // `only_zslg_net_bundles_ports` pins who may have it.
-            if k.name == "zslg-net" && to == Role::Ports {
+            // The ports -> ports edges: `ReplicaClient` bundles four groups, and
+            // the nvzn store port is written against the projection's read port.
+            // `only_declared_ports_build_on_ports` pins who may have one.
+            if to == Role::Ports
+                && (k.name == "zslg-net"
+                    || PORTS_ON_PORTS.contains(&(k.name.as_str(), d.name.as_str())))
+            {
                 continue;
             }
             if !allowed.contains(&to) {
@@ -274,14 +278,22 @@ fn no_cross_group_dependency_on_a_types_crate_from_above_the_ports_layer() {
     assert!(violations.is_empty(), "{}", violations.join("\n"));
 }
 
+/// The ports crates that may depend on another ports crate, besides `zslg-net`
+/// (which bundles four groups): `nvzn-store` is the write side of persistence
+/// and builds on the read port and projection model of `nvzn-projection`.
+const PORTS_ON_PORTS: &[(&str, &str)] = &[("nvzn-store", "nvzn-projection")];
+
 #[test]
-fn only_zslg_net_bundles_ports() {
+fn only_declared_ports_build_on_ports() {
     let krates = workspace();
     let roles: BTreeMap<&str, Role> = krates.iter().map(|k| (k.name.as_str(), k.role)).collect();
     let mut violations = Vec::new();
     for k in krates.iter().filter(|k| k.role == Role::Ports) {
         for d in k.deps.iter().filter(|d| !d.dev) {
-            if roles[d.name.as_str()] == Role::Ports && k.name != "zslg-net" {
+            if roles[d.name.as_str()] == Role::Ports
+                && !(k.name == "zslg-net"
+                    || PORTS_ON_PORTS.contains(&(k.name.as_str(), d.name.as_str())))
+            {
                 violations.push(format!("{} -> {}", k.name, d.name));
             }
         }

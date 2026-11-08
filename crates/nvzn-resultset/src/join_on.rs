@@ -1,5 +1,5 @@
 use crate::{Lazy, ResultSet};
-use nvzn_store::{Index, Projection, Ref, Rows};
+use nvzn_projection::{Index, Projection, Ref, Rows};
 
 impl<'a, T: 'a> ResultSet<'a, T> {
     pub fn join_idx<P: Projection, Q: Projection>(

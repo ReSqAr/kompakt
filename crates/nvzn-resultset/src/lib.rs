@@ -1,6 +1,6 @@
 //! `ResultSet`: lazy, tenant-scoped query results over one read transaction.
 
-use nvzn_store::{ReadTransaction, Rows};
+use nvzn_projection::{ReadTransaction, Rows};
 use nvzn_types::{Error, TenantId};
 
 mod filter_map;

@@ -3,7 +3,8 @@
 
 use crate::metrics::{self, RowOp};
 use bytes::Bytes;
-use nvzn_store::{AnyIndex, Projection, View, Write, WriteTransaction, WriteTransactionImpl};
+use nvzn_projection::{AnyIndex, Projection, View, Write};
+use nvzn_store::{WriteTransaction, WriteTransactionImpl};
 use nvzn_types::{Error, IndexId, ProjectionTypeId, SubEventOf, Tenant};
 use std::collections::{BTreeMap, BTreeSet};
 

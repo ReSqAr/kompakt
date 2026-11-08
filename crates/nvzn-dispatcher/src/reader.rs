@@ -133,7 +133,7 @@ impl<Ev> Reader<Ev> {
     /// A projection over unrelated events does not compile:
     ///
     /// ```compile_fail
-    /// fn subscribe<Ev, P: nvzn_store::Projection>(reader: &nvzn_dispatcher::Reader<Ev>) {
+    /// fn subscribe<Ev, P: nvzn_projection::Projection>(reader: &nvzn_dispatcher::Reader<Ev>) {
     ///     let _ = reader.subscribe_stable_log::<P>();
     /// }
     /// ```
@@ -143,7 +143,7 @@ impl<Ev> Reader<Ev> {
     /// ```
     /// fn subscribe<Ev, P>(reader: &nvzn_dispatcher::Reader<Ev>)
     /// where
-    ///     P: nvzn_store::Projection,
+    ///     P: nvzn_projection::Projection,
     ///     for<'a> P::Event<'a>: nvzn_types::SubEventOf<'a, Ev>,
     /// {
     ///     let _ = reader.subscribe_stable_log::<P>();

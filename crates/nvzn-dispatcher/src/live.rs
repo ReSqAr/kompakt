@@ -63,7 +63,7 @@ pub const fn is_live<P: Projection, S: EventSet>() -> bool {
 ///
 /// ```
 /// # use serde::{Deserialize, Serialize};
-/// # use nvzn_store::{Projection, Ref, View, Write};
+/// # use nvzn_projection::{Projection, Ref, View, Write};
 /// # use nvzn_types::{Error, ProjectionTypeId};
 /// # #[derive(Debug, Serialize, Deserialize, Clone)] struct NoteSetV1 { id: u128 }
 /// # #[derive(Debug, Serialize, Deserialize, Clone)] struct FileSeenV1 { id: u128 }
@@ -95,7 +95,7 @@ pub const fn is_live<P: Projection, S: EventSet>() -> bool {
 ///
 /// ```compile_fail
 /// # use serde::{Deserialize, Serialize};
-/// # use nvzn_store::{Projection, Ref, View, Write};
+/// # use nvzn_projection::{Projection, Ref, View, Write};
 /// # use nvzn_types::{Error, ProjectionTypeId};
 /// # #[derive(Debug, Serialize, Deserialize, Clone)] struct NoteSetV1 { id: u128 }
 /// # #[derive(Debug, Serialize, Deserialize, Clone)] struct FileSeenV1 { id: u128 }

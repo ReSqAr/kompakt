@@ -34,7 +34,7 @@ pub trait Projection:
     /// event (`event::TodoEvent<'a>`), so folding copies nothing.
     type Event<'a>: EventSet;
     /// The numbers of the events it folds; what decides whether it is live
-    /// under a live view's sub-event set ([`is_live`](crate::is_live)).
+    /// under a live view's sub-event set (`is_live` in `nvzn-dispatcher`).
     const EVENTS: &'static [u32] = <Self::Event<'static> as EventSet>::EVENTS;
     const TYPE_ID: ProjectionTypeId;
     /// The indices the framework maintains for this projection; registering

@@ -56,7 +56,8 @@ The `nvzn*` crates are built on the `zslg` facade (D11) and may depend on it; no
 
 | crate | purpose |
 |---|---|
-| `nvzn-store` | Store ports, the staging overlay and the projection vocabulary of nvzn |
+| `nvzn-projection` | The nvzn projection model (`Projection`, `Write`, `Ref`, `Index`, `View`) and the read ports it is written against |
+| `nvzn-store` | The nvzn store ports: write side, staging overlay and store configuration |
 | `zslg-consensus` | The consensus group's ports |
 | `zslg-log` | The log group's ports |
 | `zslg-net` | The net group's ports |

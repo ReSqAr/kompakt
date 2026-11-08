@@ -8,7 +8,7 @@ description = "Lazy, tenant-scoped query results over one nvzn read transaction"
 publish = false
 
 [dependencies]
-nvzn-store = { workspace = true }
+nvzn-projection = { workspace = true }
 nvzn-types = { workspace = true }
 
 [lints]

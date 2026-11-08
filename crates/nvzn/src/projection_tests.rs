@@ -16,8 +16,8 @@ mod tests {
             tenant, tenant_id,
         },
     };
+    use nvzn_projection::*;
     use nvzn_projector::*;
-    use nvzn_store::*;
     use serde::{Deserialize, Serialize};
     use std::sync::Arc;
 

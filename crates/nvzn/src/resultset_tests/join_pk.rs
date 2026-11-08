@@ -11,7 +11,7 @@ use crate::{
     resultset_tests::test_support::{rig, seed, todo, user},
     testsupport::{Todo, TodoId, UserId, commit_row, tenant_id},
 };
-use nvzn_store::*;
+use nvzn_projection::*;
 
 #[tokio::test]
 async fn join_pk_resolves_and_errors_on_missing() {

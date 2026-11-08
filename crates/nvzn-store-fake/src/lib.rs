@@ -1,10 +1,8 @@
 //! An in-memory `Store`, for tests and for `Dispatcher::in_memory`.
 
 use bytes::Bytes;
-use nvzn_store::{
-    ArcReadTransaction, CommitBatch, ConfigHash, IndexAction, ReadTransaction, Rows, Store,
-    Watermark, WriteTransactionImpl,
-};
+use nvzn_projection::{ArcReadTransaction, ReadTransaction, Rows, Watermark};
+use nvzn_store::{CommitBatch, ConfigHash, IndexAction, Store, WriteTransactionImpl};
 use nvzn_types::{Error, IndexId, ProjectionId, ProjectionTypeId, TenantId};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Bound;

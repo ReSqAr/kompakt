@@ -18,6 +18,7 @@ use crate::{
         NewTodoV1, TodoId, User, UserDeletedV1, UserId, event, inmemory, tenant, tenant_id,
     },
 };
+use nvzn_projection::*;
 use nvzn_projector::*;
 use nvzn_store::*;
 use serde::{Deserialize, Serialize};

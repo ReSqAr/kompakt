@@ -13,6 +13,7 @@ crossbeam-combinators = { workspace = true }
 async-trait = { workspace = true }
 zslg = { workspace = true }
 bytes = { workspace = true }
+nvzn-projection = { workspace = true }
 nvzn-store = { workspace = true }
 nvzn-types = { workspace = true }
 serde = { workspace = true }

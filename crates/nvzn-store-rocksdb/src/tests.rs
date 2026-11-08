@@ -9,9 +9,8 @@
 
 use super::*;
 use nvzn_fixtures::{Todo, TodoId, UserId, tenant_id};
-use nvzn_store::{
-    ArcStore, Projection, ReadTransactionExt, Ref, WriteTransaction, WriteTransactionExt,
-};
+use nvzn_projection::{Projection, ReadTransactionExt, Ref};
+use nvzn_store::{ArcStore, WriteTransaction, WriteTransactionExt};
 use nvzn_types::ProjectionTypeId;
 use proptest::prelude::*;
 

@@ -10,6 +10,7 @@ publish = false
 [dependencies]
 bytes = { workspace = true }
 metrics-kit = { workspace = true }
+nvzn-projection = { workspace = true }
 nvzn-store = { workspace = true }
 nvzn-types = { workspace = true }
 

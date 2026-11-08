@@ -56,7 +56,8 @@ functions and `nvzn::testing`.
 | crate | role | holds |
 |---|---|---|
 | `nvzn-types` | types | ids, event sets/wire format, `Error`, `StopReason`, `FoldState`, `Subscriptions`, **`Encoder`/`EventWriter`/`Syncer`** + the `writes` metrics slice |
-| `nvzn-store` | ports | store traits, the staging overlay (`CommitBatch`, `WriteTransactionImpl`), `StoreConfig`, **`Projection`/`Write`/`Ref`/`Index`/`View`**; re-exports the types |
+| `nvzn-projection` | ports | **`Projection`/`Write`/`Ref`/`Index`/`View`**, the read ports they are written against (`ReadTransaction`, `Watermark`); re-exports the types |
+| `nvzn-store` | ports | write-side store traits, the staging overlay (`CommitBatch`, `WriteTransactionImpl`), `StoreConfig`; builds on `nvzn-projection` (the one declared ports → ports edge besides `zslg-net`) |
 | `nvzn-projector` | procedure | `Projector`, `ProjectorManager`, `fold_event`, `projection_rows` slice |
 | `nvzn-store-fake` | fake | in-memory store |
 | `nvzn-store-rocksdb` | implementation | RocksDB store, its white-box tests, `store_live_sst` slice |

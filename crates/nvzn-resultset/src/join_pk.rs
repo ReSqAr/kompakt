@@ -1,5 +1,5 @@
 use crate::ResultSet;
-use nvzn_store::{Projection, ReadTransaction, ReadTransactionExt, Ref, Row};
+use nvzn_projection::{Projection, ReadTransaction, ReadTransactionExt, Ref, Row};
 use nvzn_types::TenantId;
 
 impl<'a, T: 'a> ResultSet<'a, T> {

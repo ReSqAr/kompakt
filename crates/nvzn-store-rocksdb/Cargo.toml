@@ -12,6 +12,7 @@ postcard = { workspace = true, features = ["alloc", "use-std"] }
 zslg = { workspace = true }
 bytes = { workspace = true }
 metrics-kit = { workspace = true }
+nvzn-projection = { workspace = true }
 nvzn-store = { workspace = true }
 nvzn-types = { workspace = true }
 rust-rocksdb = { workspace = true }

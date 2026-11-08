@@ -4,9 +4,8 @@
 
 use bytes::Bytes;
 use crossbeam_combinators::Channel;
-use nvzn_store::{
-    Index, Indices, Projection, Ref, Store, View, Watermark, Write, WriteTransactionExt,
-};
+use nvzn_projection::{Index, Indices, Projection, Ref, View, Watermark, Write};
+use nvzn_store::{Store, WriteTransactionExt};
 use nvzn_types::{
     Error, IndexId, ProjectionId, ProjectionTypeId, Tenant, TenantId, WithWireFormat,
 };
@@ -278,7 +277,7 @@ impl Store for ObservingStore {
     fn set_config_hash(&self, hash: &nvzn_store::ConfigHash) -> Result<(), nvzn_types::Error> {
         self.inner.set_config_hash(hash)
     }
-    fn read(&self) -> Result<nvzn_store::ArcReadTransaction<'_>, nvzn_types::Error> {
+    fn read(&self) -> Result<nvzn_projection::ArcReadTransaction<'_>, nvzn_types::Error> {
         record(&self.calls, "read");
         self.inner.read()
     }
@@ -292,7 +291,7 @@ impl Store for ObservingStore {
     fn commit_batch(
         &self,
         batch: nvzn_store::CommitBatch,
-        watermark: nvzn_store::Watermark,
+        watermark: nvzn_projection::Watermark,
     ) -> Result<(), nvzn_types::Error> {
         record(&self.calls, "commit");
         self.inner.commit_batch(batch, watermark)
@@ -383,7 +382,7 @@ impl Store for UnfenceableStore {
     fn set_config_hash(&self, hash: &nvzn_store::ConfigHash) -> Result<(), nvzn_types::Error> {
         self.inner.set_config_hash(hash)
     }
-    fn read(&self) -> Result<nvzn_store::ArcReadTransaction<'_>, nvzn_types::Error> {
+    fn read(&self) -> Result<nvzn_projection::ArcReadTransaction<'_>, nvzn_types::Error> {
         self.inner.read()
     }
     fn write(&self) -> Result<nvzn_store::WriteTransactionImpl<'_>, nvzn_types::Error> {
@@ -395,7 +394,7 @@ impl Store for UnfenceableStore {
     fn commit_batch(
         &self,
         batch: nvzn_store::CommitBatch,
-        watermark: nvzn_store::Watermark,
+        watermark: nvzn_projection::Watermark,
     ) -> Result<(), nvzn_types::Error> {
         self.inner.commit_batch(batch, watermark)
     }

@@ -9,6 +9,7 @@
 )]
 
 use bytes::Bytes;
+use nvzn_projection::*;
 use nvzn_store::*;
 use zslg::{Hlc, LogIndex};
 

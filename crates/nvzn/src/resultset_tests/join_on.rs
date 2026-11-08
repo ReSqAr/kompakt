@@ -12,7 +12,7 @@ use crate::{
     resultset_tests::test_support::{rig, seed, user},
     testsupport::{Todo, TodoId, User, UserId, commit_row, tenant_id},
 };
-use nvzn_store::*;
+use nvzn_projection::*;
 use std::sync::Arc;
 
 fn dangle(store: &Arc<dyn Store>, idx: &Index<Todo, User>) {

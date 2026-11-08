@@ -15,12 +15,15 @@
 pub mod metrics;
 
 // The names the moved modules reach for as `crate::X`.
-pub use nvzn_resultset::{IndexJoin, Lazy, LazyRows, ResultSet};
-pub(crate) use nvzn_store::{
-    ArcReadTransaction, ConfigHash, Index, Projection, ReadTransactionExt, Ref, View, Watermark,
-};
 #[cfg(test)]
-pub(crate) use nvzn_store::{Store, Write};
+pub(crate) use nvzn_projection::Write;
+pub(crate) use nvzn_projection::{
+    ArcReadTransaction, Index, Projection, ReadTransactionExt, Ref, View, Watermark,
+};
+pub use nvzn_resultset::{IndexJoin, Lazy, LazyRows, ResultSet};
+pub(crate) use nvzn_store::ConfigHash;
+#[cfg(test)]
+pub(crate) use nvzn_store::Store;
 #[cfg(feature = "testing")]
 pub use nvzn_store_fake::InMemoryStore;
 pub use nvzn_store_rocksdb::RocksDBStore;
