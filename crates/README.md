@@ -1,6 +1,6 @@
 # Crates
 
-Every directory here is a crate; each declares its layer in `[package.metadata.layer] role` and the test `zslg::layering` (in `crates/zslg/src/layering.rs`) rejects a dependency its role does not allow. Design: `docs/logs/2026-11-07_design_crate_split.md`, decisions: `docs/logs/2026-11-07_log_crate_split.md`, what changed on the way: `docs/logs/2026-11-07_post_crate_split.md`.
+Every directory here is a crate; each declares its layer in `[package.metadata.layer] role` and the test `layering` test (in `crates/kompakt-workspace-checks/tests/layering.rs`) rejects a dependency its role does not allow. Design: `docs/logs/2026-11-07_design_crate_split.md`, decisions: `docs/logs/2026-11-07_log_crate_split.md`, what changed on the way: `docs/logs/2026-11-07_post_crate_split.md`.
 
 ```text
 library < types < ports < procedure < implementation < assembly < facade

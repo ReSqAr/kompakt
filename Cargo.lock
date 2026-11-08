@@ -1769,6 +1769,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "kompakt-workspace-checks"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4601,7 +4608,6 @@ dependencies = [
  "raft-kit",
  "rand 0.10.3",
  "rocksdb-kit",
- "serde_json",
  "shutdown",
  "tempfile",
  "tikv-jemalloc-ctl",

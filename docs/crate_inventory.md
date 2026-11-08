@@ -134,3 +134,4 @@ Workspace-internal dependencies only; "dev" lists edges that exist only for test
 | crate | depends on | dev only |
 |---|---|---|
 | `btrb` | nvzn, objectstorage-cache, zslg | — |
+| `kompakt-workspace-checks` | — | — |

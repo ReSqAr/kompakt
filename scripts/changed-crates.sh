@@ -12,6 +12,10 @@ fi
 
 zslg=0 nvzn=0 btrb=0 cache=0 svg=0 cc=0 all=0
 for f in $files; do
+  # The layering test reads every crate's manifest; it runs with the zslg tests.
+  case "$f" in
+    crates/*/Cargo.toml|crates/kompakt-workspace-checks/*) zslg=1 ;;
+  esac
   case "$f" in
     Cargo.toml|Cargo.lock|rust-toolchain.toml|deny.toml|.github/*|scripts/*)
       all=1 ;;
