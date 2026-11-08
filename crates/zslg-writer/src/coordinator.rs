@@ -625,13 +625,11 @@ mod tests {
                 });
                 Channel::from_infinite(rx, "test replica")
             };
-            let result: Channel<Result<WriteOutcome, Error>, Infinite> = run();
-            result.err_into()
+            run().err_into()
         }
 
         async fn fetch_status(&self) -> Result<ReplicaStatus, zslg_log::Error> {
-            let result: Result<ReplicaStatus, Error> = async { unimplemented!() }.await;
-            result.map_err(Into::into)
+            unimplemented!()
         }
         fn subscribe_from(&self, _: Option<LogIndex>) -> zslg_log::ReplicaStream {
             Channel::aborted("test replica").ordered(None, "replica subscription")
@@ -640,13 +638,7 @@ mod tests {
             &self,
         ) -> Result<BoxStream<'static, Result<ReplicaStatus, zslg_log::Error>>, zslg_log::Error>
         {
-            let result: Result<BoxStream<'static, Result<ReplicaStatus, Error>>, Error> =
-                async { unimplemented!() }.await;
-            result
-                .map(|s| {
-                    futures::StreamExt::boxed(futures::StreamExt::map(s, |r| r.map_err(Into::into)))
-                })
-                .map_err(Into::into)
+            unimplemented!()
         }
     }
 

@@ -88,7 +88,7 @@ impl WriterService {
 #[async_trait::async_trait]
 impl zslg_log::Writer for WriterService {
     async fn write(&self, blob: Bytes) -> Result<zslg_log::DataId, zslg_log::Error> {
-        let result: Result<zslg_log::DataId, Error> = async {
+        async {
             let creation_hlc = self.clock.now();
             let data_id = zslg_log::DataId::from_parts(creation_hlc, self.node_id, rand::random());
 
@@ -117,8 +117,8 @@ impl zslg_log::Writer for WriterService {
             probe.finish(OpState::from_ok(out.is_ok()));
             out
         }
-        .await;
-        result.map_err(Into::into)
+        .await
+        .map_err(Into::into)
     }
 }
 

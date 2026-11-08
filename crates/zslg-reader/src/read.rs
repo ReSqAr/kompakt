@@ -133,14 +133,14 @@ impl GatedReader {
 #[async_trait::async_trait]
 impl Reader for GatedReader {
     async fn sync(&self) -> Result<(), zslg_log::Error> {
-        let result: Result<(), Error> = async {
+        async {
             if !self.ready() {
                 return Err(self.not_ready());
             }
             self.inner.sync().await.map_err(Into::into)
         }
-        .await;
-        result.map_err(Into::into)
+        .await
+        .map_err(Into::into)
     }
 
     fn stable_watermark(&self) -> Option<Hlc> {
@@ -171,8 +171,7 @@ impl Reader for GatedReader {
             }
             self.inner.unstable_tail().err_into()
         };
-        let result: Channel<Result<Data, Error>, Finite> = run();
-        result.err_into()
+        run().err_into()
     }
 
     fn subscribe_unstable_tail(&self) -> Channel<Result<UnstableEvent, zslg_log::Error>, Infinite> {
@@ -183,8 +182,7 @@ impl Reader for GatedReader {
             }
             self.inner.subscribe_unstable_tail().err_into()
         };
-        let result: Channel<Result<UnstableEvent, Error>, Infinite> = run();
-        result.err_into()
+        run().err_into()
     }
 }
 
@@ -628,13 +626,13 @@ fn resyncing_unstable_tail(
 #[async_trait::async_trait]
 impl Reader for ReaderImpl {
     async fn sync(&self) -> Result<(), zslg_log::Error> {
-        let result: Result<(), Error> = async {
+        async {
             let result = self.debouncer.sync_quorum().await;
             metrics::quorum_read(metrics_kit::OpState::from_ok(result.is_ok()));
             result
         }
-        .await;
-        result.map_err(Into::into)
+        .await
+        .map_err(Into::into)
     }
 
     fn stable_watermark(&self) -> Option<Hlc> {
@@ -672,8 +670,7 @@ impl Reader for ReaderImpl {
                 .until(&self.shutdown))
             .err_into()
         };
-        let result: Channel<Result<Data, Error>, Finite> = run();
-        result.err_into()
+        run().err_into()
     }
 
     fn subscribe_unstable_tail(&self) -> Channel<Result<UnstableEvent, zslg_log::Error>, Infinite> {
@@ -682,7 +679,6 @@ impl Reader for ReaderImpl {
             resyncing_unstable_tail(self.local_store.clone(), self.stable_log.clone())
                 .until(&self.shutdown)
         };
-        let result: Channel<Result<UnstableEvent, Error>, Infinite> = run();
-        result.err_into()
+        run().err_into()
     }
 }

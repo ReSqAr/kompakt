@@ -316,11 +316,6 @@ mod tests {
     use zslg_net::ServerName;
 
     struct NoVoters;
-    impl NoVoters {
-        pub(crate) async fn remove_member_in(&self, _node_id: NodeId) -> Result<(), crate::Error> {
-            Ok(())
-        }
-    }
 
     #[async_trait::async_trait]
     impl RaftLeadership for NoVoters {
@@ -335,9 +330,9 @@ mod tests {
         }
         async fn remove_member(
             &self,
-            node_id: zslg_consensus::NodeId,
+            _node_id: zslg_consensus::NodeId,
         ) -> Result<(), zslg_consensus::Error> {
-            self.remove_member_in(node_id).await.map_err(Into::into)
+            Ok(())
         }
     }
 
@@ -356,32 +351,26 @@ mod tests {
         calls: Arc<AtomicU32>,
     }
 
-    impl OkProbe {
-        pub(crate) async fn probe_in(&self) -> Result<(), Error> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(())
-        }
-    }
-
     #[async_trait]
     impl zslg_net::LivenessProbe for OkProbe {
         async fn probe(&self) -> Result<(), zslg_net::Error> {
-            self.probe_in().await.map_err(Into::into)
+            async {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                Ok::<_, Error>(())
+            }
+            .await
+            .map_err(Into::into)
         }
     }
 
     struct FailProbe;
 
-    impl FailProbe {
-        pub(crate) async fn probe_in(&self) -> Result<(), Error> {
-            Err(crate::Error::Net(NetError::Rpc("simulated".into())))
-        }
-    }
-
     #[async_trait]
     impl zslg_net::LivenessProbe for FailProbe {
         async fn probe(&self) -> Result<(), zslg_net::Error> {
-            self.probe_in().await.map_err(Into::into)
+            async { Err(crate::Error::Net(NetError::Rpc("simulated".into()))) }
+                .await
+                .map_err(Into::into)
         }
     }
 
@@ -664,23 +653,22 @@ mod tests {
             in_flight: Arc<AtomicU32>,
             peak: Arc<AtomicU32>,
         }
-        impl SlowProbe {
-            pub(crate) async fn probe_in(&self) -> Result<(), Error> {
-                let now = self
-                    .in_flight
-                    .fetch_add(1, Ordering::SeqCst)
-                    .saturating_add(1);
-                self.peak.fetch_max(now, Ordering::SeqCst);
-                tokio::time::sleep(Duration::from_millis(50)).await;
-                self.in_flight.fetch_sub(1, Ordering::SeqCst);
-                Ok(())
-            }
-        }
 
         #[async_trait]
         impl zslg_net::LivenessProbe for SlowProbe {
             async fn probe(&self) -> Result<(), zslg_net::Error> {
-                self.probe_in().await.map_err(Into::into)
+                async {
+                    let now = self
+                        .in_flight
+                        .fetch_add(1, Ordering::SeqCst)
+                        .saturating_add(1);
+                    self.peak.fetch_max(now, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    self.in_flight.fetch_sub(1, Ordering::SeqCst);
+                    Ok::<_, Error>(())
+                }
+                .await
+                .map_err(Into::into)
             }
         }
 
@@ -730,16 +718,11 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn wedged_probe_times_out_and_marks_peer_unhealthy() {
         struct WedgedProbe;
-        impl WedgedProbe {
-            pub(crate) async fn probe_in(&self) -> Result<(), Error> {
-                std::future::pending().await
-            }
-        }
 
         #[async_trait]
         impl zslg_net::LivenessProbe for WedgedProbe {
             async fn probe(&self) -> Result<(), zslg_net::Error> {
-                self.probe_in().await.map_err(Into::into)
+                std::future::pending().await
             }
         }
 

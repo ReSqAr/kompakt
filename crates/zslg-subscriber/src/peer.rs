@@ -234,13 +234,10 @@ mod tests {
             &self,
             _: Channel<StampedWrite, Finite>,
         ) -> Channel<Result<WriteOutcome, zslg_log::Error>, Infinite> {
-            let run = || -> Channel<Result<WriteOutcome, Error>, Infinite> { unimplemented!() };
-            let result: Channel<Result<WriteOutcome, Error>, Infinite> = run();
-            result.err_into()
+            unimplemented!()
         }
         async fn fetch_status(&self) -> Result<ReplicaStatus, zslg_log::Error> {
-            let result: Result<ReplicaStatus, Error> = async { unimplemented!() }.await;
-            result.map_err(Into::into)
+            unimplemented!()
         }
         fn subscribe_from(&self, _from: Option<LogIndex>) -> zslg_log::ReplicaStream {
             let items = self.items.lock().expect("lock").take().unwrap_or_default();
@@ -257,13 +254,7 @@ mod tests {
             &self,
         ) -> Result<BoxStream<'static, Result<ReplicaStatus, zslg_log::Error>>, zslg_log::Error>
         {
-            let result: Result<BoxStream<'static, Result<ReplicaStatus, Error>>, Error> =
-                async { unimplemented!() }.await;
-            result
-                .map(|s| {
-                    futures::StreamExt::boxed(futures::StreamExt::map(s, |r| r.map_err(Into::into)))
-                })
-                .map_err(Into::into)
+            unimplemented!()
         }
     }
 
@@ -277,13 +268,10 @@ mod tests {
             &self,
             _: Channel<StampedWrite, Finite>,
         ) -> Channel<Result<WriteOutcome, zslg_log::Error>, Infinite> {
-            let run = || -> Channel<Result<WriteOutcome, Error>, Infinite> { unimplemented!() };
-            let result: Channel<Result<WriteOutcome, Error>, Infinite> = run();
-            result.err_into()
+            unimplemented!()
         }
         async fn fetch_status(&self) -> Result<ReplicaStatus, zslg_log::Error> {
-            let result: Result<ReplicaStatus, Error> = async { unimplemented!() }.await;
-            result.map_err(Into::into)
+            unimplemented!()
         }
         fn subscribe_from(&self, _from: Option<LogIndex>) -> zslg_log::ReplicaStream {
             let (tx, rx) = crossbeam_channel::bounded::<Result<(LogIndex, Data), Error>>(1);
@@ -296,13 +284,7 @@ mod tests {
             &self,
         ) -> Result<BoxStream<'static, Result<ReplicaStatus, zslg_log::Error>>, zslg_log::Error>
         {
-            let result: Result<BoxStream<'static, Result<ReplicaStatus, Error>>, Error> =
-                async { unimplemented!() }.await;
-            result
-                .map(|s| {
-                    futures::StreamExt::boxed(futures::StreamExt::map(s, |r| r.map_err(Into::into)))
-                })
-                .map_err(Into::into)
+            unimplemented!()
         }
     }
 

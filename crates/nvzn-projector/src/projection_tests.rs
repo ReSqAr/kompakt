@@ -205,7 +205,10 @@ mod tests {
         let mut manager = ProjectorManager::<event::Event>::new(tenant());
         manager.register::<Todo>().unwrap();
         let err = manager.register::<Todo>().expect_err("duplicate must err");
-        assert!(matches!(err, nvzn_projection::Error::ProjectionAlreadyRegistered(_)));
+        assert!(matches!(
+            err,
+            nvzn_projection::Error::ProjectionAlreadyRegistered(_)
+        ));
     }
 
     #[test]

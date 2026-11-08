@@ -162,7 +162,7 @@ impl zslg_log::StableLogSnapshot for StableLog {
         entries: Channel<Result<SnapshotEntry, zslg_log::Error>, Finite>,
     ) -> Result<usize, zslg_log::Error> {
         let entries: Channel<Result<SnapshotEntry, Error>, Finite> = entries.err_into();
-        let result: Result<usize, Error> = async {
+        async {
             // The entire drain → encode → commit → fsync → frontier-advance →
             // broadcast loop runs on ONE blocking thread (CLAUDE.md §8; mirrors
             // `replica/log.rs::flush_loop_blocking`). The caller (`integrate_manifest`)
@@ -196,14 +196,14 @@ impl zslg_log::StableLogSnapshot for StableLog {
                 .to_storage("append spawn_blocking panicked")??;
 
             probe.finish(OpState::Success);
-            Ok(total)
+            Ok::<_, Error>(total)
         }
-        .await;
-        result.map_err(Into::into)
+        .await
+        .map_err(Into::into)
     }
 
     async fn record_end_hlc(&self, end_hlc: Hlc) -> Result<(), zslg_log::Error> {
-        let result: Result<(), Error> = async {
+        async {
             // Purely in-memory: the watermark is derived from the log tail at
             // recovery, so an empty-window advance needs no durability — the
             // manifest that carries it is re-delivered after a restart. Serialized
@@ -237,8 +237,8 @@ impl zslg_log::StableLogSnapshot for StableLog {
             }
             Ok(())
         }
-        .await;
-        result.map_err(Into::into)
+        .await
+        .map_err(Into::into)
     }
 
     fn subscribe_events(&self) -> Channel<StableLogEvent, Infinite> {
@@ -287,8 +287,7 @@ impl zslg_log::StableLogSnapshot for StableLog {
                 feed.close()
             })
         };
-        let result: Channel<Result<(LogIndex, Data), Error>, Finite> = run();
-        result.err_into()
+        run().err_into()
     }
 
     fn set_purge_threshold(&self, hlc_threshold: Hlc) -> Result<(), zslg_log::Error> {
@@ -322,7 +321,6 @@ impl zslg_log::StableLogSnapshot for StableLog {
             self.storage.write(batch)?;
             self.storage.fence().map_err(Into::into)
         };
-        let result: Result<(), Error> = run();
-        result.map_err(Into::into)
+        run().map_err(Into::into)
     }
 }

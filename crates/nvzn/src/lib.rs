@@ -29,7 +29,6 @@ mod metrics;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
-
 #[cfg(feature = "prometheus")]
 pub use metrics::configure_prometheus;
 pub use metrics::{METRIC_NAMESPACE, describe_metrics, histogram_buckets};

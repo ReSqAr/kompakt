@@ -85,30 +85,27 @@ mod tests {
         }
     }
 
-    impl ScriptedSnapshotStore {
-        pub(crate) async fn write_snapshot_in(
+    #[async_trait]
+    impl SnapshotStore for ScriptedSnapshotStore {
+        async fn write_snapshot(
             &self,
             _id: SnapshotId,
-            _entries: crossbeam_combinators::Channel<
-                Result<SnapshotEntry, Error>,
+            _entries: Channel<
+                Result<SnapshotEntry, zslg_snapshot::Error>,
                 crossbeam_combinators::Finite,
             >,
             _compression: CompressionLevel,
             _reason: zslg_snapshot::ObjectStoreReason,
-        ) -> Result<zslg_snapshot::SnapshotWrite, Error> {
+        ) -> Result<SnapshotWrite, zslg_snapshot::Error> {
             unimplemented!("loader tests never write snapshots")
         }
-
-        pub(crate) async fn read_snapshot_in(
+        async fn read_snapshot(
             &self,
             id: SnapshotId,
             _reason: zslg_snapshot::ObjectStoreReason,
         ) -> Result<
-            crossbeam_combinators::Channel<
-                Result<SnapshotEntry, Error>,
-                crossbeam_combinators::Finite,
-            >,
-            Error,
+            Channel<Result<SnapshotEntry, zslg_snapshot::Error>, crossbeam_combinators::Finite>,
+            zslg_snapshot::Error,
         > {
             self.reads.lock().expect("lock").push(id);
             let (entries, truncate_after) = self
@@ -118,80 +115,30 @@ mod tests {
                 .get(&id)
                 .cloned()
                 .ok_or_else(|| {
-                    Error::Snapshot(SnapshotError::ObjectStore(format!(
+                    zslg_snapshot::Error::Snapshot(SnapshotError::ObjectStore(format!(
                         "no scripted snapshot {id:?}"
                     )))
                 })?;
             let deliver = truncate_after.unwrap_or(entries.len());
-            Ok(crossbeam_combinators::Channel::from_vec(
+            Ok(Channel::from_vec(
                 entries.into_iter().take(deliver).map(Ok).collect(),
             ))
-        }
-
-        pub(crate) async fn has_bootstrap_fence_in(&self) -> Result<bool, Error> {
-            unimplemented!("loader tests never touch the fence")
-        }
-
-        pub(crate) async fn write_bootstrap_fence_in(&self) -> Result<(), Error> {
-            unimplemented!("loader tests never touch the fence")
-        }
-
-        pub(crate) async fn cleanup_snapshots_in(
-            &self,
-            _live_snapshots: BTreeSet<SnapshotId>,
-            _cleanup_retention: Duration,
-        ) -> Result<CleanupReport, Error> {
-            unimplemented!("loader tests never clean up")
-        }
-    }
-
-    #[async_trait]
-    impl SnapshotStore for ScriptedSnapshotStore {
-        async fn write_snapshot(
-            &self,
-            id: SnapshotId,
-            entries: Channel<
-                Result<SnapshotEntry, zslg_snapshot::Error>,
-                crossbeam_combinators::Finite,
-            >,
-            compression: CompressionLevel,
-            reason: zslg_snapshot::ObjectStoreReason,
-        ) -> Result<SnapshotWrite, zslg_snapshot::Error> {
-            self.write_snapshot_in(id, entries.err_into(), compression, reason)
-                .await
-                .map_err(Into::into)
-        }
-        async fn read_snapshot(
-            &self,
-            id: SnapshotId,
-            reason: zslg_snapshot::ObjectStoreReason,
-        ) -> Result<
-            Channel<Result<SnapshotEntry, zslg_snapshot::Error>, crossbeam_combinators::Finite>,
-            zslg_snapshot::Error,
-        > {
-            self.read_snapshot_in(id, reason)
-                .await
-                .map(Channel::err_into)
-                .map_err(Into::into)
         }
         fn shutdown_token(&self) -> CancellationToken {
             CancellationToken::new()
         }
-
         async fn has_bootstrap_fence(&self) -> Result<bool, zslg_snapshot::Error> {
-            self.has_bootstrap_fence_in().await.map_err(Into::into)
+            unimplemented!("loader tests never touch the fence")
         }
         async fn write_bootstrap_fence(&self) -> Result<(), zslg_snapshot::Error> {
-            self.write_bootstrap_fence_in().await.map_err(Into::into)
+            unimplemented!("loader tests never touch the fence")
         }
         async fn cleanup_snapshots(
             &self,
-            live_snapshots: std::collections::BTreeSet<SnapshotId>,
-            cleanup_retention: std::time::Duration,
+            _live_snapshots: BTreeSet<SnapshotId>,
+            _cleanup_retention: Duration,
         ) -> Result<CleanupReport, zslg_snapshot::Error> {
-            self.cleanup_snapshots_in(live_snapshots, cleanup_retention)
-                .await
-                .map_err(Into::into)
+            unimplemented!("loader tests never clean up")
         }
     }
 

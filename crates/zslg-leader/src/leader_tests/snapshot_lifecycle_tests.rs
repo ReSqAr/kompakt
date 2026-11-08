@@ -88,7 +88,6 @@ async fn append_entries(local_store: &LocalStore, entries: &[Data]) {
 #[tokio::test]
 async fn snapshot_refuses_to_commit_an_aborted_window() {
     use crossbeam_combinators::Channel;
-    use zslg_error::Error;
     use zslg_log::LocalStoreView;
 
     use tokio::sync::watch;
@@ -125,10 +124,7 @@ async fn snapshot_refuses_to_commit_an_aborted_window() {
             &self,
             upstream: NodeId,
         ) -> Result<Option<LogIndex>, zslg_log::Error> {
-            let result: Result<Option<LogIndex>, Error> =
-                (async { self.inner.subscription_cursor(upstream).await }.await)
-                    .map_err(Into::into);
-            result.map_err(Into::into)
+            self.inner.subscription_cursor(upstream).await
         }
     }
 
@@ -586,7 +582,6 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
 
     use zslg_consensus::NodeId;
     use zslg_consensus::RaftGeneration;
-    use zslg_error::Error;
     use zslg_leader_snapshot::create::{SnapshotInputs, build_snapshot};
     use zslg_log::LocalStoreView;
     use zslg_log::LogIndex;
@@ -654,10 +649,7 @@ async fn invariant_stale_snapshot_commit_is_fenced() {
             &self,
             upstream: NodeId,
         ) -> Result<Option<LogIndex>, zslg_log::Error> {
-            let result: Result<Option<LogIndex>, Error> =
-                (async { self.inner.subscription_cursor(upstream).await }.await)
-                    .map_err(Into::into);
-            result.map_err(Into::into)
+            self.inner.subscription_cursor(upstream).await
         }
     }
 
@@ -898,7 +890,6 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use crossbeam_combinators::Channel;
-    use zslg_error::Error;
     use zslg_leader_snapshot::create::{SnapshotInputs, build_snapshot};
     use zslg_log::Replica;
     use zslg_log::SnapshotEntry;
@@ -942,12 +933,6 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
         }
     }
 
-    impl FakeLeadership {
-        pub(crate) async fn remove_member_in(&self, _node_id: NodeId) -> Result<(), Error> {
-            Ok(())
-        }
-    }
-
     #[async_trait::async_trait]
     impl RaftLeadership for FakeLeadership {
         fn current_leader(&self) -> Option<NodeId> {
@@ -964,9 +949,9 @@ async fn a_leader_demoted_during_the_quorum_wait_writes_no_object() {
 
         async fn remove_member(
             &self,
-            node_id: zslg_consensus::NodeId,
+            _node_id: zslg_consensus::NodeId,
         ) -> Result<(), zslg_consensus::Error> {
-            self.remove_member_in(node_id).await.map_err(Into::into)
+            Ok(())
         }
     }
 

@@ -26,10 +26,8 @@ use tracing::info;
 use crate::Error;
 use crate::metrics;
 use zslg_consensus::NodeId;
-use zslg_consensus::RaftGeneration;
-use zslg_consensus::ReplicatedRaftState;
 use zslg_consensus::ToRaft;
-use zslg_net::{PeerAddr, ServerName};
+use zslg_net::ServerName;
 use zslg_raft::{FencedStateWrite, NodeInfo, RaftResponse};
 
 pub struct RaftNode {
@@ -94,13 +92,36 @@ impl zslg_raft::RaftMetricsSource for RaftNode {
     }
 }
 
-impl RaftNode {
-    pub async fn add_member_in(
+#[async_trait::async_trait]
+impl RaftConsensus for RaftNode {
+    async fn append_entries(
         &self,
-        new_node_id: NodeId,
-        peer_addr: PeerAddr,
-    ) -> Result<(), Error> {
-        self.gate.admit(new_node_id, &peer_addr)?;
+        rpc: AppendEntriesRequest<zslg_raft::TypeConfig>,
+    ) -> Result<AppendEntriesResponse<NodeId>, RaftError<NodeId>> {
+        self.inner.append_entries(rpc).await
+    }
+
+    async fn vote(
+        &self,
+        rpc: VoteRequest<NodeId>,
+    ) -> Result<VoteResponse<NodeId>, RaftError<NodeId>> {
+        self.inner.vote(rpc).await
+    }
+
+    async fn install_snapshot(
+        &self,
+        rpc: InstallSnapshotRequest<zslg_raft::TypeConfig>,
+    ) -> Result<InstallSnapshotResponse<NodeId>, RaftError<NodeId, InstallSnapshotError>> {
+        self.inner.install_snapshot(rpc).await
+    }
+
+    async fn add_member(
+        &self,
+        new_node_id: zslg_consensus::NodeId,
+        peer_addr: zslg_net::PeerAddr,
+    ) -> Result<(), zslg_raft::Error> {
+        async {
+self.gate.admit(new_node_id, &peer_addr)?;
 
         let start = tokio::time::Instant::now();
         let metrics = self.inner.metrics().borrow().clone();
@@ -199,61 +220,13 @@ impl RaftNode {
                 }
             }
         }
-    }
 }
-
-#[async_trait::async_trait]
-impl RaftConsensus for RaftNode {
-    async fn append_entries(
-        &self,
-        rpc: AppendEntriesRequest<zslg_raft::TypeConfig>,
-    ) -> Result<AppendEntriesResponse<NodeId>, RaftError<NodeId>> {
-        self.inner.append_entries(rpc).await
-    }
-
-    async fn vote(
-        &self,
-        rpc: VoteRequest<NodeId>,
-    ) -> Result<VoteResponse<NodeId>, RaftError<NodeId>> {
-        self.inner.vote(rpc).await
-    }
-
-    async fn install_snapshot(
-        &self,
-        rpc: InstallSnapshotRequest<zslg_raft::TypeConfig>,
-    ) -> Result<InstallSnapshotResponse<NodeId>, RaftError<NodeId, InstallSnapshotError>> {
-        self.inner.install_snapshot(rpc).await
-    }
-
-    async fn add_member(
-        &self,
-        new_node_id: zslg_consensus::NodeId,
-        peer_addr: zslg_net::PeerAddr,
-    ) -> Result<(), zslg_raft::Error> {
-        self.add_member_in(new_node_id, peer_addr)
-            .await
-            .map_err(Into::into)
+.await
+.map_err(Into::into)
     }
 }
 
 // ── RaftLeadership (leader queries + membership remove) ─────────────────
-
-impl RaftNode {
-    pub async fn remove_member_in(&self, node_id: NodeId) -> Result<(), Error> {
-        let metrics = self.inner.metrics().borrow().clone();
-        let members: BTreeSet<NodeId> = metrics
-            .membership_config
-            .membership()
-            .voter_ids()
-            .filter(|id| *id != node_id)
-            .collect();
-        self.inner
-            .change_membership(members, false)
-            .await
-            .to_raft("change_membership remove")?;
-        Ok(())
-    }
-}
 
 #[async_trait::async_trait]
 impl RaftLeadership for RaftNode {
@@ -285,55 +258,26 @@ impl RaftLeadership for RaftNode {
         &self,
         node_id: zslg_consensus::NodeId,
     ) -> Result<(), zslg_consensus::Error> {
-        self.remove_member_in(node_id).await.map_err(Into::into)
+        async {
+            let metrics = self.inner.metrics().borrow().clone();
+            let members: BTreeSet<NodeId> = metrics
+                .membership_config
+                .membership()
+                .voter_ids()
+                .filter(|id| *id != node_id)
+                .collect();
+            self.inner
+                .change_membership(members, false)
+                .await
+                .to_raft("change_membership remove")?;
+            Ok::<_, Error>(())
+        }
+        .await
+        .map_err(Into::into)
     }
 }
 
 // ── StateReplicator (fenced cluster-state write) ─────────────────────────
-
-impl RaftNode {
-    pub async fn replicate_state_in(
-        &self,
-        state: ReplicatedRaftState,
-        expected_generation: RaftGeneration,
-        context: &'static str,
-    ) -> Result<(), Error> {
-        // See `StateReplicator::replicate_state` for the pre-flight contract.
-        zslg_consensus::validate_replicated_state(&state)
-            .map_err(|source| ConsensusError::invalid_raft_state(context, source))?;
-        // openraft's call has no deadline, and the integrator is a single
-        // serial task — one wedged wait would stall every leader job
-        // (`RaftConfig::client_write_timeout`). Time out instead; the
-        // submitting job re-derives on its next iteration.
-        let response = tokio::time::timeout(
-            self.client_write_timeout,
-            self.inner.client_write(FencedStateWrite {
-                expected_generation,
-                state,
-            }),
-        )
-        .await
-        .map_err(|_| {
-            metrics::raft_client_write_timeout();
-            Error::Net(NetError::Rpc(format!(
-                "raft client_write ({context}) timed out after {:?}",
-                self.client_write_timeout
-            )))
-        })?
-        .to_raft(context)?;
-        match response.data {
-            RaftResponse::Applied => Ok(()),
-            RaftResponse::RejectedStaleGeneration { expected, current } => {
-                metrics::raft_fenced_write();
-                Err(ConsensusError::stale_state_write(context, expected, current).into())
-            }
-            RaftResponse::RejectedInvalidState { reason } => {
-                metrics::raft_fenced_write();
-                Err(ConsensusError::invalid_raft_state(context, reason).into())
-            }
-        }
-    }
-}
 
 #[async_trait::async_trait]
 impl StateReplicator for RaftNode {
@@ -343,9 +287,44 @@ impl StateReplicator for RaftNode {
         expected_generation: zslg_consensus::RaftGeneration,
         context: &'static str,
     ) -> Result<(), zslg_consensus::Error> {
-        self.replicate_state_in(state, expected_generation, context)
+        async {
+            // See `StateReplicator::replicate_state` for the pre-flight contract.
+            zslg_consensus::validate_replicated_state(&state)
+                .map_err(|source| ConsensusError::invalid_raft_state(context, source))?;
+            // openraft's call has no deadline, and the integrator is a single
+            // serial task — one wedged wait would stall every leader job
+            // (`RaftConfig::client_write_timeout`). Time out instead; the
+            // submitting job re-derives on its next iteration.
+            let response = tokio::time::timeout(
+                self.client_write_timeout,
+                self.inner.client_write(FencedStateWrite {
+                    expected_generation,
+                    state,
+                }),
+            )
             .await
-            .map_err(Into::into)
+            .map_err(|_| {
+                metrics::raft_client_write_timeout();
+                Error::Net(NetError::Rpc(format!(
+                    "raft client_write ({context}) timed out after {:?}",
+                    self.client_write_timeout
+                )))
+            })?
+            .to_raft(context)?;
+            match response.data {
+                RaftResponse::Applied => Ok::<_, Error>(()),
+                RaftResponse::RejectedStaleGeneration { expected, current } => {
+                    metrics::raft_fenced_write();
+                    Err(ConsensusError::stale_state_write(context, expected, current).into())
+                }
+                RaftResponse::RejectedInvalidState { reason } => {
+                    metrics::raft_fenced_write();
+                    Err(ConsensusError::invalid_raft_state(context, reason).into())
+                }
+            }
+        }
+        .await
+        .map_err(Into::into)
     }
 }
 

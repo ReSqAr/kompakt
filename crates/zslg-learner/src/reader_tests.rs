@@ -47,16 +47,10 @@ mod tests {
 
     struct NoOpCheck;
 
-    impl NoOpCheck {
-        pub(crate) async fn check_in(&self) -> Result<(), crate::Error> {
-            Ok(())
-        }
-    }
-
     #[async_trait]
     impl zslg_consensus::QuorumCheck for NoOpCheck {
         async fn check(&self) -> Result<(), zslg_consensus::Error> {
-            self.check_in().await.map_err(Into::into)
+            Ok(())
         }
     }
 
@@ -131,26 +125,24 @@ mod tests {
         }
     }
 
-    impl ScriptedSnapshotStore {
-        pub(crate) async fn write_snapshot_in(
+    #[async_trait]
+    impl zslg_snapshot::SnapshotStore for ScriptedSnapshotStore {
+        async fn write_snapshot(
             &self,
-            _id: zslg_snapshot::SnapshotId,
-            _entries: crossbeam_combinators::Channel<
-                Result<zslg_log::SnapshotEntry, crate::Error>,
-                Finite,
-            >,
-            _compression: zslg_snapshot::CompressionLevel,
+            _id: SnapshotId,
+            _entries: Channel<Result<SnapshotEntry, zslg_snapshot::Error>, Finite>,
+            _compression: CompressionLevel,
             _reason: zslg_snapshot::ObjectStoreReason,
-        ) -> Result<zslg_snapshot::SnapshotWrite, crate::Error> {
+        ) -> Result<SnapshotWrite, zslg_snapshot::Error> {
             unimplemented!("reader tests never write snapshots")
         }
-        pub(crate) async fn read_snapshot_in(
+        async fn read_snapshot(
             &self,
-            id: zslg_snapshot::SnapshotId,
+            id: SnapshotId,
             _reason: zslg_snapshot::ObjectStoreReason,
         ) -> Result<
-            crossbeam_combinators::Channel<Result<zslg_log::SnapshotEntry, crate::Error>, Finite>,
-            crate::Error,
+            Channel<Result<SnapshotEntry, zslg_snapshot::Error>, Finite>,
+            zslg_snapshot::Error,
         > {
             let entries = self
                 .snapshots
@@ -159,75 +151,27 @@ mod tests {
                 .get(&id)
                 .cloned()
                 .ok_or_else(|| {
-                    crate::Error::Snapshot(SnapshotError::ObjectStore(format!(
+                    zslg_snapshot::Error::Snapshot(SnapshotError::ObjectStore(format!(
                         "no scripted snapshot {id:?}"
                     )))
                 })?;
-            Ok(crossbeam_combinators::Channel::from_vec(
-                entries.into_iter().map(Ok).collect(),
-            ))
-        }
-        pub(crate) async fn has_bootstrap_fence_in(&self) -> Result<bool, crate::Error> {
-            unimplemented!()
-        }
-        pub(crate) async fn write_bootstrap_fence_in(&self) -> Result<(), crate::Error> {
-            unimplemented!()
-        }
-        pub(crate) async fn cleanup_snapshots_in(
-            &self,
-            _live: std::collections::BTreeSet<zslg_snapshot::SnapshotId>,
-            _retention: Duration,
-        ) -> Result<zslg_snapshot::CleanupReport, crate::Error> {
-            unimplemented!()
-        }
-    }
-
-    #[async_trait]
-    impl zslg_snapshot::SnapshotStore for ScriptedSnapshotStore {
-        async fn write_snapshot(
-            &self,
-            id: SnapshotId,
-            entries: Channel<
-                Result<SnapshotEntry, zslg_snapshot::Error>,
-                crossbeam_combinators::Finite,
-            >,
-            compression: CompressionLevel,
-            reason: zslg_snapshot::ObjectStoreReason,
-        ) -> Result<SnapshotWrite, zslg_snapshot::Error> {
-            self.write_snapshot_in(id, entries.err_into(), compression, reason)
-                .await
-                .map_err(Into::into)
-        }
-        async fn read_snapshot(
-            &self,
-            id: SnapshotId,
-            reason: zslg_snapshot::ObjectStoreReason,
-        ) -> Result<
-            Channel<Result<SnapshotEntry, zslg_snapshot::Error>, crossbeam_combinators::Finite>,
-            zslg_snapshot::Error,
-        > {
-            self.read_snapshot_in(id, reason)
-                .await
-                .map(Channel::err_into)
-                .map_err(Into::into)
+            Ok(Channel::from_vec(entries.into_iter().map(Ok).collect()))
         }
         fn shutdown_token(&self) -> tokio_util::sync::CancellationToken {
             tokio_util::sync::CancellationToken::new()
         }
         async fn has_bootstrap_fence(&self) -> Result<bool, zslg_snapshot::Error> {
-            self.has_bootstrap_fence_in().await.map_err(Into::into)
+            unimplemented!()
         }
         async fn write_bootstrap_fence(&self) -> Result<(), zslg_snapshot::Error> {
-            self.write_bootstrap_fence_in().await.map_err(Into::into)
+            unimplemented!()
         }
         async fn cleanup_snapshots(
             &self,
-            live_snapshots: std::collections::BTreeSet<SnapshotId>,
-            cleanup_retention: std::time::Duration,
+            _live_snapshots: std::collections::BTreeSet<SnapshotId>,
+            _cleanup_retention: Duration,
         ) -> Result<CleanupReport, zslg_snapshot::Error> {
-            self.cleanup_snapshots_in(live_snapshots, cleanup_retention)
-                .await
-                .map_err(Into::into)
+            unimplemented!()
         }
     }
 
@@ -594,14 +538,10 @@ mod tests {
             &self,
             _entries: Channel<Result<zslg_log::SnapshotEntry, zslg_log::Error>, Finite>,
         ) -> Result<usize, zslg_log::Error> {
-            let result: Result<usize, crate::Error> =
-                async { unimplemented!("scripted stable log is read-only") }.await;
-            result.map_err(Into::into)
+            unimplemented!("scripted stable log is read-only")
         }
         async fn record_end_hlc(&self, _end_hlc: Hlc) -> Result<(), zslg_log::Error> {
-            let result: Result<(), crate::Error> =
-                async { unimplemented!("scripted stable log is read-only") }.await;
-            result.map_err(Into::into)
+            unimplemented!("scripted stable log is read-only")
         }
         fn subscribe_events(&self) -> Channel<zslg_log::StableLogEvent, Infinite> {
             self.events_registry.subscribe_infinite()
@@ -614,27 +554,21 @@ mod tests {
             after: Option<LogIndex>,
             until: LogIndex,
         ) -> Channel<Result<(LogIndex, Data), zslg_log::Error>, Finite> {
-            let run = || -> Channel<Result<(LogIndex, Data), crate::Error>, Finite> {
-                self.ranges
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let items: Vec<Result<(LogIndex, Data), crate::Error>> = self
-                    .entries
-                    .lock()
-                    .expect("lock")
-                    .iter()
-                    .filter(|(i, _)| after.is_none_or(|a| *i > a) && *i < until)
-                    .cloned()
-                    .map(Ok)
-                    .collect();
-                Channel::from_vec(items)
-            };
-            let result: Channel<Result<(LogIndex, Data), crate::Error>, Finite> = run();
-            result.err_into()
+            self.ranges
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let items: Vec<Result<(LogIndex, Data), zslg_log::Error>> = self
+                .entries
+                .lock()
+                .expect("lock")
+                .iter()
+                .filter(|(i, _)| after.is_none_or(|a| *i > a) && *i < until)
+                .cloned()
+                .map(Ok)
+                .collect();
+            Channel::from_vec(items)
         }
         fn set_purge_threshold(&self, _hlc_threshold: Hlc) -> Result<(), zslg_log::Error> {
-            let run = || -> Result<(), crate::Error> { Ok(()) };
-            let result: Result<(), crate::Error> = run();
-            result.map_err(Into::into)
+            Ok(())
         }
     }
 

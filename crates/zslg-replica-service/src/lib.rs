@@ -137,8 +137,7 @@ impl Replica for ReplicaService {
                 Some(s.data)
             }))
         };
-        let result: Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> = run();
-        result.err_into()
+        run().err_into()
     }
 
     fn subscribe_from(&self, from: Option<LogIndex>) -> zslg_log::ReplicaStream {
@@ -146,54 +145,32 @@ impl Replica for ReplicaService {
     }
 
     async fn fetch_status(&self) -> Result<ReplicaStatus, zslg_log::Error> {
-        let result: Result<ReplicaStatus, Error> = async {
-            Ok(status_snapshot(
-                self.node_id,
-                self.replica_log.as_ref(),
-                self.raft_state.as_ref(),
-                &self.effective_cutoff_rx,
-                self.peers.as_ref(),
-            ))
-        }
-        .await;
-        result.map_err(Into::into)
+        Ok(status_snapshot(
+            self.node_id,
+            self.replica_log.as_ref(),
+            self.raft_state.as_ref(),
+            &self.effective_cutoff_rx,
+            self.peers.as_ref(),
+        ))
     }
 
     async fn subscribe_status(
         &self,
     ) -> Result<BoxStream<'static, Result<ReplicaStatus, zslg_log::Error>>, zslg_log::Error> {
-        let result: Result<BoxStream<'static, Result<ReplicaStatus, Error>>, Error> = async {
-            let replica_log = self.replica_log.clone();
-            let node_id = self.node_id;
-            let raft_state = self.raft_state.clone();
-            let cutoff_rx = self.effective_cutoff_rx.clone();
-            let peers = self.peers.clone();
+        let replica_log = self.replica_log.clone();
+        let node_id = self.node_id;
+        let raft_state = self.raft_state.clone();
+        let cutoff_rx = self.effective_cutoff_rx.clone();
+        let peers = self.peers.clone();
 
-            let stream = futures::stream::unfold(
-                (raft_state.subscribe(), cutoff_rx, false),
-                move |(mut rx, mut cutoff_rx, baseline_sent)| {
-                    let replica_log = replica_log.clone();
-                    let raft_state = raft_state.clone();
-                    let peers = peers.clone();
-                    async move {
-                        if !baseline_sent {
-                            let status = status_snapshot(
-                                node_id,
-                                replica_log.as_ref(),
-                                raft_state.as_ref(),
-                                &cutoff_rx,
-                                peers.as_ref(),
-                            );
-                            return Some((Ok(status), (rx, cutoff_rx, true)));
-                        }
-
-                        let alive = tokio::select! {
-                            raft = rx.changed() => raft.is_ok(),
-                            changed = cutoff_rx.changed() => changed.is_ok(),
-                        };
-                        if !alive {
-                            return None;
-                        }
+        let stream = futures::stream::unfold(
+            (raft_state.subscribe(), cutoff_rx, false),
+            move |(mut rx, mut cutoff_rx, baseline_sent)| {
+                let replica_log = replica_log.clone();
+                let raft_state = raft_state.clone();
+                let peers = peers.clone();
+                async move {
+                    if !baseline_sent {
                         let status = status_snapshot(
                             node_id,
                             replica_log.as_ref(),
@@ -201,19 +178,29 @@ impl Replica for ReplicaService {
                             &cutoff_rx,
                             peers.as_ref(),
                         );
-                        Some((Ok(status), (rx, cutoff_rx, true)))
+                        return Some((Ok::<_, zslg_log::Error>(status), (rx, cutoff_rx, true)));
                     }
-                },
-            );
 
-            Ok(stream.boxed())
-        }
-        .await;
-        result
-            .map(|s| {
-                futures::StreamExt::boxed(futures::StreamExt::map(s, |r| r.map_err(Into::into)))
-            })
-            .map_err(Into::into)
+                    let alive = tokio::select! {
+                        raft = rx.changed() => raft.is_ok(),
+                        changed = cutoff_rx.changed() => changed.is_ok(),
+                    };
+                    if !alive {
+                        return None;
+                    }
+                    let status = status_snapshot(
+                        node_id,
+                        replica_log.as_ref(),
+                        raft_state.as_ref(),
+                        &cutoff_rx,
+                        peers.as_ref(),
+                    );
+                    Some((Ok::<_, zslg_log::Error>(status), (rx, cutoff_rx, true)))
+                }
+            },
+        );
+
+        Ok(stream.boxed())
     }
 }
 

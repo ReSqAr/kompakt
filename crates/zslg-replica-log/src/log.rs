@@ -763,27 +763,24 @@ impl ReplicaLog for ReplicaLogStore {
     /// Without the clamp, an idle log whose watermark passed every entry's HLC
     /// would purge the frontier and restart at index 0.
     fn set_purge_threshold(&self, threshold: Hlc) -> Result<(), zslg_log::Error> {
-        self.purge_threshold_in(threshold).map_err(Into::into)
-    }
-}
-
-impl ReplicaLogStore {
-    fn purge_threshold_in(&self, threshold: Hlc) -> Result<(), Error> {
-        let Some(clamped) = self.frontier.clamp_threshold(threshold) else {
-            return Ok(());
+        let purge = || -> Result<(), Error> {
+            let Some(clamped) = self.frontier.clamp_threshold(threshold) else {
+                return Ok(());
+            };
+            let Some(boundary) = purge_boundary(&self.storage, clamped)? else {
+                return Ok(());
+            };
+            let cf = self.storage.cf(REPLICA_LOG_CF)?;
+            let mut batch = RocksBatch::new();
+            batch.delete_range(
+                &cf,
+                &encode_primary(LogIndex::ZERO)[..],
+                &encode_primary(boundary)[..],
+            );
+            self.storage.write(batch)?;
+            self.storage.fence().map_err(Into::into)
         };
-        let Some(boundary) = purge_boundary(&self.storage, clamped)? else {
-            return Ok(());
-        };
-        let cf = self.storage.cf(REPLICA_LOG_CF)?;
-        let mut batch = RocksBatch::new();
-        batch.delete_range(
-            &cf,
-            &encode_primary(LogIndex::ZERO)[..],
-            &encode_primary(boundary)[..],
-        );
-        self.storage.write(batch)?;
-        self.storage.fence().map_err(Into::into)
+        purge().map_err(Into::into)
     }
 }
 

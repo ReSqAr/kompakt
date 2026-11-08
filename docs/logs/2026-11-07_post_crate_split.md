@@ -23,6 +23,7 @@ examples; it depends on no type crate and no implementation. The layering test
 | facade role | — | transitional `monolith` role until step 14 | allowed the split to land crate by crate; removed in step 14 |
 | error size bar | `size_of::<Error>() <= size_of::<DataId>() + 8` | bar kept at 40 bytes | measured; user-approved |
 | conversion to the port error | — | `into <PortError>` clause in `error_union!`; boundaries use `map_err(Into::into)` and `Channel::err_into` | the union knows its variants, so no separate bridge macro or `Home` trait |
+| a port method whose body uses `?` on the crate's own error | — | the body sits in the trait method as `async { … }.await.map_err(Into::into)` (tail `Ok::<_, Error>(…)` pins the type); no `*_in` inherent twin. Fakes and stubs return the port error directly | one shape for the boundary; the `*_in` twins were a split artefact |
 | both directions to a peer with the same variants | — | `bridge Peer` clause in `error_union!` (`From<Peer>` + `From<Union>`; the variant list is this union's own, so nothing to repeat) | where a `from X { all variants }` and an `into X` named the same peer, one line now says it; 85 such pairs across the node crates |
 | spare selection | `SpareSelector` trait | `SpareSelectionStrategy::rank` + `CandidateInfo` in consensus-types | trait had one implementer |
 | extra ports | — | `RaftMetricsSource`, `ClusterBootstrap` (raft); `WriteGate`/`Admission` (time); `ReplicaLog` (log); `IntentSubmitter` (consensus) | each removed an implementation→implementation edge |

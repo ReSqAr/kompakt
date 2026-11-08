@@ -117,9 +117,7 @@ impl StableArchiveReader for ObjectStoreArchiveReader {
                 };
                 ch.also::<NonDecreasing<Hlc>>(None, "archive HLC")
             };
-        let result: OrderedChannel<Result<SnapshotEntry, Error>, Contiguous<LogIndex>, Finite> =
-            run();
-        result.err_into()
+        run().err_into()
     }
 }
 

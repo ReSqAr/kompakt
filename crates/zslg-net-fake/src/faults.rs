@@ -166,8 +166,7 @@ impl Replica for FaultyReplica {
 
             Channel::from_infinite(out_rx, "faulty replica")
         };
-        let result: Channel<Result<WriteOutcome, Error>, Infinite> = run();
-        result.err_into()
+        run().err_into()
     }
 
     fn subscribe_from(&self, from: Option<LogIndex>) -> zslg_log::ReplicaStream {
@@ -384,8 +383,7 @@ impl Replica for DuplicateReplica {
 
             Channel::from_infinite(out_rx, "faulty replica")
         };
-        let result: Channel<Result<WriteOutcome, Error>, Infinite> = run();
-        result.err_into()
+        run().err_into()
     }
 
     fn subscribe_from(&self, from: Option<LogIndex>) -> zslg_log::ReplicaStream {
@@ -393,8 +391,7 @@ impl Replica for DuplicateReplica {
     }
 
     async fn fetch_status(&self) -> Result<ReplicaStatus, zslg_log::Error> {
-        let result: Result<ReplicaStatus, Error> = self.inner.fetch_status().await;
-        result
+        self.inner.fetch_status().await
     }
 
     async fn subscribe_status(

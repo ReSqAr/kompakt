@@ -8,7 +8,6 @@ use tokio::sync::watch;
 
 use super::engine::{above_hlc, read_cursor, stream_scan};
 use super::{LocalStore, STREAM_CHANNEL_CAPACITY};
-use crate::Error;
 use zslg_consensus::NodeId;
 use zslg_log::Data;
 use zslg_log::ToStorage;
@@ -49,13 +48,13 @@ impl zslg_log::LocalStoreView for LocalStore {
         &self,
         upstream: NodeId,
     ) -> Result<Option<LogIndex>, zslg_log::Error> {
-        let result: Result<Option<LogIndex>, Error> = async {
+        async {
             let storage = self.storage.clone();
             tokio::task::spawn_blocking(move || read_cursor(&storage, upstream))
                 .await
                 .to_storage("subscription_cursor spawn_blocking panicked")?
         }
-        .await;
-        result.map_err(Into::into)
+        .await
+        .map_err(Into::into)
     }
 }

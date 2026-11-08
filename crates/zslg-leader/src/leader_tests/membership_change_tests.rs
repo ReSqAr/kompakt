@@ -128,12 +128,6 @@ impl StaticLeadership {
     }
 }
 
-impl StaticLeadership {
-    pub(crate) async fn remove_member_in(&self, _node_id: NodeId) -> Result<(), zslg_error::Error> {
-        Ok(())
-    }
-}
-
 #[async_trait]
 impl RaftLeadership for StaticLeadership {
     fn current_leader(&self) -> Option<NodeId> {
@@ -150,9 +144,9 @@ impl RaftLeadership for StaticLeadership {
 
     async fn remove_member(
         &self,
-        node_id: zslg_consensus::NodeId,
+        _node_id: zslg_consensus::NodeId,
     ) -> Result<(), zslg_consensus::Error> {
-        self.remove_member_in(node_id).await.map_err(Into::into)
+        Ok(())
     }
 }
 

@@ -23,7 +23,7 @@ impl zslg_log::LocalStoreMut for LocalStore {
     ) -> Result<(), zslg_log::Error> {
         let mut records: Channel<Result<(NodeId, LogIndex, Data), Error>, Finite> =
             records.err_into();
-        let result: Result<(), Error> = async {
+        async {
             let tx = self.integrate_tx.clone();
             // Forwarding blocks on both halves (Channel::recv and a bounded
             // send), so it belongs on the blocking pool. It does no IO — the
@@ -88,12 +88,12 @@ impl zslg_log::LocalStoreMut for LocalStore {
             }
             outcome
         }
-        .await;
-        result.map_err(Into::into)
+        .await
+        .map_err(Into::into)
     }
 
     async fn purge_below_hlc(&self, threshold: Hlc) -> Result<(), zslg_log::Error> {
-        let result: Result<(), Error> = async {
+        async {
             // The data key is the `DataId` itself, which is HLC-major (ids.rs:170,
             // bytes 0..8 are the HLC big-endian), so key order IS HLC order and
             // `hlc <= threshold` is a key-order prefix. A durable range delete says
@@ -118,9 +118,9 @@ impl zslg_log::LocalStoreMut for LocalStore {
             // own to sit in (CLAUDE.md §19) — `fence` is documented "call it from
             // spawn_blocking", which this isn't.
             self.storage.fence_async().await?;
-            Ok(())
+            Ok::<_, Error>(())
         }
-        .await;
-        result.map_err(Into::into)
+        .await
+        .map_err(Into::into)
     }
 }

@@ -71,34 +71,32 @@ impl MultiReplicaQuorumCheck {
     }
 }
 
-impl MultiReplicaQuorumCheck {
-    pub async fn check_in(&self) -> Result<(), Error> {
-        let router = self.router.clone();
-        let local_store = self.local_store.clone();
-        let (final_state, _successful) =
-            fan_out_quorum((*self.raft_state.snapshot()).clone(), move |peer| {
-                let transport = router.remote(peer);
-                let local_store = local_store.clone();
-                async move {
-                    match ReplicaPoller::check(transport, local_store, peer).await {
-                        Ok(Some(state)) => Ok(FanOutResponse::Ready(state)),
-                        Ok(None) => Ok(FanOutResponse::Failed),
-                        Err(e) => Err(e),
-                    }
-                }
-            })
-            .await?;
-
-        // Check 2 (module header): the cursor comparison above cannot see data
-        // the leader already snapshotted and the replicas purged.
-        wait_for_stable_caught_up(self.stable_log.as_ref(), &final_state.manifest_state).await
-    }
-}
-
 #[async_trait]
 impl QuorumCheck for MultiReplicaQuorumCheck {
     async fn check(&self) -> Result<(), zslg_consensus::Error> {
-        self.check_in().await.map_err(Into::into)
+        async {
+            let router = self.router.clone();
+            let local_store = self.local_store.clone();
+            let (final_state, _successful) =
+                fan_out_quorum((*self.raft_state.snapshot()).clone(), move |peer| {
+                    let transport = router.remote(peer);
+                    let local_store = local_store.clone();
+                    async move {
+                        match ReplicaPoller::check(transport, local_store, peer).await {
+                            Ok(Some(state)) => Ok(FanOutResponse::Ready(state)),
+                            Ok(None) => Ok(FanOutResponse::Failed),
+                            Err(e) => Err(e),
+                        }
+                    }
+                })
+                .await?;
+
+            // Check 2 (module header): the cursor comparison above cannot see data
+            // the leader already snapshotted and the replicas purged.
+            wait_for_stable_caught_up(self.stable_log.as_ref(), &final_state.manifest_state).await
+        }
+        .await
+        .map_err(Into::into)
     }
 }
 
@@ -340,16 +338,12 @@ mod tests {
         }
     }
 
-    impl ScriptedQuorum {
-        pub(crate) async fn check_in(&self) -> Result<(), Error> {
-            self.result.lock().expect("lock").clone()
-        }
-    }
-
     #[async_trait]
     impl QuorumCheck for ScriptedQuorum {
         async fn check(&self) -> Result<(), zslg_consensus::Error> {
-            self.check_in().await.map_err(Into::into)
+            async { self.result.lock().expect("lock").clone() }
+                .await
+                .map_err(Into::into)
         }
     }
 
@@ -369,20 +363,18 @@ mod tests {
             calls: AtomicU32,
         }
 
-        impl CountingCheck {
-            pub(crate) async fn check_in(&self) -> Result<(), Error> {
-                self.calls.fetch_add(1, Ordering::SeqCst);
-                // Let the batch gather — the first caller arms the timer,
-                // subsequent waiters ride.
-                tokio::time::sleep(Duration::from_millis(20)).await;
-                Ok(())
-            }
-        }
-
         #[async_trait]
         impl QuorumCheck for CountingCheck {
             async fn check(&self) -> Result<(), zslg_consensus::Error> {
-                self.check_in().await.map_err(Into::into)
+                async {
+                    self.calls.fetch_add(1, Ordering::SeqCst);
+                    // Let the batch gather — the first caller arms the timer,
+                    // subsequent waiters ride.
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                    Ok::<_, Error>(())
+                }
+                .await
+                .map_err(Into::into)
             }
         }
 
@@ -455,17 +447,13 @@ mod tests {
             &self,
             upstream: NodeId,
         ) -> Result<Option<LogIndex>, zslg_log::Error> {
-            let result: Result<Option<LogIndex>, Error> = async {
-                Ok(self
-                    .inner
-                    .lock()
-                    .expect("lock")
-                    .cursors
-                    .get(&upstream)
-                    .copied())
-            }
-            .await;
-            result.map_err(Into::into)
+            Ok(self
+                .inner
+                .lock()
+                .expect("lock")
+                .cursors
+                .get(&upstream)
+                .copied())
         }
     }
 

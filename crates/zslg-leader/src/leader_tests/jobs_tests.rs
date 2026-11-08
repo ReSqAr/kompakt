@@ -86,16 +86,10 @@ async fn integrate_batch(
 
 struct NoOpProbe;
 
-impl NoOpProbe {
-    pub(crate) async fn probe_in(&self) -> Result<(), zslg_error::Error> {
-        Ok(())
-    }
-}
-
 #[async_trait::async_trait]
 impl LivenessProbe for NoOpProbe {
     async fn probe(&self) -> Result<(), zslg_net::Error> {
-        self.probe_in().await.map_err(Into::into)
+        Ok(())
     }
 }
 

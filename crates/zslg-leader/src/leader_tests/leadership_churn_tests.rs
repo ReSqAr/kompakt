@@ -147,9 +147,7 @@ impl LocalStoreView for StallingLocalStore {
         &self,
         upstream: NodeId,
     ) -> Result<Option<LogIndex>, zslg_log::Error> {
-        let result: Result<Option<LogIndex>, Error> =
-            (async { self.inner.subscription_cursor(upstream).await }.await).map_err(Into::into);
-        result.map_err(Into::into)
+        self.inner.subscription_cursor(upstream).await
     }
 }
 

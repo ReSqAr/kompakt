@@ -12,15 +12,10 @@ use std::sync::Arc;
 
 use crossbeam_combinators::{Channel, Finite, Infinite};
 use futures::stream::BoxStream;
-use raft_kit::error::{InstallSnapshotError, RaftError};
-use raft_kit::raft::{
-    AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
-    VoteRequest, VoteResponse,
-};
-use zslg_consensus::{AddMemberOutcome, NodeId, RaftMembership, ReplicaStatus};
+use zslg_consensus::{NodeId, RaftMembership, ReplicaStatus};
 use zslg_log::{LogIndex, Replica, StampedWrite, WriteOutcome};
 use zslg_net::{LivenessProbe, PeerAddr, ReplicaClient, Router};
-use zslg_raft::{RaftTransport, TypeConfig};
+use zslg_raft::RaftTransport;
 
 // ── test transport helpers ───────────────────────────────────────────
 
@@ -57,37 +52,11 @@ impl Replica for ReplicaOnly {
     }
 }
 
-impl ReplicaOnly {
-    pub(crate) async fn append_entries_in(
-        &self,
-        _rpc: AppendEntriesRequest<TypeConfig>,
-    ) -> Result<Result<AppendEntriesResponse<NodeId>, RaftError<NodeId>>, Error> {
-        unimplemented!("ReplicaOnly: raft transport not used")
-    }
-
-    pub(crate) async fn vote_in(
-        &self,
-        _rpc: VoteRequest<NodeId>,
-    ) -> Result<Result<VoteResponse<NodeId>, RaftError<NodeId>>, Error> {
-        unimplemented!("ReplicaOnly: raft transport not used")
-    }
-
-    pub(crate) async fn install_snapshot_in(
-        &self,
-        _rpc: InstallSnapshotRequest<TypeConfig>,
-    ) -> Result<
-        Result<InstallSnapshotResponse<NodeId>, RaftError<NodeId, InstallSnapshotError>>,
-        Error,
-    > {
-        unimplemented!("ReplicaOnly: raft transport not used")
-    }
-}
-
 #[async_trait::async_trait]
 impl RaftTransport for ReplicaOnly {
     async fn append_entries(
         &self,
-        rpc: raft_kit::raft::AppendEntriesRequest<zslg_raft::TypeConfig>,
+        _rpc: raft_kit::raft::AppendEntriesRequest<zslg_raft::TypeConfig>,
     ) -> Result<
         Result<
             raft_kit::raft::AppendEntriesResponse<zslg_consensus::NodeId>,
@@ -95,11 +64,11 @@ impl RaftTransport for ReplicaOnly {
         >,
         zslg_raft::Error,
     > {
-        self.append_entries_in(rpc).await.map_err(Into::into)
+        unimplemented!("ReplicaOnly: raft transport not used")
     }
     async fn vote(
         &self,
-        rpc: raft_kit::raft::VoteRequest<zslg_consensus::NodeId>,
+        _rpc: raft_kit::raft::VoteRequest<zslg_consensus::NodeId>,
     ) -> Result<
         Result<
             raft_kit::raft::VoteResponse<zslg_consensus::NodeId>,
@@ -107,11 +76,11 @@ impl RaftTransport for ReplicaOnly {
         >,
         zslg_raft::Error,
     > {
-        self.vote_in(rpc).await.map_err(Into::into)
+        unimplemented!("ReplicaOnly: raft transport not used")
     }
     async fn install_snapshot(
         &self,
-        rpc: raft_kit::raft::InstallSnapshotRequest<zslg_raft::TypeConfig>,
+        _rpc: raft_kit::raft::InstallSnapshotRequest<zslg_raft::TypeConfig>,
     ) -> Result<
         Result<
             raft_kit::raft::InstallSnapshotResponse<zslg_consensus::NodeId>,
@@ -122,17 +91,7 @@ impl RaftTransport for ReplicaOnly {
         >,
         zslg_raft::Error,
     > {
-        self.install_snapshot_in(rpc).await.map_err(Into::into)
-    }
-}
-
-impl ReplicaOnly {
-    pub(crate) async fn add_member_in(
-        &self,
-        _node_id: NodeId,
-        _peer_addr: PeerAddr,
-    ) -> Result<AddMemberOutcome, Error> {
-        unimplemented!("ReplicaOnly: membership not used")
+        unimplemented!("ReplicaOnly: raft transport not used")
     }
 }
 
@@ -140,25 +99,17 @@ impl ReplicaOnly {
 impl RaftMembership for ReplicaOnly {
     async fn add_member(
         &self,
-        node_id: zslg_consensus::NodeId,
-        peer_addr: zslg_net::PeerAddr,
+        _node_id: zslg_consensus::NodeId,
+        _peer_addr: zslg_net::PeerAddr,
     ) -> Result<zslg_consensus::AddMemberOutcome, zslg_consensus::Error> {
-        self.add_member_in(node_id, peer_addr)
-            .await
-            .map_err(Into::into)
-    }
-}
-
-impl ReplicaOnly {
-    pub(crate) async fn probe_in(&self) -> Result<(), Error> {
-        unimplemented!("ReplicaOnly: liveness not used")
+        unimplemented!("ReplicaOnly: membership not used")
     }
 }
 
 #[async_trait::async_trait]
 impl LivenessProbe for ReplicaOnly {
     async fn probe(&self) -> Result<(), zslg_net::Error> {
-        self.probe_in().await.map_err(Into::into)
+        unimplemented!("ReplicaOnly: liveness not used")
     }
 }
 
@@ -210,16 +161,12 @@ impl Router for ProbeRouter {
 /// `unimplemented!()` (the liveness worker calls nothing else).
 struct ProbeOnly(Arc<dyn LivenessProbe>);
 
-impl ProbeOnly {
-    pub(crate) async fn probe_in(&self) -> Result<(), Error> {
-        self.0.probe().await.map_err(Error::from)
-    }
-}
-
 #[async_trait::async_trait]
 impl LivenessProbe for ProbeOnly {
     async fn probe(&self) -> Result<(), zslg_net::Error> {
-        self.probe_in().await.map_err(Into::into)
+        async { self.0.probe().await.map_err(Error::from) }
+            .await
+            .map_err(Into::into)
     }
 }
 
@@ -229,11 +176,7 @@ impl Replica for ProbeOnly {
         &self,
         _: Channel<StampedWrite, Finite>,
     ) -> Channel<Result<WriteOutcome, zslg_log::Error>, Infinite> {
-        let run = || -> Channel<Result<WriteOutcome, Error>, Infinite> {
-            unimplemented!("ProbeOnly: replica not used")
-        };
-        let result: Channel<Result<WriteOutcome, Error>, Infinite> = run();
-        result.err_into()
+        unimplemented!("ProbeOnly: replica not used")
     }
 
     fn subscribe_from(&self, _from: Option<LogIndex>) -> zslg_log::ReplicaStream {
@@ -241,47 +184,13 @@ impl Replica for ProbeOnly {
     }
 
     async fn fetch_status(&self) -> Result<ReplicaStatus, zslg_log::Error> {
-        let result: Result<ReplicaStatus, Error> =
-            async { unimplemented!("ProbeOnly: replica not used") }.await;
-        result.map_err(Into::into)
+        unimplemented!("ProbeOnly: replica not used")
     }
 
     async fn subscribe_status(
         &self,
     ) -> Result<BoxStream<'static, Result<ReplicaStatus, zslg_log::Error>>, zslg_log::Error> {
-        let result: Result<BoxStream<'static, Result<ReplicaStatus, Error>>, Error> =
-            async { unimplemented!("ProbeOnly: replica not used") }.await;
-        result
-            .map(|s| {
-                futures::StreamExt::boxed(futures::StreamExt::map(s, |r| r.map_err(Into::into)))
-            })
-            .map_err(Into::into)
-    }
-}
-
-impl ProbeOnly {
-    pub(crate) async fn append_entries_in(
-        &self,
-        _rpc: AppendEntriesRequest<TypeConfig>,
-    ) -> Result<Result<AppendEntriesResponse<NodeId>, RaftError<NodeId>>, Error> {
-        unimplemented!("ProbeOnly: raft transport not used")
-    }
-
-    pub(crate) async fn vote_in(
-        &self,
-        _rpc: VoteRequest<NodeId>,
-    ) -> Result<Result<VoteResponse<NodeId>, RaftError<NodeId>>, Error> {
-        unimplemented!("ProbeOnly: raft transport not used")
-    }
-
-    pub(crate) async fn install_snapshot_in(
-        &self,
-        _rpc: InstallSnapshotRequest<TypeConfig>,
-    ) -> Result<
-        Result<InstallSnapshotResponse<NodeId>, RaftError<NodeId, InstallSnapshotError>>,
-        Error,
-    > {
-        unimplemented!("ProbeOnly: raft transport not used")
+        unimplemented!("ProbeOnly: replica not used")
     }
 }
 
@@ -289,7 +198,7 @@ impl ProbeOnly {
 impl RaftTransport for ProbeOnly {
     async fn append_entries(
         &self,
-        rpc: raft_kit::raft::AppendEntriesRequest<zslg_raft::TypeConfig>,
+        _rpc: raft_kit::raft::AppendEntriesRequest<zslg_raft::TypeConfig>,
     ) -> Result<
         Result<
             raft_kit::raft::AppendEntriesResponse<zslg_consensus::NodeId>,
@@ -297,11 +206,11 @@ impl RaftTransport for ProbeOnly {
         >,
         zslg_raft::Error,
     > {
-        self.append_entries_in(rpc).await.map_err(Into::into)
+        unimplemented!("ProbeOnly: raft transport not used")
     }
     async fn vote(
         &self,
-        rpc: raft_kit::raft::VoteRequest<zslg_consensus::NodeId>,
+        _rpc: raft_kit::raft::VoteRequest<zslg_consensus::NodeId>,
     ) -> Result<
         Result<
             raft_kit::raft::VoteResponse<zslg_consensus::NodeId>,
@@ -309,11 +218,11 @@ impl RaftTransport for ProbeOnly {
         >,
         zslg_raft::Error,
     > {
-        self.vote_in(rpc).await.map_err(Into::into)
+        unimplemented!("ProbeOnly: raft transport not used")
     }
     async fn install_snapshot(
         &self,
-        rpc: raft_kit::raft::InstallSnapshotRequest<zslg_raft::TypeConfig>,
+        _rpc: raft_kit::raft::InstallSnapshotRequest<zslg_raft::TypeConfig>,
     ) -> Result<
         Result<
             raft_kit::raft::InstallSnapshotResponse<zslg_consensus::NodeId>,
@@ -324,17 +233,7 @@ impl RaftTransport for ProbeOnly {
         >,
         zslg_raft::Error,
     > {
-        self.install_snapshot_in(rpc).await.map_err(Into::into)
-    }
-}
-
-impl ProbeOnly {
-    pub(crate) async fn add_member_in(
-        &self,
-        _node_id: NodeId,
-        _peer_addr: PeerAddr,
-    ) -> Result<AddMemberOutcome, Error> {
-        unimplemented!("ProbeOnly: membership not used")
+        unimplemented!("ProbeOnly: raft transport not used")
     }
 }
 
@@ -342,12 +241,10 @@ impl ProbeOnly {
 impl RaftMembership for ProbeOnly {
     async fn add_member(
         &self,
-        node_id: zslg_consensus::NodeId,
-        peer_addr: zslg_net::PeerAddr,
+        _node_id: zslg_consensus::NodeId,
+        _peer_addr: zslg_net::PeerAddr,
     ) -> Result<zslg_consensus::AddMemberOutcome, zslg_consensus::Error> {
-        self.add_member_in(node_id, peer_addr)
-            .await
-            .map_err(Into::into)
+        unimplemented!("ProbeOnly: membership not used")
     }
 }
 

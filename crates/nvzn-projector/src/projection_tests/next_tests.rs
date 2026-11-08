@@ -14,9 +14,7 @@
 
 use super::inmemory;
 use crate::*;
-use nvzn_fixtures::{
-    NewTodoV1, TodoId, User, UserDeletedV1, UserId, event, tenant, tenant_id,
-};
+use nvzn_fixtures::{NewTodoV1, TodoId, User, UserDeletedV1, UserId, event, tenant, tenant_id};
 use nvzn_projection::*;
 use nvzn_store::*;
 use serde::{Deserialize, Serialize};

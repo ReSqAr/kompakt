@@ -468,44 +468,6 @@ mod tests {
         }
     }
 
-    impl FakeRaft {
-        pub(crate) async fn replicate_state_in(
-            &self,
-            state: ReplicatedRaftState,
-            expected_generation: RaftGeneration,
-            context: &'static str,
-        ) -> Result<(), Error> {
-            let current = self.state.snapshot();
-            if self.stale_budget.load(Ordering::Relaxed) > 0 {
-                self.stale_budget.fetch_sub(1, Ordering::Relaxed);
-                return Err(Error::Consensus(ConsensusError::stale_state_write(
-                    context,
-                    expected_generation,
-                    current.generation,
-                )));
-            }
-            if expected_generation != current.generation {
-                return Err(Error::Consensus(ConsensusError::stale_state_write(
-                    context,
-                    expected_generation,
-                    current.generation,
-                )));
-            }
-            // The integrator must never propose a state the fence would reject;
-            // asserting that here turns any such bug into a test failure rather
-            // than a silent value-rejection in production.
-            zslg_consensus::validate_replicated_state(&state)
-                .expect("integrator proposed a structurally invalid state");
-            zslg_consensus::validate_transition(&current.replica, &state)
-                .expect("integrator proposed an illegal membership transition");
-            zslg_consensus::validate_cutoff_advance(current.manifest_state.hlc_cutoff, &state)
-                .expect("integrator proposed a regressing hlc cutoff");
-            self.proposals.fetch_add(1, Ordering::Relaxed);
-            let next = RaftGeneration(current.generation.raw().saturating_add(1));
-            self.state.apply_replicated(state, next).map_err(Into::into)
-        }
-    }
-
     #[async_trait::async_trait]
     impl StateReplicator for FakeRaft {
         async fn replicate_state(
@@ -514,9 +476,38 @@ mod tests {
             expected_generation: zslg_consensus::RaftGeneration,
             context: &'static str,
         ) -> Result<(), zslg_consensus::Error> {
-            self.replicate_state_in(state, expected_generation, context)
-                .await
-                .map_err(Into::into)
+            async {
+                let current = self.state.snapshot();
+                if self.stale_budget.load(Ordering::Relaxed) > 0 {
+                    self.stale_budget.fetch_sub(1, Ordering::Relaxed);
+                    return Err(Error::Consensus(ConsensusError::stale_state_write(
+                        context,
+                        expected_generation,
+                        current.generation,
+                    )));
+                }
+                if expected_generation != current.generation {
+                    return Err(Error::Consensus(ConsensusError::stale_state_write(
+                        context,
+                        expected_generation,
+                        current.generation,
+                    )));
+                }
+                // The integrator must never propose a state the fence would reject;
+                // asserting that here turns any such bug into a test failure rather
+                // than a silent value-rejection in production.
+                zslg_consensus::validate_replicated_state(&state)
+                    .expect("integrator proposed a structurally invalid state");
+                zslg_consensus::validate_transition(&current.replica, &state)
+                    .expect("integrator proposed an illegal membership transition");
+                zslg_consensus::validate_cutoff_advance(current.manifest_state.hlc_cutoff, &state)
+                    .expect("integrator proposed a regressing hlc cutoff");
+                self.proposals.fetch_add(1, Ordering::Relaxed);
+                let next = RaftGeneration(current.generation.raw().saturating_add(1));
+                self.state.apply_replicated(state, next).map_err(Into::into)
+            }
+            .await
+            .map_err(Into::into)
         }
     }
 

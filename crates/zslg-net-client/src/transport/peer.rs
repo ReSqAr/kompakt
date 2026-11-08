@@ -23,11 +23,6 @@ use async_trait::async_trait;
 use crossbeam_combinators::Channel;
 use futures::StreamExt;
 use futures::stream::BoxStream;
-use raft_kit::error::{InstallSnapshotError, RaftError};
-use raft_kit::raft::{
-    AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
-    VoteRequest, VoteResponse,
-};
 use zslg_consensus::NodeId;
 use zslg_consensus::ReplicaStatus;
 use zslg_log::LogIndex;
@@ -36,7 +31,6 @@ use zslg_net::PeerAddr;
 use zslg_net_wire::messages::{
     RpcFrame, RpcRaftFrame, RpcRaftRequest, RpcReplicaFrame, RpcReplicaRequest, RpcRequest,
 };
-use zslg_raft::TypeConfig;
 /// Per-peer typed transport over [`RpcClient`]. The peer is addressed either by
 /// a registered `NodeId` ([`TcpPeerClient::new`]) or directly by
 /// `(addr, server_name)` ([`TcpPeerClient::direct`]); both expose the full
@@ -79,36 +73,6 @@ impl TcpPeerClient {
     }
 }
 
-impl TcpPeerClient {
-    pub async fn add_member_in(
-        &self,
-        node_id: NodeId,
-        peer_addr: PeerAddr,
-    ) -> Result<AddMemberOutcome, Error> {
-        match self
-            .rpc_client
-            .call_raft(
-                &self.target,
-                RpcRaftRequest::AddMember { node_id, peer_addr },
-            )
-            .await
-        {
-            Ok(RpcRaftFrame::AddMember { added: true, state }) => {
-                Ok(AddMemberOutcome::Accepted { state })
-            }
-            Ok(RpcRaftFrame::AddMember {
-                added: false,
-                state,
-            }) => Ok(AddMemberOutcome::Rejected { state }),
-            Ok(other) => Err(Error::Net(NetError::Rpc(format!(
-                "unexpected raft frame on add_member to {:?}: {other:?}",
-                self.target,
-            )))),
-            Err(e) => Err(e),
-        }
-    }
-}
-
 #[async_trait]
 impl RaftMembership for TcpPeerClient {
     async fn add_member(
@@ -116,22 +80,40 @@ impl RaftMembership for TcpPeerClient {
         node_id: zslg_consensus::NodeId,
         peer_addr: zslg_net::PeerAddr,
     ) -> Result<zslg_consensus::AddMemberOutcome, zslg_consensus::Error> {
-        self.add_member_in(node_id, peer_addr)
-            .await
-            .map_err(Into::into)
-    }
-}
-
-impl TcpPeerClient {
-    pub async fn probe_in(&self) -> Result<(), Error> {
-        self.rpc_client.echo(self.target_node_id()).await
+        async {
+            match self
+                .rpc_client
+                .call_raft(
+                    &self.target,
+                    RpcRaftRequest::AddMember { node_id, peer_addr },
+                )
+                .await
+            {
+                Ok(RpcRaftFrame::AddMember { added: true, state }) => {
+                    Ok(AddMemberOutcome::Accepted { state })
+                }
+                Ok(RpcRaftFrame::AddMember {
+                    added: false,
+                    state,
+                }) => Ok(AddMemberOutcome::Rejected { state }),
+                Ok(other) => Err(Error::Net(NetError::Rpc(format!(
+                    "unexpected raft frame on add_member to {:?}: {other:?}",
+                    self.target,
+                )))),
+                Err(e) => Err(e),
+            }
+        }
+        .await
+        .map_err(Into::into)
     }
 }
 
 #[async_trait]
 impl LivenessProbe for TcpPeerClient {
     async fn probe(&self) -> Result<(), zslg_net::Error> {
-        self.probe_in().await.map_err(Into::into)
+        async { self.rpc_client.echo(self.target_node_id()).await }
+            .await
+            .map_err(Into::into)
     }
 }
 
@@ -158,8 +140,7 @@ impl Replica for TcpPeerClient {
                 }
             }
         };
-        let result: Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> = run();
-        result.err_into()
+        run().err_into()
     }
 
     fn subscribe_from(&self, from: Option<LogIndex>) -> zslg_log::ReplicaStream {
@@ -172,7 +153,7 @@ impl Replica for TcpPeerClient {
     }
 
     async fn fetch_status(&self) -> Result<ReplicaStatus, zslg_log::Error> {
-        let result: Result<ReplicaStatus, Error> = async {
+        async {
             let frame = self
                 .rpc_client
                 .call_replica(&self.target, RpcReplicaRequest::FetchStatus)
@@ -185,14 +166,14 @@ impl Replica for TcpPeerClient {
                 )))),
             }
         }
-        .await;
-        result.map_err(Into::into)
+        .await
+        .map_err(Into::into)
     }
 
     async fn subscribe_status(
         &self,
     ) -> Result<BoxStream<'static, Result<ReplicaStatus, zslg_log::Error>>, zslg_log::Error> {
-        let result: Result<BoxStream<'static, Result<ReplicaStatus, Error>>, Error> = async {
+        async {
             let rpc_client = self.rpc_client.clone();
 
             let frame_stream = rpc_client
@@ -223,73 +204,11 @@ impl Replica for TcpPeerClient {
                     }
                 });
 
-            Ok(stream.boxed())
+            Ok::<_, Error>(stream.boxed())
         }
-        .await;
-        result
-            .map(|s| {
-                futures::StreamExt::boxed(futures::StreamExt::map(s, |r| r.map_err(Into::into)))
-            })
-            .map_err(Into::into)
-    }
-}
-
-impl TcpPeerClient {
-    pub async fn append_entries_in(
-        &self,
-        rpc: AppendEntriesRequest<TypeConfig>,
-    ) -> Result<Result<AppendEntriesResponse<NodeId>, RaftError<NodeId>>, Error> {
-        let frame = self
-            .rpc_client
-            .call_raft(&self.target, RpcRaftRequest::AppendEntries { request: rpc })
-            .await?;
-        match frame {
-            RpcRaftFrame::AppendEntries { response } => Ok(response),
-            other => Err(Error::Net(NetError::Rpc(format!(
-                "unexpected frame on append_entries to {:?}: {other:?}",
-                self.target,
-            )))),
-        }
-    }
-
-    pub async fn vote_in(
-        &self,
-        rpc: VoteRequest<NodeId>,
-    ) -> Result<Result<VoteResponse<NodeId>, RaftError<NodeId>>, Error> {
-        let frame = self
-            .rpc_client
-            .call_raft(&self.target, RpcRaftRequest::Vote { request: rpc })
-            .await?;
-        match frame {
-            RpcRaftFrame::Vote { response } => Ok(response),
-            other => Err(Error::Net(NetError::Rpc(format!(
-                "unexpected frame on vote to {:?}: {other:?}",
-                self.target,
-            )))),
-        }
-    }
-
-    pub async fn install_snapshot_in(
-        &self,
-        rpc: InstallSnapshotRequest<TypeConfig>,
-    ) -> Result<
-        Result<InstallSnapshotResponse<NodeId>, RaftError<NodeId, InstallSnapshotError>>,
-        Error,
-    > {
-        let frame = self
-            .rpc_client
-            .call_raft(
-                &self.target,
-                RpcRaftRequest::InstallSnapshot { request: rpc },
-            )
-            .await?;
-        match frame {
-            RpcRaftFrame::InstallSnapshot { response } => Ok(response),
-            other => Err(Error::Net(NetError::Rpc(format!(
-                "unexpected frame on install_snapshot to {:?}: {other:?}",
-                self.target,
-            )))),
-        }
+        .await
+        .map(|s| futures::StreamExt::boxed(futures::StreamExt::map(s, |r| r.map_err(Into::into))))
+        .map_err(Into::into)
     }
 }
 
@@ -305,7 +224,21 @@ impl RaftTransport for TcpPeerClient {
         >,
         zslg_raft::Error,
     > {
-        self.append_entries_in(rpc).await.map_err(Into::into)
+        async {
+            let frame = self
+                .rpc_client
+                .call_raft(&self.target, RpcRaftRequest::AppendEntries { request: rpc })
+                .await?;
+            match frame {
+                RpcRaftFrame::AppendEntries { response } => Ok(response),
+                other => Err(Error::Net(NetError::Rpc(format!(
+                    "unexpected frame on append_entries to {:?}: {other:?}",
+                    self.target,
+                )))),
+            }
+        }
+        .await
+        .map_err(Into::into)
     }
     async fn vote(
         &self,
@@ -317,7 +250,21 @@ impl RaftTransport for TcpPeerClient {
         >,
         zslg_raft::Error,
     > {
-        self.vote_in(rpc).await.map_err(Into::into)
+        async {
+            let frame = self
+                .rpc_client
+                .call_raft(&self.target, RpcRaftRequest::Vote { request: rpc })
+                .await?;
+            match frame {
+                RpcRaftFrame::Vote { response } => Ok(response),
+                other => Err(Error::Net(NetError::Rpc(format!(
+                    "unexpected frame on vote to {:?}: {other:?}",
+                    self.target,
+                )))),
+            }
+        }
+        .await
+        .map_err(Into::into)
     }
     async fn install_snapshot(
         &self,
@@ -332,6 +279,23 @@ impl RaftTransport for TcpPeerClient {
         >,
         zslg_raft::Error,
     > {
-        self.install_snapshot_in(rpc).await.map_err(Into::into)
+        async {
+            let frame = self
+                .rpc_client
+                .call_raft(
+                    &self.target,
+                    RpcRaftRequest::InstallSnapshot { request: rpc },
+                )
+                .await?;
+            match frame {
+                RpcRaftFrame::InstallSnapshot { response } => Ok(response),
+                other => Err(Error::Net(NetError::Rpc(format!(
+                    "unexpected frame on install_snapshot to {:?}: {other:?}",
+                    self.target,
+                )))),
+            }
+        }
+        .await
+        .map_err(Into::into)
     }
 }
