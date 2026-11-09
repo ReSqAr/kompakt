@@ -27,7 +27,6 @@ zstd = { workspace = true }
 [dev-dependencies]
 crossbeam-channel = { workspace = true }
 crossbeam-combinators = { workspace = true, features = ["testing"] }
-zslg-consensus = { workspace = true }
 zslg-time = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time", "test-util"] }
 

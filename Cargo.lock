@@ -5313,7 +5313,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "zslg-consensus",
  "zslg-log",
  "zslg-snapshot",
  "zslg-time",
