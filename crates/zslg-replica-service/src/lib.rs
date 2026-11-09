@@ -113,7 +113,7 @@ impl Replica for ReplicaService {
         &self,
         input: Channel<StampedWrite, crossbeam_combinators::Finite>,
     ) -> Channel<Result<WriteOutcome, zslg_log::Error>, crossbeam_combinators::Infinite> {
-        let run = || -> Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> {
+        let out: Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> = {
             // No thread: the gate is a `filter_map` stage that runs when the *consumer*
             // pulls the returned channel. A rejection short-circuits onto the output; an
             // accepted write is submitted (durably, inline) and the stage yields
@@ -137,7 +137,7 @@ impl Replica for ReplicaService {
                 Some(s.data)
             }))
         };
-        run().err_into()
+        out.err_into()
     }
 
     fn subscribe_from(&self, from: Option<LogIndex>) -> zslg_log::ReplicaStream {

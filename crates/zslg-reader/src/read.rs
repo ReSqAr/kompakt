@@ -649,7 +649,7 @@ impl Reader for ReaderImpl {
     }
 
     fn unstable_tail(&self) -> Channel<Result<Data, zslg_log::Error>, Finite> {
-        let run = || -> Channel<Result<Data, Error>, Finite> {
+        let out: Channel<Result<Data, Error>, Finite> = {
             metrics::read_request(ReadSource::Unstable);
             let local_store = self.local_store.clone();
             let stable_log = self.stable_log.clone();
@@ -670,7 +670,7 @@ impl Reader for ReaderImpl {
                 .until(&self.shutdown))
             .err_into()
         };
-        run().err_into()
+        out.err_into()
     }
 
     fn subscribe_unstable_tail(&self) -> Channel<Result<UnstableEvent, zslg_log::Error>, Infinite> {

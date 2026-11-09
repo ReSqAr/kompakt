@@ -254,7 +254,7 @@ impl zslg_log::StableLogSnapshot for StableLog {
         after: Option<LogIndex>,
         until: LogIndex,
     ) -> Channel<Result<(LogIndex, Data), zslg_log::Error>, Finite> {
-        let run = || -> Channel<Result<(LogIndex, Data), Error>, Finite> {
+        let out: Channel<Result<(LogIndex, Data), Error>, Finite> = {
             // `(after, until)`, scanned as the inclusive `[from, until)` storage
             // takes, off a blocking scan through a bounded channel.
             let from = LogIndex::next_after(after);
@@ -287,7 +287,7 @@ impl zslg_log::StableLogSnapshot for StableLog {
                 feed.close()
             })
         };
-        run().err_into()
+        out.err_into()
     }
 
     fn set_purge_threshold(&self, hlc_threshold: Hlc) -> Result<(), zslg_log::Error> {

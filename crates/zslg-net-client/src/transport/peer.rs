@@ -127,7 +127,7 @@ impl Replica for TcpPeerClient {
         &self,
         input: Channel<StampedWrite, crossbeam_combinators::Finite>,
     ) -> Channel<Result<WriteOutcome, zslg_log::Error>, crossbeam_combinators::Infinite> {
-        let run = || -> Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> {
+        let out: Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> = {
             match &self.target {
                 Target::Registered(node_id) => self.rpc_client.write(*node_id, input),
                 Target::Direct(addr) => {
@@ -140,7 +140,7 @@ impl Replica for TcpPeerClient {
                 }
             }
         };
-        run().err_into()
+        out.err_into()
     }
 
     fn subscribe_from(&self, from: Option<LogIndex>) -> zslg_log::ReplicaStream {
