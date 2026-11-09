@@ -32,43 +32,38 @@
 //! path. Subscribes stay async.
 
 use std::num::NonZeroUsize;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 use std::time::Duration;
-use zslg_consensus::ConsensusError;
 use zslg_lifecycle_types::ConfigError;
 use zslg_net::NetError;
 
-use dashmap::DashMap;
-use parking_lot::Mutex;
-use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
-use tracing::debug;
 
 use crate::Error;
 use bytesize::ByteSize;
 use crossbeam_combinators::Channel;
-use metrics_kit::OpState;
 use zslg_consensus::NodeId;
 use zslg_log::LogIndex;
 use zslg_log::{StampedWrite, WriteOutcome};
 use zslg_net::PeerAddr;
 use zslg_net_wire::messages::{
     RpcFrame, RpcRaftFrame, RpcRaftRequest, RpcReplicaFrame, RpcReplicaRequest, RpcRequest,
-    RpcStreamKind,
 };
-use zslg_net_wire::tcp::{self, SocketOpts};
+use zslg_net_wire::tcp::SocketOpts;
 use zslg_net_wire::{AsyncFrameSink, AsyncFrameStream};
 use zslg_time::Clock;
 
 mod write_stream;
-pub(super) use write_stream::open_write;
 
 mod subscribe_stream;
-pub(super) use subscribe_stream::open_subscribe;
 
-/// Identifies a per-peer unary connection pool. See the header for why the
-/// `Option<NodeId>` is part of the key.
-type UnaryKey = (PeerAddr, Option<NodeId>);
+mod dial;
+mod stream;
+mod unary;
+
+pub(crate) use self::dial::{AddrBook, Dialer};
+pub(crate) use self::stream::StreamOpener;
+pub(crate) use self::unary::UnaryPoolStore;
 
 /// How an outgoing RPC reaches its peer.
 #[derive(Debug, Clone)]
@@ -136,292 +131,6 @@ impl RpcClientConfig {
             )));
         }
         Ok(())
-    }
-}
-
-struct AddrBook {
-    addrs: DashMap<NodeId, PeerAddr>,
-}
-
-impl AddrBook {
-    fn new() -> Self {
-        Self {
-            addrs: DashMap::new(),
-        }
-    }
-
-    fn register(&self, node_id: NodeId, addr: PeerAddr) {
-        self.addrs.insert(node_id, addr);
-    }
-
-    fn resolve(&self, target: &Target) -> Result<(PeerAddr, Option<NodeId>), Error> {
-        match target {
-            Target::Registered(peer) => {
-                let addr = self
-                    .addrs
-                    .get(peer)
-                    .map(|e| e.clone())
-                    .ok_or(Error::Consensus(ConsensusError::UnknownPeer(*peer)))?;
-                Ok((addr, Some(*peer)))
-            }
-            Target::Direct(addr) => Ok((addr.clone(), None)),
-        }
-    }
-}
-
-struct Dialer {
-    clock: Arc<dyn Clock>,
-    socket_opts: SocketOpts,
-    connect_timeout: Duration,
-}
-
-impl Dialer {
-    fn new(clock: Arc<dyn Clock>, socket_opts: SocketOpts, connect_timeout: Duration) -> Self {
-        Self {
-            clock,
-            socket_opts,
-            connect_timeout,
-        }
-    }
-
-    async fn dial(
-        &self,
-        peer_addr: &PeerAddr,
-        expected: Option<NodeId>,
-    ) -> Result<(AsyncFrameSink, AsyncFrameStream), Error> {
-        let (write, read) = tcp::dial(peer_addr, self.connect_timeout, &self.socket_opts).await?;
-        let sink = AsyncFrameSink::new(write, self.clock.clone(), expected);
-        let stream = AsyncFrameStream::new(read, self.clock.clone(), expected);
-        Ok((sink, stream))
-    }
-}
-
-/// A pooled, keep-alive unary connection: one framed TCP connection over which a
-/// single request/response exchange happens at a time. Returned to its
-/// [`UnaryPool`] after each successful exchange for reuse.
-struct UnaryConn {
-    sink: AsyncFrameSink,
-    stream: AsyncFrameStream,
-}
-
-impl UnaryConn {
-    /// Send the request and read exactly one response frame. Any error leaves
-    /// the connection unusable (the caller drops it).
-    async fn exchange(&mut self, request: RpcRequest) -> Result<RpcFrame, Error> {
-        self.sink.send(request).await?;
-        match self.stream.next_frame::<RpcFrame>().await {
-            Some(Ok(frame)) => Ok(frame),
-            Some(Err(e)) => Err(e.into()),
-            None => Err(Error::Net(NetError::Rpc(
-                "stream closed without response".into(),
-            ))),
-        }
-    }
-}
-
-/// Per-peer pool of idle unary connections plus the concurrency gate. Invariant:
-/// at most one request in flight on a checked-out connection (see the header).
-struct UnaryPool {
-    idle: Mutex<Vec<UnaryConn>>,
-    permits: Semaphore,
-    max_idle: usize,
-}
-
-impl UnaryPool {
-    /// Take an idle connection for reuse, if any.
-    fn checkout(&self) -> Option<UnaryConn> {
-        self.idle.lock().pop()
-    }
-
-    /// Return a connection for reuse, or drop it (closing the socket) if the
-    /// idle list is already at capacity.
-    fn checkin(&self, conn: UnaryConn) {
-        let mut idle = self.idle.lock();
-        if idle.len() < self.max_idle {
-            idle.push(conn);
-        }
-    }
-}
-
-struct UnaryPoolStore {
-    pools: DashMap<UnaryKey, Arc<UnaryPool>>,
-    dialer: Arc<Dialer>,
-    max_unary_conns: usize,
-    max_idle: usize,
-    unary_timeout: Duration,
-}
-
-impl UnaryPoolStore {
-    fn new(
-        dialer: Arc<Dialer>,
-        max_unary_conns: usize,
-        max_idle: usize,
-        unary_timeout: Duration,
-    ) -> Self {
-        Self {
-            pools: DashMap::new(),
-            dialer,
-            max_unary_conns,
-            max_idle,
-            unary_timeout,
-        }
-    }
-
-    fn unary_timeout(&self) -> Duration {
-        self.unary_timeout
-    }
-
-    async fn send_unary(
-        &self,
-        addr: PeerAddr,
-        expected: Option<NodeId>,
-        request: RpcRequest,
-    ) -> Result<RpcFrame, Error> {
-        let key: UnaryKey = (addr.clone(), expected);
-        let pool = self
-            .pools
-            .entry(key)
-            .or_insert_with(|| {
-                Arc::new(UnaryPool {
-                    idle: Mutex::new(Vec::new()),
-                    permits: Semaphore::new(self.max_unary_conns),
-                    max_idle: self.max_idle,
-                })
-            })
-            .clone();
-
-        let roundtrip = crate::metrics::rpc_roundtrip_probe();
-        let _permit = pool
-            .permits
-            .acquire()
-            .await
-            .map_err(|_| Error::Net(NetError::Rpc("unary pool closed".into())))?;
-
-        let frame = self
-            .exchange_with_retry(&pool, &addr, expected, request)
-            .await?;
-        roundtrip.finish(OpState::Success);
-        Ok(frame)
-    }
-
-    async fn exchange_with_retry(
-        &self,
-        pool: &UnaryPool,
-        peer_addr: &PeerAddr,
-        expected: Option<NodeId>,
-        request: RpcRequest,
-    ) -> Result<RpcFrame, Error> {
-        if let Some(mut conn) = pool.checkout() {
-            crate::metrics::rpc_conn_reuse(true);
-            match conn.exchange(request.clone()).await {
-                Ok(frame) => {
-                    pool.checkin(conn);
-                    return Ok(frame);
-                }
-                Err(e) => {
-                    debug!(error = %e, "reused unary connection failed; retrying fresh dial");
-                }
-            }
-        } else {
-            crate::metrics::rpc_conn_reuse(false);
-        }
-
-        let checkout = crate::metrics::rpc_conn_checkout_probe();
-        let (sink, stream) = self.dialer.dial(peer_addr, expected).await?;
-        checkout.record();
-        let mut conn = UnaryConn { sink, stream };
-        let frame = conn.exchange(request).await?;
-        pool.checkin(conn);
-        Ok(frame)
-    }
-}
-
-struct StreamOpener {
-    rpc_weak: Weak<RpcClient>,
-    dialer: Arc<Dialer>,
-    pool_channel_cap: usize,
-    subscribe_channel_cap: NonZeroUsize,
-    /// The node's shutdown token — see [`open_subscribe`] for what it is for.
-    cancel: CancellationToken,
-}
-
-impl StreamOpener {
-    fn new(
-        rpc_weak: Weak<RpcClient>,
-        dialer: Arc<Dialer>,
-        pool_channel_cap: usize,
-        subscribe_channel_cap: NonZeroUsize,
-        cancel: CancellationToken,
-    ) -> Self {
-        Self {
-            rpc_weak,
-            dialer,
-            pool_channel_cap,
-            subscribe_channel_cap,
-            cancel,
-        }
-    }
-
-    async fn open(
-        &self,
-        addr: PeerAddr,
-        expected: Option<NodeId>,
-        request: RpcRequest,
-    ) -> Result<AsyncFrameStream, Error> {
-        let probe = crate::metrics::rpc_open_stream_probe();
-        let (mut sink, stream) = self.dialer.dial(&addr, expected).await?;
-        sink.send(request).await?;
-        drop(sink);
-        probe.finish(OpState::Success);
-        Ok(stream)
-    }
-
-    async fn dial_write_stream(
-        &self,
-        addr: PeerAddr,
-        expected: Option<NodeId>,
-    ) -> Result<(AsyncFrameSink, AsyncFrameStream), Error> {
-        let (mut sink, stream) = self.dialer.dial(&addr, expected).await?;
-        sink.send(RpcRequest::Stream(RpcStreamKind::ReplicaWrite))
-            .await?;
-        Ok((sink, stream))
-    }
-
-    fn write(
-        &self,
-        node_id: NodeId,
-        input: Channel<StampedWrite, crossbeam_combinators::Finite>,
-    ) -> Channel<Result<WriteOutcome, Error>, crossbeam_combinators::Infinite> {
-        open_write(
-            self.rpc_weak.clone(),
-            Target::Registered(node_id),
-            input,
-            self.pool_channel_cap,
-        )
-    }
-
-    async fn dial_subscribe_stream(
-        &self,
-        addr: PeerAddr,
-        expected: Option<NodeId>,
-        from: Option<LogIndex>,
-    ) -> Result<(AsyncFrameSink, AsyncFrameStream), Error> {
-        let (mut sink, stream) = self.dialer.dial(&addr, expected).await?;
-        sink.send(RpcRequest::Stream(RpcStreamKind::ReplicaSubscribe { from }))
-            .await?;
-        Ok((sink, stream))
-    }
-
-    fn subscribe_from(&self, node_id: NodeId, from: Option<LogIndex>) -> zslg_log::ReplicaStream {
-        (open_subscribe(
-            self.rpc_weak.clone(),
-            Target::Registered(node_id),
-            from,
-            self.subscribe_channel_cap,
-            self.cancel.clone(),
-        )
-        .ordered(from, "replica subscription"))
-        .err_into()
     }
 }
 
@@ -611,126 +320,4 @@ impl RpcClient {
     clippy::unimplemented,
     reason = "test code"
 )]
-mod tests {
-    use std::time::Duration;
-
-    use tokio::net::TcpListener;
-
-    use super::*;
-    use zslg_time_fake::CountingClock;
-
-    fn test_opts(unary_timeout: Duration) -> RpcClientConfig {
-        RpcClientConfig {
-            tcp_keepalive_interval: Duration::from_secs(5),
-            #[cfg(target_os = "linux")]
-            tcp_user_timeout: Duration::from_secs(15),
-            tcp_keepalive_retries: 3,
-            socket_buffer_size: ByteSize::from_mib(2),
-            unary_timeout,
-            connect_timeout: Duration::from_secs(10),
-            max_unary_conns_per_peer: 32,
-            max_idle_unary_conns_per_peer: 8,
-            pool_channel_capacity: 4096,
-            subscribe_channel_capacity: bytesize::nonzero(1024),
-        }
-    }
-
-    // ── RpcClientConfig::validate ──────────────────────────────────────────
-
-    fn ok_client_config() -> RpcClientConfig {
-        test_opts(Duration::from_secs(10))
-    }
-
-    /// The client buffer must default to the same depth as the replica's live
-    /// channel. A smaller one just relocates the bottleneck one hop: unlike the
-    /// replica side this blocks (30 s CONSUMER_STALL_TIMEOUT) rather than
-    /// shedding, so it would stall the stream instead of collapsing it.
-    #[test]
-    fn subscribe_buffer_defaults_to_the_replica_live_channel_depth() {
-        assert_eq!(ok_client_config().subscribe_channel_capacity.get(), 1024);
-    }
-
-    #[test]
-    fn rejects_zero_keepalive_retries() {
-        let mut c = ok_client_config();
-        c.tcp_keepalive_retries = 0;
-        assert!(matches!(
-            c.validate(),
-            Err(Error::Config(ConfigError::InvalidConfiguration(_)))
-        ));
-    }
-
-    #[test]
-    fn rejects_connect_timeout_above_unary_timeout() {
-        let mut c = ok_client_config();
-        c.connect_timeout = Duration::from_secs(11);
-        assert!(matches!(
-            c.validate(),
-            Err(Error::Config(ConfigError::InvalidConfiguration(_)))
-        ));
-    }
-
-    #[test]
-    fn rejects_zero_unary_connection_caps() {
-        let mut c = ok_client_config();
-        c.max_unary_conns_per_peer = 0;
-        assert!(matches!(
-            c.validate(),
-            Err(Error::Config(ConfigError::InvalidConfiguration(_)))
-        ));
-        let mut c = ok_client_config();
-        c.max_idle_unary_conns_per_peer = 0;
-        assert!(matches!(
-            c.validate(),
-            Err(Error::Config(ConfigError::InvalidConfiguration(_)))
-        ));
-    }
-
-    /// F-29: a peer whose handler is wedged (connection alive, request read, no
-    /// response ever sent) must not hang the caller — the unary deadline converts
-    /// the stall into a typed error.
-    #[tokio::test]
-    async fn unary_rpc_times_out_against_wedged_handler() {
-        // Silent server: accepts the TCP connection, then holds it open forever
-        // without ever writing a response frame.
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let server_addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            loop {
-                let Ok((stream, _)) = listener.accept().await else {
-                    return;
-                };
-                tokio::spawn(async move {
-                    let _hold_open = stream;
-                    std::future::pending::<()>().await;
-                });
-            }
-        });
-
-        let clock = Arc::new(CountingClock::new());
-        let client = RpcClient::new(
-            clock,
-            test_opts(Duration::from_millis(300)),
-            CancellationToken::new(),
-        );
-        let peer = NodeId::new_v4();
-        client.register_peer(
-            peer,
-            PeerAddr {
-                addr: server_addr.into(),
-                server_name: "localhost".into(),
-            },
-        );
-
-        let start = tokio::time::Instant::now();
-        let err = client.echo(peer).await.expect_err("must time out");
-        assert!(
-            err.to_string().contains("timed out"),
-            "unexpected error: {err}"
-        );
-        assert!(
-            start.elapsed() < Duration::from_secs(5),
-            "timeout must fire promptly, not hang"
-        );
-    }
-}
+mod tests;
