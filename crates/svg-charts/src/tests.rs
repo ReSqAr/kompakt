@@ -1,7 +1,9 @@
 //! Tests for the crate root.
 
 use super::*;
+use jiff::{SignedDuration, Timestamp};
 use proptest::prelude::*;
+use std::collections::BTreeSet;
 
 fn built_chart() -> Chart {
     let start = Timestamp::from_second(0).unwrap();
