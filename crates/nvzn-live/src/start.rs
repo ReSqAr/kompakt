@@ -15,7 +15,7 @@ use zslg::Hlc;
 use super::consumer::{LiveSeam, run};
 use super::coverage::{Coverage, Held, Inner, State};
 
-/// A live view not started yet: see [`Coverage::NotStarted`]. [`begin`]
+/// A live view not started yet: it serves the stable snapshot until [`begin`]
 /// starts it.
 pub fn not_started<Ev: WithWireFormat>(
     tenant: Tenant,
