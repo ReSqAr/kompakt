@@ -1,5 +1,4 @@
 #![allow(
-    dead_code,
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
@@ -20,7 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use zslg_consensus::{RaftLeadership, StateReplicator};
 use zslg_log::Data;
-use zslg_net::{LivenessProbe, Router};
+use zslg_net::Router;
 use zslg_snapshot::CompressionLevel;
 use zslg_snapshot::SnapshotStore;
 
@@ -84,21 +83,11 @@ async fn integrate_batch(
     store.integrate_loop(ch).await.map_err(Into::into)
 }
 
-struct NoOpProbe;
-
-#[async_trait::async_trait]
-impl LivenessProbe for NoOpProbe {
-    async fn probe(&self) -> Result<(), zslg_net::Error> {
-        Ok(())
-    }
-}
-
 struct PerNode {
     local_store: Arc<LocalStore>,
     stable_log: Arc<StableLog>,
     replica_log: Arc<ReplicaLogStore>,
     hlc_gate: Arc<HlcGate>,
-    object_store: Arc<dyn ObjectStore>,
     snapshot_store: Arc<RemoteSnapshotStore>,
     _tempdir: TempDir,
 }
@@ -129,7 +118,6 @@ async fn build_per_node() -> PerNode {
         stable_log,
         replica_log,
         hlc_gate: Arc::new(HlcGate::new()),
-        object_store,
         snapshot_store,
         _tempdir: tempdir,
     }

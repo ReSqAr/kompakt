@@ -1,5 +1,4 @@
 #![allow(
-    dead_code,
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
@@ -31,7 +30,6 @@ use zslg_consensus::RaftStateHandle;
 use zslg_consensus::ReplicatedRaftState;
 use zslg_consensus::SpareSelectionStrategy;
 use zslg_consensus_fake::upstream;
-use zslg_hlc_gate::HlcGate;
 use zslg_leader_membership::{LivenessQuery, MembershipChangeInputs, MembershipChangeManager};
 use zslg_leader_membership::{MembershipDriver, MembershipObserver, TickOutcome};
 use zslg_leader_snapshot::create::{SnapshotEntryInputs, SnapshotResult, create_snapshot_entry};
@@ -125,7 +123,6 @@ fn temp_dir(label: &str) -> TempDir {
 struct LeaderWorkspace {
     local_store: Arc<LocalStore>,
     stable_log: Arc<StableLog>,
-    hlc_gate: Arc<HlcGate>,
     object_store: Arc<dyn object_store::ObjectStore>,
 }
 
@@ -138,7 +135,6 @@ async fn build_workspace(dir: &std::path::Path, id: NodeId) -> LeaderWorkspace {
         },
         stable_log: zslg_learner::testing::stable_log_at(&dir.join(format!("stable-{id}.db")))
             .await,
-        hlc_gate: Arc::new(HlcGate::new()),
         object_store: Arc::new(InMemory::new()),
     }
 }

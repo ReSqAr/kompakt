@@ -4658,7 +4658,6 @@ dependencies = [
  "zslg-consensus-fake",
  "zslg-error",
  "zslg-log",
- "zslg-log-fake",
  "zslg-net",
  "zslg-replica-node",
  "zslg-snapshot",

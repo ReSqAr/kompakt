@@ -1,5 +1,4 @@
 #![allow(
-    dead_code,
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
@@ -29,13 +28,3 @@ pub(crate) use cutoff_observer::CutoffObserver;
 // ── deadline-bounded wait helpers ─────────────────────────────────────
 
 pub(crate) use zslg_consensus_fake::nid;
-
-/// [`zslg_log_fake::replica_write`] with the error widened to the public type.
-pub(crate) async fn replica_write<R: zslg_log::Replica + ?Sized>(
-    replica: &R,
-    data: zslg_log::Data,
-) -> Result<zslg_consensus::RaftState, zslg::Error> {
-    zslg_log_fake::replica_write(replica, data)
-        .await
-        .map_err(Into::into)
-}

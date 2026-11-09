@@ -2,7 +2,6 @@
 //! set and the snapshot manifest/watermark propagate to every node's
 //! `RaftStateHandle` after a fenced write commits.
 #![allow(
-    dead_code,
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,

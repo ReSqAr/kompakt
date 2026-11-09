@@ -4,7 +4,6 @@
 //! partition scenario builds on: a cut minority falls behind and converges
 //! after heal, and a cut majority-less leader cannot commit.
 #![allow(
-    dead_code,
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,

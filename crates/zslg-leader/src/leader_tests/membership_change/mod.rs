@@ -1,7 +1,6 @@
 //! The membership change manager driven over a real multi-node Raft: joint
 //! transitions replicated to every node, retargets, reconciliation.
 #![allow(
-    dead_code,
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,

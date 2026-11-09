@@ -8,11 +8,8 @@ use std::time::{Duration, SystemTime};
 use object_store::memory::InMemory;
 
 use super::*;
-use zslg_consensus::RaftStateHandle;
 use zslg_log::LogIndex;
 use zslg_snapshot::CompressionLevel;
-use zslg_snapshot::SnapshotMetadata;
-use zslg_time::Hlc;
 
 /// Retention for the cleanup tests below. `cleanup_snapshots` takes it
 /// per-call rather than reading it off the store.
@@ -300,30 +297,6 @@ fn bootstrap_fence_path_is_stable() {
 }
 
 // ── cleanup ──────────────────────────────────────────────────────────
-
-#[allow(
-    dead_code,
-    reason = "used by cleanup tests that verify manifest-based filtering"
-)]
-fn set_live_manifest(apply: &RaftStateHandle, snapshot_id: SnapshotId) {
-    apply
-        .apply_replicated(
-            zslg_consensus::ReplicatedRaftState {
-                replica: ReplicaMembership::single(std::collections::BTreeSet::new()),
-                manifest: vec![SnapshotMetadata {
-                    start_hlc: Hlc(0),
-                    end_hlc: Hlc(10),
-                    start_index: LogIndex(0),
-                    end_index: LogIndex(0),
-                    snapshot_id,
-                }],
-                manifest_watermark: Some(Hlc(10)),
-                hlc_cutoff: Some(Hlc(10)),
-            },
-            zslg_consensus::RaftGeneration(1),
-        )
-        .expect("apply");
-}
 
 #[tokio::test]
 async fn cleanup_skips_files_within_retention_window() {

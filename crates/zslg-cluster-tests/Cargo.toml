@@ -12,7 +12,6 @@ publish = false
 zslg-time = { workspace = true }
 zslg-snapshot = { workspace = true }
 zslg-net = { workspace = true }
-zslg-log-fake = { workspace = true }
 zslg-log = { workspace = true }
 zslg-error = { workspace = true }
 zslg-consensus-fake = { workspace = true }

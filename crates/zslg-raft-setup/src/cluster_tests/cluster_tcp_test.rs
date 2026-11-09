@@ -2,7 +2,6 @@
 //! exercising the openraft RPC layer end to end: leader election and a fenced
 //! state write observed by every node.
 #![allow(
-    dead_code,
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,

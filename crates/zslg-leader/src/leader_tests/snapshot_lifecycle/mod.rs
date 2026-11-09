@@ -1,6 +1,5 @@
 //! The snapshot job end to end against a real Raft instance and object store.
 #![allow(
-    dead_code,
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
@@ -40,8 +39,6 @@ use uuid::Uuid;
 
 use zslg_consensus::NodeId;
 
-use zslg_consensus::RaftStateHandle;
-
 use zslg_consensus::ReplicaMembership;
 
 use zslg_consensus::ReplicatedRaftState;
@@ -61,8 +58,6 @@ use zslg_log::{LocalStoreMut, StableLogSnapshot};
 use zslg_net::PeerAddr;
 
 use zslg_object_store::{RemoteSnapshotStore, SnapshotStoreConfig};
-
-use zslg_raft::Raft;
 
 use zslg_raft_setup::RaftNode;
 

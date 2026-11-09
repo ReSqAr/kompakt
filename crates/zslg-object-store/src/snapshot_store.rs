@@ -54,8 +54,6 @@ use crate::framing;
 use crate::metrics::{self, ObjectStoreOp};
 use crossbeam_combinators::Channel;
 use metrics_kit::OpState;
-#[cfg(test)]
-use zslg_consensus::ReplicaMembership;
 use zslg_log::SnapshotEntry;
 use zslg_log::ToStorage as _;
 use zslg_snapshot::CompressionLevel;

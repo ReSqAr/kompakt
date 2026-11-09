@@ -13,7 +13,6 @@
 //! via the shared object-store fence.
 
 #![allow(
-    dead_code,
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,

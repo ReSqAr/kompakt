@@ -12,7 +12,6 @@
 //! keepalive / `TCP_USER_TIMEOUT`) is left to the docker harness.
 
 #![allow(
-    dead_code,
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,

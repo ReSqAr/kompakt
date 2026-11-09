@@ -1,5 +1,4 @@
 #![allow(
-    dead_code,
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
@@ -52,7 +51,6 @@ use zslg_consensus::NodeId;
 use zslg_consensus::ReplicaMembership;
 use zslg_consensus::ReplicatedRaftState;
 use zslg_error::Error;
-use zslg_hlc_gate::HlcGate;
 use zslg_leader_snapshot::create::{SnapshotInputs, build_snapshot};
 use zslg_learner::LocalStore;
 use zslg_learner::StableLog;
@@ -158,7 +156,6 @@ struct Churn {
     local_store: Arc<LocalStore>,
     stable_log: Arc<StableLog>,
     object_store: Arc<dyn ObjectStore>,
-    hlc_gate: Arc<HlcGate>,
     router: Arc<dyn Router>,
     _dir: tempfile::TempDir,
 }
@@ -247,7 +244,6 @@ async fn boot_churn() -> Churn {
         local_store,
         stable_log,
         object_store,
-        hlc_gate: Arc::new(HlcGate::new()),
         router,
         _dir: dir,
     }
