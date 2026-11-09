@@ -45,7 +45,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
 use crate::Error;
 use crate::metrics::{self, WriteRpcOutcome};
-use crossbeam_combinators::Channel;
+use crossbeam_combinators::{CancelHandle, Cancellation, Channel};
 use zslg_consensus::NodeId;
 use zslg_consensus::{all_targets, is_quorum};
 use zslg_log::Data;
@@ -119,7 +119,8 @@ impl Coordinator {
         for node in all_targets(&coord.streams.tracker().snapshot().replica) {
             let rx = coord.streams.ensure(node);
             let weak = Arc::downgrade(&coord);
-            tokio::task::spawn_blocking(move || run_replica(weak, node, rx));
+            let stopped = coord.streams.stopped();
+            tokio::task::spawn_blocking(move || run_replica(weak, node, rx, stopped));
         }
 
         // Async, not `spawn_blocking`: nothing in this loop blocks — `insert` is a
@@ -182,11 +183,18 @@ impl Coordinator {
 
 /// One replica's write connection, for the lifetime of the coordinator: prime
 /// from `pending`, stream, apply outcomes, reconnect with backoff. Returns only
-/// when the coordinator is gone or the node has left the replica set.
+/// when the coordinator is gone or the node has left the replica set. The
+/// response stream is bound to `stopped`, so a coordinator dropped while the
+/// peer is idle ends the wait instead of leaving it parked.
 ///
 /// Priming before merging the fan is what makes a reconnect self-healing —
 /// whatever this node missed while disconnected is still in `pending`.
-fn run_replica(weak: Weak<Coordinator>, node: NodeId, mut ids_rx: Receiver<DataId>) {
+fn run_replica(
+    weak: Weak<Coordinator>,
+    node: NodeId,
+    mut ids_rx: Receiver<DataId>,
+    stopped: Cancellation,
+) {
     let mut backoff = REOPEN_BACKOFF;
     loop {
         let Some(this) = weak.upgrade() else {
@@ -219,7 +227,8 @@ fn run_replica(weak: Weak<Coordinator>, node: NodeId, mut ids_rx: Receiver<DataI
             .streams
             .router()
             .remote(node)
-            .write(input.into_finite());
+            .write(input.into_finite())
+            .until(&stopped);
         drop(this);
 
         while let Ok(Ok(outcome)) = outcomes.recv() {
@@ -429,12 +438,21 @@ struct StreamOrchestrator {
     tracker: Arc<dyn RaftStateTracker>,
     reconciled_gen: AtomicU64,
     fans: DashMap<NodeId, Sender<DataId>>,
+    /// Fires when the orchestrator — and so the coordinator — is dropped, to
+    /// wake loops parked on a replica's response stream. Without it an idle
+    /// peer parks them for good, and a runtime dropped with the node still
+    /// live waits on them forever.
+    _stop: CancelHandle,
+    stopped: Cancellation,
 }
 
 impl StreamOrchestrator {
     fn new(router: Arc<dyn Router>, tracker: Arc<dyn RaftStateTracker>) -> Self {
         let start_gen = tracker.snapshot().generation.0;
+        let (stop, stopped) = CancelHandle::new();
         Self {
+            _stop: stop,
+            stopped,
             router,
             tracker,
             reconciled_gen: AtomicU64::new(start_gen),
@@ -455,6 +473,10 @@ impl StreamOrchestrator {
 
     fn tracker(&self) -> &Arc<dyn RaftStateTracker> {
         &self.tracker
+    }
+
+    fn stopped(&self) -> Cancellation {
+        self.stopped.clone()
     }
 
     fn should_stop(&self, node: NodeId) -> bool {
@@ -489,7 +511,8 @@ impl StreamOrchestrator {
                 let (ids_tx, ids_rx) = crossbeam_channel::bounded(FAN_CAP);
                 v.insert(ids_tx);
                 let weak = coordinator_weak.clone();
-                tokio::task::spawn_blocking(move || run_replica(weak, node, ids_rx));
+                let stopped = self.stopped();
+                tokio::task::spawn_blocking(move || run_replica(weak, node, ids_rx, stopped));
             }
         }
     }

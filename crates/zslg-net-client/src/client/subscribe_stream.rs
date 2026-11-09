@@ -95,6 +95,10 @@ pub(crate) fn open_subscribe(
                 }
             };
             drop(blk_sink); // subscribe is uni-directional — client never writes
+            // Closes the socket when this task ends *for any reason* — cancelled,
+            // finished, or dropped with its runtime — because the blocking reader
+            // below holds its own descriptor and only a `shutdown` wakes it.
+            let raw = CloseOnDrop(raw);
 
             let reader =
                 tokio::task::spawn_blocking(move || subscribe_reader_loop(blk_stream, out_tx));
@@ -108,16 +112,32 @@ pub(crate) fn open_subscribe(
             tokio::pin!(join);
             tokio::select! {
                 () = cancel.cancelled() => {
-                    let _ = raw.shutdown(std::net::Shutdown::Both);
+                    raw.close();
                     join.await;
                 }
                 () = &mut join => {}
             }
-            let _ = raw.shutdown(std::net::Shutdown::Both);
             // The subscriber sees `Aborted(ProducerGone)`, backs off, and resumes
             // from its durable cursor.
         },
     )
+}
+
+/// A socket handle that shuts the connection down when dropped, so a blocking
+/// read on another descriptor of it returns. Dropping the handle alone would
+/// not: `close(2)` on one dup leaves the socket up.
+struct CloseOnDrop(std::net::TcpStream);
+
+impl CloseOnDrop {
+    fn close(&self) {
+        let _ = self.0.shutdown(std::net::Shutdown::Both);
+    }
+}
+
+impl Drop for CloseOnDrop {
+    fn drop(&mut self) {
+        self.close();
+    }
 }
 
 /// Hand one record to the consumer, **waiting** while it is merely behind.
