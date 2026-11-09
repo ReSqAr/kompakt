@@ -174,14 +174,16 @@ pub(crate) async fn assert_durability_chain_on(
             }
         })
         .await;
-        let seen = seen
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let missing: BTreeSet<DataId> = want
-            .keys()
-            .copied()
-            .filter(|id| !seen.contains_key(id))
-            .collect();
+        // The guard's scope ends here: the report below awaits.
+        let missing: BTreeSet<DataId> = {
+            let seen = seen
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            want.keys()
+                .copied()
+                .filter(|id| !seen.contains_key(id))
+                .collect()
+        };
         if !(found.is_ok() && missing.is_empty()) {
             let report = explain_missing(cluster, id, &missing, found.is_err()).await;
             panic!(
