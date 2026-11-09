@@ -7,7 +7,10 @@ use crate::{
         self, FLUSH_INTERVAL, TestLog, User, UserId, commit_row, event, inmemory, tenant, tenant_id,
     },
 };
+use nvzn_live::{LiveLimits, Wait};
+use nvzn_types::{Error, StopReason};
 use std::sync::Arc;
+use std::time::Duration;
 
 fn new_user(id: u128, name: &str) -> event::Event {
     event::Event::NewUser(testing::NewUserV3 {
@@ -346,4 +349,87 @@ mod subscribe_stable_log {
             .subscribe_stable_log::<User>()
             .expect("a registered projection subscribes");
     }
+}
+
+type Users = event::UserEvent<'static>;
+const LONG: std::time::Duration = std::time::Duration::from_secs(5);
+
+// ── the live view through a running dispatcher ───────────────────────────────
+//
+// The live view's own tests are in `nvzn-live`, over a rig with no fold. These
+// two need the dispatcher itself: its start waits for the fold, and its fold
+// stops when the live tail ends.
+
+/// A sync that fails at startup is retried: the view starts once one
+/// succeeds, rather than serving the stable snapshot for good.
+#[tokio::test]
+async fn the_start_retries_a_failed_sync() {
+    let store = inmemory();
+    let log = TestLog::new();
+    let failing: Arc<dyn zslg::Reader> =
+        Arc::new(crate::testing::FailingSyncReader::new(log.reader(), 2));
+    let mut dispatcher = Dispatcher::from_db(
+        store,
+        log.writer(),
+        failing,
+        FLUSH_INTERVAL,
+        &tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    let mut manager = dispatcher.new_handler::<event::Event>(tenant());
+    manager.register::<User>().unwrap();
+    let (writer, reader) = manager.finalise().unwrap();
+    let live = reader.live::<Users>().unwrap();
+    // Not started: the wait for an entry nobody wrote times out.
+    assert_eq!(
+        live.wait_for(crate::testing::data_id(9, 9), Duration::from_millis(50))
+            .await,
+        Wait::TimedOut
+    );
+    // The fold runs: the start waits for it to pass the write below.
+    let _fold = dispatcher.finalise().await.unwrap();
+    // A write before the start: its wait waits for the start too.
+    let d = writer.write(&[new_user(3, "amos")]).await.unwrap();
+    assert_eq!(live.wait_for(d, LONG).await, Wait::Seen);
+    // `Seen` is only ever answered by a started view: the start went through
+    // after the two failed syncs.
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_ended_tail_stops_the_dispatcher() {
+    let store = inmemory();
+    let log = TestLog::new();
+    let mut dispatcher = Dispatcher::from_db(
+        store.clone(),
+        log.writer(),
+        log.reader(),
+        FLUSH_INTERVAL,
+        &tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    let mut manager = dispatcher.new_handler::<event::Event>(tenant());
+    manager.register::<User>().unwrap();
+    let (_writer, reader) = manager.finalise().unwrap();
+    let fold = dispatcher.finalise().await.unwrap();
+    let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
+
+    log.hang_up_unstable();
+    let ended = tokio::time::timeout(Duration::from_secs(5), fold)
+        .await
+        .expect("the dispatcher stops")
+        .unwrap();
+    assert!(
+        matches!(ended, Err(Error::FoldStopped(StopReason::LiveStreamEnded))),
+        "{ended:?}"
+    );
+    let live2 = live.clone();
+    let read = tokio::task::spawn_blocking(move || live2.snapshot().map(|_| ()))
+        .await
+        .unwrap();
+    assert!(matches!(
+        read,
+        Err(Error::FoldStopped(StopReason::LiveStreamEnded))
+    ));
 }

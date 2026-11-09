@@ -17,7 +17,7 @@ use super::coverage::{Coverage, Held, Inner, State};
 
 /// A live view not started yet: see [`Coverage::NotStarted`]. [`begin`]
 /// starts it.
-pub(crate) fn not_started<Ev: WithWireFormat>(
+pub fn not_started<Ev: WithWireFormat>(
     tenant: Tenant,
     store: ArcStore,
     fold_state: FoldState,
@@ -49,7 +49,7 @@ pub(crate) fn not_started<Ev: WithWireFormat>(
 
 /// Start `live`: open the unstable tail, scan the stable log from the store's
 /// watermark up to the stable one, and integrate from then on.
-pub(crate) fn begin<Ev: WithWireFormat>(
+pub fn begin<Ev: WithWireFormat>(
     live: &Live<Ev>,
     reader: &Arc<dyn zslg::Reader>,
     cancelled: &crossbeam_combinators::Cancellation,
@@ -121,7 +121,7 @@ const START_BACKOFF_MAX: Duration = Duration::from_secs(10);
 /// before that would hold events above a watermark the store no longer has.
 /// A failed sync is retried with backoff; the view stays `NotStarted` (and
 /// serves the stable snapshot) only if the fold stops.
-pub(crate) async fn begin_when_caught_up<Ev: WithWireFormat>(
+pub async fn begin_when_caught_up<Ev: WithWireFormat>(
     live: Live<Ev>,
     syncer: nvzn_types::Syncer,
     reader: Arc<dyn zslg::Reader>,

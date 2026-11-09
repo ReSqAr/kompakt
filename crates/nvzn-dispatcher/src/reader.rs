@@ -1,7 +1,5 @@
 use crate::PENDING_SUBSCRIBERS;
 use crate::Syncer;
-use crate::live::{self, Live, LiveLimits};
-use crate::metrics::{self, ReadKind};
 use crate::subset;
 use crate::{
     ArcStore, Error, EventSet, Projection, ProjectionTypeId, Ref, Snapshot, SubEventOf, Tenant,
@@ -9,6 +7,8 @@ use crate::{
 };
 use crate::{FoldState, Subscriptions};
 use crossbeam_combinators::{Channel, Infinite, RegistryError};
+use nvzn_live::metrics::{self, ReadKind};
+use nvzn_live::{Live, LiveLimits};
 use nvzn_projector::Registered;
 use std::collections::{BTreeMap, BTreeSet};
 use std::marker::PhantomData;
@@ -194,7 +194,7 @@ impl<Ev: WithWireFormat> Reader<Ev> {
             // Nothing could ever be live: no tail, no scan, no tasks.
             return Ok(view);
         }
-        tokio::spawn(live::begin_when_caught_up(
+        tokio::spawn(nvzn_live::begin_when_caught_up(
             view.clone(),
             self.syncer.clone(),
             Arc::clone(&self.reader),
@@ -208,7 +208,7 @@ impl<Ev: WithWireFormat> Reader<Ev> {
     #[cfg(test)]
     pub(crate) fn live_started<S: EventSet>(&self, limits: LiveLimits) -> Result<Live<Ev>, Error> {
         let view = self.not_started::<S>(limits)?;
-        live::begin(
+        nvzn_live::begin(
             &view,
             &self.reader,
             &self.subscriptions.cancelled,
@@ -225,7 +225,7 @@ impl<Ev: WithWireFormat> Reader<Ev> {
                 projectors.insert(*type_id, (registered.make)()?);
             }
         }
-        live::not_started(
+        nvzn_live::not_started(
             self.tenant,
             self.store.clone(),
             self.fold_state.clone(),

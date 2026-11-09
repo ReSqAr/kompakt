@@ -113,7 +113,8 @@ Workspace-internal dependencies only; "dev" lists edges that exist only for test
 
 | crate | depends on | dev only |
 |---|---|---|
-| `nvzn-dispatcher` | crossbeam-combinators, metrics-kit, nvzn-projection, nvzn-projector, nvzn-resultset, nvzn-store, nvzn-store-fake, nvzn-store-rocksdb, nvzn-types, zslg | nvzn-fixtures |
+| `nvzn-live` | crossbeam-combinators, metrics-kit, nvzn-projection, nvzn-projector, nvzn-resultset, nvzn-store, nvzn-types, zslg | nvzn-fixtures, nvzn-store-fake |
+| `nvzn-dispatcher` | crossbeam-combinators, metrics-kit, nvzn-live, nvzn-projection, nvzn-projector, nvzn-resultset, nvzn-store, nvzn-store-fake, nvzn-store-rocksdb, nvzn-types, zslg | nvzn-fixtures |
 | `zslg-writer-node` | bytesize, shutdown, zslg-consensus, zslg-error, zslg-hlc-clock, zslg-log, zslg-net, zslg-net-setup, zslg-observability, zslg-peers, zslg-raft-tracker, zslg-writer | — |
 | `zslg-leader` | error-union, shutdown, zslg-consensus, zslg-error, zslg-leader-compaction, zslg-leader-integrator, zslg-leader-membership, zslg-leader-snapshot, zslg-lifecycle-types, zslg-log, zslg-net, zslg-snapshot, zslg-time | bytesize, crossbeam-combinators, pace-kit, raft-kit, rocksdb-kit, testing-kit, warn-throttle, zslg-consensus-fake, zslg-hlc-clock, zslg-hlc-gate, zslg-learner, zslg-log-fake, zslg-net-client, zslg-net-fake, zslg-net-setup, zslg-net-wire, zslg-object-store, zslg-peers, zslg-raft, zslg-raft-fake, zslg-raft-setup, zslg-replica-log, zslg-replica-service, zslg-time-fake |
 | `zslg-net-setup` | error-union, shutdown, zslg-consensus, zslg-error, zslg-lifecycle-types, zslg-log, zslg-net, zslg-net-client, zslg-net-router, zslg-net-server, zslg-net-wire, zslg-snapshot, zslg-time | — |

@@ -16,8 +16,10 @@ pub mod metrics;
 
 // The names the moved modules reach for as `crate::X`.
 #[cfg(test)]
+pub(crate) use nvzn_projection::Watermark;
+#[cfg(test)]
 pub(crate) use nvzn_projection::{Index, ReadTransactionExt, View, Write};
-pub(crate) use nvzn_projection::{Projection, Ref, Watermark};
+pub(crate) use nvzn_projection::{Projection, Ref};
 pub use nvzn_resultset::{IndexJoin, Lazy, LazyRows, ResultSet, Snapshot};
 pub(crate) use nvzn_store::ConfigHash;
 #[cfg(test)]
@@ -27,12 +29,11 @@ pub use nvzn_store_fake::InMemoryStore;
 pub use nvzn_store_rocksdb::RocksDBStore;
 #[cfg(test)]
 pub(crate) use nvzn_types::ProjectionId;
-pub(crate) use nvzn_types::{
-    APP_ID_LEN, Encoder, EventSet, EventWriter, StopReason, SubEventOf, WithWireFormat, subset,
-};
+#[cfg(test)]
+pub(crate) use nvzn_types::StopReason;
+pub(crate) use nvzn_types::{Encoder, EventSet, EventWriter, SubEventOf, WithWireFormat, subset};
 
 mod fold;
-mod live;
 mod reader;
 mod registration;
 mod subscribers;
@@ -53,7 +54,7 @@ mod resultset_tests;
 )]
 mod tests;
 
-pub use live::{Live, LiveLimits, Wait, is_live};
+pub use nvzn_live::{Live, LiveLimits, Wait, assert_live, is_live};
 use nvzn_types::{FoldState, SubscriptionItem, Subscriptions, Syncer};
 pub use reader::Reader;
 pub use registration::AssociatedProjectorManager;

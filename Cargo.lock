@@ -2142,12 +2142,11 @@ dependencies = [
 name = "nvzn-dispatcher"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "bytes",
- "crossbeam-channel",
  "crossbeam-combinators",
  "metrics-kit",
  "nvzn-fixtures",
+ "nvzn-live",
  "nvzn-projection",
  "nvzn-projector",
  "nvzn-resultset",
@@ -2155,7 +2154,6 @@ dependencies = [
  "nvzn-store-fake",
  "nvzn-store-rocksdb",
  "nvzn-types",
- "proptest",
  "serde",
  "sha2",
  "tempfile",
@@ -2179,6 +2177,30 @@ dependencies = [
  "postcard",
  "proptest",
  "serde",
+ "zslg",
+]
+
+[[package]]
+name = "nvzn-live"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "metrics-kit",
+ "nvzn-fixtures",
+ "nvzn-projection",
+ "nvzn-projector",
+ "nvzn-resultset",
+ "nvzn-store",
+ "nvzn-store-fake",
+ "nvzn-types",
+ "proptest",
+ "serde",
+ "tokio",
+ "tokio-util",
+ "tracing",
  "zslg",
 ]
 

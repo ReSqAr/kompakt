@@ -7,7 +7,7 @@ nvzn split (step 15) is tracked separately below.
 
 ## Result
 
-The workspace is 87 crates (60 `zslg-*`, 10 `nvzn-*` plus the facades and libraries; `crates/README.md`). The `zslg` facade is
+The workspace is 88 crates (60 `zslg-*`, 11 `nvzn-*` plus the facades and libraries; `crates/README.md`). The `zslg` facade is
 `pub use`, the public `Error`, `zslg::testing` and the
 examples; it depends on no implementation, and on one type crate, `zslg-error`, so the
 public `Error` is re-exported from where it is defined. The layering test
@@ -47,7 +47,7 @@ layer" (except `zslg-lifecycle-types` and `zslg-error`).
   `cluster_proptest::cluster_upholds_invariants_under_generated_faults` and
   `objectstorage-cache` evictor timing; decommission tests flake under a full
   parallel run and pass in isolation.
-- The `lint` and `ci` cargo profiles were dropped (CI uses the default one). With 87 crates
+- The `lint` and `ci` cargo profiles were dropped (CI uses the default one). With 88 crates
   `target/` grows large; stale test executables in `target/debug/deps` can be deleted when the disk fills.
 
 ## nvzn (step 15)
@@ -63,8 +63,9 @@ functions and `nvzn::testing`.
 | `nvzn-projector` | procedure | `Projector`, `ProjectorManager`, `fold_event`, `projection_rows` slice |
 | `nvzn-store-fake` | fake | in-memory store |
 | `nvzn-store-rocksdb` | implementation | RocksDB store, its white-box tests, `store_live_sst` slice |
-| `nvzn-resultset` | implementation | `ResultSet` and combinators |
-| `nvzn-dispatcher` | assembly | **dispatcher, reader and live view**, fold/live metric slices, `all()` registry |
+| `nvzn-resultset` | implementation | `ResultSet` and combinators, **`Snapshot`** |
+| `nvzn-live` | assembly | **the live view** (`Live`, `is_live`, `assert_live!`), its metric slice and the `reads` metric |
+| `nvzn-dispatcher` | assembly | dispatcher and reader, fold metric slice, `all()` registry |
 | `nvzn-fixtures` | fake | test events, projections, store/reader doubles |
 
 Deviations from design §9 (all forced by the code, not by preference):
@@ -78,11 +79,21 @@ Deviations from design §9 (all forced by the code, not by preference):
   design had no home for it (user-approved).
 - **`Subscriptions` is a shared cell in `nvzn-types`** (user-approved), together
   with `Syncer`/`Encoder`/`EventWriter`, which wrap only `zslg` and `FoldState`.
-- **Dispatcher, reader and live are one assembly.** `Live` returns `Snapshot`,
-  the reader hands out `Live` and owns the cell the dispatcher fills, the
-  dispatcher hands out `Reader`s, and `Dispatcher::new` names the RocksDB store.
-  Any split would be a cycle or a sideways edge. `Dispatcher::in_memory` is behind
-  the crate's `testing` feature (optional dependency on the fake).
+- **The live view is its own assembly, `nvzn-live`; the dispatcher and the reader are
+  one.** The first cut kept all three together because `Live` returns `Snapshot`, the
+  dispatcher's read type. `Snapshot` is a thin wrapper over a tenant id and a read
+  transaction and returns `ResultSet`, so it moved to `nvzn-resultset`; after that the
+  edge is one-way (the reader starts a `Live` through `nvzn_live::{not_started, begin,
+  begin_when_caught_up}`, which take pieces rather than a `Reader`). The dispatcher
+  hands out `Reader`s and owns the cell they share, and `Dispatcher::new` names the
+  RocksDB store, so those two stay together. `Dispatcher::in_memory` is behind the
+  crate's `testing` feature (optional dependency on the fake).
+- **`nvzn_reads_total` lives in `nvzn-live`**, because the live view counts its reads
+  (`live`) and the reader counts its own (`stable`) through the same function; the
+  dispatcher's `metrics` module re-exports the old paths. The live tests run over a rig
+  with no fold (`nvzn-live/src/tests.rs`); the two that need a running dispatcher
+  (`the_start_retries_a_failed_sync`, `an_ended_tail_stops_the_dispatcher`) are in
+  `nvzn-dispatcher/src/reader/tests.rs`.
 - **Metrics:** per-crate slices on `metrics-kit` (`nvzn_` namespace); a golden
   dump captured before the move pins names, kinds, units and help.
 - **`TestLog`** moved to `zslg-log-fake` and is published as `zslg::testing`;

@@ -96,7 +96,7 @@ The `nvzn*` crates are built on the `zslg` facade (D11) and may depend on it; no
 
 | crate | purpose |
 |---|---|
-| `nvzn-resultset` | Lazy, tenant-scoped query results over one nvzn read transaction |
+| `nvzn-resultset` | Lazy, tenant-scoped query results and `Snapshot` over one nvzn read transaction |
 | `nvzn-store-rocksdb` | The nvzn Store on RocksDB |
 | `zslg-hlc-clock` | The hybrid logical clock |
 | `zslg-hlc-gate` | Write admission against the HLC cutoff |
@@ -129,7 +129,8 @@ The `nvzn*` crates are built on the `zslg` facade (D11) and may depend on it; no
 
 | crate | purpose |
 |---|---|
-| `nvzn-dispatcher` | The nvzn runtime: the fold, its supervisor, readers and live views |
+| `nvzn-live` | Live views: the folded state plus the few events received above it, readable at once |
+| `nvzn-dispatcher` | The nvzn runtime: the fold, its supervisor and readers |
 | `zslg-follower-node` | Follower node assembly: learner plus writer on one node |
 | `zslg-leader` | Leader assembly: hands every leader job its handles and config slice |
 | `zslg-learner-node` | Learner node assembly: read-only node over the learner assembly |

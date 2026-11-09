@@ -106,6 +106,7 @@ nvzn-store = { path = "crates/nvzn-store" }
 nvzn-projector = { path = "crates/nvzn-projector" }
 nvzn-fixtures = { path = "crates/nvzn-fixtures" }
 nvzn-dispatcher = { path = "crates/nvzn-dispatcher" }
+nvzn-live = { path = "crates/nvzn-live" }
 nvzn-resultset = { path = "crates/nvzn-resultset" }
 nvzn-store-fake = { path = "crates/nvzn-store-fake" }
 nvzn-store-rocksdb = { path = "crates/nvzn-store-rocksdb" }

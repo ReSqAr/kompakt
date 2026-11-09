@@ -1,20 +1,27 @@
-//! Live-view tests.
+//! Live-view tests, over a rig with no fold running: F moves only when a test
+//! commits a watermark ([`set_f`]).
 
 use super::coverage::Held;
 use super::*;
-use crate::testing::{
-    FLUSH_INTERVAL, NewTodoV1, NewUserV3, PingedV1, TestLog, Todo, TodoId, User, UserId, data_id,
-    event, hlc, inmemory, payload, tenant, tenant_id,
-};
-use crate::{Dispatcher, Reader, Ref, Store};
-use crate::{StopReason, Watermark};
 use bytes::Bytes;
-use crossbeam_combinators::CancelHandle;
-use crossbeam_combinators::Channel;
+use crossbeam_combinators::{CancelHandle, Cancellation, Channel};
+use nvzn_fixtures::{
+    NewTodoV1, NewUserV3, PingedV1, Todo, TodoId, User, UserId, commit_row, event, hlc, payload,
+    tenant, tenant_id,
+};
+use nvzn_projection::Ref;
+use nvzn_projector::ProjectorManager;
+use nvzn_store::Store;
 use proptest::prelude::*;
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use zslg::testing::{TestLog, data_id};
 use zslg::{Data, DataId, Hlc, LogIndex, StableLogEvent, UnstableEvent};
+
+fn inmemory() -> nvzn_store::ArcStore {
+    Arc::new(nvzn_store_fake::InMemoryStore::default())
+}
 
 type Users = event::UserEvent<'static>;
 
@@ -43,25 +50,72 @@ fn blob(events: &[event::Event]) -> Bytes {
     payload(tenant_id(), events)
 }
 
-/// A reader over `User` and `Todo` with no fold running: F moves only when
-/// a test commits a watermark ([`set_f`]).
-async fn rig() -> (Arc<dyn Store>, TestLog, Reader<event::Event>) {
+/// What a reader hands a live view, without a dispatcher: the store, the log's
+/// reader, the registered projections, and a fold nobody runs.
+struct Rig {
+    store: Arc<dyn Store>,
+    reader: Arc<dyn zslg::Reader>,
+    manager: ProjectorManager<event::Event>,
+    fold_state: FoldState,
+    cancelled: Cancellation,
+    _cancel: CancelHandle,
+    folded: tokio::sync::watch::Sender<Option<Hlc>>,
+}
+
+impl Rig {
+    fn new(store: Arc<dyn Store>, reader: Arc<dyn zslg::Reader>) -> Self {
+        let mut manager = ProjectorManager::<event::Event>::new(tenant());
+        manager.register::<User>().unwrap();
+        manager.register::<Todo>().unwrap();
+        let (cancel, cancelled) = CancelHandle::new();
+        Self {
+            store,
+            reader,
+            manager,
+            fold_state: FoldState::new(tokio_util::sync::CancellationToken::new()),
+            cancelled,
+            _cancel: cancel,
+            folded: tokio::sync::watch::channel(None).0,
+        }
+    }
+
+    /// A view over the registered projections whose events are all in `S`,
+    /// not started.
+    fn not_started<S: EventSet>(&self, limits: LiveLimits) -> Result<Live<event::Event>, Error> {
+        let mut projectors = BTreeMap::new();
+        for (type_id, registered) in &self.manager.registered {
+            if subset(registered.events, S::EVENTS) {
+                projectors.insert(*type_id, (registered.make)()?);
+            }
+        }
+        not_started(
+            tenant(),
+            self.store.clone(),
+            self.fold_state.clone(),
+            projectors,
+            S::EVENTS,
+            limits,
+        )
+    }
+
+    /// A view started now, without waiting for a fold.
+    fn live_started<S: EventSet>(&self, limits: LiveLimits) -> Result<Live<event::Event>, Error> {
+        let view = self.not_started::<S>(limits)?;
+        begin(
+            &view,
+            &self.reader,
+            &self.cancelled,
+            self.folded.subscribe(),
+        )?;
+        Ok(view)
+    }
+}
+
+async fn rig() -> (Arc<dyn Store>, TestLog, Rig) {
     let store = inmemory();
     let log = TestLog::new();
-    let mut dispatcher = Dispatcher::from_db(
-        store.clone(),
-        log.writer(),
-        log.reader(),
-        FLUSH_INTERVAL,
-        &tokio_util::sync::CancellationToken::new(),
-    )
-    .await
-    .unwrap();
-    let mut manager = dispatcher.new_handler::<event::Event>(tenant());
-    manager.register::<User>().unwrap();
-    manager.register::<Todo>().unwrap();
-    let (_writer, reader) = manager.finalise().unwrap();
-    (store, log, reader)
+    let rig = Rig::new(store.clone(), log.reader());
+    (store, log, rig)
 }
 
 /// The store's watermark, as if the fold had committed through `did`.
@@ -125,8 +179,8 @@ const LONG: Duration = Duration::from_secs(5);
 
 #[tokio::test]
 async fn wait_for_sees_an_entry_once_held() {
-    let (_store, mut log, reader) = rig().await;
-    let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
+    let (_store, mut log, rig) = rig().await;
+    let live = rig.live_started::<Users>(LiveLimits::default()).unwrap();
     let d = log.push_unstable(blob(&[new_user(1, "holden")]));
     assert_eq!(live.wait_for(d, LONG).await, Wait::Seen);
     assert!(
@@ -139,8 +193,8 @@ async fn wait_for_sees_an_entry_once_held() {
 /// F advance shows it, and the retirement wakes the wait.
 #[tokio::test]
 async fn wait_for_wakes_when_f_passes_the_entry() {
-    let (store, _log, reader) = rig().await;
-    let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
+    let (store, _log, rig) = rig().await;
+    let live = rig.live_started::<Users>(LiveLimits::default()).unwrap();
     let d = data_id(9, 9);
     let waiting = tokio::spawn({
         let live = live.clone();
@@ -160,8 +214,8 @@ async fn wait_for_wakes_when_f_passes_the_entry() {
 
 #[tokio::test]
 async fn wait_for_times_out_on_an_entry_that_never_arrives() {
-    let (_store, _log, reader) = rig().await;
-    let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
+    let (_store, _log, rig) = rig().await;
+    let live = rig.live_started::<Users>(LiveLimits::default()).unwrap();
     assert_eq!(live.wait_for(data_id(5, 5), SHORT).await, Wait::TimedOut);
 }
 
@@ -169,8 +223,8 @@ async fn wait_for_times_out_on_an_entry_that_never_arrives() {
 /// served, and a wait runs to its deadline.
 #[tokio::test]
 async fn wait_for_times_out_while_overflowed() {
-    let (_store, mut log, reader) = rig().await;
-    let live = reader
+    let (_store, mut log, rig) = rig().await;
+    let live = rig
         .live_started::<Users>(LiveLimits {
             max_held_events: 1,
             max_held_bytes: usize::MAX,
@@ -191,8 +245,8 @@ async fn wait_for_times_out_while_overflowed() {
 /// recovered.
 #[tokio::test(flavor = "multi_thread")]
 async fn wait_for_sees_a_folded_entry_while_overflowed() {
-    let (store, log, reader) = rig().await;
-    let live = reader
+    let (store, log, rig) = rig().await;
+    let live = rig
         .live_started::<Users>(LiveLimits {
             max_held_events: 2,
             max_held_bytes: usize::MAX,
@@ -218,8 +272,8 @@ async fn wait_for_sees_a_folded_entry_while_overflowed() {
 /// before the start times out.
 #[tokio::test]
 async fn not_started_serves_the_stable_snapshot_and_a_wait_times_out() {
-    let (store, mut log, reader) = rig().await;
-    let live = reader.not_started::<Users>(LiveLimits::default()).unwrap();
+    let (store, mut log, rig) = rig().await;
+    let live = rig.not_started::<Users>(LiveLimits::default()).unwrap();
     let holden = User {
         id: UserId(1),
         name: "holden".into(),
@@ -227,7 +281,7 @@ async fn not_started_serves_the_stable_snapshot_and_a_wait_times_out() {
         email: None,
         last_ping: None,
     };
-    crate::testing::commit_row(&store, tenant_id(), Ref::new(UserId(1).into()), &holden);
+    commit_row(&store, tenant_id(), Ref::new(UserId(1).into()), &holden);
     let d = log.push_unstable(blob(&[new_user(2, "naomi")]));
     assert_eq!(
         live.wait_for(d, Duration::from_millis(50)).await,
@@ -237,40 +291,6 @@ async fn not_started_serves_the_stable_snapshot_and_a_wait_times_out() {
     assert!(
         user(&live, 2).await.is_none(),
         "nothing held before the start"
-    );
-}
-
-/// A sync that fails at startup is retried: the view starts once one
-/// succeeds, rather than serving the stable snapshot for good.
-#[tokio::test]
-async fn the_start_retries_a_failed_sync() {
-    let store = inmemory();
-    let log = TestLog::new();
-    let failing: Arc<dyn zslg::Reader> =
-        Arc::new(crate::testing::FailingSyncReader::new(log.reader(), 2));
-    let mut dispatcher = Dispatcher::from_db(
-        store,
-        log.writer(),
-        failing,
-        FLUSH_INTERVAL,
-        &tokio_util::sync::CancellationToken::new(),
-    )
-    .await
-    .unwrap();
-    let mut manager = dispatcher.new_handler::<event::Event>(tenant());
-    manager.register::<User>().unwrap();
-    let (writer, reader) = manager.finalise().unwrap();
-    let live = reader.live::<Users>().unwrap();
-    assert_eq!(coverage(&live), "not_started");
-    // The fold runs: the start waits for it to pass the write below.
-    let _fold = dispatcher.finalise().await.unwrap();
-    // A write before the start: its wait waits for the start too.
-    let d = writer.write(&[new_user(3, "amos")]).await.unwrap();
-    assert_eq!(live.wait_for(d, LONG).await, Wait::Seen);
-    assert_ne!(
-        coverage(&live),
-        "not_started",
-        "started after two failed syncs"
     );
 }
 
@@ -287,8 +307,8 @@ fn liveness_follows_the_events() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn an_s_event_is_live_at_once_and_folds_only_into_live_projections() {
-    let (_store, mut log, reader) = rig().await;
-    let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
+    let (_store, mut log, rig) = rig().await;
+    let live = rig.live_started::<Users>(LiveLimits::default()).unwrap();
     let changed = live.changed();
     log.push_unstable(blob(&[new_user(1, "ada"), new_todo(7, 1)]));
     settle(&live, |l| held(l) == 1).await;
@@ -306,8 +326,8 @@ async fn an_s_event_is_live_at_once_and_folds_only_into_live_projections() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_write_without_s_events_is_not_held() {
-    let (_store, mut log, reader) = rig().await;
-    let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
+    let (_store, mut log, rig) = rig().await;
+    let live = rig.live_started::<Users>(LiveLimits::default()).unwrap();
     log.push_unstable(blob(&[new_todo(7, 1)]));
     log.push_unstable(blob(&[new_user(1, "ada")]));
     settle(&live, |l| held(l) == 1).await;
@@ -316,8 +336,8 @@ async fn a_write_without_s_events_is_not_held() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn held_events_retire_when_f_covers_them_not_at_the_watermark() {
-    let (store, log, reader) = rig().await;
-    let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
+    let (store, log, rig) = rig().await;
+    let live = rig.live_started::<Users>(LiveLimits::default()).unwrap();
     let did = data_id(10, 1);
     log.push_unstable_at(did, blob(&[new_user(1, "ada")]));
     settle(&live, |l| held(l) == 1).await;
@@ -337,8 +357,8 @@ async fn held_events_retire_when_f_covers_them_not_at_the_watermark() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn at_an_hlc_tie_only_the_data_id_decides() {
-    let (store, log, reader) = rig().await;
-    let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
+    let (store, log, rig) = rig().await;
+    let live = rig.live_started::<Users>(LiveLimits::default()).unwrap();
     let (first, second) = (data_id(10, 1), data_id(10, 2));
     log.push_unstable_at(first, blob(&[new_user(1, "ada")]));
     log.push_unstable_at(second, blob(&[new_user(2, "grace")]));
@@ -354,8 +374,8 @@ async fn at_an_hlc_tie_only_the_data_id_decides() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn held_events_fold_in_data_id_order_whatever_their_arrival() {
-    let (_store, log, reader) = rig().await;
-    let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
+    let (_store, log, rig) = rig().await;
+    let live = rig.live_started::<Users>(LiveLimits::default()).unwrap();
     log.push_unstable_at(data_id(20, 2), blob(&[pinged(1, 99)]));
     log.push_unstable_at(data_id(10, 1), blob(&[new_user(1, "ada")]));
     settle(&live, |l| held(l) == 2).await;
@@ -364,8 +384,8 @@ async fn held_events_fold_in_data_id_order_whatever_their_arrival() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_redelivery_is_held_once_and_announced_once() {
-    let (_store, log, reader) = rig().await;
-    let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
+    let (_store, log, rig) = rig().await;
+    let live = rig.live_started::<Users>(LiveLimits::default()).unwrap();
     let did = data_id(10, 1);
     log.push_unstable_at(did, blob(&[new_user(1, "ada")]));
     settle(&live, |l| held(l) == 1).await;
@@ -381,8 +401,8 @@ async fn a_redelivery_is_held_once_and_announced_once() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn an_f_advance_does_not_move_changed() {
-    let (store, log, reader) = rig().await;
-    let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
+    let (store, log, rig) = rig().await;
+    let live = rig.live_started::<Users>(LiveLimits::default()).unwrap();
     let did = data_id(10, 1);
     log.push_unstable_at(did, blob(&[new_user(1, "ada")]));
     settle(&live, |l| held(l) == 1).await;
@@ -395,8 +415,8 @@ async fn an_f_advance_does_not_move_changed() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn overflow_serves_f_freezes_until_and_recovers_with_what_it_collected() {
-    let (store, log, reader) = rig().await;
-    let live = reader
+    let (store, log, rig) = rig().await;
+    let live = rig
         .live_started::<Users>(LiveLimits {
             max_held_events: 2,
             max_held_bytes: usize::MAX,
@@ -431,8 +451,8 @@ async fn overflow_serves_f_freezes_until_and_recovers_with_what_it_collected() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn hitting_the_cap_again_moves_until() {
-    let (store, log, reader) = rig().await;
-    let live = reader
+    let (store, log, rig) = rig().await;
+    let live = rig
         .live_started::<Users>(LiveLimits {
             max_held_events: 1,
             max_held_bytes: usize::MAX,
@@ -456,12 +476,12 @@ async fn hitting_the_cap_again_moves_until() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_cold_start_scan_holds_what_is_stable_but_not_folded() {
-    let (_store, mut log, reader) = rig().await;
+    let (_store, mut log, rig) = rig().await;
     // Stable before the view starts, F still at nothing: neither the tail
     // nor the store has it.
     log.append(blob(&[new_user(1, "ada")]));
     log.append(blob(&[new_todo(7, 1)]));
-    let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
+    let live = rig.live_started::<Users>(LiveLimits::default()).unwrap();
     assert_eq!(user(&live, 1).await.unwrap().name, "ada");
     assert_eq!(coverage(&live), "complete");
     assert_eq!(held(&live), 1, "only the S event is kept");
@@ -469,11 +489,11 @@ async fn the_cold_start_scan_holds_what_is_stable_but_not_folded() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn an_overflow_during_the_scan_releases_the_waiting_snapshots() {
-    let (_store, mut log, reader) = rig().await;
+    let (_store, mut log, rig) = rig().await;
     for id in 0..5 {
         log.append(blob(&[new_user(id, "x")]));
     }
-    let live = reader
+    let live = rig
         .live_started::<Users>(LiveLimits {
             max_held_events: 2,
             max_held_bytes: usize::MAX,
@@ -501,8 +521,8 @@ async fn an_overflow_during_the_scan_releases_the_waiting_snapshots() {
 /// neither held nor folded.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_overflow_during_the_scan_recovers_only_after_it() {
-    let (store, _log, reader) = rig().await;
-    let live = reader
+    let (store, _log, rig) = rig().await;
+    let live = rig
         .live_started::<Users>(LiveLimits {
             max_held_events: 1,
             max_held_bytes: usize::MAX,
@@ -587,23 +607,10 @@ impl zslg::Reader for StalledReader {
 /// on every exit, including `AbortReason::Cancelled`.
 #[tokio::test(flavor = "multi_thread")]
 async fn cancelling_mid_scan_wakes_a_waiting_snapshot() {
-    let store = inmemory();
-    let log = TestLog::new();
     let stalled = StalledReader::new();
     let stalled_reader: Arc<dyn zslg::Reader> = stalled.clone();
-    let mut dispatcher = Dispatcher::from_db(
-        store,
-        log.writer(),
-        stalled_reader.clone(),
-        FLUSH_INTERVAL,
-        &tokio_util::sync::CancellationToken::new(),
-    )
-    .await
-    .unwrap();
-    let mut manager = dispatcher.new_handler::<event::Event>(tenant());
-    manager.register::<User>().unwrap();
-    let (_writer, reader) = manager.finalise().unwrap();
-    let live = reader.not_started::<Users>(LiveLimits::default()).unwrap();
+    let rig = Rig::new(inmemory(), stalled_reader.clone());
+    let live = rig.not_started::<Users>(LiveLimits::default()).unwrap();
     let (handle, cancellation) = CancelHandle::new();
     let (_fold_tx, folded) = tokio::sync::watch::channel(None);
     begin(&live, &stalled_reader, &cancellation, folded).unwrap();
@@ -625,48 +632,10 @@ async fn cancelling_mid_scan_wakes_a_waiting_snapshot() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_ended_tail_stops_the_dispatcher() {
-    let store = inmemory();
-    let log = TestLog::new();
-    let mut dispatcher = Dispatcher::from_db(
-        store.clone(),
-        log.writer(),
-        log.reader(),
-        FLUSH_INTERVAL,
-        &tokio_util::sync::CancellationToken::new(),
-    )
-    .await
-    .unwrap();
-    let mut manager = dispatcher.new_handler::<event::Event>(tenant());
-    manager.register::<User>().unwrap();
-    let (_writer, reader) = manager.finalise().unwrap();
-    let fold = dispatcher.finalise().await.unwrap();
-    let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
-
-    log.hang_up_unstable();
-    let ended = tokio::time::timeout(Duration::from_secs(5), fold)
-        .await
-        .expect("the dispatcher stops")
-        .unwrap();
-    assert!(
-        matches!(ended, Err(Error::FoldStopped(StopReason::LiveStreamEnded))),
-        "{ended:?}"
-    );
-    let live2 = live.clone();
-    let read = tokio::task::spawn_blocking(move || live2.snapshot().map(|_| ()))
-        .await
-        .unwrap();
-    assert!(matches!(
-        read,
-        Err(Error::FoldStopped(StopReason::LiveStreamEnded))
-    ));
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn no_snapshot_waits_on_a_stalled_fold() {
-    let (_store, mut log, reader) = rig().await;
+    let (_store, mut log, rig) = rig().await;
     // No fold runs at all in this rig: F never moves.
-    let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
+    let live = rig.live_started::<Users>(LiveLimits::default()).unwrap();
     log.push_unstable(blob(&[new_user(1, "ada")]));
     settle(&live, |l| held(l) == 1).await;
     let got = tokio::time::timeout(Duration::from_secs(1), user(&live, 1))
@@ -719,7 +688,7 @@ proptest! {
             .build()
             .unwrap();
         rt.block_on(async move {
-            let (store, log, reader) = rig().await;
+            let (store, log, rig) = rig().await;
             let ids: Vec<DataId> = (0..steps.len())
                 .map(|i| {
                     let i = u64::try_from(i).unwrap();
@@ -728,7 +697,7 @@ proptest! {
                 .collect();
 
             // What the store holds at F: the fold of the first `cut`.
-            let mut manager = crate::ProjectorManager::<event::Event>::new(tenant());
+            let mut manager = ProjectorManager::<event::Event>::new(tenant());
             manager.register::<User>().unwrap();
             let mut txn = store.write().unwrap();
             for step in &steps[..cut] {
@@ -742,7 +711,7 @@ proptest! {
             })
             .unwrap();
 
-            let live = reader.live_started::<Users>(LiveLimits::default()).unwrap();
+            let live = rig.live_started::<Users>(LiveLimits::default()).unwrap();
             // Arrivals in reverse order, above and below F alike.
             let mut expected_held: usize = 0;
             for (i, step) in steps.iter().enumerate().rev() {
@@ -766,7 +735,7 @@ proptest! {
             txn.commit(Watermark::default()).unwrap();
 
             for id in 0..3u128 {
-                let want: Option<User> = crate::ReadTransactionExt::get::<User>(
+                let want: Option<User> = nvzn_projection::ReadTransactionExt::get::<User>(
                     &*expect_store.read().unwrap(),
                     tenant_id(),
                     Ref::new(UserId(id).into()),

@@ -29,17 +29,20 @@
 //! Spec: nlnr `docs/logs/2026-10-26_spec_nvzn_live_views.md`; the deferred
 //! start and `wait_for`: nlnr `docs/logs/2026-10-28_design_read_after_write.md`.
 
-use crate::metrics::{self, ReadKind};
-use crate::subset;
-use crate::{Error, EventSet, Projection, Snapshot, WithWireFormat, WriteTransactionImpl};
+use metrics::ReadKind;
 use nvzn_projector::fold_event;
 use std::sync::{Arc, PoisonError};
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
 use zslg::DataId;
 
+// Only the `assert_live!` doctests use `serde`.
+#[cfg(test)]
+use serde as _;
+
 mod consumer;
 mod coverage;
+pub mod metrics;
 mod start;
 #[cfg(test)]
 #[allow(
@@ -51,9 +54,16 @@ mod start;
 mod tests;
 
 use coverage::{Coverage, Inner};
-#[cfg(test)]
-pub(crate) use start::begin;
-pub(crate) use start::{begin_when_caught_up, not_started};
+pub use start::{begin, begin_when_caught_up, not_started};
+
+// The names the modules reach for as `crate::X`.
+pub(crate) use nvzn_projection::{Projection, Watermark};
+pub(crate) use nvzn_resultset::Snapshot;
+pub(crate) use nvzn_store::{ArcStore, WriteTransactionImpl};
+pub(crate) use nvzn_types::{
+    APP_ID_LEN, Error, EventSet, FoldState, ProjectionTypeId, StopReason, Tenant, TenantId,
+    WithWireFormat, subset,
+};
 
 /// Whether `P` is live under `S`: every event `P` folds is in `S`. A `const
 /// fn`, so it answers at run time and in a `const` assertion
@@ -96,7 +106,7 @@ pub const fn is_live<P: Projection, S: EventSet>() -> bool {
 /// // `Note` folds `NoteSet` only; `Mixed` also folds `FileSeen`.
 /// # projection!(Note, NoteEvent, 0);
 /// # projection!(Mixed, MixedEvent, 0);
-/// nvzn_dispatcher::assert_live!(event::LiveEvent<'static>, [Note]);
+/// nvzn_live::assert_live!(event::LiveEvent<'static>, [Note]);
 /// # fn main() {}
 /// ```
 ///
@@ -128,7 +138,7 @@ pub const fn is_live<P: Projection, S: EventSet>() -> bool {
 /// // `Note` folds `NoteSet` only; `Mixed` also folds `FileSeen`.
 /// # projection!(Note, NoteEvent, 0);
 /// # projection!(Mixed, MixedEvent, 0);
-/// nvzn_dispatcher::assert_live!(event::LiveEvent<'static>, [Note, Mixed]);
+/// nvzn_live::assert_live!(event::LiveEvent<'static>, [Note, Mixed]);
 /// # fn main() {}
 /// ```
 #[macro_export]
