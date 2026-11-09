@@ -40,6 +40,7 @@ use std::sync::Arc;
 use zslg_log::LogError;
 
 use rocksdb_kit::Batch as RocksBatch;
+#[cfg(any(test, feature = "testing"))]
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
