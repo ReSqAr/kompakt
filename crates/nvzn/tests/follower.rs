@@ -17,8 +17,7 @@
 
 mod common;
 
-use common::{Cluster, init_tracing};
-use std::time::Duration;
+use common::{Cluster, SETTLE_BOUND, init_tracing};
 
 const PORT: u16 = 19347;
 
@@ -34,14 +33,11 @@ async fn a_follower_syncs_against_data_it_never_saw_written() {
     for id in 1..4u128 {
         server.write(id, &format!("user-{id}")).await;
     }
-    // Past the cutoff lag and a snapshot interval, so the writes are in the
-    // cluster's stable prefix before the follower exists.
-    tokio::time::sleep(Duration::from_secs(12)).await;
-    server.sync("server, after writing").await;
-    assert!(
-        server.sees_folded(1),
-        "the cluster's data has not settled into the stable log yet",
-    );
+    // Wait for the writes to reach the cluster's stable prefix before the
+    // follower exists, so it has to load them from a snapshot.
+    for id in 1..4u128 {
+        server.wait_until_folded(id, SETTLE_BOUND).await;
+    }
 
     let cli = cluster.follower("cli").await;
     cli.sync("a fresh follower's first sync").await;
@@ -76,8 +72,10 @@ async fn a_second_invocation_syncs_against_what_the_first_wrote() {
     first.write(1, "holden").await;
     first.stop().await;
 
-    // The gap between runs: long enough for the write to be snapshotted.
-    tokio::time::sleep(Duration::from_secs(10)).await;
+    // The gap between runs: until the write has been snapshotted.
+    let observer = cluster.server("observer").await;
+    observer.wait_until_folded(1, SETTLE_BOUND).await;
+    observer.stop().await;
 
     let second = cluster.follower("cli-2").await;
     second.sync("second invocation").await;

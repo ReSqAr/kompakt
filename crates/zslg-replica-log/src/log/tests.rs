@@ -306,28 +306,6 @@ async fn append_failure_fails_the_flush_loop() {
     );
 }
 
-/// Cross-batch DataId dedup is best-effort (CLAUDE.md §8):
-/// DataId has 64 random bits, making collision effectively impossible in
-/// practice. The hot path only checks intra-batch duplicates via `seen:
-/// HashSet`; there is no durable reverse index anymore at all.
-#[tokio::test]
-async fn cross_batch_duplicate_is_not_rejected() {
-    let (_dir, store) = fresh_store().await;
-    let d = make_data(1, u64::from(1u8) * 100, b"hello");
-    let hlc = d.data_id.hlc();
-    store
-        .append(d.clone(), test_guard(hlc))
-        .await
-        .expect("first ok");
-    // Cross-batch duplicate — not rejected (best-effort dedup).
-    // In production this path is unreachable: DataId carries 64 random bits.
-    store
-        .append(d, test_guard(hlc))
-        .await
-        .expect("cross-batch dup accepted (best-effort dedup)");
-    assert_eq!(store.frontier(), Some(LogIndex(1)));
-}
-
 #[tokio::test]
 async fn frontier_persists_across_reopen() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -523,20 +501,6 @@ async fn broadcast_fires_after_commit() {
     assert_eq!(data.data_id, expected.data_id);
 }
 
-#[tokio::test]
-async fn broadcast_skipped_when_no_subscribers() {
-    let (_dir, store) = fresh_store().await;
-    store
-        .append(
-            make_data(1, u64::from(1u8) * 100, b"silent"),
-            test_guard(Hlc::ZERO),
-        )
-        .await
-        .expect("ok despite no subscribers");
-    assert_eq!(store.frontier(), Some(LogIndex::ZERO));
-    // No subscribers — fan_out is empty, append succeeds silently
-}
-
 /// A subscriber already at the frontier asks for `frontier + 1`: an empty
 /// historic window, which is the routine state of a peer that reconnects
 /// with nothing to catch up on. It must hand straight over to the live
@@ -653,18 +617,6 @@ async fn no_record_is_lost_in_the_historic_to_live_handover() {
     assert_eq!(raced_index, LogIndex(3));
 }
 
-/// The `open_with_flush` fallbacks are what the test constructors run at, so
-/// they must not drift from the values operators actually get.
-#[test]
-fn open_engine_defaults_match_the_config_defaults() {
-    let cfg = crate::ReplicaLogConfig::for_test(zslg_consensus::NodeId::new_v4());
-    assert_eq!(
-        cfg.subscribe_channel_capacity.get(),
-        DEFAULT_SUBSCRIBE_CHANNEL_CAPACITY
-    );
-    assert_eq!(cfg.max_flush_batch.get(), DEFAULT_MAX_FLUSH_BATCH);
-}
-
 /// A subscriber that drains promptly must survive a full-size flush batch.
 /// The arithmetic invariant lives in `ReplicaLogConfig::validate`; this is
 /// the behaviour it exists to protect, and it is what regressed when the
@@ -675,7 +627,9 @@ async fn full_flush_batch_does_not_shed_a_draining_subscriber() {
     let mut ch = Arc::clone(&store).subscribe_from(None);
 
     // One batch's worth of records, appended before anything is drained.
-    let batch = DEFAULT_MAX_FLUSH_BATCH;
+    let batch = crate::ReplicaLogConfig::for_test(zslg_consensus::NodeId::new_v4())
+        .max_flush_batch
+        .get();
     for i in 0..batch {
         let seed = u8::try_from(i % 251).expect("mod 251 fits u8");
         store

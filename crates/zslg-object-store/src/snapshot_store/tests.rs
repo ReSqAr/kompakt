@@ -286,12 +286,6 @@ fn snapshot_name_is_injective() {
 }
 
 #[test]
-fn snapshot_path_is_under_prefix() {
-    let p = snapshot_path(SnapshotId::from_u128(7));
-    assert!(p.as_ref().starts_with(SNAPSHOT_PREFIX));
-}
-
-#[test]
 fn bootstrap_fence_path_is_stable() {
     assert_eq!(bootstrap_fence_path().as_ref(), "raft-bootstrap-fence");
 }

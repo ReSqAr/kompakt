@@ -1,9 +1,10 @@
 //! Entry points for the tests of the crates that run a raft node on this store.
 
 use super::{
-    Arc, Batch, Error, LogId, NodeId, NodeInfo, RAFT_META_CF, RaftMetaSlot, RaftStateHandle,
+    Arc, Error, LogId, NodeId, NodeInfo, RAFT_META_CF, RaftMetaSlot, RaftStateHandle,
     RocksRaftStorage, Storage, StoredMembership, TypeConfig, Vote, put_meta,
 };
+use rocksdb_kit::Batch;
 use zslg_consensus::ToRaft as _;
 
 /// Builds a `Raft` instance backed by RocksDB storage in `storage`, generic over

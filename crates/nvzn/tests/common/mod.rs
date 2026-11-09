@@ -42,6 +42,10 @@ pub const SYNC_BOUND: Duration = Duration::from_secs(5);
 /// integrate batch and a fan-out hop, neither on a timer.
 pub const SEE_BOUND: Duration = Duration::from_secs(2);
 
+/// How long the cluster may take to settle a write into its stable prefix:
+/// the cutoff lag plus a snapshot interval, with room for a loaded machine.
+pub const SETTLE_BOUND: Duration = Duration::from_secs(30);
+
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct UserId(pub u128);
 
@@ -303,6 +307,24 @@ impl Deployment {
             .get(Ref::<User>::new(UserId(id).into()))
             .expect("get")
             .is_some()
+    }
+
+    /// Wait, polling, until the folded state shows user `id`, syncing between
+    /// looks. This is how a test waits for the cluster to settle a write into
+    /// its stable prefix without sleeping a guessed interval.
+    pub async fn wait_until_folded(&self, id: u128, bound: Duration) {
+        let started = Instant::now();
+        loop {
+            self.sync("waiting for the stable prefix").await;
+            if self.sees_folded(id) {
+                return;
+            }
+            assert!(
+                started.elapsed() < bound,
+                "user-{id} did not reach the stable prefix within {bound:?}",
+            );
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
     }
 
     /// Shut this deployment down the way a process exits cleanly.

@@ -57,18 +57,8 @@ use zslg_log::{Admission, Completion, ReplicaLog};
 use zslg_log::{DataId, LogIndex};
 use zslg_time::Hlc;
 
-/// Fallback sizing for [`ReplicaLogStore::open_with_flush`], the
-/// directory-shaped entry point used by the test constructors. Production goes
-/// through [`ReplicaLogStore::open`], which carries the operator-configured
-/// values from `ReplicaLogConfig`. Kept in step with `ReplicaLogConfig::for_test`
-/// by `open_engine_defaults_match_the_config_defaults`.
 /// This replica's dense local log.
 pub const REPLICA_LOG_CF: ColumnFamily = ColumnFamily::new("replica_log");
-
-#[cfg(any(test, feature = "testing"))]
-const DEFAULT_SUBSCRIBE_CHANNEL_CAPACITY: usize = 1024;
-#[cfg(any(test, feature = "testing"))]
-const DEFAULT_MAX_FLUSH_BATCH: usize = 1024;
 
 /// Headroom for the non-payload part of a record (the 16-byte key, the value's
 /// 32-byte `data_id` prefix, and RocksDB's per-record framing — well under
@@ -622,17 +612,14 @@ impl ReplicaLogStore {
         storage: Arc<Storage>,
         cancel: CancellationToken,
     ) -> Result<(Arc<Self>, tokio::task::JoinHandle<Result<(), Error>>), Error> {
-        let (write_tx, write_rx) = crossbeam_channel::bounded(
-            crate::ReplicaLogConfig::for_test(zslg_consensus::NodeId::new_v4())
-                .write_channel_capacity
-                .get(),
-        );
+        let sizing = crate::ReplicaLogConfig::for_test(zslg_consensus::NodeId::new_v4());
+        let (write_tx, write_rx) = crossbeam_channel::bounded(sizing.write_channel_capacity.get());
         let store = Arc::new(
             Self::open_sized(
                 storage,
                 write_tx,
-                DEFAULT_SUBSCRIBE_CHANNEL_CAPACITY,
-                DEFAULT_MAX_FLUSH_BATCH,
+                sizing.subscribe_channel_capacity.get(),
+                sizing.max_flush_batch.get(),
             )
             .await?,
         );

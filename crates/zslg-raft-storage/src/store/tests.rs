@@ -1,5 +1,13 @@
+use super::fence::evaluate_fence;
+use super::keys::{META_KEY_WIDTH, encode_log_rank};
 use super::*;
+use raft_kit::{RaftLogReader, RaftSnapshotBuilder, RaftStorage};
+use rocksdb_kit::Batch;
 use zslg_consensus::RaftStateError;
+use zslg_consensus::{
+    ReplicaMembership, validate_cutoff_advance, validate_replicated_state, validate_transition,
+};
+use zslg_raft::RaftResponse;
 use zslg_snapshot::SnapshotMetadata;
 
 /// A [`Storage`] carrying just this store's two column families.
