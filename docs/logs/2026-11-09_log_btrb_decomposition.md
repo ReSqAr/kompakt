@@ -49,3 +49,16 @@ capabilities a process carries.
 Rejected: cutting by role first with capabilities as modules inside each. It repeats the shared layers per
 role and hides that they are shared.
 
+### D3 — settings are per-capability slices (settled)
+
+Each capability crate owns the environment variables of its layer: names, parsing, defaults. The assembly reads
+every slice from the one `Env`, passes the role-dependent defaults down (server 32 MiB, worker 64 MiB,
+standalone 16 MiB RocksDB budgets), and calls `Env::finish()` once so a typo still fails before any store
+opens. The ZSLG_*/NVZN_* knob reader (`host::settings::replica_node`, `fields`) therefore lives in the db
+capability.
+
+Why: each capability can be understood and tested alone, and a new capability brings its own knobs.
+
+Rejected: one settings module in the assembly. It keeps the names in one grep-able place, but the assembly
+would know every layer's variables and no capability could be configured on its own.
+
