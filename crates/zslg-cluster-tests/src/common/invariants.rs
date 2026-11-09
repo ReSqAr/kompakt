@@ -60,13 +60,24 @@ pub(crate) fn assert_cluster_invariants(cluster: &Cluster) {
 /// so a caller that samples coverage can report a permanently vacuous check
 /// instead of mistaking it for a passing one. Callers that do not care write
 /// `let _ = …`.
+/// How long the durability chain may take to reach every stable log: 10 s
+/// unless `CLUSTER_TEST_DURABILITY_DEADLINE_MS` says otherwise. The override
+/// exists to provoke the failure report on purpose (a short deadline turns
+/// "slow" into a report that says whether an entry is late or lost).
+fn durability_deadline() -> Duration {
+    std::env::var("CLUSTER_TEST_DURABILITY_DEADLINE_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map_or(Duration::from_secs(10), Duration::from_millis)
+}
+
 pub(crate) async fn assert_cluster_invariants_with_acks(
     cluster: &Cluster,
     acked: &[(DataId, Bytes)],
 ) -> bool {
     assert_cluster_invariants(cluster);
     let boundary_exercised = assert_unstable_above_watermark(cluster).await;
-    assert_durability_chain(cluster, acked, Duration::from_secs(10)).await;
+    assert_durability_chain(cluster, acked, durability_deadline()).await;
     boundary_exercised
 }
 
@@ -378,6 +389,9 @@ async fn explain_missing(
         .unwrap_or_default();
         stable_on.insert(*node_id, stable);
     }
+    // Is it late, or lost? Keep watching the checked node's stable log, with
+    // the cluster quiet, and say when each missing entry shows up (if ever).
+    let late = late_arrivals(cluster, on, missing, Duration::from_secs(60)).await;
     for (node_id, wm) in &watermark {
         let _ = writeln!(out, "  node {node_id}: stable watermark {wm:?}");
     }
@@ -402,11 +416,58 @@ async fn explain_missing(
         } else {
             "not stable yet"
         };
+        let arrival = match late.get(id) {
+            Some(after) => {
+                format!("ARRIVED in node {on}'s stable log {after:?} after the deadline")
+            }
+            None => format!("NEVER ARRIVED in node {on}'s stable log within 60 s more"),
+        };
         let _ = writeln!(
             out,
             "  {id:?} (hlc {hlc:?}): stable on {stable_nodes:?}, unstable on {unstable_nodes:?}, \
-             watermark at/after it on {passed:?} => {verdict}"
+             watermark at/after it on {passed:?} => {verdict}; {arrival}"
         );
     }
     out
+}
+
+/// When each of `missing` appears in `on`'s stable log, measured from now;
+/// entries that never appear within `within` are absent from the result.
+async fn late_arrivals(
+    cluster: &Cluster,
+    on: NodeId,
+    missing: &BTreeSet<DataId>,
+    within: Duration,
+) -> BTreeMap<DataId, Duration> {
+    let started = std::time::Instant::now();
+    let arrived = std::sync::Arc::new(std::sync::Mutex::new(BTreeMap::new()));
+    let reader = cluster.node(on).reader();
+    let _ = tokio::time::timeout(within, {
+        let arrived = arrived.clone();
+        let missing = missing.clone();
+        let mut stream = reader
+            .subscribe_stable_log(None)
+            .into_channel()
+            .into_test_stream();
+        async move {
+            while let Some(item) = stream.next().await {
+                if let Ok(StableLogEvent::Appended { data, .. }) = item
+                    && missing.contains(&data.data_id)
+                {
+                    let mut g = arrived
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    g.entry(data.data_id).or_insert_with(|| started.elapsed());
+                    if g.len() == missing.len() {
+                        return;
+                    }
+                }
+            }
+        }
+    })
+    .await;
+    let g = arrived
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    g.clone()
 }
