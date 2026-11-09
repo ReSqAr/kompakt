@@ -23,4 +23,16 @@ Predecessor: the zslg/nvzn crate split (`2026-11-07_*_crate_split.md`), whose pa
 
 ## Decisions
 
-(none yet)
+### D1 — the consumer contract is the facade; the split is internal (settled)
+
+`btrb` stays the one crate consumers name and re-exports everything; nlnr changes by a rev bump only.
+
+Why: btrb is an app *platform* — it provides the db layer, the web layer, the background-process layer, CLIs
+and metrics, and every app mounted on it runs on all of them. There is no consumer that wants a subset, so a
+narrow "SDK" crate has nobody to serve. The first framing (apps are library customers who might want less)
+was wrong; the platform framing is the user's.
+
+Rejected: B (apps depend on a narrow SDK crate, binaries on the host crate) and C (A now, narrow crates as
+the documented way in): both rest on consumers using part of the platform.
+
+Consequence: the layering inside btrb follows the platform's capabilities, not an SDK/host line.
