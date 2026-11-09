@@ -26,7 +26,6 @@ zslg-consensus = { workspace = true }
 zslg-lifecycle-types = { workspace = true }
 zslg-log = { workspace = true }
 zslg-net = { workspace = true }
-zslg-raft = { workspace = true }
 zslg-snapshot = { workspace = true }
 zslg-time = { workspace = true }
 

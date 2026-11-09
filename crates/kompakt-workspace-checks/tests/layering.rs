@@ -256,9 +256,14 @@ fn families_do_not_reach_into_each_other() {
     );
 }
 
+/// Types crates every layer may name: the lifecycle vocabulary, and the shared
+/// `Error` that the node crates return and the facade re-exports.
+const ALLOWED_TYPES_ABOVE_PORTS: &[&str] = &["zslg-lifecycle-types", "zslg-error"];
+
 #[test]
 fn no_cross_group_dependency_on_a_types_crate_from_above_the_ports_layer() {
     let krates = workspace();
+    let roles: BTreeMap<&str, Role> = krates.iter().map(|k| (k.name.as_str(), k.role)).collect();
     let above = [
         Role::Procedure,
         Role::Fake,
@@ -269,8 +274,8 @@ fn no_cross_group_dependency_on_a_types_crate_from_above_the_ports_layer() {
     let mut violations = Vec::new();
     for k in krates.iter().filter(|k| above.contains(&k.role)) {
         for d in &k.deps {
-            if d.name.ends_with("-types")
-                && d.name != "zslg-lifecycle-types"
+            if roles[d.name.as_str()] == Role::Types
+                && !ALLOWED_TYPES_ABOVE_PORTS.contains(&d.name.as_str())
                 && !d.name.starts_with("nvzn-")
             {
                 violations.push(format!(

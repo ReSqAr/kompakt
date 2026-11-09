@@ -4857,7 +4857,6 @@ dependencies = [
  "zslg-lifecycle-types",
  "zslg-log",
  "zslg-net",
- "zslg-raft",
  "zslg-snapshot",
  "zslg-time",
 ]
@@ -4880,7 +4879,6 @@ dependencies = [
  "zslg-lifecycle-types",
  "zslg-log",
  "zslg-net",
- "zslg-raft",
  "zslg-snapshot",
  "zslg-time",
 ]
@@ -4910,7 +4908,6 @@ dependencies = [
  "zslg-net",
  "zslg-net-fake",
  "zslg-quorum-read",
- "zslg-raft",
  "zslg-snapshot",
  "zslg-time",
 ]
@@ -4939,7 +4936,6 @@ dependencies = [
  "zslg-net",
  "zslg-net-fake",
  "zslg-quorum-read",
- "zslg-raft",
  "zslg-snapshot",
  "zslg-time",
 ]
@@ -4972,8 +4968,6 @@ dependencies = [
  "zslg-log-fake",
  "zslg-net",
  "zslg-object-store",
- "zslg-quorum-read",
- "zslg-raft",
  "zslg-reader",
  "zslg-snapshot",
  "zslg-stable-archive",
@@ -5046,7 +5040,6 @@ dependencies = [
  "zslg-log",
  "zslg-log-fake",
  "zslg-net",
- "zslg-raft",
  "zslg-snapshot",
  "zslg-time",
 ]
@@ -5611,7 +5604,6 @@ dependencies = [
  "zslg-log",
  "zslg-net",
  "zslg-quorum-read",
- "zslg-raft",
  "zslg-snapshot",
  "zslg-time",
 ]
@@ -5639,8 +5631,6 @@ dependencies = [
  "zslg-log",
  "zslg-log-fake",
  "zslg-net",
- "zslg-quorum-read",
- "zslg-raft",
  "zslg-snapshot",
  "zslg-time",
 ]
@@ -5762,8 +5752,6 @@ dependencies = [
  "zslg-lifecycle-types",
  "zslg-log",
  "zslg-net",
- "zslg-quorum-read",
- "zslg-raft",
  "zslg-snapshot",
  "zslg-time",
 ]
@@ -5791,8 +5779,6 @@ dependencies = [
  "zslg-log",
  "zslg-log-fake",
  "zslg-net",
- "zslg-quorum-read",
- "zslg-raft",
  "zslg-snapshot",
  "zslg-time",
 ]
@@ -5820,8 +5806,6 @@ dependencies = [
  "zslg-log",
  "zslg-log-fake",
  "zslg-net",
- "zslg-quorum-read",
- "zslg-raft",
  "zslg-snapshot",
  "zslg-time",
  "zslg-time-fake",

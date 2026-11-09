@@ -121,108 +121,108 @@ impl RaftConsensus for RaftNode {
         peer_addr: zslg_net::PeerAddr,
     ) -> Result<(), zslg_raft::Error> {
         async {
-self.gate.admit(new_node_id, &peer_addr)?;
+            self.gate.admit(new_node_id, &peer_addr)?;
 
-        let start = tokio::time::Instant::now();
-        let metrics = self.inner.metrics().borrow().clone();
-
-        if metrics.current_leader != Some(metrics.id) {
-            return Err(Error::Consensus(ConsensusError::Raft(format!(
-                "add_member: not the leader (current leader: {:?})",
-                metrics.current_leader
-            ))));
-        }
-
-        let membership = metrics.membership_config;
-        let already_voter = membership
-            .membership()
-            .voter_ids()
-            .any(|id| id == new_node_id);
-        let same_address = membership
-            .nodes()
-            .any(|(id, info)| *id == new_node_id && info.addr == peer_addr.addr);
-        if already_voter && same_address {
-            return Ok(());
-        }
-
-        // DNS collisions: other node IDs at the same address — remove them atomically.
-        let colliding: BTreeSet<NodeId> = membership
-            .nodes()
-            .filter_map(|(id, node)| {
-                if *id != new_node_id && node.addr == peer_addr.addr {
-                    Some(*id)
-                } else {
-                    None
-                }
-            })
-            .collect();
-        if !colliding.is_empty() {
-            info!(
-                node_id = ?new_node_id,
-                addr = %peer_addr.addr,
-                ?colliding,
-                "add_member: DNS collision detected — old node(s) at same address will be replaced atomically",
-            );
-        }
-        drop(membership);
-
-        let t0 = tokio::time::Instant::now();
-        self.inner
-            .add_learner(new_node_id, NodeInfo::from(peer_addr), true)
-            .boxed()
-            .await
-            .to_raft("add_learner")?;
-        let learner_ms = t0.elapsed().as_millis();
-
-        let t0 = tokio::time::Instant::now();
-        let mut change_retries: u32 = 0;
-        loop {
-            // Re-check leadership on each iteration — may have been demoted.
+            let start = tokio::time::Instant::now();
             let metrics = self.inner.metrics().borrow().clone();
+
             if metrics.current_leader != Some(metrics.id) {
                 return Err(Error::Consensus(ConsensusError::Raft(format!(
-                    "add_member: lost leadership during membership change (current leader: {:?})",
+                    "add_member: not the leader (current leader: {:?})",
                     metrics.current_leader
                 ))));
             }
-            let mut members: BTreeSet<NodeId> =
-                metrics.membership_config.membership().voter_ids().collect();
-            for old in &colliding {
-                members.remove(old);
-            }
-            members.insert(new_node_id);
-            drop(metrics);
 
-            match self.inner.change_membership(members, false).boxed().await {
-                Ok(_) => {
-                    info!(
-                        node_id = ?new_node_id,
-                        colliding_removed = colliding.len(),
-                        learner_ms,
-                        change_ms = t0.elapsed().as_millis(),
-                        change_retries,
-                        total_ms = ?start.elapsed().as_millis(),
-                        "add_member: committed new voter",
-                    );
-                    return Ok(());
-                }
-                Err(e)
-                    if e.to_string()
-                        .contains("already undergoing a configuration change") =>
-                {
-                    change_retries = change_retries.saturating_add(1);
-                    tokio::time::sleep(Duration::from_millis(50)).await;
-                }
-                Err(e) => {
+            let membership = metrics.membership_config;
+            let already_voter = membership
+                .membership()
+                .voter_ids()
+                .any(|id| id == new_node_id);
+            let same_address = membership
+                .nodes()
+                .any(|(id, info)| *id == new_node_id && info.addr == peer_addr.addr);
+            if already_voter && same_address {
+                return Ok(());
+            }
+
+            // DNS collisions: other node IDs at the same address — remove them atomically.
+            let colliding: BTreeSet<NodeId> = membership
+                .nodes()
+                .filter_map(|(id, node)| {
+                    if *id != new_node_id && node.addr == peer_addr.addr {
+                        Some(*id)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if !colliding.is_empty() {
+                info!(
+                    node_id = ?new_node_id,
+                    addr = %peer_addr.addr,
+                    ?colliding,
+                    "add_member: DNS collision detected — old node(s) at same address will be replaced atomically",
+                );
+            }
+            drop(membership);
+
+            let t0 = tokio::time::Instant::now();
+            self.inner
+                .add_learner(new_node_id, NodeInfo::from(peer_addr), true)
+                .boxed()
+                .await
+                .to_raft("add_learner")?;
+            let learner_ms = t0.elapsed().as_millis();
+
+            let t0 = tokio::time::Instant::now();
+            let mut change_retries: u32 = 0;
+            loop {
+                // Re-check leadership on each iteration — may have been demoted.
+                let metrics = self.inner.metrics().borrow().clone();
+                if metrics.current_leader != Some(metrics.id) {
                     return Err(Error::Consensus(ConsensusError::Raft(format!(
-                        "change_membership: {e}"
+                        "add_member: lost leadership during membership change (current leader: {:?})",
+                        metrics.current_leader
                     ))));
+                }
+                let mut members: BTreeSet<NodeId> =
+                    metrics.membership_config.membership().voter_ids().collect();
+                for old in &colliding {
+                    members.remove(old);
+                }
+                members.insert(new_node_id);
+                drop(metrics);
+
+                match self.inner.change_membership(members, false).boxed().await {
+                    Ok(_) => {
+                        info!(
+                            node_id = ?new_node_id,
+                            colliding_removed = colliding.len(),
+                            learner_ms,
+                            change_ms = t0.elapsed().as_millis(),
+                            change_retries,
+                            total_ms = ?start.elapsed().as_millis(),
+                            "add_member: committed new voter",
+                        );
+                        return Ok(());
+                    }
+                    Err(e)
+                        if e.to_string()
+                            .contains("already undergoing a configuration change") =>
+                    {
+                        change_retries = change_retries.saturating_add(1);
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                    }
+                    Err(e) => {
+                        return Err(Error::Consensus(ConsensusError::Raft(format!(
+                            "change_membership: {e}"
+                        ))));
+                    }
                 }
             }
         }
-}
-.await
-.map_err(Into::into)
+        .await
+        .map_err(Into::into)
     }
 }
 

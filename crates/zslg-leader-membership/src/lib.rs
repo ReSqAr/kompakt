@@ -30,7 +30,6 @@ error_union::error_union! {
         Consensus(zslg_consensus::ConsensusError),
     }
     bridge zslg_consensus::Error
-    bridge zslg_raft::Error
     bridge zslg_net::Error
     bridge zslg_error::Error
 }
@@ -40,6 +39,3 @@ impl From<shutdown::Stopped> for Error {
         Self::Lifecycle(zslg_lifecycle_types::LifecycleError::Shutdown)
     }
 }
-
-#[cfg(test)]
-mod pacing_tests;

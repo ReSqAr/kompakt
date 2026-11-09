@@ -1,8 +1,9 @@
 # zslg / nvzn crate split — design
 
 Process: `nlnr/docs/iaic.md`. Decisions D1–D21 are in
-`2026-11-07_log_crate_split.md`; this document is the spec. Status: pass 3 —
-all decisions integrated and checked against each other; waiting for sign-off.
+`2026-11-07_log_crate_split.md`; this document is the spec. Status: implemented;
+the deviations are in `2026-11-07_post_crate_split.md`. (Pass 3 — all decisions
+integrated and checked against each other.)
 Branch `ccr-3ceece9d-e3tfbt`, base `6aa354b`.
 
 Reading order: §1 is the whole idea; §2 states the roles and rules; §3 shows the
@@ -648,7 +649,7 @@ Changed in pass 3 (consistency across D1–D20):
    crate; `HlcClock` leaves the public API; `zslg::testing::TestLog`.
 6. §10.2: lockfile name-clash check for unprefixed libraries.
 
-Earlier passes, still open for sign-off: types/ports split; procedures;
+Earlier passes, settled in the implementation: types/ports split; procedures;
 assemblies; no dev-dependencies between implementations; nvzn `reader` as an
 assembly and `Subscriptions` open. Settled since: D16–D20.
 

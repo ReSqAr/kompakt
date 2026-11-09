@@ -272,6 +272,41 @@ mod tests {
         drop(drainer.join().unwrap());
     }
 
+    /// The blocking reader holds its own descriptor of the socket, so dropping
+    /// the owner's handle must `shutdown` the connection — a plain close would
+    /// leave the reader parked in `read` for good, and a runtime dropped with
+    /// it would wait forever.
+    #[test]
+    fn dropping_the_socket_owner_wakes_a_parked_reader() {
+        use std::io::Read as _;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (_peer, _) = listener.accept().unwrap(); // idle: never writes
+        let mut reader_side = client.try_clone().unwrap();
+        let owner = CloseOnDrop(client);
+
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 1];
+            let _ = reader_side.read(&mut buf);
+            let _ = done_tx.send(());
+        });
+        assert!(
+            done_rx
+                .recv_timeout(std::time::Duration::from_millis(200))
+                .is_err(),
+            "the reader should be parked while the owner is alive",
+        );
+
+        drop(owner);
+        assert!(
+            done_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .is_ok(),
+            "dropping the owner must wake the reader",
+        );
+    }
+
     /// A gone consumer is the one genuinely terminal case.
     #[test]
     fn a_disconnected_consumer_ends_the_stream() {

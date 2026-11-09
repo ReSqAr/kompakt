@@ -259,7 +259,7 @@ impl ReplicaNodeConfig {
 
     /// Produce the raft subsystem config: the raft tunables plus the node's
     /// durable identity. The raft store's two column families come from the
-    /// [`Storage`] opened in `start`, not from a path in here.
+    /// [`Storage`](rocksdb_kit::Storage) opened in `start`, not from a path in here.
     #[must_use]
     pub fn raft_config(&self, node_id: NodeId) -> RaftConfig {
         RaftConfig {

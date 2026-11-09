@@ -12,8 +12,6 @@ zslg-error = { workspace = true }
 error-union = { workspace = true }
 zslg-time-types = { workspace = true }
 
-[dev-dependencies]
-
 [lints]
 workspace = true
 

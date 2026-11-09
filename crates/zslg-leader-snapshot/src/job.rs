@@ -215,3 +215,6 @@ impl SnapshotJob {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

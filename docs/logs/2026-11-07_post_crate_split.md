@@ -9,7 +9,8 @@ nvzn split (step 15) is tracked separately below.
 
 The workspace is 87 crates (60 `zslg-*`, 10 `nvzn-*` plus the facades and libraries; `crates/README.md`). The `zslg` facade is
 `pub use`, the public `Error`, `zslg::testing` and the
-examples; it depends on no type crate and no implementation. The layering test
+examples; it depends on no implementation, and on one type crate, `zslg-error`, so the
+public `Error` is re-exported from where it is defined. The layering test
 (`zslg::layering`) enforces the role table, the ports→ports exception for
 `zslg-net`, and "no `-types` import above the ports layer" (except
 `zslg-lifecycle-types`).
@@ -102,6 +103,8 @@ Deviations from design §9 (all forced by the code, not by preference):
 ## Where the tests live (after the facade was emptied of them)
 
 The `zslg` facade has no tests; its dev-dependencies are only what `examples/` needs.
+The `nvzn` facade has six integration test files (`crates/nvzn/tests`), which
+exercise its public API end to end against a real cluster; it has no unit tests.
 
 | tests | now in | why |
 |---|---|---|

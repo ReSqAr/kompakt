@@ -10,7 +10,6 @@ publish = false
 [dependencies]
 zslg-error = { workspace = true }
 bytes = { workspace = true }
-zslg-quorum-read = { workspace = true }
 bytesize = { workspace = true }
 crossbeam-channel = { workspace = true }
 crossbeam-combinators = { workspace = true }
@@ -25,7 +24,6 @@ zslg-consensus = { workspace = true }
 zslg-lifecycle-types = { workspace = true }
 zslg-log = { workspace = true }
 zslg-net = { workspace = true }
-zslg-raft = { workspace = true }
 zslg-snapshot = { workspace = true }
 zslg-time = { workspace = true }
 

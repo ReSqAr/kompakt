@@ -421,3 +421,6 @@ mod debounce_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod tests;

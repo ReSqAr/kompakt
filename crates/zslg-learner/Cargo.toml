@@ -21,8 +21,6 @@ zslg-lifecycle-types = { workspace = true }
 zslg-local-store = { workspace = true }
 zslg-log = { workspace = true }
 zslg-net = { workspace = true }
-zslg-quorum-read = { workspace = true }
-zslg-raft = { workspace = true }
 zslg-reader = { workspace = true }
 zslg-snapshot = { workspace = true }
 zslg-stable-archive = { workspace = true }

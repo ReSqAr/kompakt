@@ -141,8 +141,6 @@ error_union::error_union! {
         Consensus(zslg_consensus::ConsensusError),
     }
     bridge zslg_log::Error
-    bridge zslg_raft::Error
-    bridge zslg_quorum_read::Error
     bridge zslg_error::Error
 }
 
