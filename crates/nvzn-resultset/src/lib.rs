@@ -7,9 +7,11 @@ mod filter_map;
 mod join_on;
 mod join_pk;
 mod map;
+mod snapshot;
 
 pub use join_on::{IndexJoin, LazyRows};
 pub use join_pk::Lazy;
+pub use snapshot::Snapshot;
 
 #[must_use = "a result set reads nothing until it is iterated"]
 pub struct ResultSet<'a, T> {

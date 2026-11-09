@@ -16,11 +16,9 @@ pub mod metrics;
 
 // The names the moved modules reach for as `crate::X`.
 #[cfg(test)]
-pub(crate) use nvzn_projection::Write;
-pub(crate) use nvzn_projection::{
-    ArcReadTransaction, Index, Projection, ReadTransactionExt, Ref, View, Watermark,
-};
-pub use nvzn_resultset::{IndexJoin, Lazy, LazyRows, ResultSet};
+pub(crate) use nvzn_projection::{Index, ReadTransactionExt, View, Write};
+pub(crate) use nvzn_projection::{Projection, Ref, Watermark};
+pub use nvzn_resultset::{IndexJoin, Lazy, LazyRows, ResultSet, Snapshot};
 pub(crate) use nvzn_store::ConfigHash;
 #[cfg(test)]
 pub(crate) use nvzn_store::Store;
@@ -57,7 +55,7 @@ mod tests;
 
 pub use live::{Live, LiveLimits, Wait, is_live};
 use nvzn_types::{FoldState, SubscriptionItem, Subscriptions, Syncer};
-pub use reader::{Reader, Snapshot};
+pub use reader::Reader;
 pub use registration::AssociatedProjectorManager;
 use registration::compute_config_hash;
 pub(crate) use subscribers::{PENDING_SUBSCRIBERS, SUBSCRIBER_CAPACITY, Subscribers};

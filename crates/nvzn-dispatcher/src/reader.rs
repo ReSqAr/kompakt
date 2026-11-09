@@ -4,8 +4,8 @@ use crate::live::{self, Live, LiveLimits};
 use crate::metrics::{self, ReadKind};
 use crate::subset;
 use crate::{
-    ArcReadTransaction, ArcStore, Error, EventSet, Index, Projection, ProjectionTypeId,
-    ReadTransactionExt, Ref, ResultSet, SubEventOf, Tenant, TenantId, View, WithWireFormat,
+    ArcStore, Error, EventSet, Projection, ProjectionTypeId, Ref, Snapshot, SubEventOf, Tenant,
+    WithWireFormat,
 };
 use crate::{FoldState, Subscriptions};
 use crossbeam_combinators::{Channel, Infinite, RegistryError};
@@ -61,12 +61,6 @@ impl<Ev> Reader<Ev> {
     }
 }
 
-#[derive(Clone)]
-pub struct Snapshot<'a> {
-    tenant_id: TenantId,
-    snapshot: ArcReadTransaction<'a>,
-}
-
 impl<Ev> Reader<Ev> {
     pub async fn sync(&self) -> Result<(), Error> {
         self.syncer.sync().await
@@ -111,10 +105,7 @@ impl<Ev> Reader<Ev> {
     pub fn snapshot(&self) -> Result<Snapshot<'_>, Error> {
         self.fold_state.check()?;
         metrics::read(self.tenant, ReadKind::Stable);
-        Ok(Snapshot {
-            tenant_id: self.tenant.id(),
-            snapshot: self.store.read()?,
-        })
+        Ok(Snapshot::from_txn(self.tenant.id(), self.store.read()?))
     }
 
     /// Every stable `P` committed from now on, deletions included, as a
@@ -242,55 +233,6 @@ impl<Ev: WithWireFormat> Reader<Ev> {
             S::EVENTS,
             limits,
         )
-    }
-}
-
-impl<'a> Snapshot<'a> {
-    pub(crate) fn from_txn(tenant_id: TenantId, snapshot: ArcReadTransaction<'a>) -> Self {
-        Self {
-            tenant_id,
-            snapshot,
-        }
-    }
-
-    #[must_use]
-    pub fn view(&self) -> View<'_> {
-        View::new(self.tenant_id, &*self.snapshot)
-    }
-
-    pub fn get<P>(&self, r: Ref<P>) -> Result<Option<P>, Error>
-    where
-        P: Projection + Send + Sync,
-    {
-        self.view().get(r)
-    }
-
-    pub fn select<P: Projection>(&self) -> ResultSet<'_, P> {
-        let rows = self.snapshot.scan::<P>(self.tenant_id);
-        ResultSet::new(self.tenant_id, &*self.snapshot, rows)
-    }
-
-    pub fn with_iter<'s, I>(&'s self, rows: I) -> ResultSet<'s, I::Item>
-    where
-        I: IntoIterator,
-        I::IntoIter: 's,
-        I::Item: 's,
-    {
-        ResultSet::new(
-            self.tenant_id,
-            &*self.snapshot,
-            Box::new(rows.into_iter().map(Ok)),
-        )
-    }
-
-    pub fn lookup<P: Projection, Q: Projection>(
-        &self,
-        idx: Index<P, Q>,
-        key: impl Into<Ref<Q>>,
-    ) -> ResultSet<'_, P> {
-        let view = self.view();
-        let rows = view.lookup(idx, key).map(move |r| view.resolve(r?));
-        ResultSet::new(self.tenant_id, &*self.snapshot, Box::new(rows))
     }
 }
 
