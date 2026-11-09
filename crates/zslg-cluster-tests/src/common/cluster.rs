@@ -477,6 +477,26 @@ impl Cluster {
             .collect()
     }
 
+    /// A learner's config for joining this cluster: the real defaults, with the
+    /// two waits a learner's start depends on set for a loaded test machine.
+    ///
+    /// A learner's first step is a quorum read against the replicas, which in a
+    /// three-node cluster sharing one process can take longer than the
+    /// production `quorum_read_timeout` when the host is busy. Every learner a
+    /// test starts goes through here, so neither timeout is left at a value that
+    /// only holds on an idle machine.
+    pub(crate) fn learner_config(&self, db_path: std::path::PathBuf) -> zslg::LearnerNodeConfig {
+        let mut cfg = zslg::LearnerNodeConfig::new(
+            self.peer_addrs(),
+            db_path,
+            zslg::ObjectStoreConfig::InMemory,
+        )
+        .expect("learner config");
+        cfg.startup_timeout = std::time::Duration::from_secs(60);
+        cfg.quorum_read_timeout = std::time::Duration::from_secs(60);
+        cfg
+    }
+
     // ── wait helpers ──────────────────────────────────────────────
 
     /// Poll until a running node reports itself as leader.

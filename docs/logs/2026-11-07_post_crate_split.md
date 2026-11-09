@@ -11,9 +11,9 @@ The workspace is 87 crates (60 `zslg-*`, 10 `nvzn-*` plus the facades and librar
 `pub use`, the public `Error`, `zslg::testing` and the
 examples; it depends on no implementation, and on one type crate, `zslg-error`, so the
 public `Error` is re-exported from where it is defined. The layering test
-(`zslg::layering`) enforces the role table, the ports→ports exception for
-`zslg-net`, and "no `-types` import above the ports layer" (except
-`zslg-lifecycle-types`).
+(`kompakt-workspace-checks`, `tests/layering.rs`) enforces the role table, the
+ports→ports exception for `zslg-net`, and "no types-role crate above the ports
+layer" (except `zslg-lifecycle-types` and `zslg-error`).
 
 ## Deviations
 

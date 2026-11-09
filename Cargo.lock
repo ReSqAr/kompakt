@@ -5388,7 +5388,6 @@ dependencies = [
  "zslg-lifecycle-types",
  "zslg-log",
  "zslg-net",
- "zslg-raft",
  "zslg-snapshot",
  "zslg-time",
 ]

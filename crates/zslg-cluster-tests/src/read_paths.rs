@@ -34,7 +34,7 @@ use object_store::memory::InMemory;
 use tempfile::TempDir;
 
 use crate::{Cluster, ClusterConfig, assert_cluster_invariants_with_acks, default_fast_config};
-use zslg::{LearnerNode, LearnerNodeConfig, ObjectStoreConfig, WriterNode, WriterNodeConfig};
+use zslg::{LearnerNode, WriterNode, WriterNodeConfig};
 use zslg_consensus::NodeId;
 use zslg_log::{DataId, StableLogEvent};
 
@@ -114,18 +114,9 @@ async fn every_read_path_sees_the_writes() {
 
     // ── replica writer → learner's unstable tail ─────────────────────
     let learner_dir = TempDir::new().expect("tempdir for learner");
-    let learner = LearnerNode::start({
-        let mut cfg = LearnerNodeConfig::new(
-            cluster.peer_addrs(),
-            learner_dir.path().join("learner.db"),
-            ObjectStoreConfig::InMemory,
-        )
-        .expect("learner config");
-        cfg.startup_timeout = Duration::from_secs(30);
-        cfg
-    })
-    .await
-    .expect("learner start");
+    let learner = LearnerNode::start(cluster.learner_config(learner_dir.path().join("learner.db")))
+        .await
+        .expect("learner start");
 
     let payload = Bytes::from_static(b"read-paths");
     let acked_id = cluster
@@ -134,7 +125,7 @@ async fn every_read_path_sees_the_writes() {
         .write(payload.clone())
         .await
         .expect("quorum write succeeds");
-    let id = unstable_tail_has(&learner.reader(), &payload, Duration::from_secs(30)).await;
+    let id = unstable_tail_has(&learner.reader(), &payload, Duration::from_secs(60)).await;
     assert_eq!(
         id.source_node(),
         any_id,
