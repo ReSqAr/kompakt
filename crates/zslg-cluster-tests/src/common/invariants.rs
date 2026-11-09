@@ -182,12 +182,14 @@ pub(crate) async fn assert_durability_chain_on(
             .copied()
             .filter(|id| !seen.contains_key(id))
             .collect();
-        assert!(
-            found.is_ok() && missing.is_empty(),
-            "node {id}: {} of {} acked entries never reached the stable log: {missing:?}",
-            missing.len(),
-            want.len()
-        );
+        if !(found.is_ok() && missing.is_empty()) {
+            let report = explain_missing(cluster, id, &missing, found.is_err()).await;
+            panic!(
+                "node {id}: {} of {} acked entries never reached the stable log: {missing:?}\n{report}",
+                missing.len(),
+                want.len()
+            );
+        }
     }
 }
 
@@ -301,4 +303,108 @@ fn assert_no_satisfied_drain_left_armed(id: zslg_consensus::NodeId, state: &Raft
             "node {id}: drain satisfied but config still joint — collapse is not firing"
         );
     }
+}
+
+/// What the cluster knows about entries a node's stable log is missing, to tell
+/// two very different failures apart:
+///
+/// - **not yet stable** — the entry is on the replicas (in the unstable tail)
+///   and the stable watermark has not reached it: a liveness question;
+/// - **skipped** — the stable watermark is at or past the entry's HLC, yet the
+///   entry is in no stable log: a data-safety violation, whatever the timing.
+async fn explain_missing(
+    cluster: &Cluster,
+    on: NodeId,
+    missing: &BTreeSet<DataId>,
+    timed_out: bool,
+) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "  the wait {} (checking node {on})",
+        if timed_out {
+            "hit its deadline"
+        } else {
+            "ended because the stable stream ended"
+        }
+    );
+    let nodes = cluster.node_ids();
+    let mut stable_on: BTreeMap<NodeId, BTreeSet<DataId>> = BTreeMap::new();
+    let mut unstable_on: BTreeMap<NodeId, BTreeSet<DataId>> = BTreeMap::new();
+    let mut watermark: BTreeMap<NodeId, Option<zslg_time::Hlc>> = BTreeMap::new();
+    for node_id in &nodes {
+        let reader = cluster.node(*node_id).reader();
+        watermark.insert(*node_id, reader.stable_watermark());
+        let tail = tokio::time::timeout(Duration::from_secs(5), {
+            let mut stream = reader.unstable_tail().into_test_stream();
+            async move {
+                let mut got = BTreeSet::new();
+                while let Some(item) = stream.next().await {
+                    if let Ok(d) = item {
+                        got.insert(d.data_id);
+                    }
+                }
+                got
+            }
+        })
+        .await
+        .unwrap_or_default();
+        unstable_on.insert(*node_id, tail);
+        let stable = tokio::time::timeout(Duration::from_secs(3), {
+            let mut stream = reader
+                .subscribe_stable_log(None)
+                .into_channel()
+                .into_test_stream();
+            let missing = missing.clone();
+            async move {
+                let mut got = BTreeSet::new();
+                while let Some(item) = stream.next().await {
+                    if let Ok(StableLogEvent::Appended { data, .. }) = item
+                        && missing.contains(&data.data_id)
+                    {
+                        got.insert(data.data_id);
+                        if got.len() == missing.len() {
+                            break;
+                        }
+                    }
+                }
+                got
+            }
+        })
+        .await
+        .unwrap_or_default();
+        stable_on.insert(*node_id, stable);
+    }
+    for (node_id, wm) in &watermark {
+        let _ = writeln!(out, "  node {node_id}: stable watermark {wm:?}");
+    }
+    for id in missing {
+        let hlc = id.hlc();
+        let stable_nodes: Vec<_> = nodes
+            .iter()
+            .filter(|n| stable_on[*n].contains(id))
+            .collect();
+        let unstable_nodes: Vec<_> = nodes
+            .iter()
+            .filter(|n| unstable_on[*n].contains(id))
+            .collect();
+        let passed: Vec<_> = nodes
+            .iter()
+            .filter(|n| watermark[*n].is_some_and(|w| w >= hlc))
+            .collect();
+        let verdict = if stable_nodes.is_empty() && unstable_nodes.is_empty() {
+            "IN NO LOG AT ALL"
+        } else if !passed.is_empty() && stable_nodes.len() < nodes.len() {
+            "WATERMARK PASSED IT, STABLE LOG LACKS IT"
+        } else {
+            "not stable yet"
+        };
+        let _ = writeln!(
+            out,
+            "  {id:?} (hlc {hlc:?}): stable on {stable_nodes:?}, unstable on {unstable_nodes:?}, \
+             watermark at/after it on {passed:?} => {verdict}"
+        );
+    }
+    out
 }
