@@ -36,3 +36,16 @@ Rejected: B (apps depend on a narrow SDK crate, binaries on the host crate) and 
 the documented way in): both rest on consumers using part of the platform.
 
 Consequence: the layering inside btrb follows the platform's capabilities, not an SDK/host line.
+
+### D2 — the primary cut is by capability (settled)
+
+One crate per capability — db, web, background, cli, metrics — each owning what apps use *and* what the host
+runs for it. Config and `Error` are libraries beneath them; `App`/`Entry`/`Handles` and the process roles
+(server, worker, standalone, cli) are the assembly over them; `btrb` is the facade.
+
+Why: every app runs on all five layers, so the capabilities are the stable units; the roles only choose which
+capabilities a process carries.
+
+Rejected: cutting by role first with capabilities as modules inside each. It repeats the shared layers per
+role and hides that they are shared.
+

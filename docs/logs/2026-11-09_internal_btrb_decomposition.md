@@ -31,7 +31,8 @@ assembly over them, `btrb` the facade. Obstacles: `app` ↔ `admin` cycle; `live
 | # | question | I expect |
 |---|---|---|
 | 1 | ~~facade vs narrow crates~~ | settled: D1, facade |
-| 2 | is the primary cut the five capabilities, each crate owning its app-facing piece and its host machinery, with `App` + the roles as the assembly on top? | yes |
+| 2 | ~~capability cut~~ | settled: D2 |
+| 2b | settings (env → validated config) spans every capability: does each capability own its slice, with the assembly aggregating? | yes, per-capability slices |
 | 3 | does the zslg-knob reader belong in btrb at all? | no: it belongs next to `ReplicaNodeConfig` |
 | 4 | tests: integration tests (`tests/live_write.rs`) stay in the facade? | yes, like nvzn |
 | 5 | scope: only btrb, or also the nlnr side (git rev bump, Cargo.toml changes)? | btrb only; nlnr follows with a rev bump |
