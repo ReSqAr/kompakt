@@ -62,3 +62,14 @@ Why: each capability can be understood and tested alone, and a new capability br
 Rejected: one settings module in the assembly. It keeps the names in one grep-able place, but the assembly
 would know every layer's variables and no capability could be configured on its own.
 
+### D4 — read-after-write is its own crate above db and web (settled)
+
+`live.rs` (~300 production lines, its own setting `BTRB_READ_AFTER_WRITE_WAIT` and metric
+`btrb_read_after_write_wait_seconds`) becomes one crate depending on db and web; the assembly mounts it.
+
+Why: one protocol — a cookie carrying a write's position, and the wait for the view to show it — stays in one
+place, and `Live::write` returns a web response part (`Written`), so splitting it would make db depend on web.
+
+Rejected: a module in the web crate behind the `Waits` trait (web would carry a db dependency for one seam),
+and a split across db and web. Accepted cost: the smallest crate of the set.
+
