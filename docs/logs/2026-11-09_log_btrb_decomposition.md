@@ -83,3 +83,14 @@ Why: the seam is the contract an app is written against and must not be able to 
 
 Rejected: one assembly containing both — fewer boundaries, but nothing would stop `App` from mentioning roles.
 
+### D6 — one shared opaque `Error`; `ConfigError` is the only typed error (settled)
+
+`btrb::Error` (a boxed source that carries an app's error across the seam) lives in a base crate every
+capability returns. `ConfigError` stays typed in the config crate because callers match it and its messages
+name the variable. No per-capability error unions.
+
+Why: nobody matches on btrb errors — consumers print a chain; the zslg unions paid off only because callers
+matched and the compiler could prove which leaves a crate raises.
+
+Rejected: per-capability error types converting into `Error` at the seam — more machinery for the same output.
+

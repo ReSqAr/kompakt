@@ -35,7 +35,8 @@ assembly over them, `btrb` the facade. Obstacles: `app` ↔ `admin` cycle; `live
 | 2b | ~~settings ownership~~ | settled: D3, slices |
 | 2c | ~~`live.rs` placement~~ | settled: D4, own crate |
 | 2d | ~~seam vs roles~~ | settled: D5, two crates |
-| 2f | `Error` is one opaque boxed error that crosses the seam (apps' errors ride inside it): one shared crate under everything, or per-capability errors like the zslg unions? | one shared opaque error; typed only where a caller matches (`ConfigError`) |
+| 2f | ~~error layering~~ | settled: D6, one shared opaque error |
+| 2h | `/health`, `/ready` and the startup gate read a process-global `fold::current()` (db) from the web layer: a web→db dependency through a static. Who owns health? | the roles (host) own the platform routes and the gate; the global goes; web keeps only generic layers |
 | 2g | from btrb's point of view are the `zslg` and `nvzn` facades libraries (as zslg was for nvzn)? | yes |
 | 2e | `AppConfig`, `CookiePolicy`, `SigningKey`: web? | web |
 | 3 | does the zslg-knob reader belong in btrb at all? | no: it belongs next to `ReplicaNodeConfig` |
