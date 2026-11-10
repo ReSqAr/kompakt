@@ -19,8 +19,10 @@ use std::future::Future;
 use std::net::SocketAddr;
 
 use super::settings::CacheSetup;
-use crate::{BasePath, Booted, Cache, CookiePolicy, Ready, with_base_href};
+use btrb_app::{Booted, Ready};
+use btrb_db::Cache;
 use btrb_db::{FoldHealth, catch_up, until_stop};
+use btrb_web::{BasePath, CookiePolicy, with_base_href};
 
 /// Build every app, in list order, on `dispatcher` and the process's cache.
 /// The cache is activated once every app has registered its kinds: the
@@ -112,7 +114,7 @@ pub(super) async fn serve_http(
     clippy::large_stack_frames,
     reason = "one-shot startup: the frame is the sum of the setup futures and is gone before serving"
 )]
-pub(super) async fn run_serve(apps: &[crate::Entry]) -> Result<(), Box<dyn Error>> {
+pub(super) async fn run_serve(apps: &[btrb_app::Entry]) -> Result<(), Box<dyn Error>> {
     let mut settings = super::settings::from_env(apps)?;
     super::metrics::start(settings.metrics_listen_addr, apps)?;
 
@@ -131,7 +133,7 @@ pub(super) async fn run_serve(apps: &[crate::Entry]) -> Result<(), Box<dyn Error
         .into_iter()
         .map(|b| {
             let routes = b.app.router(&b.base)?;
-            Ok((b.base, crate::Booted::wrap(b.read_after_write, routes)))
+            Ok((b.base, btrb_app::Booted::wrap(b.read_after_write, routes)))
         })
         .collect::<Result<Vec<_>, Box<dyn Error>>>()?;
     let router = assemble(parts, settings.cookies, &fold);

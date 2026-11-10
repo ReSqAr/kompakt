@@ -19,13 +19,12 @@
 //!
 //! Design: nlnr `docs/logs/2026-10-28_design_read_after_write.md`.
 
-use crate::CookiePolicy;
-use crate::base_path::BasePath;
 use axum::extract::{Request, State};
 use axum::http::HeaderValue;
 use axum::http::header::{COOKIE, SET_COOKIE};
 use axum::middleware::Next;
 use axum::response::{IntoResponseParts, Response, ResponseParts};
+use btrb_web::{BasePath, CookiePolicy};
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
 use nvzn::{EventSet, EventWriter, Wait, WithWireFormat};
@@ -47,12 +46,8 @@ pub struct LiveSettings {
 }
 
 impl LiveSettings {
-    pub(crate) fn new(
-        app: &'static str,
-        base: &BasePath,
-        cookies: CookiePolicy,
-        cap: Duration,
-    ) -> Self {
+    #[must_use]
+    pub fn new(app: &'static str, base: &BasePath, cookies: CookiePolicy, cap: Duration) -> Self {
         Self {
             cap,
             cookie: Arc::new(Cookie {
@@ -195,11 +190,8 @@ impl<Ev, L> Clone for Live<Ev, L> {
 }
 
 impl<Ev: WithWireFormat, L: EventSet + Into<Ev>> Live<Ev, L> {
-    pub(crate) fn new(
-        live: nvzn::Live<Ev>,
-        writer: EventWriter<Ev>,
-        settings: LiveSettings,
-    ) -> Self {
+    #[must_use]
+    pub fn new(live: nvzn::Live<Ev>, writer: EventWriter<Ev>, settings: LiveSettings) -> Self {
         Self {
             live,
             writer,
@@ -236,7 +228,8 @@ impl<Ev: WithWireFormat, L: EventSet + Into<Ev>> Live<Ev, L> {
     }
 
     /// The layer's handle on this view: `wait_for` and the cookie.
-    pub(crate) fn read_after_write(&self) -> ReadAfterWrite
+    #[must_use]
+    pub fn read_after_write(&self) -> ReadAfterWrite
     where
         Ev: Send + Sync + 'static,
     {
@@ -300,7 +293,7 @@ pub struct ReadAfterWrite {
 
 impl ReadAfterWrite {
     /// `router` with the wait in front of every route.
-    pub(crate) fn layer(self, router: axum::Router) -> axum::Router {
+    pub fn layer(self, router: axum::Router) -> axum::Router {
         router.layer(axum::middleware::from_fn_with_state(self, wait_before))
     }
 }

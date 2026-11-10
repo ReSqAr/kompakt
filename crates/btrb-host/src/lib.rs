@@ -2,13 +2,10 @@
 //! has said which they are.
 //!
 //! ```text
-//!   settings   the environment → one validated Settings (ZSLG_, NVZN_, BTRB_, the apps')
-//!   db         the zslg node and the nvzn dispatcher on it
-//!   fold       the projection fold's health, catch-up and supervision
-//!   routes     the HTTP layers: limits, tracing, the startup gate, request metrics
-//!   paths      an app's root is a directory, every other path a name
-//!   security   response headers, HSTS
-//!   metrics    the Prometheus recorder, the process gauges, the /metrics listener
+//!   settings   the environment → one validated Settings: each capability's slice
+//!              (btrb-db, -web, -metrics, -cli), the apps', and the role defaults
+//!   routes     /health, /ready and the startup gate, on an explicit FoldHealth
+//!   metrics    the process's histograms, then the recorder and the /metrics listener
 //!   serve      the server role, end to end (and what the listening roles share)
 //!   work       the worker role: jobs and the CLI's socket
 //!   standalone both on one node
@@ -46,7 +43,7 @@ pub enum Role {
 /// # Errors
 /// A configuration, start-up or runtime failure; the process then exits
 /// non-zero, so an orchestrator restarts it.
-pub async fn run(apps: &[crate::Entry], role: Role) -> Result<(), Box<dyn Error>> {
+pub async fn run(apps: &[btrb_app::Entry], role: Role) -> Result<(), Box<dyn Error>> {
     match role {
         Role::Serve => serve::run_serve(apps).await,
         Role::Work => work::run_work(apps).await,

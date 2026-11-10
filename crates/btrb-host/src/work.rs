@@ -19,7 +19,7 @@ use btrb_db::{FoldHealth, supervise, until_stop};
     clippy::large_stack_frames,
     reason = "one-shot startup: the frame is the sum of the setup futures and is gone before work starts"
 )]
-pub(super) async fn run_work(entries: &[crate::Entry]) -> Result<(), Box<dyn Error>> {
+pub(super) async fn run_work(entries: &[btrb_app::Entry]) -> Result<(), Box<dyn Error>> {
     let mut settings = worker_from_env(entries)?;
     super::metrics::start(settings.metrics_listen_addr, entries)?;
 
@@ -54,7 +54,7 @@ pub(super) async fn run_work(entries: &[crate::Entry]) -> Result<(), Box<dyn Err
     });
 
     // The first job to fail, in any app, stops the rest (and the process).
-    let stop = crate::Shutdown::from_token(shutdown.clone());
+    let stop = btrb_app::Shutdown::from_token(shutdown.clone());
     let mut jobs: Vec<_> = booted
         .into_iter()
         .flat_map(|b| b.app.background(stop.clone()))
@@ -63,7 +63,7 @@ pub(super) async fn run_work(entries: &[crate::Entry]) -> Result<(), Box<dyn Err
     // path held by a live worker, or by something that is not a socket, stops
     // the worker the way any failed job does (drained, non-zero).
     jobs.push(socket_job(settings.cli_socket.clone(), calls, stop.clone()));
-    let apps = crate::run_background(&stop, jobs).boxed().await;
+    let apps = btrb_app::run_background(&stop, jobs).boxed().await;
     shutdown.cancel();
     if let Err(e) = &apps {
         tracing::error!(%e, "an app's background work failed");
@@ -86,8 +86,8 @@ pub(super) async fn run_work(entries: &[crate::Entry]) -> Result<(), Box<dyn Err
 /// The CLI's socket, served until `stop`.
 pub(super) fn socket_job(
     path: std::path::PathBuf,
-    calls: Vec<crate::admin::Served>,
-    stop: crate::Shutdown,
-) -> crate::Job {
-    Box::pin(async move { crate::AdminSocket::bind(&path)?.serve(calls, stop).await })
+    calls: Vec<btrb_cli::Served>,
+    stop: btrb_app::Shutdown,
+) -> btrb_app::Job {
+    Box::pin(async move { btrb_cli::AdminSocket::bind(&path)?.serve(calls, stop).await })
 }

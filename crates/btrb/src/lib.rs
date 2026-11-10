@@ -1,41 +1,53 @@
-//! What the platform hands every app it mounts.
+//! The btrb platform, as one dependency.
 //!
-//! Apps (`other` today, more later) are nested onto the platform's
-//! router, and each needs a handful of deployment facts the platform is the
-//! only place that knows: is there TLS in front of us, what secret do we sign
-//! with, and so on. Those facts belong in one validated place — the platform's
-//! `config` module — not rediscovered by each app from the environment.
+//! btrb runs apps on a replicated log. This crate holds no logic: it re-exports
+//! what the crates below it own, so that an app, or the binary that lists the
+//! apps, names `btrb::…` and nothing else.
 //!
-//! This crate exists so that can happen without a dependency cycle: the
-//! platform depends on its apps, so the shared type cannot live in either. It
-//! deliberately holds only the contract; nothing here reads the environment.
+//! ```text
+//!   btrb ─┬─ btrb-host     the roles: serve, work, standalone, cli      host
+//!         ├─ btrb-app      the seam: App, Entry, boot, the metrics list  app, metrics
+//!         ├─ btrb-live     read-after-write                              live
+//!         └─ the capabilities, each its own crate
+//!              btrb-db  btrb-web  btrb-background  btrb-cli  btrb-metrics   (+ btrb-config, btrb-types)
+//! ```
 //!
-//! It also holds the few HTTP mechanisms every app must apply the same way:
-//! [`floor`] (auth failures answer on a fixed step), [`buckets`] (failed
-//! attempts rate-limited per key) and [`assets`] (fingerprinted, immutable
-//! static files).
+//! The split is internal: every path an app used before the split still
+//! resolves here.
 
-pub mod app;
 pub use btrb_config as config;
-pub mod error {
-    pub use btrb_types::Error;
-}
-pub mod host;
-pub mod live;
-pub mod metrics;
+pub use btrb_host as host;
+pub use btrb_live as live;
 
-pub use app::{
-    App, Booted, Entry, Global, Handles, Job, Mounted, NoEvents, Nothing, Nvzn, Ready, Shutdown,
-    Stopped, configure_all, env_prefixes, run_background,
+/// The seam an app is written against.
+pub mod app {
+    pub use btrb_app::{
+        App, Booted, Entry, Global, Handles, Job, Mounted, NoEvents, Nothing, Nvzn, Ready,
+        Shutdown, Stopped, configure_all, env_prefixes, run_background,
+    };
+}
+
+/// What an app says about its metrics, as data.
+pub mod metrics {
+    pub use btrb_app::{Histogram, describe_metrics, histograms};
+}
+
+/// The one error every btrb surface returns.
+pub mod error {
+    pub use btrb_app::Error;
+}
+
+pub use btrb_app::{
+    AdminSocket, App, AppCache, AppConfig, BasePath, Booted, Cache, CacheBuilder, CacheConfig,
+    CacheLimits, Console, CookiePolicy, Entry, Error, Global, Handler, Handles, Job, Mounted,
+    NoCalls, NoEvents, Nothing, Nvzn, Ready, Remote, ScriptedConsole, Served, Shutdown, SigningKey,
+    StdConsole, Stopped, admin, assets, base_path, buckets, configure_all, console, env_prefixes,
+    fingerprint, floor, run_background, with_base_href,
 };
-pub use btrb_cli::{
-    AdminSocket, Console, Handler, NoCalls, Remote, ScriptedConsole, Served, StdConsole, admin,
-    console, fingerprint,
-};
-pub use btrb_db::{AppCache, Cache, CacheBuilder, CacheConfig, CacheLimits};
-pub use btrb_types::{Error, SigningKey};
-pub use btrb_web::{
-    AppConfig, BasePath, CookiePolicy, assets, base_path, buckets, floor, with_base_href,
-};
-pub use live::{Live, LiveSettings, ReadAfterWrite, Written};
+pub use btrb_live::{Live, LiveSettings, ReadAfterWrite, Written};
 pub use metrics::{Histogram, describe_metrics, histograms};
+
+// The integration tests in `tests/` use these; the lib's own test target has no
+// test of its own.
+#[cfg(test)]
+use {nvzn as _, serde as _, tokio as _};

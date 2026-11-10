@@ -379,26 +379,34 @@ dependencies = [
 name = "btrb"
 version = "0.1.0"
 dependencies = [
+ "btrb-app",
+ "btrb-config",
+ "btrb-host",
+ "btrb-live",
+ "nvzn",
+ "serde",
+ "tokio",
+]
+
+[[package]]
+name = "btrb-app"
+version = "0.1.0"
+dependencies = [
  "axum",
  "btrb-background",
  "btrb-cli",
  "btrb-config",
  "btrb-db",
- "btrb-metrics",
+ "btrb-live",
  "btrb-types",
  "btrb-web",
  "clap",
  "futures",
- "metrics",
  "nvzn",
  "objectstorage-cache",
  "serde",
- "tempfile",
  "tokio",
- "tokio-util",
  "tower",
- "tracing",
- "zslg",
 ]
 
 [[package]]
@@ -452,6 +460,44 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "zslg",
+]
+
+[[package]]
+name = "btrb-host"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "btrb-app",
+ "btrb-background",
+ "btrb-cli",
+ "btrb-config",
+ "btrb-db",
+ "btrb-live",
+ "btrb-metrics",
+ "btrb-web",
+ "clap",
+ "futures",
+ "nvzn",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg",
+]
+
+[[package]]
+name = "btrb-live"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "btrb-types",
+ "btrb-web",
+ "futures",
+ "metrics",
+ "nvzn",
+ "tokio",
+ "tower",
  "zslg",
 ]
 

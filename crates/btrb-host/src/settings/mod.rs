@@ -44,7 +44,7 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use crate::CookiePolicy;
+use btrb_web::CookiePolicy;
 use tempfile::TempDir;
 use zslg::{FollowerNodeConfig, ReplicaNodeConfig};
 
@@ -57,15 +57,15 @@ pub(crate) use btrb_db::settings::CacheSetup;
 /// apps' own prefixes (`OTHER_`) come from the app list.
 const PREFIXES: [&str; 3] = ["ZSLG_", "NVZN_", "BTRB_"];
 
-fn prefixes(apps: &[crate::Entry]) -> Vec<String> {
+fn prefixes(apps: &[btrb_app::Entry]) -> Vec<String> {
     PREFIXES
         .iter()
         .map(|p| (*p).to_owned())
-        .chain(crate::env_prefixes(apps))
+        .chain(btrb_app::env_prefixes(apps))
         .collect()
 }
 
-fn snapshot(apps: &[crate::Entry]) -> Result<Env, ConfigError> {
+fn snapshot(apps: &[btrb_app::Entry]) -> Result<Env, ConfigError> {
     let prefixes = prefixes(apps);
     let prefixes: Vec<&str> = prefixes.iter().map(String::as_str).collect();
     Env::from_process(&prefixes)
@@ -75,19 +75,19 @@ fn snapshot(apps: &[crate::Entry]) -> Result<Env, ConfigError> {
 fn configure_apps(
     env: &mut Env,
     cookies: CookiePolicy,
-    apps: &[crate::Entry],
-) -> Result<Vec<crate::Ready>, ConfigError> {
-    let mut read_after_write_wait = crate::live::DEFAULT_WAIT;
+    apps: &[btrb_app::Entry],
+) -> Result<Vec<btrb_app::Ready>, ConfigError> {
+    let mut read_after_write_wait = btrb_live::DEFAULT_WAIT;
     env.set(
         &mut read_after_write_wait,
         "BTRB_READ_AFTER_WRITE_WAIT",
         parse::duration,
     )?;
-    let global = crate::Global {
+    let global = btrb_app::Global {
         cookies,
         read_after_write_wait,
     };
-    crate::configure_all(env, &global, apps).map_err(|e| ConfigError::Other(e.to_string()))
+    btrb_app::configure_all(env, &global, apps).map_err(|e| ConfigError::Other(e.to_string()))
 }
 
 /// host's defaults for both RocksDB budgets (`ZSLG_STORAGE_MEMORY`,
@@ -118,7 +118,7 @@ pub(crate) struct Settings {
     pub(crate) http_listen_addr: SocketAddr,
     pub(crate) metrics_listen_addr: Option<SocketAddr>,
     /// The apps of the binary's list, configured, waiting for the dispatcher.
-    pub(crate) apps: Vec<crate::Ready>,
+    pub(crate) apps: Vec<btrb_app::Ready>,
     /// The cache this process opens once its apps are built.
     pub(crate) cache: Option<CacheSetup>,
     pub(crate) _temp: Vec<TempDir>,
@@ -126,7 +126,7 @@ pub(crate) struct Settings {
 
 /// Read every setting, then reject any `ZSLG_*` / `NVZN_*` / `BTRB_*` variable
 /// nothing claimed.
-pub(crate) fn from_env(entries: &[crate::Entry]) -> Result<Settings, ConfigError> {
+pub(crate) fn from_env(entries: &[btrb_app::Entry]) -> Result<Settings, ConfigError> {
     read_server(entries, false).map(|(settings, _)| settings)
 }
 
@@ -140,7 +140,7 @@ pub(crate) struct StandaloneSettings {
 /// The server's settings, plus the socket, for a process that serves and
 /// works on one node: the budgets are the server's, and the node is alone.
 pub(crate) fn standalone_from_env(
-    entries: &[crate::Entry],
+    entries: &[btrb_app::Entry],
 ) -> Result<StandaloneSettings, ConfigError> {
     let (server, cli_socket) = read_server(entries, true)?;
     let cli_socket = cli_socket.ok_or_else(|| {
@@ -154,7 +154,7 @@ pub(crate) fn standalone_from_env(
     reason = "one-shot startup: the frame is the sum of every builder's config and is gone before serving"
 )]
 fn read_server(
-    entries: &[crate::Entry],
+    entries: &[btrb_app::Entry],
     standalone: bool,
 ) -> Result<(Settings, Option<PathBuf>), ConfigError> {
     let mut env = snapshot(entries)?;
@@ -189,7 +189,7 @@ fn read_server(
     env.finish()?;
 
     tracing::info!(
-        settings = ?crate::config::env::present_names(
+        settings = ?btrb_config::env::present_names(
             &prefixes(entries).iter().map(String::as_str).collect::<Vec<_>>()
         ),
         db_path = ?zslg.db_path,
@@ -222,19 +222,19 @@ pub(crate) struct WorkerSettings {
     pub(crate) metrics_listen_addr: Option<SocketAddr>,
     /// Where the CLI reaches this worker (`BTRB_CLI_SOCKET`, required).
     pub(crate) cli_socket: PathBuf,
-    pub(crate) apps: Vec<crate::Ready>,
+    pub(crate) apps: Vec<btrb_app::Ready>,
     pub(crate) cache: CacheSetup,
     pub(crate) _temp: Vec<TempDir>,
 }
 
 /// Read the worker's settings and reject anything unclaimed: the worker is a
 /// long-running process with its own environment.
-pub(crate) fn worker_from_env(apps: &[crate::Entry]) -> Result<WorkerSettings, ConfigError> {
+pub(crate) fn worker_from_env(apps: &[btrb_app::Entry]) -> Result<WorkerSettings, ConfigError> {
     let mut env = snapshot(apps)?;
     let settings = worker_config(&mut env, apps)?;
     env.finish()?;
     tracing::info!(
-        settings = ?crate::config::env::present_names(
+        settings = ?btrb_config::env::present_names(
             &prefixes(apps).iter().map(String::as_str).collect::<Vec<_>>()
         ),
         "worker configuration read from the environment"
@@ -242,7 +242,10 @@ pub(crate) fn worker_from_env(apps: &[crate::Entry]) -> Result<WorkerSettings, C
     Ok(settings)
 }
 
-fn worker_config(env: &mut Env, entries: &[crate::Entry]) -> Result<WorkerSettings, ConfigError> {
+fn worker_config(
+    env: &mut Env,
+    entries: &[btrb_app::Entry],
+) -> Result<WorkerSettings, ConfigError> {
     let mut temp = Vec::new();
     let zslg = btrb_db::settings::follower_config(env, &mut temp, WORKER_STORAGE_MEMORY)?;
 

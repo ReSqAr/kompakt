@@ -22,14 +22,15 @@
 //! is permanent: it is the env prefix and, with version 0, the tenant that
 //! hashes into every key the app writes.
 
-use crate::admin::{Handler, Remote, Served};
-use crate::base_path::BasePath;
-use crate::config::{Env, Scope};
-use crate::console::Console;
-use crate::live::{Live, LiveSettings, ReadAfterWrite};
-use crate::metrics::Histogram;
-use crate::{CookiePolicy, Error};
 use axum::Router;
+use btrb_cli::Console;
+use btrb_cli::admin::{Handler, Remote, Served};
+use btrb_config::{Env, Scope};
+use btrb_live::{Live, LiveSettings, ReadAfterWrite};
+use btrb_types::Error;
+use btrb_types::Histogram;
+use btrb_web::BasePath;
+use btrb_web::CookiePolicy;
 use clap::{ArgMatches, FromArgMatches, Subcommand};
 use futures::future::BoxFuture;
 use nvzn::{
@@ -203,7 +204,7 @@ impl Subcommand for Nothing {
 /// exactly one of them — the server, the worker, or both roles in one process.
 /// Anything role-specific is built inside the method of its role; `new` is
 /// what they share. The CLI builds no app: `command` reaches the worker's
-/// through `Request`/`Response` (see [`crate::admin`]).
+/// through `Request`/`Response` (see [`btrb_cli::admin`]).
 pub trait App: Sized + Send + 'static {
     /// `[a-z]+`: the env prefix (`APP_`) and the tenant name. Permanent.
     const NAME: &'static str;
@@ -566,8 +567,8 @@ mod tests {
         type Live = NoEvents;
         type Config = ();
         type Command = Nothing;
-        type Request = crate::NoCalls;
-        type Response = crate::NoCalls;
+        type Request = btrb_cli::NoCalls;
+        type Response = btrb_cli::NoCalls;
         const WIRE: u64 = 0;
 
         fn config(_: &mut Scope<'_>, _: &Global) -> Result<(), Error> {
@@ -590,7 +591,7 @@ mod tests {
         async fn command(
             cmd: Nothing,
             _: &mut dyn Console,
-            _: &Remote<crate::NoCalls, crate::NoCalls>,
+            _: &Remote<btrb_cli::NoCalls, btrb_cli::NoCalls>,
         ) -> Result<(), Error> {
             match cmd {}
         }

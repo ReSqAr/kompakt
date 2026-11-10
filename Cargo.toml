@@ -105,10 +105,13 @@ nvzn-projection = { path = "crates/nvzn-projection" }
 nvzn-store = { path = "crates/nvzn-store" }
 nvzn-projector = { path = "crates/nvzn-projector" }
 nvzn-fixtures = { path = "crates/nvzn-fixtures" }
+btrb-app = { path = "crates/btrb-app" }
 btrb-background = { path = "crates/btrb-background" }
 btrb-cli = { path = "crates/btrb-cli" }
 btrb-config = { path = "crates/btrb-config" }
 btrb-db = { path = "crates/btrb-db" }
+btrb-host = { path = "crates/btrb-host" }
+btrb-live = { path = "crates/btrb-live" }
 btrb-metrics = { path = "crates/btrb-metrics" }
 btrb-types = { path = "crates/btrb-types" }
 btrb-web = { path = "crates/btrb-web" }

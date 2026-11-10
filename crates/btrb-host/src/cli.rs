@@ -14,7 +14,7 @@ use std::error::Error;
 
 /// The apps as a command line: `<name> app album create …`.
 #[must_use]
-pub fn cli_command(name: &'static str, entries: &[crate::Entry]) -> Command {
+pub fn cli_command(name: &'static str, entries: &[btrb_app::Entry]) -> Command {
     let mut cli = Command::new(name)
         .about("Commands for the apps of this process, asked of the process that works")
         .infer_subcommands(true)
@@ -34,7 +34,10 @@ pub fn cli_command(name: &'static str, entries: &[crate::Entry]) -> Command {
 ///
 /// # Errors
 /// The command's own error, or a missing socket variable.
-pub async fn run_cli(entries: &[crate::Entry], matches: &ArgMatches) -> Result<(), Box<dyn Error>> {
+pub async fn run_cli(
+    entries: &[btrb_app::Entry],
+    matches: &ArgMatches,
+) -> Result<(), Box<dyn Error>> {
     let Some((name, args)) = matches.subcommand() else {
         return Err("no command".into());
     };
@@ -44,7 +47,7 @@ pub async fn run_cli(entries: &[crate::Entry], matches: &ArgMatches) -> Result<(
         .ok_or_else(|| format!("no app named {name}"))?;
     let socket = super::settings::cli_socket_from_env()?;
 
-    let mut console = crate::StdConsole;
+    let mut console = btrb_cli::StdConsole;
     entry.command(args, &mut console, &socket).await?;
     Ok(())
 }

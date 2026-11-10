@@ -19,7 +19,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::serve::{assemble, boot, serve_http};
 use super::settings::standalone_from_env;
-use crate::{Job, Shutdown};
+use btrb_app::{Job, Shutdown};
 use btrb_db::{FoldHealth, catch_up, until_stop};
 
 /// A job that starts once the fold has replayed the log, and ends with `stop`
@@ -37,7 +37,7 @@ fn after_replay(fold: FoldHealth, stop: Shutdown, job: Job) -> Job {
     clippy::large_stack_frames,
     reason = "one-shot startup: the frame is the sum of the setup futures and is gone before serving"
 )]
-pub(super) async fn run_standalone(entries: &[crate::Entry]) -> Result<(), Box<dyn Error>> {
+pub(super) async fn run_standalone(entries: &[btrb_app::Entry]) -> Result<(), Box<dyn Error>> {
     let mut standalone = standalone_from_env(entries)?;
     let settings = &mut standalone.server;
     super::metrics::start(settings.metrics_listen_addr, entries)?;
@@ -75,7 +75,7 @@ pub(super) async fn run_standalone(entries: &[crate::Entry]) -> Result<(), Box<d
     let mut jobs: Vec<Job> = Vec::new();
     for b in booted {
         let (routes, app_jobs) = b.app.standalone(&b.base, stop.clone())?;
-        parts.push((b.base, crate::Booted::wrap(b.read_after_write, routes)));
+        parts.push((b.base, btrb_app::Booted::wrap(b.read_after_write, routes)));
         jobs.extend(
             app_jobs
                 .into_iter()
@@ -102,7 +102,7 @@ pub(super) async fn run_standalone(entries: &[crate::Entry]) -> Result<(), Box<d
             shutdown.cancel();
         }
     });
-    let working = crate::run_background(&stop, jobs);
+    let working = btrb_app::run_background(&stop, jobs);
     let (served, worked) = tokio::join!(serving.boxed(), working.boxed());
     shutdown.cancel();
     if let Err(e) = &worked {
