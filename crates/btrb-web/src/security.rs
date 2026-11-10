@@ -66,7 +66,7 @@ const X_FRAME_OPTIONS: HeaderName = HeaderName::from_static("x-frame-options");
 ///
 /// Like tracing, this has to be applied after the last app is nested:
 /// `Router::layer` only wraps the routes already present.
-pub(crate) fn with_security_headers(router: Router, cookies: CookiePolicy) -> Router {
+pub fn with_security_headers(router: Router, cookies: CookiePolicy) -> Router {
     let hsts = match cookies {
         CookiePolicy::RequireHttps => Some(HeaderValue::from_static(STRICT_TRANSPORT_SECURITY)),
         CookiePolicy::AllowPlainHttp => None,

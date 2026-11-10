@@ -167,6 +167,13 @@ pub fn signing_key(var: &'static str, raw: &str) -> Result<btrb_types::SigningKe
     Ok(btrb_types::SigningKey::from_bytes(bytes))
 }
 
+/// `host:port` as the OS would bind it, e.g. `0.0.0.0:9000`.
+pub fn socket_addr(var: &'static str, raw: &str) -> Result<std::net::SocketAddr, ConfigError> {
+    raw.trim()
+        .parse()
+        .map_err(|_| ConfigError::bad_value(var, raw, "a socket address, e.g. `0.0.0.0:9000`"))
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::panic, reason = "test code")]
 mod tests {

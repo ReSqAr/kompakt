@@ -107,6 +107,7 @@ nvzn-projector = { path = "crates/nvzn-projector" }
 nvzn-fixtures = { path = "crates/nvzn-fixtures" }
 btrb-config = { path = "crates/btrb-config" }
 btrb-types = { path = "crates/btrb-types" }
+btrb-web = { path = "crates/btrb-web" }
 nvzn-dispatcher = { path = "crates/nvzn-dispatcher" }
 nvzn-live = { path = "crates/nvzn-live" }
 nvzn-resultset = { path = "crates/nvzn-resultset" }

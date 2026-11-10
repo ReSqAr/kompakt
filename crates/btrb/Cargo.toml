@@ -16,7 +16,7 @@ jemalloc = ["zslg/jemalloc"]
 axum = { workspace = true }
 btrb-config = { workspace = true }
 btrb-types = { workspace = true }
-blake3 = { workspace = true }
+btrb-web = { workspace = true }
 clap = { workspace = true }
 futures = { workspace = true }
 memory-stats = { workspace = true }
@@ -31,7 +31,6 @@ rpassword = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["time", "net", "io-util", "macros", "rt", "signal"] }
 tokio-util = { workspace = true, features = ["rt"] }
-tower-http = { workspace = true, features = ["set-header", "timeout", "trace"] }
 tracing = { workspace = true }
 zslg = { workspace = true, features = ["prometheus", "s3"] }
 

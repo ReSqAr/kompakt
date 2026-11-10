@@ -111,11 +111,7 @@ pub(crate) fn peers(var: &'static str, raw: &str) -> Result<Vec<PeerAddr>, Confi
     Ok(peers)
 }
 
-pub(crate) fn socket_addr(var: &'static str, raw: &str) -> Result<SocketAddr, ConfigError> {
-    raw.trim()
-        .parse()
-        .map_err(|_| ConfigError::bad_value(var, raw, "a socket address, e.g. `0.0.0.0:9000`"))
-}
+pub(crate) use btrb_config::parse::socket_addr;
 
 /// The node's own bind address. Port 0 is refused here and allowed for the HTTP
 /// listener, because this node appears in its own peer list and a peer entry

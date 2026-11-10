@@ -380,9 +380,9 @@ name = "btrb"
 version = "0.1.0"
 dependencies = [
  "axum",
- "blake3",
  "btrb-config",
  "btrb-types",
+ "btrb-web",
  "clap",
  "futures",
  "memory-stats",
@@ -398,7 +398,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tower",
- "tower-http 0.7.1",
  "tracing",
  "zslg",
 ]
@@ -420,6 +419,21 @@ dependencies = [
  "futures",
  "nvzn",
  "tokio-util",
+]
+
+[[package]]
+name = "btrb-web"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "blake3",
+ "btrb-config",
+ "btrb-types",
+ "metrics",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
 ]
 
 [[package]]
@@ -3044,7 +3058,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-util",
  "tower",
- "tower-http 0.6.11",
+ "tower-http",
  "tower-service",
  "url",
  "wasm-bindgen",
@@ -3955,28 +3969,12 @@ dependencies = [
  "http",
  "http-body",
  "pin-project-lite",
+ "tokio",
  "tower",
  "tower-layer",
  "tower-service",
- "url",
-]
-
-[[package]]
-name = "tower-http"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08a05a66a4fdd61cbbe0a1d755ffe0ca6aba159dd4820936a0ff8a8278245b9c"
-dependencies = [
- "bitflags 2.13.2",
- "bytes",
- "http",
- "http-body",
- "percent-encoding",
- "pin-project-lite",
- "tokio",
- "tower-layer",
- "tower-service",
  "tracing",
+ "url",
 ]
 
 [[package]]

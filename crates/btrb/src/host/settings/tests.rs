@@ -97,7 +97,10 @@ fn metrics_default_to_loopback() {
 /// The two listeners must not collide, or one silently fails to bind.
 #[test]
 fn the_two_listeners_have_different_defaults() {
-    assert_ne!(DEFAULT_LISTEN_ADDR, DEFAULT_METRICS_LISTEN_ADDR);
+    assert_ne!(
+        btrb_web::settings::DEFAULT_LISTEN_ADDR,
+        DEFAULT_METRICS_LISTEN_ADDR
+    );
 }
 
 #[test]

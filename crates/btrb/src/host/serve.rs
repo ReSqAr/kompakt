@@ -63,12 +63,12 @@ pub(super) fn assemble(parts: Vec<(BasePath, Router)>, cookies: CookiePolicy) ->
             None => router.merge(routes),
         };
     }
-    let router = super::routes::with_http_metrics(router);
-    let router = super::paths::canonical(router, Box::leak(roots.into_boxed_slice()));
-    let router = super::security::with_security_headers(router, cookies);
-    let router = super::routes::with_limits(router);
+    let router = btrb_web::layers::with_http_metrics(router);
+    let router = btrb_web::paths::canonical(router, Box::leak(roots.into_boxed_slice()));
+    let router = btrb_web::security::with_security_headers(router, cookies);
+    let router = btrb_web::layers::with_limits(router);
     let router = super::routes::with_startup_gate(router);
-    super::routes::with_tracing(router)
+    btrb_web::layers::with_tracing(router)
 }
 
 /// Listen on `addr` and serve `router` until `shutdown` resolves, then let the

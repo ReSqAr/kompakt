@@ -108,8 +108,6 @@ const TEMP: &str = ":temp:";
 /// The sentinel object-store backend standing for "in this process's heap".
 const MEMORY: &str = ":memory:";
 
-const DEFAULT_LISTEN_ADDR: SocketAddr =
-    SocketAddr::new(std::net::IpAddr::V4(Ipv4Addr::LOCALHOST), 3000);
 const DEFAULT_METRICS_LISTEN_ADDR: SocketAddr =
     SocketAddr::new(std::net::IpAddr::V4(Ipv4Addr::LOCALHOST), 9100);
 
@@ -210,10 +208,9 @@ fn read_server(
     }
     let nvzn = nvzn_config(&mut env, &mut temp, nvzn_memory)?;
 
-    let mut http_listen_addr = DEFAULT_LISTEN_ADDR;
-    env.set(&mut http_listen_addr, "BTRB_LISTEN_ADDR", socket_addr)?;
+    let http_listen_addr = btrb_web::settings::http_listen_addr(&mut env)?;
 
-    let cookies = cookie_policy(&mut env)?;
+    let cookies = btrb_web::settings::cookie_policy(&mut env)?;
     let cache = Some(cache::read(&mut env)?);
     let apps = configure_apps(&mut env, cookies, entries)?;
     let cli_socket = standalone.then(|| cli_socket(&mut env)).transpose()?;
@@ -314,7 +311,7 @@ fn worker_config(env: &mut Env, entries: &[crate::Entry]) -> Result<WorkerSettin
     )?;
 
     let cli_socket = cli_socket(env)?;
-    let cookies = cookie_policy(env)?;
+    let cookies = btrb_web::settings::cookie_policy(env)?;
     let cache = cache::read(env)?;
     let apps = configure_apps(env, cookies, entries)?;
     temp.extend(env.take_temp());
@@ -350,32 +347,6 @@ fn cli_socket(env: &mut Env) -> Result<PathBuf, ConfigError> {
 }
 
 // ── apps ─────────────────────────────────────────────────────────────────────
-
-/// Read the settings every mounted app is handed.
-///
-/// `BTRB_INSECURE` turns off the `Secure` cookie attribute so a plain-HTTP
-/// `localhost` run can hold a session. It defaults to off, and it is loud when
-/// on: a deployment that reaches this branch by accident is serving session
-/// cookies a plain-HTTP hop can read, and the warning is the only thing that
-/// will say so.
-///
-/// It is read here rather than in the app so the `BTRB_` prefix brings it under
-/// `Env::finish`'s unknown-variable check. Without that a typo reads as "not
-/// set" — safe for this variable, and not for the next one.
-fn cookie_policy(env: &mut Env) -> Result<CookiePolicy, ConfigError> {
-    let mut insecure = false;
-    env.set(&mut insecure, "BTRB_INSECURE", parse::boolean)?;
-
-    if insecure {
-        tracing::warn!(
-            "BTRB_INSECURE is set: cookies will not carry the Secure attribute, so any \
-             plain-HTTP hop can read a session. Development only."
-        );
-        Ok(CookiePolicy::AllowPlainHttp)
-    } else {
-        Ok(CookiePolicy::RequireHttps)
-    }
-}
 
 // ── nvzn ─────────────────────────────────────────────────────────────────────
 

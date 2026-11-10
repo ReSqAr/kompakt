@@ -52,7 +52,7 @@ fn plan(path: &str, roots: &[&str]) -> Plan {
 
 /// Apply the rule to every request `router` will see. `roots` are the apps'
 /// prefixes (`/app`, `/other`).
-pub(crate) fn canonical(router: Router, roots: &'static [&'static str]) -> Router {
+pub fn canonical(router: Router, roots: &'static [&'static str]) -> Router {
     Router::new()
         .fallback_service(router)
         .layer(axum::middleware::from_fn(move |request, next| {
