@@ -46,3 +46,16 @@ Guard: a test pins the option set `Plain` builds, so a change to zslg's tuning h
 
 Open from the facts above: finding 1 means `Plain` cannot also serve nvzn's point families, so the type set is
 probably three modes (plain, point-lookup with bloom, prefixed). Settled in D3.
+
+### D2 — nvzn keeps its own `Storage`: one kit, two instances (settled)
+
+`nvzn-store-rocksdb` calls `Storage::open` on its own path with its own budget. `NVZN_DB_PATH` and `NVZN_MEMORY`
+stay as they are. `StoreConfig` converts field by field into `StorageConfig` (the six optional tunables and the
+budget constants are already identical); `flush_interval`, `fold_commit` and `compression` stay in nvzn.
+
+Why: projections are derived, rebuildable state and the log is their source of truth, so nvzn's durability and
+memory budget are its own. The kit is a library from both sides; sharing one database would make nvzn depend on
+zslg's node wiring, tie the two memory budgets and fsync cadences together, and make a node without nvzn carry
+nvzn's families.
+
+Rejected: one shared RocksDB for zslg and nvzn.
