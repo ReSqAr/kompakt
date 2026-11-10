@@ -41,29 +41,17 @@
 //! | [`parse`] | the value grammar — units, booleans, sentinels |
 //! | [`env`] | the environment as a map consumed by reading, so a typo is caught |
 
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use crate::CookiePolicy;
 use tempfile::TempDir;
 use zslg::{FollowerNodeConfig, ReplicaNodeConfig};
 
-pub(crate) use crate::config::ConfigError;
-use crate::config::{Env, parse};
+pub(crate) use btrb_config::ConfigError;
+use btrb_config::{Env, parse};
 
-mod cache;
-mod store;
-
-pub(crate) use cache::CacheSetup;
-
-mod fields;
-mod replica_node;
-
-pub(crate) use self::fields::{
-    compression, count, directory, jobs, listen_addr, object_store, open_files, peers, socket_addr,
-    spare_selection, tiers,
-};
-pub(crate) use self::replica_node::zslg_config;
+pub(crate) use btrb_db::settings::CacheSetup;
 
 /// Variables under these prefixes are ours: read them, or reject them. The
 /// apps' own prefixes (`OTHER_`) come from the app list.
@@ -101,15 +89,6 @@ fn configure_apps(
     };
     crate::configure_all(env, &global, apps).map_err(|e| ConfigError::Other(e.to_string()))
 }
-
-/// The sentinel path standing for "a fresh directory, gone when the process is".
-const TEMP: &str = ":temp:";
-
-/// The sentinel object-store backend standing for "in this process's heap".
-const MEMORY: &str = ":memory:";
-
-const DEFAULT_METRICS_LISTEN_ADDR: SocketAddr =
-    SocketAddr::new(std::net::IpAddr::V4(Ipv4Addr::LOCALHOST), 9100);
 
 /// host's defaults for both RocksDB budgets (`ZSLG_STORAGE_MEMORY`,
 /// `NVZN_MEMORY`) — restated here on purpose. The libraries default to
@@ -170,22 +149,6 @@ pub(crate) fn standalone_from_env(
     Ok(StandaloneSettings { server, cli_socket })
 }
 
-/// A standalone process is one replica: its peers are itself.
-fn alone(zslg: &ReplicaNodeConfig) -> Result<(), ConfigError> {
-    let others = zslg
-        .peers
-        .iter()
-        .filter(|p| p.server_name != zslg.network_server_name)
-        .count();
-    if others == 0 {
-        return Ok(());
-    }
-    Err(ConfigError::Other(format!(
-        "ZSLG_PEERS names {others} other node(s): a standalone process is one node \
-         (use `serve` and `work` for more)"
-    )))
-}
-
 #[allow(
     clippy::large_stack_frames,
     reason = "one-shot startup: the frame is the sum of every builder's config and is gone before serving"
@@ -202,26 +165,24 @@ fn read_server(
     } else {
         (SERVER_STORAGE_MEMORY, SERVER_STORAGE_MEMORY)
     };
-    let zslg = zslg_config(&mut env, &mut temp, zslg_memory)?;
+    let zslg = btrb_db::settings::zslg_config(&mut env, &mut temp, zslg_memory)?;
     if standalone {
-        alone(&zslg)?;
+        btrb_db::settings::alone(&zslg)?;
     }
-    let nvzn = nvzn_config(&mut env, &mut temp, nvzn_memory)?;
+    let nvzn = btrb_db::settings::nvzn_config(&mut env, &mut temp, nvzn_memory)?;
 
     let http_listen_addr = btrb_web::settings::http_listen_addr(&mut env)?;
 
     let cookies = btrb_web::settings::cookie_policy(&mut env)?;
-    let cache = Some(cache::read(&mut env)?);
+    let cache = Some(btrb_db::settings::read_cache(&mut env)?);
     let apps = configure_apps(&mut env, cookies, entries)?;
     let cli_socket = standalone
         .then(|| btrb_cli::settings::cli_socket(&mut env))
         .transpose()?;
 
-    let mut metrics_listen_addr = Some(DEFAULT_METRICS_LISTEN_ADDR);
-    env.set_optional(
-        &mut metrics_listen_addr,
-        "BTRB_METRICS_LISTEN_ADDR",
-        socket_addr,
+    let metrics_listen_addr = btrb_metrics::settings::listen_addr(
+        &mut env,
+        Some(btrb_metrics::settings::DEFAULT_LISTEN_ADDR),
     )?;
 
     temp.extend(env.take_temp());
@@ -283,38 +244,15 @@ pub(crate) fn worker_from_env(apps: &[crate::Entry]) -> Result<WorkerSettings, C
 
 fn worker_config(env: &mut Env, entries: &[crate::Entry]) -> Result<WorkerSettings, ConfigError> {
     let mut temp = Vec::new();
-    let peers_raw = env.required("ZSLG_PEERS")?;
-    let peers = peers("ZSLG_PEERS", &peers_raw)?;
-    let object_store_raw = env.required("ZSLG_OBJECT_STORE")?;
-    let object_store = object_store("ZSLG_OBJECT_STORE", &object_store_raw, &mut temp)?;
-    let db_path_raw = env.required("ZSLG_DB_PATH")?;
-    let db_path = directory("ZSLG_DB_PATH", &db_path_raw, &mut temp)?;
+    let zslg = btrb_db::settings::follower_config(env, &mut temp, WORKER_STORAGE_MEMORY)?;
 
-    let mut zslg = FollowerNodeConfig::new(peers, db_path, object_store).map_err(|source| {
-        ConfigError::Rejected {
-            var: "ZSLG_OBJECT_STORE",
-            source,
-        }
-    })?;
-    zslg.storage_memory = WORKER_STORAGE_MEMORY;
-    env.set(
-        &mut zslg.storage_memory,
-        "ZSLG_STORAGE_MEMORY",
-        parse::bytes,
-    )?;
+    let nvzn = btrb_db::settings::nvzn_config(env, &mut temp, WORKER_STORAGE_MEMORY)?;
 
-    let nvzn = nvzn_config(env, &mut temp, WORKER_STORAGE_MEMORY)?;
-
-    let mut metrics_listen_addr = None;
-    env.set_optional(
-        &mut metrics_listen_addr,
-        "BTRB_METRICS_LISTEN_ADDR",
-        socket_addr,
-    )?;
+    let metrics_listen_addr = btrb_metrics::settings::listen_addr(env, None)?;
 
     let cli_socket = btrb_cli::settings::cli_socket(env)?;
     let cookies = btrb_web::settings::cookie_policy(env)?;
-    let cache = cache::read(env)?;
+    let cache = btrb_db::settings::read_cache(env)?;
     let apps = configure_apps(env, cookies, entries)?;
     temp.extend(env.take_temp());
 
@@ -339,38 +277,6 @@ pub(crate) fn cli_socket_from_env() -> Result<PathBuf, ConfigError> {
 }
 
 // ── apps ─────────────────────────────────────────────────────────────────────
-
-// ── nvzn ─────────────────────────────────────────────────────────────────────
-
-fn nvzn_config(
-    env: &mut Env,
-    temp: &mut Vec<TempDir>,
-    memory: zslg::ByteSize,
-) -> Result<nvzn::StoreConfig, ConfigError> {
-    let path_raw = env.required("NVZN_DB_PATH")?;
-    let mut c = nvzn::StoreConfig::new(directory("NVZN_DB_PATH", &path_raw, temp)?);
-
-    c.memory = memory;
-    env.set(&mut c.memory, "NVZN_MEMORY", parse::bytes)?;
-    env.set(
-        &mut c.flush_interval,
-        "NVZN_FLUSH_INTERVAL",
-        parse::duration,
-    )?;
-    env.set_optional(&mut c.write_buffer, "NVZN_WRITE_BUFFER", parse::bytes)?;
-    env.set_optional(
-        &mut c.target_file_size,
-        "NVZN_TARGET_FILE_SIZE",
-        parse::bytes,
-    )?;
-    env.set_optional(&mut c.max_total_wal, "NVZN_MAX_TOTAL_WAL", parse::bytes)?;
-    env.set_optional(&mut c.max_background_jobs, "NVZN_MAX_BACKGROUND_JOBS", jobs)?;
-    env.set_optional(&mut c.max_open_files, "NVZN_MAX_OPEN_FILES", open_files)?;
-    env.set_optional(&mut c.retire_sweep, "NVZN_RETIRE_SWEEP", parse::duration)?;
-    env.set(&mut c.fold_commit, "NVZN_FOLD_COMMIT", parse::bytes)?;
-
-    Ok(c)
-}
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::panic, reason = "test code")]

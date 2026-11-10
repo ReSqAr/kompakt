@@ -12,8 +12,8 @@ use futures::FutureExt as _;
 use std::error::Error;
 use tokio_util::sync::CancellationToken;
 
-use super::fold::{FoldHealth, supervise, until_stop};
 use super::settings::{CacheSetup, worker_from_env};
+use btrb_db::{FoldHealth, supervise, until_stop};
 
 #[allow(
     clippy::large_stack_frames,
@@ -23,8 +23,7 @@ pub(super) async fn run_work(entries: &[crate::Entry]) -> Result<(), Box<dyn Err
     let mut settings = worker_from_env(entries)?;
     super::metrics::start(settings.metrics_listen_addr, entries)?;
 
-    let (mut dispatcher, node) =
-        super::db::setup_follower_db(&settings.zslg, &settings.nvzn).await?;
+    let (mut dispatcher, node) = btrb_db::setup_follower_db(&settings.zslg, &settings.nvzn).await?;
 
     let (booted, cache) = super::serve::boot(
         std::mem::take(&mut settings.apps),
@@ -45,7 +44,7 @@ pub(super) async fn run_work(entries: &[crate::Entry]) -> Result<(), Box<dyn Err
         let (shutdown, fold) = (shutdown.clone(), fold_health.clone());
         async move {
             let stop = tokio::select! {
-                stop = until_stop(&fold) => stop,
+                stop = until_stop(&fold, btrb_background::shutdown_signal()) => stop,
                 () = shutdown.cancelled() => None,
             };
             tracing::info!("stopping: draining the background work");

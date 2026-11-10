@@ -383,6 +383,7 @@ dependencies = [
  "btrb-background",
  "btrb-cli",
  "btrb-config",
+ "btrb-db",
  "btrb-metrics",
  "btrb-types",
  "btrb-web",
@@ -390,7 +391,6 @@ dependencies = [
  "futures",
  "metrics",
  "nvzn",
- "object_store",
  "objectstorage-cache",
  "serde",
  "tempfile",
@@ -434,6 +434,24 @@ dependencies = [
  "btrb-types",
  "tempfile",
  "thiserror 2.0.21",
+ "zslg",
+]
+
+[[package]]
+name = "btrb-db"
+version = "0.1.0"
+dependencies = [
+ "btrb-config",
+ "btrb-types",
+ "futures",
+ "metrics",
+ "nvzn",
+ "object_store",
+ "objectstorage-cache",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
  "zslg",
 ]
 

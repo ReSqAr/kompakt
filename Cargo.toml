@@ -108,6 +108,7 @@ nvzn-fixtures = { path = "crates/nvzn-fixtures" }
 btrb-background = { path = "crates/btrb-background" }
 btrb-cli = { path = "crates/btrb-cli" }
 btrb-config = { path = "crates/btrb-config" }
+btrb-db = { path = "crates/btrb-db" }
 btrb-metrics = { path = "crates/btrb-metrics" }
 btrb-types = { path = "crates/btrb-types" }
 btrb-web = { path = "crates/btrb-web" }

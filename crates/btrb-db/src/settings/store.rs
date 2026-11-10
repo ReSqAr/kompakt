@@ -11,7 +11,7 @@
 //! `#` cannot be written; the error says what it needs. The value is a secret:
 //! no message here repeats it, and the spec never prints the key pair.
 
-use super::ConfigError;
+use btrb_config::ConfigError;
 use zslg::ObjectStoreConfig;
 
 const EXPECTED: &str = "s3://bucket[/prefix]?endpoint=URL&region=R&access_key=K&secret_key=S";

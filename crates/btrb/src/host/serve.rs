@@ -18,9 +18,9 @@ use std::error::Error;
 use std::future::Future;
 use std::net::SocketAddr;
 
-use super::fold::{FoldHealth, catch_up, until_stop};
 use super::settings::CacheSetup;
 use crate::{BasePath, Booted, Cache, CookiePolicy, Ready, with_base_href};
+use btrb_db::{FoldHealth, catch_up, until_stop};
 
 /// Build every app, in list order, on `dispatcher` and the process's cache.
 /// The cache is activated once every app has registered its kinds: the
@@ -48,8 +48,12 @@ pub(super) fn boot(
 /// the router, so they come after the last app is nested — see
 /// `routes::with_tracing`. It stays a `Router`, so the listener can still
 /// attach connect info for the request log.
-pub(super) fn assemble(parts: Vec<(BasePath, Router)>, cookies: CookiePolicy) -> Router {
-    let mut router = super::routes::setup_router();
+pub(super) fn assemble(
+    parts: Vec<(BasePath, Router)>,
+    cookies: CookiePolicy,
+    fold: &FoldHealth,
+) -> Router {
+    let mut router = super::routes::setup_router(fold);
     // The mounts' prefixes: each is a directory (`/app/`). Leaked once, at
     // start-up, for the path rule's `'static` table.
     let mut roots: Vec<&'static str> = Vec::new();
@@ -67,7 +71,7 @@ pub(super) fn assemble(parts: Vec<(BasePath, Router)>, cookies: CookiePolicy) ->
     let router = btrb_web::paths::canonical(router, Box::leak(roots.into_boxed_slice()));
     let router = btrb_web::security::with_security_headers(router, cookies);
     let router = btrb_web::layers::with_limits(router);
-    let router = super::routes::with_startup_gate(router);
+    let router = super::routes::with_startup_gate(router, fold);
     btrb_web::layers::with_tracing(router)
 }
 
@@ -112,9 +116,8 @@ pub(super) async fn run_serve(apps: &[crate::Entry]) -> Result<(), Box<dyn Error
     let mut settings = super::settings::from_env(apps)?;
     super::metrics::start(settings.metrics_listen_addr, apps)?;
 
-    let (mut dispatcher, node) = super::db::setup_db(&settings.zslg, &settings.nvzn).await?;
+    let (mut dispatcher, node) = btrb_db::setup_db(&settings.zslg, &settings.nvzn).await?;
     let fold = FoldHealth::new();
-    super::fold::install(fold.clone());
 
     let Some(cache_setup) = settings.cache.take() else {
         return Err("the server's settings carry no cache".into());
@@ -131,7 +134,7 @@ pub(super) async fn run_serve(apps: &[crate::Entry]) -> Result<(), Box<dyn Error
             Ok((b.base, crate::Booted::wrap(b.read_after_write, routes)))
         })
         .collect::<Result<Vec<_>, Box<dyn Error>>>()?;
-    let router = assemble(parts, settings.cookies);
+    let router = assemble(parts, settings.cookies, &fold);
 
     // The log is replayed while the server already listens: healthy, so a
     // long refold does not read as a dead process; not ready, so nothing is
@@ -140,7 +143,7 @@ pub(super) async fn run_serve(apps: &[crate::Entry]) -> Result<(), Box<dyn Error
 
     let stop = fold.clone();
     serve_http(settings.http_listen_addr, router, async move {
-        until_stop(&stop).await;
+        until_stop(&stop, btrb_background::shutdown_signal()).await;
     })
     .await?;
 

@@ -19,8 +19,6 @@
 //! allocator are installed by `main`, never here.
 
 mod cli;
-mod db;
-mod fold;
 mod metrics;
 mod routes;
 mod serve;

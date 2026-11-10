@@ -16,8 +16,8 @@
 //!
 //! Both setups borrow their node config rather than consuming it, because a
 //! `:temp:` store's `TempDir` guard lives in the settings value: `main` holds
-//! the [`Settings`](crate::Settings) or the
-//! [`WorkerSettings`](crate::WorkerSettings), so the directories outlive the
+//! the `Settings` or the
+//! `WorkerSettings`, so the directories outlive the
 //! databases inside them.
 
 use futures::FutureExt as _;
@@ -25,7 +25,7 @@ use std::error::Error;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-pub(crate) struct NodeShutdown {
+pub struct NodeShutdown {
     token: CancellationToken,
     run: JoinHandle<()>,
 }
@@ -34,11 +34,11 @@ impl NodeShutdown {
     /// The token that stops the node, for code that needs to know a shutdown
     /// is under way (the fold supervisor).
     #[must_use]
-    pub(crate) fn token(&self) -> CancellationToken {
+    pub fn token(&self) -> CancellationToken {
         self.token.clone()
     }
 
-    pub(crate) async fn shutdown(self) {
+    pub async fn shutdown(self) {
         self.token.cancel();
         if let Err(e) = self.run.await {
             tracing::error!(?e, "the replica node task did not finish");
@@ -46,7 +46,7 @@ impl NodeShutdown {
     }
 }
 
-pub(crate) async fn setup_db(
+pub async fn setup_db(
     zslg: &zslg::ReplicaNodeConfig,
     nvzn: &nvzn::StoreConfig,
 ) -> Result<(nvzn::Dispatcher, NodeShutdown), Box<dyn Error>> {
@@ -58,7 +58,7 @@ pub(crate) async fn setup_db(
     Ok((dispatcher, shutdown))
 }
 
-pub(crate) async fn setup_follower_db(
+pub async fn setup_follower_db(
     zslg: &zslg::FollowerNodeConfig,
     nvzn: &nvzn::StoreConfig,
 ) -> Result<(nvzn::Dispatcher, CancellationToken), Box<dyn Error>> {

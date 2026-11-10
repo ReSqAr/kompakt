@@ -1,7 +1,7 @@
 //! Field parsers: counts, sizes, peer lists, paths and object-store specs.
 
 use super::{MEMORY, TEMP, store};
-use crate::config::{ConfigError, parse};
+use btrb_config::{ConfigError, parse};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -10,19 +10,19 @@ use zslg::{ObjectStoreConfig, PeerAddr, ServerName, SpareSelectionStrategy};
 
 // ── Field parsers ────────────────────────────────────────────────────────────
 
-pub(crate) fn count<T: std::str::FromStr>(var: &'static str, raw: &str) -> Result<T, ConfigError> {
+pub(super) fn count<T: std::str::FromStr>(var: &'static str, raw: &str) -> Result<T, ConfigError> {
     parse::integer(var, raw, "a non-negative integer")
 }
 
-pub(crate) fn jobs(var: &'static str, raw: &str) -> Result<i32, ConfigError> {
+pub(super) fn jobs(var: &'static str, raw: &str) -> Result<i32, ConfigError> {
     parse::integer(var, raw, "a thread count")
 }
 
-pub(crate) fn open_files(var: &'static str, raw: &str) -> Result<i32, ConfigError> {
+pub(super) fn open_files(var: &'static str, raw: &str) -> Result<i32, ConfigError> {
     parse::integer(var, raw, "a file-descriptor cap, or -1 for unlimited")
 }
 
-pub(crate) fn compression(
+pub(super) fn compression(
     var: &'static str,
     raw: &str,
 ) -> Result<zslg::CompressionLevel, ConfigError> {
@@ -33,7 +33,7 @@ pub(crate) fn compression(
     })
 }
 
-pub(crate) fn spare_selection(
+pub(super) fn spare_selection(
     var: &'static str,
     raw: &str,
 ) -> Result<SpareSelectionStrategy, ConfigError> {
@@ -50,7 +50,7 @@ pub(crate) fn spare_selection(
 
 /// Compaction tiers, coarsest last. zslg checks the ordering and the floor
 /// against `snapshot_interval` itself, so this only has to produce the list.
-pub(crate) fn tiers(
+pub(super) fn tiers(
     var: &'static str,
     raw: &str,
 ) -> Result<Vec<zslg::CompactionTier>, ConfigError> {
@@ -65,7 +65,7 @@ pub(crate) fn tiers(
 /// the same string. The two are separate because the name is the cluster's
 /// identity for the peer — it is what membership admits on — while `host:port`
 /// is re-resolved at every reconnect.
-pub(crate) fn peers(var: &'static str, raw: &str) -> Result<Vec<PeerAddr>, ConfigError> {
+pub fn peers(var: &'static str, raw: &str) -> Result<Vec<PeerAddr>, ConfigError> {
     const EXPECTED: &str = "a comma-separated list of `name@host:port` (or `host:port`), e.g. `node-a@node-a.svc:9000,node-b@node-b.svc:9000`";
 
     let peers: Vec<PeerAddr> = raw
@@ -111,12 +111,12 @@ pub(crate) fn peers(var: &'static str, raw: &str) -> Result<Vec<PeerAddr>, Confi
     Ok(peers)
 }
 
-pub(crate) use btrb_config::parse::socket_addr;
+use btrb_config::parse::socket_addr;
 
 /// The node's own bind address. Port 0 is refused here and allowed for the HTTP
 /// listener, because this node appears in its own peer list and a peer entry
 /// cannot name a port the kernel has not chosen yet.
-pub(crate) fn listen_addr(var: &'static str, raw: &str) -> Result<SocketAddr, ConfigError> {
+pub(super) fn listen_addr(var: &'static str, raw: &str) -> Result<SocketAddr, ConfigError> {
     let addr = socket_addr(var, raw)?;
     if addr.port() == 0 {
         return Err(ConfigError::bad_value(
@@ -131,7 +131,7 @@ pub(crate) fn listen_addr(var: &'static str, raw: &str) -> Result<SocketAddr, Co
 /// A directory that must exist by the time a store opens into it. RocksDB
 /// creates its own root but not the path to it, so the whole path is created
 /// here — where a permissions problem can still name the variable that caused it.
-pub(crate) fn directory(
+pub fn directory(
     var: &'static str,
     raw: &str,
     temp: &mut Vec<TempDir>,
@@ -153,7 +153,7 @@ pub(crate) fn directory(
 ///
 /// `owner` names the store in a failure. It is a variable for an
 /// environment-driven path, or the store itself where the CLI fixes the path.
-pub(crate) fn temp_directory(
+pub(super) fn temp_directory(
     owner: &'static str,
     temp: &mut Vec<TempDir>,
 ) -> Result<PathBuf, ConfigError> {
@@ -177,7 +177,7 @@ pub(crate) fn temp_directory(
 /// zslg's own config cannot carry a key prefix, so the store is built here and
 /// a non-empty prefix wraps it (`PrefixStore`). zslg takes the built
 /// `Arc<dyn ObjectStore>` all the same.
-pub(crate) fn object_store(
+pub fn object_store(
     var: &'static str,
     raw: &str,
     temp: &mut Vec<TempDir>,
@@ -192,7 +192,7 @@ pub(crate) fn object_store(
 
 /// A prefix is not part of zslg's backend config, so it is applied over the
 /// built store: every key zslg reads or writes gains the prefix.
-pub(crate) fn with_prefix(
+pub(super) fn with_prefix(
     store: Arc<dyn object_store::ObjectStore>,
     prefix: &str,
 ) -> Arc<dyn object_store::ObjectStore> {
@@ -203,7 +203,7 @@ pub(crate) fn with_prefix(
 }
 
 /// The backend and, for S3, the key prefix below which this store lives.
-pub(crate) fn object_store_config(
+pub(super) fn object_store_config(
     var: &'static str,
     raw: &str,
     temp: &mut Vec<TempDir>,

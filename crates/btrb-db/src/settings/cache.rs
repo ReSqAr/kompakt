@@ -20,8 +20,9 @@
 //! The weights must name exactly the apps that use the cache — the cache
 //! checks that at the boot, with every app's kinds registered.
 
-use crate::config::{ConfigError, Env, parse};
-use crate::{CacheConfig, CacheLimits};
+use crate::{CacheBuilder, CacheConfig, CacheLimits};
+use btrb_config::{ConfigError, Env, parse};
+use btrb_types::Error;
 use std::path::PathBuf;
 
 /// A throwaway cache: a command may fetch a handful of files.
@@ -31,7 +32,7 @@ const THROWAWAY: CacheLimits = CacheLimits {
 };
 
 /// Which cache a process opens.
-pub(crate) enum CacheSetup {
+pub enum CacheSetup {
     /// The configured directory (server, worker).
     Directory(CacheConfig),
     /// A temporary directory, removed at exit (the CLI).
@@ -44,17 +45,17 @@ impl CacheSetup {
     ///
     /// # Errors
     /// The cache's configuration error, naming the directory.
-    pub(crate) fn builder(self) -> Result<crate::CacheBuilder, crate::Error> {
+    pub fn builder(self) -> Result<CacheBuilder, Error> {
         let builder = match self {
             CacheSetup::Directory(config) => crate::Cache::builder(config),
             CacheSetup::Throwaway => crate::Cache::temporary(THROWAWAY),
         };
-        builder.map_err(crate::Error::new)
+        builder.map_err(Error::new)
     }
 }
 
 /// The server's and the worker's cache.
-pub(super) fn read(env: &mut Env) -> Result<CacheSetup, ConfigError> {
+pub fn read(env: &mut Env) -> Result<CacheSetup, ConfigError> {
     let raw = env.required("BTRB_CACHE_DIR")?;
     let dir: PathBuf = env.directory("BTRB_CACHE_DIR", &raw)?;
     let soft = parse::bytes("BTRB_CACHE_SOFT", &env.required("BTRB_CACHE_SOFT")?)?;

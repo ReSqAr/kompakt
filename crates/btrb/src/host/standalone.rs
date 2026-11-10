@@ -17,10 +17,10 @@ use futures::FutureExt as _;
 use std::error::Error;
 use tokio_util::sync::CancellationToken;
 
-use super::fold::{FoldHealth, catch_up, until_stop};
 use super::serve::{assemble, boot, serve_http};
 use super::settings::standalone_from_env;
 use crate::{Job, Shutdown};
+use btrb_db::{FoldHealth, catch_up, until_stop};
 
 /// A job that starts once the fold has replayed the log, and ends with `stop`
 /// if the fold never gets there.
@@ -42,9 +42,8 @@ pub(super) async fn run_standalone(entries: &[crate::Entry]) -> Result<(), Box<d
     let settings = &mut standalone.server;
     super::metrics::start(settings.metrics_listen_addr, entries)?;
 
-    let (mut dispatcher, node) = super::db::setup_db(&settings.zslg, &settings.nvzn).await?;
+    let (mut dispatcher, node) = btrb_db::setup_db(&settings.zslg, &settings.nvzn).await?;
     let fold = FoldHealth::new();
-    super::fold::install(fold.clone());
 
     let Some(cache_setup) = settings.cache.take() else {
         return Err("the standalone settings carry no cache".into());
@@ -63,7 +62,7 @@ pub(super) async fn run_standalone(entries: &[crate::Entry]) -> Result<(), Box<d
         let (shutdown, fold) = (shutdown.clone(), fold.clone());
         async move {
             let stop = tokio::select! {
-                stop = until_stop(&fold) => stop,
+                stop = until_stop(&fold, btrb_background::shutdown_signal()) => stop,
                 () = shutdown.cancelled() => None,
             };
             tracing::info!("stopping: draining the listener and the background work");
@@ -83,7 +82,7 @@ pub(super) async fn run_standalone(entries: &[crate::Entry]) -> Result<(), Box<d
                 .map(|job| after_replay(fold.clone(), stop.clone(), job)),
         );
     }
-    let router = assemble(parts, settings.cookies);
+    let router = assemble(parts, settings.cookies, &fold);
     // Booted: the CLI may ask from here on. The socket is one more job, so a
     // path held by a live process stops this one the way any failed job does.
     jobs.push(super::work::socket_job(

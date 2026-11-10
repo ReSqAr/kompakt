@@ -32,12 +32,10 @@ pub use btrb_cli::{
     AdminSocket, Console, Handler, NoCalls, Remote, ScriptedConsole, Served, StdConsole, admin,
     console, fingerprint,
 };
+pub use btrb_db::{AppCache, Cache, CacheBuilder, CacheConfig, CacheLimits};
 pub use btrb_types::{Error, SigningKey};
 pub use btrb_web::{
     AppConfig, BasePath, CookiePolicy, assets, base_path, buckets, floor, with_base_href,
 };
 pub use live::{Live, LiveSettings, ReadAfterWrite, Written};
 pub use metrics::{Histogram, describe_metrics, histograms};
-pub use objectstorage_cache::{
-    AppCache, Builder as CacheBuilder, Cache, CacheConfig, Limits as CacheLimits,
-};

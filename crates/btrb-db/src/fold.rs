@@ -32,34 +32,18 @@
 //!   /ready, pages    —         503          200          503
 //! ```
 
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-/// The process's fold. There is one dispatcher per process, so its health is a
-/// process property, not request state — `/health` reads it from here rather
-/// than the router carrying it.
 /// Help text for `btrb_fold_up`; call it after the recorder is installed.
-pub(crate) fn describe_metrics() {
+pub fn describe_metrics() {
     metrics::describe_gauge!(
         "btrb_fold_up",
         "1 while the nvzn projection fold is advancing, 0 once it has stopped"
     );
-}
-
-static CURRENT: OnceLock<FoldHealth> = OnceLock::new();
-
-/// Publish the process's fold health. Idempotent; the first install wins.
-pub(crate) fn install(health: FoldHealth) {
-    let _ = CURRENT.set(health);
-}
-
-/// The installed fold health, if one has been installed.
-#[must_use]
-pub(crate) fn current() -> Option<&'static FoldHealth> {
-    CURRENT.get()
 }
 
 /// How long an unhealthy process keeps serving after the fold stops, so health
@@ -68,7 +52,7 @@ const FOLD_EXIT_GRACE: Duration = Duration::from_secs(10);
 
 /// Why the projection fold is no longer advancing.
 #[derive(Clone, Debug)]
-pub(crate) enum FoldStop {
+pub enum FoldStop {
     /// The fold returned cleanly while the process was still running.
     Ended,
     /// The fold returned an error.
@@ -78,7 +62,7 @@ pub(crate) enum FoldStop {
 impl FoldStop {
     /// A sentence for a log line or a health body.
     #[must_use]
-    pub(crate) fn describe(&self) -> String {
+    pub fn describe(&self) -> String {
         match self {
             Self::Ended => "the projection fold ended".to_owned(),
             Self::Failed(e) => format!("the projection fold failed: {e}"),
@@ -89,14 +73,14 @@ impl FoldStop {
 /// Shared, observable fold state: `None` while the fold advances; whether
 /// it has replayed the log yet.
 #[derive(Clone)]
-pub(crate) struct FoldHealth {
+pub struct FoldHealth {
     tx: Arc<watch::Sender<Option<FoldStop>>>,
     caught_up: Arc<watch::Sender<bool>>,
 }
 
 impl FoldHealth {
     #[must_use]
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         metrics::gauge!("btrb_fold_up").set(1.0);
         metrics::gauge!("btrb_fold_caught_up").set(0.0);
         Self {
@@ -108,18 +92,18 @@ impl FoldHealth {
     /// Whether the fold has replayed the log and still advances: the
     /// projections may be read.
     #[must_use]
-    pub(crate) fn is_ready(&self) -> bool {
+    pub fn is_ready(&self) -> bool {
         *self.caught_up.borrow() && self.stop_reason().is_none()
     }
 
-    pub(super) fn mark_caught_up(&self) {
+    pub fn mark_caught_up(&self) {
         metrics::gauge!("btrb_fold_caught_up").set(1.0);
         self.caught_up.send_replace(true);
     }
 
     /// Resolve once the fold has replayed the log. Never resolves if it stops
     /// first: pair it with the shutdown it leads to.
-    pub(crate) async fn caught_up(&self) {
+    pub async fn caught_up(&self) {
         let mut rx = self.caught_up.subscribe();
         // `self` holds the sender, so the channel cannot close while we wait.
         let _ = rx.wait_for(|up| *up).await;
@@ -127,7 +111,7 @@ impl FoldHealth {
 
     /// Why the fold stopped, once it has.
     #[must_use]
-    pub(crate) fn stop_reason(&self) -> Option<FoldStop> {
+    pub fn stop_reason(&self) -> Option<FoldStop> {
         self.tx.borrow().clone()
     }
 
@@ -137,7 +121,7 @@ impl FoldHealth {
     }
 
     /// Resolve once the fold has stopped (at once if it already has), with why.
-    pub(crate) async fn stopped(&self) -> FoldStop {
+    pub async fn stopped(&self) -> FoldStop {
         let mut rx = self.tx.subscribe();
         // `self` holds the sender, so the channel cannot close while we wait.
         let stop = rx
@@ -158,9 +142,13 @@ impl Default for FoldHealth {
 /// Wait until the process should stop: a signal (`None`), or the fold
 /// stopping (`Some`). A fold stop is held for [`FOLD_EXIT_GRACE`] first, so
 /// health checks and scrapes see it; a signal cuts the grace short.
-pub(crate) async fn until_stop(health: &FoldHealth) -> Option<FoldStop> {
+pub async fn until_stop(
+    health: &FoldHealth,
+    shutdown: impl std::future::Future<Output = ()>,
+) -> Option<FoldStop> {
+    tokio::pin!(shutdown);
     let stop = tokio::select! {
-        () = btrb_background::shutdown_signal() => return None,
+        () = &mut shutdown => return None,
         stop = health.stopped() => stop,
     };
     tracing::info!(
@@ -168,7 +156,7 @@ pub(crate) async fn until_stop(health: &FoldHealth) -> Option<FoldStop> {
         FOLD_EXIT_GRACE.as_secs()
     );
     tokio::select! {
-        () = btrb_background::shutdown_signal() => {}
+        () = &mut shutdown => {}
         () = tokio::time::sleep(FOLD_EXIT_GRACE) => {}
     }
     Some(stop)
@@ -176,7 +164,7 @@ pub(crate) async fn until_stop(health: &FoldHealth) -> Option<FoldStop> {
 
 /// Replay the log in the background, then supervise the fold. The process
 /// listens meanwhile — healthy, not ready (see the module docs).
-pub(crate) fn catch_up<F>(finalise: F, health: FoldHealth, shutting_down: CancellationToken)
+pub fn catch_up<F>(finalise: F, health: FoldHealth, shutting_down: CancellationToken)
 where
     F: Future<Output = Result<JoinHandle<Result<(), nvzn::Error>>, nvzn::Error>> + Send + 'static,
 {
@@ -203,7 +191,7 @@ where
 ///
 /// `shutting_down` distinguishes the fold stopping because we asked from the
 /// fold stopping on its own: only the latter is marked unhealthy.
-pub(crate) fn supervise(
+pub fn supervise(
     handle: JoinHandle<Result<(), nvzn::Error>>,
     health: FoldHealth,
     shutting_down: CancellationToken,

@@ -17,6 +17,7 @@ axum = { workspace = true }
 btrb-background = { workspace = true }
 btrb-cli = { workspace = true }
 btrb-config = { workspace = true }
+btrb-db = { workspace = true }
 btrb-metrics = { workspace = true }
 btrb-types = { workspace = true }
 btrb-web = { workspace = true }
@@ -24,7 +25,6 @@ clap = { workspace = true }
 futures = { workspace = true }
 metrics = { workspace = true }
 nvzn = { workspace = true, features = ["prometheus"] }
-object_store = { workspace = true }
 objectstorage-cache = { workspace = true }
 serde = { workspace = true }
 tempfile = { workspace = true }

@@ -1,16 +1,46 @@
 //! Reading the zslg replica-node knobs from the environment.
 
-use super::{
+use super::fields::{
     compression, count, directory, jobs, listen_addr, object_store, open_files, peers,
     spare_selection, tiers,
 };
-use crate::config::{ConfigError, Env, parse};
+use btrb_config::{ConfigError, Env, parse};
 use tempfile::TempDir;
-use zslg::{ReplicaNodeConfig, ServerName};
+use zslg::{FollowerNodeConfig, ReplicaNodeConfig, ServerName};
+
+// ── the follower ─────────────────────────────────────────────────────────────
+
+/// The worker's follower node: the peers, the object store and a persistent path, and the one budget it has.
+pub fn follower_config(
+    env: &mut Env,
+    temp: &mut Vec<TempDir>,
+    memory: zslg::ByteSize,
+) -> Result<FollowerNodeConfig, ConfigError> {
+    let peers_raw = env.required("ZSLG_PEERS")?;
+    let peers = peers("ZSLG_PEERS", &peers_raw)?;
+    let object_store_raw = env.required("ZSLG_OBJECT_STORE")?;
+    let object_store = object_store("ZSLG_OBJECT_STORE", &object_store_raw, temp)?;
+    let db_path_raw = env.required("ZSLG_DB_PATH")?;
+    let db_path = directory("ZSLG_DB_PATH", &db_path_raw, temp)?;
+
+    let mut zslg = FollowerNodeConfig::new(peers, db_path, object_store).map_err(|source| {
+        ConfigError::Rejected {
+            var: "ZSLG_OBJECT_STORE",
+            source,
+        }
+    })?;
+    zslg.storage_memory = memory;
+    env.set(
+        &mut zslg.storage_memory,
+        "ZSLG_STORAGE_MEMORY",
+        parse::bytes,
+    )?;
+    Ok(zslg)
+}
 
 // ── zslg ─────────────────────────────────────────────────────────────────────
 
-pub(crate) fn zslg_config(
+pub fn zslg_config(
     env: &mut Env,
     temp: &mut Vec<TempDir>,
     memory: zslg::ByteSize,
@@ -47,7 +77,7 @@ pub(crate) fn zslg_config(
 }
 
 /// Consensus timing and the log-compaction triggers.
-pub(crate) fn raft(env: &mut Env, c: &mut ReplicaNodeConfig) -> Result<(), ConfigError> {
+pub(super) fn raft(env: &mut Env, c: &mut ReplicaNodeConfig) -> Result<(), ConfigError> {
     env.set(
         &mut c.raft_heartbeat_interval,
         "ZSLG_RAFT_HEARTBEAT_INTERVAL",
@@ -87,7 +117,7 @@ pub(crate) fn raft(env: &mut Env, c: &mut ReplicaNodeConfig) -> Result<(), Confi
 }
 
 /// Snapshot cadence, the compaction tier ladder, and object cleanup.
-pub(crate) fn snapshots(env: &mut Env, c: &mut ReplicaNodeConfig) -> Result<(), ConfigError> {
+pub(super) fn snapshots(env: &mut Env, c: &mut ReplicaNodeConfig) -> Result<(), ConfigError> {
     env.set(
         &mut c.snapshot_interval,
         "ZSLG_SNAPSHOT_INTERVAL",
@@ -133,7 +163,7 @@ pub(crate) fn snapshots(env: &mut Env, c: &mut ReplicaNodeConfig) -> Result<(), 
 
 /// The node's one RocksDB. `storage_memory` is the budget the rest derive from,
 /// which is why they are `Option`.
-pub(crate) fn storage(
+pub(super) fn storage(
     env: &mut Env,
     c: &mut ReplicaNodeConfig,
     memory: zslg::ByteSize,
@@ -174,7 +204,7 @@ pub(crate) fn storage(
 }
 
 /// The replica log's retention and its two payload-carrying queues.
-pub(crate) fn replica_log(env: &mut Env, c: &mut ReplicaNodeConfig) -> Result<(), ConfigError> {
+pub(super) fn replica_log(env: &mut Env, c: &mut ReplicaNodeConfig) -> Result<(), ConfigError> {
     env.set(
         &mut c.replica_log_purge_grace_period,
         "ZSLG_REPLICA_LOG_PURGE_GRACE_PERIOD",
@@ -214,7 +244,7 @@ pub(crate) fn replica_log(env: &mut Env, c: &mut ReplicaNodeConfig) -> Result<()
 }
 
 /// Ingest, the local store, and the quorum-read timings.
-pub(crate) fn learner(env: &mut Env, c: &mut ReplicaNodeConfig) -> Result<(), ConfigError> {
+pub(super) fn learner(env: &mut Env, c: &mut ReplicaNodeConfig) -> Result<(), ConfigError> {
     env.set(
         &mut c.learner_fetch_sweep_interval,
         "ZSLG_LEARNER_FETCH_SWEEP_INTERVAL",
@@ -274,7 +304,7 @@ pub(crate) fn learner(env: &mut Env, c: &mut ReplicaNodeConfig) -> Result<(), Co
 }
 
 /// The CQRS replay source: per-subscriber queue depth and footprint.
-pub(crate) fn stable_log(env: &mut Env, c: &mut ReplicaNodeConfig) -> Result<(), ConfigError> {
+pub(super) fn stable_log(env: &mut Env, c: &mut ReplicaNodeConfig) -> Result<(), ConfigError> {
     env.set(
         &mut c.stable_log_subscriber_queue_capacity,
         "ZSLG_STABLE_LOG_SUBSCRIBER_QUEUE_CAPACITY",
@@ -289,7 +319,7 @@ pub(crate) fn stable_log(env: &mut Env, c: &mut ReplicaNodeConfig) -> Result<(),
 }
 
 /// Clock skew, the membership target, and liveness pappg.
-pub(crate) fn cluster(env: &mut Env, c: &mut ReplicaNodeConfig) -> Result<(), ConfigError> {
+pub(super) fn cluster(env: &mut Env, c: &mut ReplicaNodeConfig) -> Result<(), ConfigError> {
     env.set(
         &mut c.hlc_max_clock_skew,
         "ZSLG_HLC_MAX_CLOCK_SKEW",
@@ -334,7 +364,7 @@ pub(crate) fn cluster(env: &mut Env, c: &mut ReplicaNodeConfig) -> Result<(), Co
 }
 
 /// The TCP knobs, whose zslg field names are bare — hence `ZSLG_NETWORK_`.
-pub(crate) fn transport(env: &mut Env, c: &mut ReplicaNodeConfig) -> Result<(), ConfigError> {
+pub(super) fn transport(env: &mut Env, c: &mut ReplicaNodeConfig) -> Result<(), ConfigError> {
     env.set(
         &mut c.keepalive_interval,
         "ZSLG_NETWORK_KEEPALIVE_INTERVAL",
@@ -389,7 +419,7 @@ pub(crate) fn transport(env: &mut Env, c: &mut ReplicaNodeConfig) -> Result<(), 
 }
 
 /// The write deadline and the shutdown drain.
-pub(crate) fn writes(env: &mut Env, c: &mut ReplicaNodeConfig) -> Result<(), ConfigError> {
+pub(super) fn writes(env: &mut Env, c: &mut ReplicaNodeConfig) -> Result<(), ConfigError> {
     env.set(&mut c.write_timeout, "ZSLG_WRITE_TIMEOUT", parse::duration)?;
     env.set(&mut c.drain_timeout, "ZSLG_DRAIN_TIMEOUT", parse::duration)?;
     Ok(())

@@ -17,7 +17,7 @@ pub(super) fn start(addr: Option<SocketAddr>, apps: &[crate::Entry]) -> Result<(
             let handle = btrb_metrics::install(&histograms)?;
             btrb_web::describe_metrics();
             crate::live::describe_metrics();
-            super::fold::describe_metrics();
+            btrb_db::describe_metrics();
             crate::describe_metrics(apps);
             tokio::spawn(async move {
                 if let Err(e) = btrb_metrics::serve(addr, handle).await {
