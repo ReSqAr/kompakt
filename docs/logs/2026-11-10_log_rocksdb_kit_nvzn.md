@@ -59,3 +59,16 @@ zslg's node wiring, tie the two memory budgets and fsync cadences together, and 
 nvzn's families.
 
 Rejected: one shared RocksDB for zslg and nvzn.
+
+### D3 — three access modes: `Plain`, `Lookup`, `Prefixed<N>` (settled)
+
+- `Plain`: the option set zslg gets today, unchanged (no filter policy).
+- `Lookup`: `Plain` plus the 10-bit bloom filter; nvzn's `store` and its single-row families.
+- `Prefixed<const N: usize>`: whole-key filtering off, fixed-width prefix extractor, memtable prefix bloom;
+  `scan_prefix(&[u8; N])` and `scan_all` (total-order seek); nvzn's `index` family.
+
+Why: finding 1 shows nvzn's point families already differ from zslg's. Naming each mode keeps every option set
+explicit, and zslg cannot receive a filter it never had.
+
+Rejected: two modes with the bloom filter on `Plain`; it would change zslg's cache use and read profile, the
+accident D1 exists to prevent.
