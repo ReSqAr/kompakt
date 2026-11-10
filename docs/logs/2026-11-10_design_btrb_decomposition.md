@@ -90,8 +90,8 @@ stays in the facade, as nvzn's integration tests did.
 
 | crate | role | owns | depends on (btrb family) | ≈ lines |
 |---|---|---|---|---|
-| `btrb-config` | config | `Env`, `Scope`, `parse`, `ConfigError` | — | 830 |
-| `btrb-types` | types | `Error`, `Shutdown`, `Stopped`, `Job` | `btrb-config` | 100 |
+| `btrb-types` | types | `Error`, `Shutdown`, `Stopped`, `Job` | — | 100 |
+| `btrb-config` | config | `Env`, `Scope`, `parse`, `ConfigError`, `From<ConfigError> for Error` | types | 830 |
 | `btrb-web` | implementation | `floor`, `buckets`, `assets`, `BasePath`, `AppConfig`, `CookiePolicy`, `SigningKey`; limits, tracing, security headers, canonical paths; its settings | config, types | 1,100 |
 | `btrb-db` | implementation | the zslg node and nvzn dispatcher bring-up, `FoldHealth` and the fold supervisor, `Cache`; the ZSLG_*/NVZN_*/cache/store settings | config, types | 1,300 |
 | `btrb-background` | implementation | `run_background`, signal handling, the worker's settings | config, types | 150 |
@@ -122,7 +122,8 @@ existing roles (`config`, `types`, `implementation`, `assembly`, `facade`).
 ### 6.1 The shared vocabulary
 
 `btrb-types` holds the four things the seam passes around: `Error` (a boxed source that carries an app's error
-across the seam; it implements `From<ConfigError>` and `From<nvzn::Error>`), `Shutdown` and `Stopped` (a stop
+across the seam; it implements `From<nvzn::Error>`, and `btrb-config` implements `From<ConfigError>`, because a
+types crate may not depend on a config crate), `Shutdown` and `Stopped` (a stop
 request and the proof one was honoured), and `Job` (`BoxFuture<Result<Stopped, Error>>`). `ConfigError` stays in
 `btrb-config` because callers match it and its messages name the variable. This is what removes the `app`⇄`admin`
 cycle: `btrb-cli` and `btrb-app` both depend on `btrb-types`, and neither on the other.

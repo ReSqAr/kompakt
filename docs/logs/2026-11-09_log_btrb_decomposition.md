@@ -106,3 +106,11 @@ went through a static. No new concept is needed.
 Rejected: a `Health` handle that every capability feeds. Cleaner if several capabilities ever report health, but
 an abstraction for one reporter today.
 
+## Implementation notes (course-corrections, amended into the design)
+
+- **N1 — `From<ConfigError> for Error` lives in `btrb-config`.** The role table lets a `config` crate depend on
+  `types` but not the reverse, so the types crate (`Error`) cannot name `ConfigError`. `btrb-config` depends on
+  `btrb-types`; the table in design §5.1 and §6.1 says so. No behaviour change.
+- **N2 — the facade depends on assemblies only.** A `facade` may not depend on a `types` crate, so `btrb`
+  re-exports `Error`, `Shutdown`, `Stopped` and `Job` through `btrb-app` instead of naming `btrb-types`.
+

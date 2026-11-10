@@ -164,11 +164,20 @@ fn workspace() -> Vec<Krate> {
     result
 }
 
-/// `zslg`, `nvzn` for `zslg-*`/`nvzn-*` crates and their facades; `None` for
-/// unprefixed crates (libraries and the application).
+/// `zslg`, `nvzn`, `btrb` for the `*-*` crates and their facades; `None` for
+/// unprefixed crates (libraries and the applications).
 fn family(name: &str) -> Option<&str> {
     let head = name.split('-').next().expect("name");
-    matches!(head, "zslg" | "nvzn").then_some(head)
+    matches!(head, "zslg" | "nvzn" | "btrb").then_some(head)
+}
+
+/// The facades a family sees as plain libraries: `nvzn` sees `zslg`; `btrb`, the
+/// platform on top of both, sees `zslg` and `nvzn`. The reverse never holds.
+fn facade_seen_as_library(from: &str, to: &str) -> bool {
+    matches!(
+        (from, to),
+        ("nvzn", "zslg") | ("btrb", "zslg") | ("btrb", "nvzn")
+    )
 }
 
 #[test]
@@ -179,9 +188,10 @@ fn every_dependency_is_allowed_by_the_role_table() {
     for k in &krates {
         for d in &k.deps {
             // From the nvzn family's point of view the `zslg` facade is a library
-            // (D11); `families_do_not_reach_into_each_other` pins that nothing else
-            // of zslg is reachable.
-            let to = if family(&k.name) == Some("nvzn") && d.name == "zslg" {
+            // (D11), and from btrb's the `zslg` and `nvzn` facades are;
+            // `families_do_not_reach_into_each_other` pins that nothing else of
+            // them is reachable.
+            let to = if family(&k.name).is_some_and(|f| facade_seen_as_library(f, &d.name)) {
                 Role::Library
             } else {
                 roles[d.name.as_str()]
@@ -240,8 +250,8 @@ fn families_do_not_reach_into_each_other() {
                 (_, None) => true,
                 (None, Some(_)) => k.role == Role::Application,
                 (Some(a), Some(b)) if a == b => true,
-                // nvzn sees zslg only through its facade.
-                (Some("nvzn"), Some("zslg")) => d.name == "zslg",
+                // nvzn sees zslg, and btrb sees zslg and nvzn, only through their facades.
+                (Some(a), Some(b)) if facade_seen_as_library(a, b) => d.name == b,
                 _ => false,
             };
             if !ok {
@@ -277,6 +287,7 @@ fn no_cross_group_dependency_on_a_types_crate_from_above_the_ports_layer() {
             if roles[d.name.as_str()] == Role::Types
                 && !ALLOWED_TYPES_ABOVE_PORTS.contains(&d.name.as_str())
                 && !d.name.starts_with("nvzn-")
+                && !d.name.starts_with("btrb-")
             {
                 violations.push(format!(
                     "{} -> {} (import through the ports crate)",
