@@ -100,3 +100,14 @@ Rejected: dirty tracking in nvzn only (a third copy beside the local store's); a
 
 Note (not a decision): the engine-property gauges stay with their callers. The kit exposes
 `Storage::property_u64`; nvzn keeps `nvzn_store_live_sst_files_size_bytes` and its name.
+
+### D5 — one storage variant in nvzn's error (settled)
+
+`nvzn_types::Error` replaces `RocksDB(rust_rocksdb::Error)` and `RocksDBColumnFamilyMissing(String)` with
+`Storage(#[from] rocksdb_kit::StorageError)`. A missing family is already a `Storage` error in the kit. `nvzn-types`
+depends on the kit (a library under a types crate is allowed) and drops its direct `rust-rocksdb` dependency, so
+nothing in nvzn names the engine.
+
+Why: nothing in nvzn or nlnr matches on the two variants, so keeping them would be dead surface.
+
+Rejected: keeping both variant names with string payloads.
