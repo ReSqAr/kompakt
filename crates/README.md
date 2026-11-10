@@ -42,6 +42,7 @@ The `nvzn*` crates are built on the `zslg` facade (D11) and may depend on it; no
 
 | crate | purpose |
 |---|---|
+| `btrb-types` | The vocabulary the btrb platform's capabilities share: Error, Shutdown, Stopped, Job, SigningKey |
 | `nvzn-types` | Identifiers, event sets, the error and the shared cells of nvzn |
 | `zslg-consensus-types` | The cluster's vocabulary: who is in it, what state it replicates, and the rules that state must obey |
 | `zslg-error` | The public error union that every crate returning it converts into |
@@ -78,6 +79,7 @@ The `nvzn*` crates are built on the `zslg` facade (D11) and may depend on it; no
 
 | crate | purpose |
 |---|---|
+| `btrb-config` | The value grammar and the consumable environment every btrb binary and app reads its settings through |
 | `zslg-object-store-config` | Object-store backend configuration |
 
 ## fake
@@ -96,6 +98,11 @@ The `nvzn*` crates are built on the `zslg` facade (D11) and may depend on it; no
 
 | crate | purpose |
 |---|---|
+| `btrb-background` | The btrb background capability: jobs that end only when told to, and the process's stop signals |
+| `btrb-cli` | The btrb CLI capability: the worker's admin socket and the console a command talks to |
+| `btrb-db` | The btrb db capability: the zslg node and nvzn dispatcher bring-up, the fold supervisor and the cache |
+| `btrb-metrics` | The btrb metrics capability: the Prometheus recorder, process gauges and the /metrics listener |
+| `btrb-web` | The btrb web capability: HTTP mechanisms, response layers and the deployment facts an app is built with |
 | `nvzn-resultset` | Lazy, tenant-scoped query results and `Snapshot` over one nvzn read transaction |
 | `nvzn-store-rocksdb` | The nvzn Store on RocksDB |
 | `zslg-hlc-clock` | The hybrid logical clock |
@@ -129,12 +136,15 @@ The `nvzn*` crates are built on the `zslg` facade (D11) and may depend on it; no
 
 | crate | purpose |
 |---|---|
-| `nvzn-live` | Live views: the folded state plus the few events received above it, readable at once |
+| `btrb-app` | The seam between the btrb platform and an app: the App trait, the app list and its boot |
+| `btrb-host` | The btrb process roles: serve, work, standalone and the CLI, composed from the capabilities |
+| `btrb-live` | Read-after-write for btrb apps: the interactive write handle and the cookie layer that carries a write's position |
 | `nvzn-dispatcher` | The nvzn runtime: the fold, its supervisor and readers |
+| `nvzn-live` | Live views: the folded state plus the few events received above it, readable at once |
 | `zslg-follower-node` | Follower node assembly: learner plus writer on one node |
 | `zslg-leader` | Leader assembly: hands every leader job its handles and config slice |
-| `zslg-learner-node` | Learner node assembly: read-only node over the learner assembly |
 | `zslg-learner` | Learner assembly: wires the local store, stable log, archive, subscriber and reader |
+| `zslg-learner-node` | Learner node assembly: read-only node over the learner assembly |
 | `zslg-net-setup` | Network assembly: builds the outbound router and binds the RPC server |
 | `zslg-observability` | Observability assembly: the metric registry, histogram buckets, process gauges |
 | `zslg-raft-setup` | Raft assembly: wires storage, RPC, state publishing and the node for one openraft instance |
@@ -145,6 +155,7 @@ The `nvzn*` crates are built on the `zslg` facade (D11) and may depend on it; no
 
 | crate | purpose |
 |---|---|
+| `btrb` | The btrb platform for apps: one dependency that re-exports the crates behind it |
 | `nvzn` | Projections folded from an append-only log |
 | `zslg` | A replicated, eventually-stable HLC-ordered log |
 
@@ -152,6 +163,5 @@ The `nvzn*` crates are built on the `zslg` facade (D11) and may depend on it; no
 
 | crate | purpose |
 |---|---|
-| `btrb` | The host runtime for btrb applications |
 | `kompakt-workspace-checks` | Checks over the whole workspace (crate layering) |
 | `zslg-cluster-tests` | End-to-end tests: real multi-node zslg clusters over TCP |

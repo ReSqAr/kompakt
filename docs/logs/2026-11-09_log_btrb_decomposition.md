@@ -112,7 +112,14 @@ an abstraction for one reporter today.
   `types` but not the reverse, so the types crate (`Error`) cannot name `ConfigError`. `btrb-config` depends on
   `btrb-types`; the table in design §5.1 and §6.1 says so. No behaviour change.
 - **N2 — the facade depends on assemblies only.** A `facade` may not depend on a `types` crate, so `btrb`
-  re-exports `Error`, `Shutdown`, `Stopped` and `Job` through `btrb-app` instead of naming `btrb-types`.- **N3 — `SigningKey` lives in `btrb-types`, not `btrb-web`.** `config::parse::signing_key` (called directly by
+  re-exports `Error`, `Shutdown`, `Stopped` and `Job` through `btrb-app` instead of naming `btrb-types`.
+- **N3 — `SigningKey` lives in `btrb-types`, not `btrb-web`.** `config::parse::signing_key` (called directly by
   nlnr's apps) returns a `SigningKey`, and `config` sits below `web`, so the type must be at or below `config`.
   `AppConfig` and `CookiePolicy` stay in `btrb-web` (A2 amended); `btrb-web` re-exports the key.
-
+- **N4 — `Histogram` lives in `btrb-types`.** Capabilities are siblings and may not depend on each other, so the
+  type a capability's `HISTOGRAMS` list is made of sits beneath all of them; `btrb-metrics::install` takes the list.
+- **N5 — `until_stop` takes the shutdown future.** `btrb-db` may not call `btrb-background`'s signal handler, so the
+  host passes `shutdown_signal()` in.
+- **N6 — the facade reaches the capabilities through `btrb-app`.** The role table lets a facade depend on assemblies
+  only, so `btrb-app` re-exports the capability items an app uses (`BasePath`, `Console`, `Cache`, …) and `btrb`
+  re-exports from it, alongside `btrb-host`, `btrb-live` and `btrb-config`.
