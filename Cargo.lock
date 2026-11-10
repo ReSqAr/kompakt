@@ -381,6 +381,8 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "blake3",
+ "btrb-config",
+ "btrb-types",
  "clap",
  "futures",
  "memory-stats",
@@ -393,13 +395,31 @@ dependencies = [
  "rpassword",
  "serde",
  "tempfile",
- "thiserror 2.0.21",
  "tokio",
  "tokio-util",
  "tower",
  "tower-http 0.7.1",
  "tracing",
  "zslg",
+]
+
+[[package]]
+name = "btrb-config"
+version = "0.1.0"
+dependencies = [
+ "btrb-types",
+ "tempfile",
+ "thiserror 2.0.21",
+ "zslg",
+]
+
+[[package]]
+name = "btrb-types"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "nvzn",
+ "tokio-util",
 ]
 
 [[package]]

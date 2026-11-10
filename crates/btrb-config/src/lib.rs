@@ -71,3 +71,9 @@ impl ConfigError {
         }
     }
 }
+
+impl From<ConfigError> for btrb_types::Error {
+    fn from(e: ConfigError) -> Self {
+        Self::new(e)
+    }
+}

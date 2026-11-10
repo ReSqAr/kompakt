@@ -76,8 +76,8 @@ procedure and config crates.
 
 **A1.** From btrb's point of view the `zslg` and `nvzn` facades are *libraries* (the rule the nvzn family already
 uses for zslg); `zslg`/`nvzn` never depend on btrb. This is what lets implementation-role crates use them.
-**A2.** `AppConfig`, `CookiePolicy` and `SigningKey` go to `btrb-web`: the cookie layer and HSTS both hang off
-`CookiePolicy`, and the key signs web tokens. **A3.** `Shutdown`, `Stopped` and `Job` (with `Error`) are the
+**A2.** `AppConfig` and `CookiePolicy` go to `btrb-web`: the cookie layer and HSTS both hang off `CookiePolicy`.
+`SigningKey` is in `btrb-types` (N3: the env grammar `parse::signing_key` returns it and `config` is below `web`). **A3.** `Shutdown`, `Stopped` and `Job` (with `Error`) are the
 shared vocabulary of the seam and go to a types crate, `btrb-types`: the five capabilities are independent
 siblings, so anything two of them need sits beneath them. **A4.** `btrb` becomes role `facade` (it is `application`
 today). **A5.** Each capability exposes the histograms it records as data (`HISTOGRAMS`), and `btrb-metrics`
@@ -90,9 +90,9 @@ stays in the facade, as nvzn's integration tests did.
 
 | crate | role | owns | depends on (btrb family) | ≈ lines |
 |---|---|---|---|---|
-| `btrb-types` | types | `Error`, `Shutdown`, `Stopped`, `Job` | — | 100 |
+| `btrb-types` | types | `Error`, `Shutdown`, `Stopped`, `Job`, `SigningKey` | — | 130 |
 | `btrb-config` | config | `Env`, `Scope`, `parse`, `ConfigError`, `From<ConfigError> for Error` | types | 830 |
-| `btrb-web` | implementation | `floor`, `buckets`, `assets`, `BasePath`, `AppConfig`, `CookiePolicy`, `SigningKey`; limits, tracing, security headers, canonical paths; its settings | config, types | 1,100 |
+| `btrb-web` | implementation | `floor`, `buckets`, `assets`, `BasePath`, `AppConfig`, `CookiePolicy`; limits, tracing, security headers, canonical paths; its settings | config, types | 1,100 |
 | `btrb-db` | implementation | the zslg node and nvzn dispatcher bring-up, `FoldHealth` and the fold supervisor, `Cache`; the ZSLG_*/NVZN_*/cache/store settings | config, types | 1,300 |
 | `btrb-background` | implementation | `run_background`, signal handling, the worker's settings | config, types | 150 |
 | `btrb-cli` | implementation | `Console`, the admin socket (`AdminSocket`, `Remote`, `Handler`), the CLI socket setting | config, types | 580 |

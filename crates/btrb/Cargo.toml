@@ -14,6 +14,8 @@ jemalloc = ["zslg/jemalloc"]
 
 [dependencies]
 axum = { workspace = true }
+btrb-config = { workspace = true }
+btrb-types = { workspace = true }
 blake3 = { workspace = true }
 clap = { workspace = true }
 futures = { workspace = true }
@@ -26,7 +28,6 @@ objectstorage-cache = { workspace = true }
 postcard = { workspace = true, features = ["use-std"] }
 serde = { workspace = true }
 rpassword = { workspace = true }
-thiserror = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["time", "net", "io-util", "macros", "rt", "signal"] }
 tokio-util = { workspace = true, features = ["rt"] }

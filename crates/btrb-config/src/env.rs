@@ -29,7 +29,7 @@ use tempfile::TempDir;
 /// The sentinel path standing for "a fresh directory, gone when the process is".
 pub const TEMP: &str = ":temp:";
 
-use super::ConfigError;
+use crate::ConfigError;
 
 /// A pair of values sharing a name: `{prefix}{NAME}{a}` and `{prefix}{NAME}{b}`.
 /// Both halves of a name are present, or it is an error.

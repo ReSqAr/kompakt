@@ -23,7 +23,7 @@ use std::time::Duration;
 
 use zslg::ByteSize;
 
-use super::ConfigError;
+use crate::ConfigError;
 
 /// `"90s"` -> `("90", "s")`: the leading digits, then the rest, both trimmed.
 fn split_suffix(raw: &str) -> (&str, &str) {
@@ -146,16 +146,16 @@ pub fn is_absent(raw: &str) -> bool {
 /// cookie-writer and a forged CSRF token — it has to be 32 bytes from a random
 /// source, and the format is what makes that the obvious thing to supply. The
 /// error names the command that produces one.
-pub fn signing_key(var: &'static str, raw: &str) -> Result<crate::SigningKey, ConfigError> {
+pub fn signing_key(var: &'static str, raw: &str) -> Result<btrb_types::SigningKey, ConfigError> {
     const EXPECTED: &str =
         "64 hexadecimal characters (32 bytes) — generate one with `openssl rand -hex 32`";
 
     let raw = raw.trim();
-    if raw.len() != crate::SigningKey::BYTES.saturating_mul(2) {
+    if raw.len() != btrb_types::SigningKey::BYTES.saturating_mul(2) {
         return Err(ConfigError::bad_value(var, raw, EXPECTED));
     }
 
-    let mut bytes = [0u8; crate::SigningKey::BYTES];
+    let mut bytes = [0u8; btrb_types::SigningKey::BYTES];
     let (it, _) = raw.as_bytes().as_chunks::<2>();
     for (byte, pair) in bytes.iter_mut().zip(it) {
         let hex =
@@ -164,7 +164,7 @@ pub fn signing_key(var: &'static str, raw: &str) -> Result<crate::SigningKey, Co
             u8::from_str_radix(hex, 16).map_err(|_| ConfigError::bad_value(var, raw, EXPECTED))?;
     }
 
-    Ok(crate::SigningKey::from_bytes(bytes))
+    Ok(btrb_types::SigningKey::from_bytes(bytes))
 }
 
 #[cfg(test)]

@@ -46,7 +46,8 @@ use std::future::Future;
 use std::marker::PhantomData;
 use std::path::Path;
 use std::time::Duration;
-use tokio_util::sync::CancellationToken;
+
+pub use btrb_types::{Job, Shutdown, Stopped};
 
 /// Deployment facts every app is given, by value.
 #[derive(Debug, Clone, Copy)]
@@ -54,49 +55,6 @@ pub struct Global {
     pub cookies: CookiePolicy,
     /// `BTRB_READ_AFTER_WRITE_WAIT`: the cap on either read-after-write wait.
     pub read_after_write_wait: Duration,
-}
-
-/// The runtime's request to stop: SIGTERM, or the fold stopping.
-#[derive(Clone, Default)]
-pub struct Shutdown(CancellationToken);
-
-/// Proof that shutdown was requested. A background job returns it, so a job
-/// cannot end with `Ok` before shutdown: there is no way to build one.
-#[derive(Debug)]
-pub struct Stopped(());
-
-impl Shutdown {
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Shares `token`'s state: cancelling either cancels both.
-    #[must_use]
-    pub const fn from_token(token: CancellationToken) -> Self {
-        Self(token)
-    }
-
-    /// The underlying token, for code that waits on a `CancellationToken`.
-    #[must_use]
-    pub fn token(&self) -> CancellationToken {
-        self.0.clone()
-    }
-
-    pub fn cancel(&self) {
-        self.0.cancel();
-    }
-
-    #[must_use]
-    pub fn is_stopping(&self) -> bool {
-        self.0.is_cancelled()
-    }
-
-    /// Resolves once shutdown was requested.
-    pub async fn wait(&self) -> Stopped {
-        self.0.cancelled().await;
-        Stopped(())
-    }
 }
 
 /// What [`Nvzn::finish`] hands an app: its writer, reader and live view.
@@ -239,9 +197,6 @@ impl Subcommand for Nothing {
         false
     }
 }
-
-/// A background job: ends only when told to (or fails).
-pub type Job = BoxFuture<'static, Result<Stopped, Error>>;
 
 /// Run every app's background jobs together. The first job to fail cancels
 /// `stop`; the rest drain, and that first error is returned. With no jobs this

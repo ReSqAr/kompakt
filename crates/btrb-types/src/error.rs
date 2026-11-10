@@ -4,8 +4,6 @@
 //! the app's error as its source, so the runtime can print a chain without
 //! knowing any app's types.
 
-use crate::config::ConfigError;
-
 #[derive(Debug)]
 pub struct Error {
     source: Box<dyn std::error::Error + Send + Sync>,
@@ -28,12 +26,6 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         self.source.source()
-    }
-}
-
-impl From<ConfigError> for Error {
-    fn from(e: ConfigError) -> Self {
-        Self::new(e)
     }
 }
 

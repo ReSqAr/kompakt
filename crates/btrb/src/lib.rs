@@ -20,9 +20,11 @@ pub mod app;
 pub mod assets;
 pub mod base_path;
 pub mod buckets;
-pub mod config;
+pub use btrb_config as config;
 pub mod console;
-pub mod error;
+pub mod error {
+    pub use btrb_types::Error;
+}
 pub mod floor;
 pub mod host;
 pub mod live;
@@ -34,8 +36,8 @@ pub use app::{
     Stopped, configure_all, env_prefixes, run_background,
 };
 pub use base_path::{BasePath, with_base_href};
+pub use btrb_types::{Error, SigningKey};
 pub use console::{Console, ScriptedConsole, StdConsole};
-pub use error::Error;
 pub use live::{Live, LiveSettings, ReadAfterWrite, Written};
 pub use metrics::{Histogram, describe_metrics, histograms};
 pub use objectstorage_cache::{
@@ -77,34 +79,6 @@ impl AppConfig {
     #[must_use]
     pub const fn signing_key(&self) -> &SigningKey {
         &self.signing_key
-    }
-}
-
-/// A 32-byte secret shared by everything this process signs with.
-///
-/// Not `Debug`-derived, not comparable, not `Copy`: the derives are how a
-/// secret ends up in a log line or in a timing-variable comparison. Reading the
-/// bytes is deliberately a named call.
-#[derive(Clone)]
-pub struct SigningKey([u8; SigningKey::BYTES]);
-
-impl SigningKey {
-    pub const BYTES: usize = 32;
-
-    #[must_use]
-    pub const fn from_bytes(bytes: [u8; Self::BYTES]) -> Self {
-        Self(bytes)
-    }
-
-    #[must_use]
-    pub const fn expose(&self) -> &[u8; Self::BYTES] {
-        &self.0
-    }
-}
-
-impl core::fmt::Debug for SigningKey {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str("SigningKey(<redacted>)")
     }
 }
 
