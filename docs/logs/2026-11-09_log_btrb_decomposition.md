@@ -94,3 +94,15 @@ matched and the compiler could prove which leaves a crate raises.
 
 Rejected: per-capability error types converting into `Error` at the seam — more machinery for the same output.
 
+### D7 — the roles own health: `/health`, `/ready` and the startup gate (settled)
+
+The platform routes and the gate move into `btrb-host`, which knows both the db's `FoldHealth` and the router.
+The web crate keeps only the generic layers (limits, tracing, security headers, canonical paths). The
+process-global `fold::current()` is replaced by a `FoldHealth` handle the roles pass to what needs it.
+
+Why: whether this process should receive traffic is process policy, and it removes a web→db dependency that
+went through a static. No new concept is needed.
+
+Rejected: a `Health` handle that every capability feeds. Cleaner if several capabilities ever report health, but
+an abstraction for one reporter today.
+

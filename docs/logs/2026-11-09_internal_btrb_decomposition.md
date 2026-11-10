@@ -36,9 +36,15 @@ assembly over them, `btrb` the facade. Obstacles: `app` ↔ `admin` cycle; `live
 | 2c | ~~`live.rs` placement~~ | settled: D4, own crate |
 | 2d | ~~seam vs roles~~ | settled: D5, two crates |
 | 2f | ~~error layering~~ | settled: D6, one shared opaque error |
-| 2h | `/health`, `/ready` and the startup gate read a process-global `fold::current()` (db) from the web layer: a web→db dependency through a static. Who owns health? | the roles (host) own the platform routes and the gate; the global goes; web keeps only generic layers |
+| 2h | ~~who owns health~~ | settled: D7, the roles |
 | 2g | from btrb's point of view are the `zslg` and `nvzn` facades libraries (as zslg was for nvzn)? | yes |
 | 2e | `AppConfig`, `CookiePolicy`, `SigningKey`: web? | web |
 | 3 | does the zslg-knob reader belong in btrb at all? | no: it belongs next to `ReplicaNodeConfig` |
 | 4 | tests: integration tests (`tests/live_write.rs`) stay in the facade? | yes, like nvzn |
 | 5 | scope: only btrb, or also the nlnr side (git rev bump, Cargo.toml changes)? | btrb only; nlnr follows with a rev bump |
+
+## Status
+
+Design doc written: `2026-11-10_design_btrb_decomposition.md`, awaiting sign-off. Assumptions taken without asking
+are in its §4.2 (A1–A6); I expect the user to accept A1, A2, A4, A6 as written and might push on A3 (a types
+crate for `Shutdown`/`Stopped`/`Job`) and on the crate count (eleven crates for ~7k lines).
