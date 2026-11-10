@@ -380,19 +380,18 @@ name = "btrb"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "btrb-background",
+ "btrb-cli",
  "btrb-config",
+ "btrb-metrics",
  "btrb-types",
  "btrb-web",
  "clap",
  "futures",
- "memory-stats",
  "metrics",
- "metrics-exporter-prometheus",
  "nvzn",
  "object_store",
  "objectstorage-cache",
- "postcard",
- "rpassword",
  "serde",
  "tempfile",
  "tokio",
@@ -403,12 +402,54 @@ dependencies = [
 ]
 
 [[package]]
+name = "btrb-background"
+version = "0.1.0"
+dependencies = [
+ "btrb-types",
+ "futures",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "btrb-cli"
+version = "0.1.0"
+dependencies = [
+ "btrb-config",
+ "btrb-types",
+ "futures",
+ "postcard",
+ "rpassword",
+ "serde",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "btrb-config"
 version = "0.1.0"
 dependencies = [
  "btrb-types",
  "tempfile",
  "thiserror 2.0.21",
+ "zslg",
+]
+
+[[package]]
+name = "btrb-metrics"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "btrb-config",
+ "btrb-types",
+ "memory-stats",
+ "metrics",
+ "metrics-exporter-prometheus",
+ "nvzn",
+ "tokio",
+ "tracing",
  "zslg",
 ]
 

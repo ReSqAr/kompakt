@@ -105,7 +105,10 @@ nvzn-projection = { path = "crates/nvzn-projection" }
 nvzn-store = { path = "crates/nvzn-store" }
 nvzn-projector = { path = "crates/nvzn-projector" }
 nvzn-fixtures = { path = "crates/nvzn-fixtures" }
+btrb-background = { path = "crates/btrb-background" }
+btrb-cli = { path = "crates/btrb-cli" }
 btrb-config = { path = "crates/btrb-config" }
+btrb-metrics = { path = "crates/btrb-metrics" }
 btrb-types = { path = "crates/btrb-types" }
 btrb-web = { path = "crates/btrb-web" }
 nvzn-dispatcher = { path = "crates/nvzn-dispatcher" }

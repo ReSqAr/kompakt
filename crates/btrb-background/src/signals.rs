@@ -1,4 +1,4 @@
-//! Process lifecycle shared by the binaries.
+//! Asking the process to stop: Ctrl-C and SIGTERM.
 
 /// Resolves when the process is asked to stop: Ctrl-C or SIGTERM.
 ///
@@ -6,7 +6,7 @@
 /// only Ctrl-C would mean every restart kills the process mid-request. An
 /// installation failure waits forever rather than completing: the other signal
 /// still stops the server, and a broken handler must not read as a stop request.
-pub(crate) async fn shutdown_signal() {
+pub async fn shutdown_signal() {
     tokio::select! {
         () = interrupt() => {}
         () = terminate() => {}

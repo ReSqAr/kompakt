@@ -15,10 +15,8 @@
 //! attempts rate-limited per key) and [`assets`] (fingerprinted, immutable
 //! static files).
 
-pub mod admin;
 pub mod app;
 pub use btrb_config as config;
-pub mod console;
 pub mod error {
     pub use btrb_types::Error;
 }
@@ -26,16 +24,18 @@ pub mod host;
 pub mod live;
 pub mod metrics;
 
-pub use admin::{AdminSocket, Handler, NoCalls, Remote, Served, fingerprint};
 pub use app::{
     App, Booted, Entry, Global, Handles, Job, Mounted, NoEvents, Nothing, Nvzn, Ready, Shutdown,
     Stopped, configure_all, env_prefixes, run_background,
+};
+pub use btrb_cli::{
+    AdminSocket, Console, Handler, NoCalls, Remote, ScriptedConsole, Served, StdConsole, admin,
+    console, fingerprint,
 };
 pub use btrb_types::{Error, SigningKey};
 pub use btrb_web::{
     AppConfig, BasePath, CookiePolicy, assets, base_path, buckets, floor, with_base_href,
 };
-pub use console::{Console, ScriptedConsole, StdConsole};
 pub use live::{Live, LiveSettings, ReadAfterWrite, Written};
 pub use metrics::{Histogram, describe_metrics, histograms};
 pub use objectstorage_cache::{

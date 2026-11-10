@@ -41,6 +41,14 @@ use tokio_util::sync::CancellationToken;
 /// The process's fold. There is one dispatcher per process, so its health is a
 /// process property, not request state — `/health` reads it from here rather
 /// than the router carrying it.
+/// Help text for `btrb_fold_up`; call it after the recorder is installed.
+pub(crate) fn describe_metrics() {
+    metrics::describe_gauge!(
+        "btrb_fold_up",
+        "1 while the nvzn projection fold is advancing, 0 once it has stopped"
+    );
+}
+
 static CURRENT: OnceLock<FoldHealth> = OnceLock::new();
 
 /// Publish the process's fold health. Idempotent; the first install wins.
@@ -152,7 +160,7 @@ impl Default for FoldHealth {
 /// health checks and scrapes see it; a signal cuts the grace short.
 pub(crate) async fn until_stop(health: &FoldHealth) -> Option<FoldStop> {
     let stop = tokio::select! {
-        () = super::signals::shutdown_signal() => return None,
+        () = btrb_background::shutdown_signal() => return None,
         stop = health.stopped() => stop,
     };
     tracing::info!(
@@ -160,7 +168,7 @@ pub(crate) async fn until_stop(health: &FoldHealth) -> Option<FoldStop> {
         FOLD_EXIT_GRACE.as_secs()
     );
     tokio::select! {
-        () = super::signals::shutdown_signal() => {}
+        () = btrb_background::shutdown_signal() => {}
         () = tokio::time::sleep(FOLD_EXIT_GRACE) => {}
     }
     Some(stop)

@@ -254,16 +254,3 @@ fn a_path_is_created_if_it_does_not_exist() {
     assert!(made.is_dir(), "intermediate components are created too");
     assert_eq!(temp.len(), 1, "a real path allocates no guard");
 }
-
-#[test]
-fn the_cli_socket_is_required_and_not_empty() {
-    let mut env = Env::from_pairs(&[]);
-    assert!(cli_socket(&mut env).is_err());
-    let mut env = Env::from_pairs(&[("BTRB_CLI_SOCKET", " ")]);
-    assert!(cli_socket(&mut env).is_err());
-    let mut env = Env::from_pairs(&[("BTRB_CLI_SOCKET", "/run/host/cli.sock")]);
-    assert_eq!(
-        cli_socket(&mut env).unwrap(),
-        PathBuf::from("/run/host/cli.sock")
-    );
-}

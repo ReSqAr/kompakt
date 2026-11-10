@@ -141,6 +141,25 @@ enum Site {
     Read,
 }
 
+/// The wait buckets of `btrb_read_after_write_wait_seconds`: an entry already held answers in microseconds, the
+/// cap (`BTRB_READ_AFTER_WRITE_WAIT`) a fraction of a second.
+pub const HISTOGRAMS: &[btrb_types::Histogram] = &[btrb_types::Histogram {
+    metric: "btrb_read_after_write_wait_seconds",
+    bounds: &[
+        0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0,
+    ],
+}];
+
+/// Help text for the series this module records; call it after the recorder is installed.
+pub fn describe_metrics() {
+    metrics::describe_histogram!(
+        "btrb_read_after_write_wait_seconds",
+        metrics::Unit::Seconds,
+        "Read-after-write waits, by app, site (write: the writer's own view; read: \
+         the next request's) and outcome (seen, timed_out)"
+    );
+}
+
 fn record(cookie: &Cookie, site: Site, wait: Wait, elapsed: Duration) {
     let site = match site {
         Site::Write => "write",

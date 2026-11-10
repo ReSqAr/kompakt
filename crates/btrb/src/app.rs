@@ -31,9 +31,7 @@ use crate::metrics::Histogram;
 use crate::{CookiePolicy, Error};
 use axum::Router;
 use clap::{ArgMatches, FromArgMatches, Subcommand};
-use futures::StreamExt;
 use futures::future::BoxFuture;
-use futures::stream::FuturesUnordered;
 use nvzn::{
     AssociatedProjectorManager, Dispatcher, EventSet, EventWriter, Projection, Reader, SubEventOf,
     Tenant, WithWireFormat,
@@ -47,6 +45,7 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::time::Duration;
 
+pub use btrb_background::run_background;
 pub use btrb_types::{Job, Shutdown, Stopped};
 
 /// Deployment facts every app is given, by value.
@@ -196,25 +195,6 @@ impl Subcommand for Nothing {
     fn has_subcommand(_: &str) -> bool {
         false
     }
-}
-
-/// Run every app's background jobs together. The first job to fail cancels
-/// `stop`; the rest drain, and that first error is returned. With no jobs this
-/// waits for shutdown, so a worker of job-less apps is still a worker.
-pub async fn run_background(stop: &Shutdown, jobs: Vec<Job>) -> Result<(), Error> {
-    if jobs.is_empty() {
-        stop.wait().await;
-        return Ok(());
-    }
-    let mut running: FuturesUnordered<_> = jobs.into_iter().collect();
-    let mut first = None;
-    while let Some(done) = running.next().await {
-        if let Err(e) = done {
-            stop.cancel();
-            first.get_or_insert(e);
-        }
-    }
-    first.map_or(Ok(()), Err)
 }
 
 /// An app: a tenant of the log, a router, background work, CLI commands.
@@ -650,46 +630,5 @@ mod tests {
         for bad in ["", "Invalid", "other-tree", "app_cache", "app2"] {
             assert!(check_name(bad).is_err(), "{bad:?}");
         }
-    }
-
-    #[tokio::test]
-    async fn the_first_failure_stops_the_others_and_is_the_result() {
-        let stop = Shutdown::new();
-        let patient: BoxFuture<'static, Result<Stopped, Error>> = {
-            let stop = stop.clone();
-            Box::pin(async move { Ok(stop.wait().await) })
-        };
-        let failing: BoxFuture<'static, Result<Stopped, Error>> =
-            Box::pin(async { Err(Error::new("boom")) });
-        let result = run_background(&stop, vec![patient, failing]).await;
-        assert_eq!(result.unwrap_err().to_string(), "boom");
-        assert!(stop.is_stopping());
-    }
-
-    #[tokio::test]
-    async fn no_jobs_waits_for_shutdown() {
-        let stop = Shutdown::new();
-        let waiting = tokio::spawn({
-            let stop = stop.clone();
-            async move { run_background(&stop, Vec::new()).await }
-        });
-        tokio::task::yield_now().await;
-        assert!(!waiting.is_finished());
-        stop.cancel();
-        waiting.await.unwrap().unwrap();
-    }
-
-    #[tokio::test]
-    async fn a_job_ends_only_when_told() {
-        let stop = Shutdown::new();
-        let waiting = tokio::spawn({
-            let stop = stop.clone();
-            async move { stop.wait().await }
-        });
-        tokio::task::yield_now().await;
-        assert!(!waiting.is_finished());
-        stop.cancel();
-        waiting.await.unwrap();
-        assert!(stop.is_stopping());
     }
 }

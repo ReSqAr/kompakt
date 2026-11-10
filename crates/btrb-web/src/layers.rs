@@ -16,6 +16,28 @@ use std::time::Instant;
 use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tracing::Level;
 
+/// The latency buckets of `btrb_http_request_duration_seconds`: a fast static asset through a slow streamed
+/// body's response head.
+pub const HISTOGRAMS: &[btrb_types::Histogram] = &[btrb_types::Histogram {
+    metric: "btrb_http_request_duration_seconds",
+    bounds: &[
+        0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0,
+    ],
+}];
+
+/// Help text for the series [`with_http_metrics`] records; call it after the recorder is installed.
+pub fn describe_metrics() {
+    metrics::describe_counter!(
+        "btrb_http_requests_total",
+        "HTTP requests, by method, matched route and status"
+    );
+    metrics::describe_histogram!(
+        "btrb_http_request_duration_seconds",
+        metrics::Unit::Seconds,
+        "HTTP request duration, by method and matched route"
+    );
+}
+
 /// The most a request body may carry: every form and JSON body any app takes
 /// is far smaller (the largest, a batch of sensor readings, is a few KiB).
 const BODY_LIMIT: usize = 64 * 1024;

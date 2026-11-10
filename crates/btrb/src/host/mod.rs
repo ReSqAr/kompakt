@@ -25,7 +25,6 @@ mod metrics;
 mod routes;
 mod serve;
 mod settings;
-mod signals;
 mod standalone;
 mod work;
 

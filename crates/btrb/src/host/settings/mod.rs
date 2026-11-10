@@ -213,7 +213,9 @@ fn read_server(
     let cookies = btrb_web::settings::cookie_policy(&mut env)?;
     let cache = Some(cache::read(&mut env)?);
     let apps = configure_apps(&mut env, cookies, entries)?;
-    let cli_socket = standalone.then(|| cli_socket(&mut env)).transpose()?;
+    let cli_socket = standalone
+        .then(|| btrb_cli::settings::cli_socket(&mut env))
+        .transpose()?;
 
     let mut metrics_listen_addr = Some(DEFAULT_METRICS_LISTEN_ADDR);
     env.set_optional(
@@ -310,7 +312,7 @@ fn worker_config(env: &mut Env, entries: &[crate::Entry]) -> Result<WorkerSettin
         socket_addr,
     )?;
 
-    let cli_socket = cli_socket(env)?;
+    let cli_socket = btrb_cli::settings::cli_socket(env)?;
     let cookies = btrb_web::settings::cookie_policy(env)?;
     let cache = cache::read(env)?;
     let apps = configure_apps(env, cookies, entries)?;
@@ -333,17 +335,7 @@ fn worker_config(env: &mut Env, entries: &[crate::Entry]) -> Result<WorkerSettin
 /// shell is left alone (it may be the worker's own).
 pub(crate) fn cli_socket_from_env() -> Result<PathBuf, ConfigError> {
     let mut env = Env::from_process(&["BTRB_"])?;
-    cli_socket(&mut env)
-}
-
-fn cli_socket(env: &mut Env) -> Result<PathBuf, ConfigError> {
-    let raw = env.required("BTRB_CLI_SOCKET")?;
-    if raw.trim().is_empty() {
-        return Err(ConfigError::Other(
-            "BTRB_CLI_SOCKET is empty: it is the path of the worker's socket".to_owned(),
-        ));
-    }
-    Ok(PathBuf::from(raw))
+    btrb_cli::settings::cli_socket(&mut env)
 }
 
 // ── apps ─────────────────────────────────────────────────────────────────────

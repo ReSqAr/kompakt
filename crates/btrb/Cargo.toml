@@ -14,20 +14,19 @@ jemalloc = ["zslg/jemalloc"]
 
 [dependencies]
 axum = { workspace = true }
+btrb-background = { workspace = true }
+btrb-cli = { workspace = true }
 btrb-config = { workspace = true }
+btrb-metrics = { workspace = true }
 btrb-types = { workspace = true }
 btrb-web = { workspace = true }
 clap = { workspace = true }
 futures = { workspace = true }
-memory-stats = { workspace = true }
 metrics = { workspace = true }
-metrics-exporter-prometheus = { workspace = true }
 nvzn = { workspace = true, features = ["prometheus"] }
 object_store = { workspace = true }
 objectstorage-cache = { workspace = true }
-postcard = { workspace = true, features = ["use-std"] }
 serde = { workspace = true }
-rpassword = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["time", "net", "io-util", "macros", "rt", "signal"] }
 tokio-util = { workspace = true, features = ["rt"] }

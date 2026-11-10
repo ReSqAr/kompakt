@@ -11,12 +11,7 @@
 
 use crate::app::Entry;
 
-/// The bounds of one histogram: seconds, bytes per second, whatever its unit.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Histogram {
-    pub metric: &'static str,
-    pub bounds: &'static [f64],
-}
+pub use btrb_types::Histogram;
 
 /// Every histogram the process records, apps in list order, then the cache's.
 #[must_use]

@@ -18,8 +18,7 @@
 //! whoever can open the socket is the operator. Bodies carry passwords and
 //! keys, so nothing here logs one.
 
-use crate::app::Shutdown;
-use crate::{Error, Stopped};
+use btrb_types::{Error, Shutdown, Stopped};
 use futures::future::BoxFuture;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -83,7 +82,7 @@ pub struct Served {
 }
 
 impl Served {
-    pub(crate) fn new<Req, Resp>(app: &'static str, wire: u64, handler: Handler<Req, Resp>) -> Self
+    pub fn new<Req, Resp>(app: &'static str, wire: u64, handler: Handler<Req, Resp>) -> Self
     where
         Req: DeserializeOwned + Send + 'static,
         Resp: Serialize + Send + 'static,

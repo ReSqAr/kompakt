@@ -22,6 +22,7 @@ pub mod settings;
 
 pub use base_path::{BasePath, with_base_href};
 pub use btrb_types::SigningKey;
+pub use layers::{HISTOGRAMS, describe_metrics};
 
 /// Deployment facts every mounted app is given at construction.
 ///

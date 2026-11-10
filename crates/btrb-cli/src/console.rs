@@ -10,7 +10,7 @@
 //! Library crates deny `print_stdout`; routing every line through a trait is
 //! what lets a command live in its app's crate, and be tested without a TTY.
 
-use crate::Error;
+use btrb_types::Error;
 use std::collections::VecDeque;
 use std::io::{Read, Write};
 
