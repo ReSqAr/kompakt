@@ -1,0 +1,29 @@
+[package]
+name = "nvzn-fixtures"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Test events and projections shared by the nvzn crates' tests"
+publish = false
+
+[dependencies]
+crossbeam-channel = { workspace = true }
+crossbeam-combinators = { workspace = true }
+async-trait = { workspace = true }
+zslg = { workspace = true }
+bytes = { workspace = true }
+nvzn-projection = { workspace = true }
+nvzn-store = { workspace = true }
+nvzn-types = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+postcard = { workspace = true, features = ["alloc", "use-std"] }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "fake"

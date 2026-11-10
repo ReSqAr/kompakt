@@ -37,6 +37,7 @@ rand = "0.10"
 rpassword = "7"
 rust-rocksdb = { version = "0", default-features = false, features = ["zstd", "bindgen-runtime"] }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 sha2 = "0"
 socket2 = { version = "0", features = ["all"] }
 tempfile = "3"
@@ -55,10 +56,100 @@ uuid = { version = "1", features = ["v4"] }
 zstd = { version = "0", default-features = false }
 
 btrb = { path = "crates/btrb" }
+bytesize = { path = "crates/bytesize" }
 crossbeam-combinators = { path = "crates/crossbeam-combinators" }
+error-union = { path = "crates/error-union" }
+framing = { path = "crates/framing" }
+metrics-kit = { path = "crates/metrics-kit" }
 nvzn = { path = "crates/nvzn" }
 objectstorage-cache = { path = "crates/objectstorage-cache" }
+rocksdb-kit = { path = "crates/rocksdb-kit" }
+zslg-leader-membership = { path = "crates/zslg-leader-membership" }
+zslg-leader-snapshot = { path = "crates/zslg-leader-snapshot" }
+zslg-leader-compaction = { path = "crates/zslg-leader-compaction" }
+zslg-leader-integrator = { path = "crates/zslg-leader-integrator" }
+zslg-raft-setup = { path = "crates/zslg-raft-setup" }
+zslg-learner = { path = "crates/zslg-learner" }
+zslg-leader = { path = "crates/zslg-leader" }
+zslg-observability = { path = "crates/zslg-observability" }
+zslg-net-setup = { path = "crates/zslg-net-setup" }
+zslg-error = { path = "crates/zslg-error" }
+zslg-replica-node = { path = "crates/zslg-replica-node" }
+zslg-follower-node = { path = "crates/zslg-follower-node" }
+zslg-learner-node = { path = "crates/zslg-learner-node" }
+zslg-writer-node = { path = "crates/zslg-writer-node" }
+zslg-writer = { path = "crates/zslg-writer" }
+zslg-replica-service = { path = "crates/zslg-replica-service" }
+zslg-replica-log = { path = "crates/zslg-replica-log" }
+zslg-reader = { path = "crates/zslg-reader" }
+zslg-subscriber = { path = "crates/zslg-subscriber" }
+zslg-stable-archive = { path = "crates/zslg-stable-archive" }
+zslg-stable-log = { path = "crates/zslg-stable-log" }
+zslg-local-store = { path = "crates/zslg-local-store" }
+zslg-raft-startup = { path = "crates/zslg-raft-startup" }
+zslg-raft-node = { path = "crates/zslg-raft-node" }
+zslg-raft-tracker = { path = "crates/zslg-raft-tracker" }
+zslg-raft-state = { path = "crates/zslg-raft-state" }
+zslg-raft-rpc = { path = "crates/zslg-raft-rpc" }
+zslg-consensus-fake = { path = "crates/zslg-consensus-fake" }
+zslg-peers = { path = "crates/zslg-peers" }
+backoff-kit = { path = "crates/backoff-kit" }
+raft-kit = { path = "crates/raft-kit" }
+shutdown = { path = "crates/shutdown" }
+warn-throttle = { path = "crates/warn-throttle" }
+pace-kit = { path = "crates/pace-kit" }
+testing-kit = { path = "crates/testing-kit" }
 zslg = { path = "crates/zslg" }
+nvzn-types = { path = "crates/nvzn-types" }
+nvzn-projection = { path = "crates/nvzn-projection" }
+nvzn-store = { path = "crates/nvzn-store" }
+nvzn-projector = { path = "crates/nvzn-projector" }
+nvzn-fixtures = { path = "crates/nvzn-fixtures" }
+btrb-app = { path = "crates/btrb-app" }
+btrb-background = { path = "crates/btrb-background" }
+btrb-cli = { path = "crates/btrb-cli" }
+btrb-config = { path = "crates/btrb-config" }
+btrb-db = { path = "crates/btrb-db" }
+btrb-host = { path = "crates/btrb-host" }
+btrb-live = { path = "crates/btrb-live" }
+btrb-metrics = { path = "crates/btrb-metrics" }
+btrb-types = { path = "crates/btrb-types" }
+btrb-web = { path = "crates/btrb-web" }
+nvzn-dispatcher = { path = "crates/nvzn-dispatcher" }
+nvzn-live = { path = "crates/nvzn-live" }
+nvzn-resultset = { path = "crates/nvzn-resultset" }
+nvzn-store-fake = { path = "crates/nvzn-store-fake" }
+nvzn-store-rocksdb = { path = "crates/nvzn-store-rocksdb" }
+zslg-consensus = { path = "crates/zslg-consensus" }
+zslg-consensus-types = { path = "crates/zslg-consensus-types" }
+zslg-lifecycle-types = { path = "crates/zslg-lifecycle-types" }
+zslg-log = { path = "crates/zslg-log" }
+zslg-log-types = { path = "crates/zslg-log-types" }
+zslg-net = { path = "crates/zslg-net" }
+zslg-net-wire = { path = "crates/zslg-net-wire" }
+zslg-net-types = { path = "crates/zslg-net-types" }
+zslg-node-types = { path = "crates/zslg-node-types" }
+zslg-quorum-read = { path = "crates/zslg-quorum-read" }
+zslg-object-store-config = { path = "crates/zslg-object-store-config" }
+zslg-node-id = { path = "crates/zslg-node-id" }
+zslg-object-store = { path = "crates/zslg-object-store" }
+zslg-hlc-clock = { path = "crates/zslg-hlc-clock" }
+zslg-hlc-gate = { path = "crates/zslg-hlc-gate" }
+zslg-net-client = { path = "crates/zslg-net-client" }
+zslg-net-server = { path = "crates/zslg-net-server" }
+zslg-net-router = { path = "crates/zslg-net-router" }
+zslg-raft-storage = { path = "crates/zslg-raft-storage" }
+zslg-raft = { path = "crates/zslg-raft" }
+zslg-raft-types = { path = "crates/zslg-raft-types" }
+zslg-snapshot = { path = "crates/zslg-snapshot" }
+zslg-snapshot-types = { path = "crates/zslg-snapshot-types" }
+zslg-time = { path = "crates/zslg-time" }
+zslg-time-fake = { path = "crates/zslg-time-fake" }
+zslg-net-fake = { path = "crates/zslg-net-fake" }
+zslg-raft-fake = { path = "crates/zslg-raft-fake" }
+zslg-cluster-tests = { path = "crates/zslg-cluster-tests" }
+zslg-log-fake = { path = "crates/zslg-log-fake" }
+zslg-time-types = { path = "crates/zslg-time-types" }
 
 [workspace.lints.clippy]
 all = "deny"
@@ -90,20 +181,6 @@ opt-level = 1
 debug = 1
 
 [profile.test.package.rust-librocksdb-sys]
-debug = 0
-opt-level = 1
-
-[profile.lint]
-inherits = "dev"
-debug = 0
-opt-level = 0
-
-[profile.ci]
-inherits = "dev"
-debug = "line-tables-only"
-incremental = false
-
-[profile.ci.package.rust-librocksdb-sys]
 debug = 0
 opt-level = 1
 

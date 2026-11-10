@@ -248,6 +248,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "backoff-kit"
+version = "0.1.0"
+dependencies = [
+ "rand 0.10.3",
+]
+
+[[package]]
 name = "backtrace"
 version = "0.3.77"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -372,27 +379,166 @@ dependencies = [
 name = "btrb"
 version = "0.1.0"
 dependencies = [
+ "btrb-app",
+ "btrb-config",
+ "btrb-host",
+ "btrb-live",
+ "nvzn",
+ "serde",
+ "tokio",
+]
+
+[[package]]
+name = "btrb-app"
+version = "0.1.0"
+dependencies = [
  "axum",
- "blake3",
+ "btrb-background",
+ "btrb-cli",
+ "btrb-config",
+ "btrb-db",
+ "btrb-live",
+ "btrb-types",
+ "btrb-web",
  "clap",
  "futures",
- "memory-stats",
- "metrics",
- "metrics-exporter-prometheus",
  "nvzn",
- "object_store",
  "objectstorage-cache",
+ "serde",
+ "tokio",
+ "tower",
+]
+
+[[package]]
+name = "btrb-background"
+version = "0.1.0"
+dependencies = [
+ "btrb-types",
+ "futures",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "btrb-cli"
+version = "0.1.0"
+dependencies = [
+ "btrb-config",
+ "btrb-types",
+ "futures",
  "postcard",
  "rpassword",
  "serde",
  "tempfile",
- "thiserror 2.0.21",
  "tokio",
  "tokio-util",
- "tower",
- "tower-http 0.7.1",
+ "tracing",
+]
+
+[[package]]
+name = "btrb-config"
+version = "0.1.0"
+dependencies = [
+ "btrb-types",
+ "tempfile",
+ "thiserror 2.0.21",
+ "zslg",
+]
+
+[[package]]
+name = "btrb-db"
+version = "0.1.0"
+dependencies = [
+ "btrb-config",
+ "btrb-types",
+ "futures",
+ "metrics",
+ "nvzn",
+ "object_store",
+ "objectstorage-cache",
+ "tempfile",
+ "tokio",
+ "tokio-util",
  "tracing",
  "zslg",
+]
+
+[[package]]
+name = "btrb-host"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "btrb-app",
+ "btrb-background",
+ "btrb-cli",
+ "btrb-config",
+ "btrb-db",
+ "btrb-live",
+ "btrb-metrics",
+ "btrb-web",
+ "clap",
+ "futures",
+ "nvzn",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg",
+]
+
+[[package]]
+name = "btrb-live"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "btrb-types",
+ "btrb-web",
+ "futures",
+ "metrics",
+ "nvzn",
+ "tokio",
+ "tower",
+ "zslg",
+]
+
+[[package]]
+name = "btrb-metrics"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "btrb-config",
+ "btrb-types",
+ "memory-stats",
+ "metrics",
+ "metrics-exporter-prometheus",
+ "nvzn",
+ "tokio",
+ "tracing",
+ "zslg",
+]
+
+[[package]]
+name = "btrb-types"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "nvzn",
+ "tokio-util",
+]
+
+[[package]]
+name = "btrb-web"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "blake3",
+ "btrb-config",
+ "btrb-types",
+ "metrics",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
 ]
 
 [[package]]
@@ -430,6 +576,13 @@ name = "bytes"
 version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
+
+[[package]]
+name = "bytesize"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "bzip2-sys"
@@ -721,6 +874,7 @@ name = "crossbeam-combinators"
 version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
+ "futures",
  "parking_lot 0.13.0",
  "proptest",
  "tokio",
@@ -947,6 +1101,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "error-union"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "evmap"
 version = "11.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1011,6 +1172,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "framing"
+version = "0.1.0"
+dependencies = [
+ "crc32fast",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1739,6 +1908,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "kompakt-workspace-checks"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1925,6 +2101,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "metrics-kit"
+version = "0.1.0"
+dependencies = [
+ "metrics",
+ "metrics-util",
+ "tokio",
+]
+
+[[package]]
 name = "metrics-util"
 version = "0.20.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2069,25 +2254,187 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
- "const-fnv1a-hash",
  "crossbeam-channel",
  "crossbeam-combinators",
  "futures",
- "itertools 0.15.0",
  "metrics",
  "metrics-exporter-prometheus",
+ "metrics-kit",
  "metrics-util",
- "postcard",
- "proptest",
- "rust-rocksdb",
+ "nvzn-dispatcher",
+ "nvzn-fixtures",
+ "nvzn-projection",
+ "nvzn-projector",
+ "nvzn-store",
+ "nvzn-store-rocksdb",
+ "nvzn-types",
  "serde",
- "sha2",
  "tempfile",
- "thiserror 2.0.21",
  "tokio",
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "zslg",
+]
+
+[[package]]
+name = "nvzn-dispatcher"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "crossbeam-combinators",
+ "metrics-kit",
+ "nvzn-fixtures",
+ "nvzn-live",
+ "nvzn-projection",
+ "nvzn-projector",
+ "nvzn-resultset",
+ "nvzn-store",
+ "nvzn-store-fake",
+ "nvzn-store-rocksdb",
+ "nvzn-types",
+ "serde",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg",
+]
+
+[[package]]
+name = "nvzn-fixtures"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "nvzn-projection",
+ "nvzn-store",
+ "nvzn-types",
+ "postcard",
+ "proptest",
+ "serde",
+ "zslg",
+]
+
+[[package]]
+name = "nvzn-live"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "metrics-kit",
+ "nvzn-fixtures",
+ "nvzn-projection",
+ "nvzn-projector",
+ "nvzn-resultset",
+ "nvzn-store",
+ "nvzn-store-fake",
+ "nvzn-types",
+ "proptest",
+ "serde",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg",
+]
+
+[[package]]
+name = "nvzn-projection"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "nvzn-types",
+ "postcard",
+ "serde",
+ "zslg",
+]
+
+[[package]]
+name = "nvzn-projector"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "metrics",
+ "metrics-kit",
+ "metrics-util",
+ "nvzn-fixtures",
+ "nvzn-projection",
+ "nvzn-store",
+ "nvzn-store-fake",
+ "nvzn-types",
+ "serde",
+]
+
+[[package]]
+name = "nvzn-resultset"
+version = "0.1.0"
+dependencies = [
+ "nvzn-projection",
+ "nvzn-types",
+]
+
+[[package]]
+name = "nvzn-store"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "itertools 0.14.0",
+ "nvzn-projection",
+ "nvzn-types",
+ "zslg",
+]
+
+[[package]]
+name = "nvzn-store-fake"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "nvzn-projection",
+ "nvzn-store",
+ "nvzn-types",
+]
+
+[[package]]
+name = "nvzn-store-rocksdb"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "metrics",
+ "metrics-kit",
+ "metrics-util",
+ "nvzn-fixtures",
+ "nvzn-projection",
+ "nvzn-store",
+ "nvzn-store-fake",
+ "nvzn-types",
+ "postcard",
+ "proptest",
+ "rust-rocksdb",
+ "tempfile",
+ "zslg",
+]
+
+[[package]]
+name = "nvzn-types"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "const-fnv1a-hash",
+ "crossbeam-combinators",
+ "metrics-kit",
+ "postcard",
+ "proptest",
+ "rust-rocksdb",
+ "serde",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
  "uuid",
  "zslg",
 ]
@@ -2221,6 +2568,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f59006ce1e204c30956638535b74d317bca99477b9356dfaec54c37f6f600ab"
 dependencies = [
  "num-traits",
+]
+
+[[package]]
+name = "pace-kit"
+version = "0.1.0"
+dependencies = [
+ "tokio",
 ]
 
 [[package]]
@@ -2585,6 +2939,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "raft-kit"
+version = "0.1.0"
+dependencies = [
+ "openraft",
+]
+
+[[package]]
 name = "rand"
 version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2802,7 +3163,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-util",
  "tower",
- "tower-http 0.6.11",
+ "tower-http",
  "tower-service",
  "url",
  "wasm-bindgen",
@@ -2832,6 +3193,17 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "rocksdb-kit"
+version = "0.1.0"
+dependencies = [
+ "bytesize",
+ "rust-rocksdb",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]
@@ -3203,6 +3575,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
+name = "shutdown"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "signal-hook-registry"
 version = "1.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3388,6 +3770,14 @@ dependencies = [
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "testing-kit"
+version = "0.1.0"
+dependencies = [
+ "tokio",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -3684,28 +4074,12 @@ dependencies = [
  "http",
  "http-body",
  "pin-project-lite",
+ "tokio",
  "tower",
  "tower-layer",
  "tower-service",
- "url",
-]
-
-[[package]]
-name = "tower-http"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08a05a66a4fdd61cbbe0a1d755ffe0ca6aba159dd4820936a0ff8a8278245b9c"
-dependencies = [
- "bitflags 2.13.2",
- "bytes",
- "http",
- "http-body",
- "percent-encoding",
- "pin-project-lite",
- "tokio",
- "tower-layer",
- "tower-service",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -3936,6 +4310,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec4cdd0dd910afe868b7ef477227d8d538b46b3075031afee8a9f2acb0a2ed0b"
 dependencies = [
  "try-lock",
+]
+
+[[package]]
+name = "warn-throttle"
+version = "0.1.0"
+dependencies = [
+ "parking_lot 0.13.0",
+ "tokio",
 ]
 
 [[package]]
@@ -4363,12 +4745,10 @@ checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 name = "zslg"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "bytes",
+ "bytesize",
  "clap",
  "console-subscriber",
- "crc32fast",
- "crossbeam-channel",
  "crossbeam-combinators",
  "dashmap",
  "futures",
@@ -4377,19 +4757,10 @@ dependencies = [
  "hyper-util",
  "metrics",
  "metrics-exporter-prometheus",
- "metrics-util",
  "object_store",
- "openraft",
- "parking_lot 0.13.0",
- "postcard",
  "pprof",
- "proptest",
  "rand 0.10.3",
- "rust-rocksdb",
- "serde",
- "socket2",
- "tempfile",
- "thiserror 2.0.21",
+ "shutdown",
  "tikv-jemalloc-ctl",
  "tikv-jemallocator",
  "time",
@@ -4398,8 +4769,1267 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "zslg-consensus",
+ "zslg-error",
+ "zslg-follower-node",
+ "zslg-learner-node",
+ "zslg-log",
+ "zslg-log-fake",
+ "zslg-net",
+ "zslg-object-store-config",
+ "zslg-observability",
+ "zslg-replica-node",
+ "zslg-snapshot",
+ "zslg-time",
+ "zslg-writer-node",
+]
+
+[[package]]
+name = "zslg-cluster-tests"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "crossbeam-combinators",
+ "futures",
+ "object_store",
+ "proptest",
+ "tempfile",
+ "testing-kit",
+ "tokio",
+ "tokio-util",
+ "tracing-subscriber",
+ "zslg",
+ "zslg-consensus",
+ "zslg-consensus-fake",
+ "zslg-error",
+ "zslg-log",
+ "zslg-net",
+ "zslg-replica-node",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-consensus"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "error-union",
+ "tokio",
+ "zslg-consensus-types",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log-types",
+ "zslg-net-types",
+ "zslg-node-types",
+ "zslg-snapshot-types",
+ "zslg-time-types",
+]
+
+[[package]]
+name = "zslg-consensus-fake"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "parking_lot 0.13.0",
+ "tokio",
  "uuid",
+ "zslg-consensus",
+ "zslg-net",
+]
+
+[[package]]
+name = "zslg-consensus-types"
+version = "0.1.0"
+dependencies = [
+ "metrics-kit",
+ "postcard",
+ "proptest",
+ "rand 0.10.3",
+ "serde",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "uuid",
+ "zslg-log-types",
+ "zslg-net-types",
+ "zslg-node-types",
+ "zslg-snapshot-types",
+ "zslg-time-types",
+]
+
+[[package]]
+name = "zslg-error"
+version = "0.1.0"
+dependencies = [
+ "bytesize",
+ "error-union",
+ "framing",
+ "rocksdb-kit",
+ "serde",
+ "shutdown",
+ "zslg-consensus-types",
+ "zslg-lifecycle-types",
+ "zslg-log-types",
+ "zslg-net-types",
+ "zslg-node-types",
+ "zslg-snapshot-types",
+ "zslg-time-types",
+]
+
+[[package]]
+name = "zslg-follower-node"
+version = "0.1.0"
+dependencies = [
+ "bytesize",
+ "object_store",
+ "rocksdb-kit",
+ "shutdown",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-error",
+ "zslg-hlc-clock",
+ "zslg-learner",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-net-setup",
+ "zslg-node-id",
+ "zslg-object-store",
+ "zslg-object-store-config",
+ "zslg-observability",
+ "zslg-peers",
+ "zslg-raft-tracker",
+ "zslg-snapshot",
+ "zslg-writer",
+]
+
+[[package]]
+name = "zslg-hlc-clock"
+version = "0.1.0"
+dependencies = [
+ "metrics-kit",
+ "parking_lot 0.13.0",
+ "proptest",
+ "tokio",
+ "tokio-util",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-hlc-gate"
+version = "0.1.0"
+dependencies = [
+ "metrics-kit",
+ "parking_lot 0.13.0",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-leader"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "bytesize",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "error-union",
+ "futures",
+ "metrics",
+ "metrics-util",
+ "object_store",
+ "parking_lot 0.13.0",
+ "proptest",
+ "raft-kit",
+ "rocksdb-kit",
+ "shutdown",
+ "tempfile",
+ "testing-kit",
+ "tokio",
+ "tokio-util",
+ "uuid",
+ "zslg-consensus",
+ "zslg-consensus-fake",
+ "zslg-error",
+ "zslg-hlc-clock",
+ "zslg-hlc-gate",
+ "zslg-leader-compaction",
+ "zslg-leader-integrator",
+ "zslg-leader-membership",
+ "zslg-leader-snapshot",
+ "zslg-learner",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-log-fake",
+ "zslg-net",
+ "zslg-net-client",
+ "zslg-net-fake",
+ "zslg-net-setup",
+ "zslg-net-wire",
+ "zslg-object-store",
+ "zslg-peers",
+ "zslg-raft",
+ "zslg-raft-fake",
+ "zslg-raft-setup",
+ "zslg-replica-log",
+ "zslg-replica-service",
+ "zslg-snapshot",
+ "zslg-time",
+ "zslg-time-fake",
+]
+
+[[package]]
+name = "zslg-leader-compaction"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-combinators",
+ "error-union",
+ "metrics-kit",
+ "proptest",
+ "shutdown",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-leader-integrator"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "error-union",
+ "metrics",
+ "metrics-kit",
+ "metrics-util",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-consensus-fake",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-leader-membership"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "error-union",
+ "futures",
+ "metrics",
+ "metrics-kit",
+ "metrics-util",
+ "pace-kit",
+ "parking_lot 0.13.0",
+ "proptest",
+ "shutdown",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-consensus-fake",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-net-fake",
+ "zslg-quorum-read",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-leader-snapshot"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "error-union",
+ "metrics",
+ "metrics-kit",
+ "metrics-util",
+ "pace-kit",
+ "shutdown",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "warn-throttle",
+ "zslg-consensus",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-net-fake",
+ "zslg-quorum-read",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-learner"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytesize",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "error-union",
+ "futures",
+ "object_store",
+ "proptest",
+ "rocksdb-kit",
+ "shutdown",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-consensus-fake",
+ "zslg-error",
+ "zslg-hlc-clock",
+ "zslg-lifecycle-types",
+ "zslg-local-store",
+ "zslg-log",
+ "zslg-log-fake",
+ "zslg-net",
+ "zslg-object-store",
+ "zslg-reader",
+ "zslg-snapshot",
+ "zslg-stable-archive",
+ "zslg-stable-log",
+ "zslg-subscriber",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-learner-node"
+version = "0.1.0"
+dependencies = [
+ "bytesize",
+ "object_store",
+ "rocksdb-kit",
+ "shutdown",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-error",
+ "zslg-hlc-clock",
+ "zslg-learner",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-net-setup",
+ "zslg-node-id",
+ "zslg-object-store",
+ "zslg-object-store-config",
+ "zslg-observability",
+ "zslg-peers",
+ "zslg-raft-tracker",
+ "zslg-snapshot",
+]
+
+[[package]]
+name = "zslg-lifecycle-types"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "zslg-local-store"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "bytesize",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "error-union",
+ "futures",
+ "metrics-kit",
+ "parking_lot 0.13.0",
+ "proptest",
+ "rocksdb-kit",
+ "shutdown",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "zslg-consensus",
+ "zslg-consensus-fake",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-log-fake",
+ "zslg-net",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-log"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "error-union",
+ "futures",
+ "tokio",
+ "zslg-consensus-types",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log-types",
+ "zslg-net-types",
+ "zslg-node-types",
+ "zslg-snapshot-types",
+ "zslg-time-types",
+]
+
+[[package]]
+name = "zslg-log-fake"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "parking_lot 0.13.0",
+ "tokio",
+ "uuid",
+ "zslg-consensus",
+ "zslg-log",
+ "zslg-net",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-log-types"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "crossbeam-combinators",
+ "metrics-kit",
+ "postcard",
+ "serde",
+ "thiserror 2.0.21",
+ "uuid",
+ "zslg-node-types",
+ "zslg-time-types",
+]
+
+[[package]]
+name = "zslg-net"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "error-union",
+ "tokio",
+ "zslg-consensus",
+ "zslg-consensus-types",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-log-types",
+ "zslg-net-types",
+ "zslg-node-types",
+ "zslg-raft",
+ "zslg-snapshot-types",
+ "zslg-time-types",
+]
+
+[[package]]
+name = "zslg-net-client"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "bytesize",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "dashmap",
+ "error-union",
+ "futures",
+ "metrics-kit",
+ "parking_lot 0.13.0",
+ "raft-kit",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "zslg-consensus",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-net-wire",
+ "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
+ "zslg-time-fake",
+]
+
+[[package]]
+name = "zslg-net-fake"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "error-union",
+ "futures",
+ "parking_lot 0.13.0",
+ "raft-kit",
+ "tokio",
+ "zslg-consensus",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-log-fake",
+ "zslg-net",
+ "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-net-router"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crossbeam-combinators",
+ "futures",
+ "raft-kit",
+ "tokio",
+ "zslg-consensus",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-raft",
+]
+
+[[package]]
+name = "zslg-net-server"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "error-union",
+ "futures",
+ "metrics-kit",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-net-wire",
+ "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-net-setup"
+version = "0.1.0"
+dependencies = [
+ "error-union",
+ "shutdown",
+ "tokio-util",
+ "zslg-consensus",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-net-client",
+ "zslg-net-router",
+ "zslg-net-server",
+ "zslg-net-wire",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-net-types"
+version = "0.1.0"
+dependencies = [
+ "postcard",
+ "serde",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
+name = "zslg-net-wire"
+version = "0.1.0"
+dependencies = [
+ "bytesize",
+ "error-union",
+ "framing",
+ "futures",
+ "metrics-kit",
+ "postcard",
+ "raft-kit",
+ "serde",
+ "socket2",
+ "tokio",
+ "zslg-consensus",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-node-id"
+version = "0.1.0"
+dependencies = [
+ "bytesize",
+ "error-union",
+ "rocksdb-kit",
+ "tempfile",
+ "tokio",
+ "uuid",
+ "zslg-consensus",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log",
+]
+
+[[package]]
+name = "zslg-node-types"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "uuid",
+]
+
+[[package]]
+name = "zslg-object-store"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "framing",
+ "futures",
+ "metrics-kit",
+ "object_store",
+ "postcard",
+ "serde",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg-log",
+ "zslg-snapshot",
+ "zslg-time",
  "zstd",
+]
+
+[[package]]
+name = "zslg-object-store-config"
+version = "0.1.0"
+dependencies = [
+ "error-union",
+ "object_store",
+ "serde",
+ "zslg-error",
+ "zslg-snapshot-types",
+]
+
+[[package]]
+name = "zslg-observability"
+version = "0.1.0"
+dependencies = [
+ "error-union",
+ "metrics",
+ "metrics-exporter-prometheus",
+ "metrics-kit",
+ "metrics-util",
+ "rocksdb-kit",
+ "tikv-jemalloc-ctl",
+ "tokio",
+ "tokio-util",
+ "zslg-consensus",
+ "zslg-error",
+ "zslg-hlc-clock",
+ "zslg-hlc-gate",
+ "zslg-leader-compaction",
+ "zslg-leader-integrator",
+ "zslg-leader-membership",
+ "zslg-leader-snapshot",
+ "zslg-lifecycle-types",
+ "zslg-local-store",
+ "zslg-log",
+ "zslg-net-client",
+ "zslg-net-server",
+ "zslg-net-wire",
+ "zslg-object-store",
+ "zslg-quorum-read",
+ "zslg-raft-node",
+ "zslg-raft-startup",
+ "zslg-raft-state",
+ "zslg-raft-storage",
+ "zslg-reader",
+ "zslg-replica-log",
+ "zslg-replica-service",
+ "zslg-stable-log",
+ "zslg-subscriber",
+ "zslg-writer",
+]
+
+[[package]]
+name = "zslg-peers"
+version = "0.1.0"
+dependencies = [
+ "tokio",
+ "tracing",
+ "zslg-consensus",
+ "zslg-net",
+]
+
+[[package]]
+name = "zslg-quorum-read"
+version = "0.1.0"
+dependencies = [
+ "error-union",
+ "metrics-kit",
+ "tokio",
+ "tracing",
+ "uuid",
+ "zslg-consensus",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-raft"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "error-union",
+ "raft-kit",
+ "tokio",
+ "zslg-consensus-types",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log-types",
+ "zslg-net-types",
+ "zslg-node-types",
+ "zslg-raft-types",
+ "zslg-snapshot-types",
+ "zslg-time-types",
+]
+
+[[package]]
+name = "zslg-raft-fake"
+version = "0.1.0"
+dependencies = [
+ "dashmap",
+ "raft-kit",
+ "zslg-consensus",
+ "zslg-net",
+ "zslg-raft",
+]
+
+[[package]]
+name = "zslg-raft-node"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "error-union",
+ "futures",
+ "metrics-kit",
+ "raft-kit",
+ "tokio",
+ "tracing",
+ "zslg-consensus",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-raft-rpc"
+version = "0.1.0"
+dependencies = [
+ "raft-kit",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-net",
+ "zslg-raft",
+]
+
+[[package]]
+name = "zslg-raft-setup"
+version = "0.1.0"
+dependencies = [
+ "bytesize",
+ "error-union",
+ "raft-kit",
+ "rocksdb-kit",
+ "shutdown",
+ "tempfile",
+ "testing-kit",
+ "tokio",
+ "zslg-consensus",
+ "zslg-consensus-fake",
+ "zslg-error",
+ "zslg-hlc-clock",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-net-client",
+ "zslg-net-fake",
+ "zslg-net-setup",
+ "zslg-net-wire",
+ "zslg-raft",
+ "zslg-raft-fake",
+ "zslg-raft-node",
+ "zslg-raft-rpc",
+ "zslg-raft-startup",
+ "zslg-raft-state",
+ "zslg-raft-storage",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-raft-startup"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "backoff-kit",
+ "error-union",
+ "futures",
+ "metrics-kit",
+ "shutdown",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "zslg-consensus",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-quorum-read",
+ "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-raft-state"
+version = "0.1.0"
+dependencies = [
+ "metrics-kit",
+ "raft-kit",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-raft",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-raft-storage"
+version = "0.1.0"
+dependencies = [
+ "bytesize",
+ "error-union",
+ "metrics-kit",
+ "parking_lot 0.13.0",
+ "postcard",
+ "proptest",
+ "raft-kit",
+ "rocksdb-kit",
+ "serde",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
+ "zslg-consensus",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-raft",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-raft-tracker"
+version = "0.1.0"
+dependencies = [
+ "backoff-kit",
+ "error-union",
+ "futures",
+ "shutdown",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "zslg-consensus",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-net",
+]
+
+[[package]]
+name = "zslg-raft-types"
+version = "0.1.0"
+dependencies = [
+ "raft-kit",
+ "serde",
+ "zslg-consensus-types",
+ "zslg-net-types",
+ "zslg-node-types",
+]
+
+[[package]]
+name = "zslg-reader"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "error-union",
+ "metrics-kit",
+ "parking_lot 0.13.0",
+ "tokio",
+ "tracing",
+ "zslg-consensus",
+ "zslg-consensus-fake",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-quorum-read",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-replica-log"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "bytesize",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "error-union",
+ "metrics-kit",
+ "parking_lot 0.13.0",
+ "proptest",
+ "rocksdb-kit",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-log-fake",
+ "zslg-net",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-replica-node"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "bytesize",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "futures",
+ "object_store",
+ "rocksdb-kit",
+ "shutdown",
+ "tempfile",
+ "testing-kit",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-consensus-fake",
+ "zslg-error",
+ "zslg-hlc-clock",
+ "zslg-hlc-gate",
+ "zslg-leader",
+ "zslg-leader-membership",
+ "zslg-learner",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-log-fake",
+ "zslg-net",
+ "zslg-net-client",
+ "zslg-net-fake",
+ "zslg-net-setup",
+ "zslg-net-wire",
+ "zslg-node-id",
+ "zslg-object-store",
+ "zslg-object-store-config",
+ "zslg-observability",
+ "zslg-peers",
+ "zslg-raft-node",
+ "zslg-raft-setup",
+ "zslg-raft-storage",
+ "zslg-raft-tracker",
+ "zslg-replica-log",
+ "zslg-replica-service",
+ "zslg-snapshot",
+ "zslg-time",
+ "zslg-time-fake",
+ "zslg-writer",
+]
+
+[[package]]
+name = "zslg-replica-service"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "error-union",
+ "futures",
+ "metrics-kit",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "warn-throttle",
+ "zslg-consensus",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-quorum-read",
+ "zslg-raft",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-snapshot"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "crossbeam-combinators",
+ "error-union",
+ "object_store",
+ "tokio-util",
+ "zslg-consensus-types",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log-types",
+ "zslg-net-types",
+ "zslg-snapshot-types",
+ "zslg-time-types",
+]
+
+[[package]]
+name = "zslg-snapshot-types"
+version = "0.1.0"
+dependencies = [
+ "metrics-kit",
+ "rand 0.10.3",
+ "serde",
+ "thiserror 2.0.21",
+ "zslg-lifecycle-types",
+ "zslg-log-types",
+ "zslg-time-types",
+]
+
+[[package]]
+name = "zslg-stable-archive"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-combinators",
+ "error-union",
+ "tokio",
+ "zslg-consensus",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-net",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-stable-log"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytesize",
+ "crossbeam-combinators",
+ "error-union",
+ "metrics-kit",
+ "parking_lot 0.13.0",
+ "postcard",
+ "proptest",
+ "rocksdb-kit",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-log-fake",
+ "zslg-net",
+ "zslg-snapshot",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-subscriber"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "backoff-kit",
+ "bytes",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "error-union",
+ "futures",
+ "metrics-kit",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "warn-throttle",
+ "zslg-consensus",
+ "zslg-consensus-fake",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-log-fake",
+ "zslg-net",
+ "zslg-snapshot",
+ "zslg-time",
+ "zslg-time-fake",
+]
+
+[[package]]
+name = "zslg-time"
+version = "0.1.0"
+dependencies = [
+ "error-union",
+ "zslg-error",
+ "zslg-time-types",
+]
+
+[[package]]
+name = "zslg-time-fake"
+version = "0.1.0"
+dependencies = [
+ "parking_lot 0.13.0",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-time-types"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-combinators",
+ "postcard",
+ "proptest",
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "zslg-writer"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "backoff-kit",
+ "bytes",
+ "crossbeam-channel",
+ "crossbeam-combinators",
+ "dashmap",
+ "error-union",
+ "futures",
+ "metrics-kit",
+ "rand 0.10.3",
+ "tokio",
+ "tracing",
+ "zslg-consensus",
+ "zslg-consensus-fake",
+ "zslg-error",
+ "zslg-lifecycle-types",
+ "zslg-log",
+ "zslg-log-fake",
+ "zslg-net",
+ "zslg-net-fake",
+ "zslg-quorum-read",
+ "zslg-raft",
+ "zslg-time",
+]
+
+[[package]]
+name = "zslg-writer-node"
+version = "0.1.0"
+dependencies = [
+ "bytesize",
+ "shutdown",
+ "tokio-util",
+ "tracing",
+ "zslg-consensus",
+ "zslg-error",
+ "zslg-hlc-clock",
+ "zslg-log",
+ "zslg-net",
+ "zslg-net-setup",
+ "zslg-observability",
+ "zslg-peers",
+ "zslg-raft-tracker",
+ "zslg-writer",
 ]
 
 [[package]]

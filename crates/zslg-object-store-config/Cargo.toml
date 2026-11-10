@@ -1,0 +1,24 @@
+[package]
+name = "zslg-object-store-config"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Object-store backend configuration"
+publish = false
+
+[dependencies]
+zslg-error = { workspace = true }
+error-union = { workspace = true }
+object_store = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+zslg-snapshot-types = { workspace = true }
+
+[features]
+s3 = ["object_store/aws"]
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "config"

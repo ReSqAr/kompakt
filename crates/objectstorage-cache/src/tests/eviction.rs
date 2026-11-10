@@ -245,16 +245,14 @@ async fn an_app_borrows_idle_space_and_pays_it_back_to_the_one_below_its_target(
 
 /// What one more file costs once the cache is over its soft limit, with 8×
 /// the entries: choosing a victim is O(log n), so the cost stays put (it was
-/// a pass over the entries per victim — the 200k import's cliff). Explicit
-/// (about 40 s unoptimised): `cargo test -p objectstorage-cache
-/// eviction_cost -- --ignored --nocapture`.
+/// a pass over the entries per victim — the 200k import's cliff). The bound is
+/// loose on purpose: a pass over the entries per victim costs 8× here, and
+/// this only has to tell that from noise.
 #[tokio::test]
-#[ignore = "a measurement: about 40 s unoptimised"]
-#[allow(clippy::print_stdout, reason = "a measurement reports")]
 async fn eviction_cost_does_not_grow_with_the_entries() {
     let mut costs = Vec::new();
-    for held in [5_000usize, 40_000] {
-        let names: Vec<String> = (0..held + 2_000).map(|i| format!("f{i}")).collect();
+    for held in [1_000usize, 8_000] {
+        let names: Vec<String> = (0..held + 500).map(|i| format!("f{i}")).collect();
         let pairs: Vec<(&str, usize)> = names.iter().map(|n| (n.as_str(), 100)).collect();
         let soft = u64::try_from(held * 100).unwrap();
         let rig = Rig::new(soft, soft * 2, &[("original", 1)]);
@@ -268,13 +266,12 @@ async fn eviction_cost_does_not_grow_with_the_entries() {
             drop(store.open(k, n, Immutable).await.unwrap());
         }
         rig.cache.core().settled().await;
-        let per = started.elapsed() / 2_000;
-        println!("{held} held: {per:?} per file over soft");
+        let per = started.elapsed() / 500;
         assert_eq!(rig.cache.core().used(), soft);
         costs.push(per);
     }
     assert!(
-        costs[1] < costs[0] * 2,
+        costs[1] < costs[0] * 4,
         "8× the entries, {costs:?}: the cost of a file follows them"
     );
 }

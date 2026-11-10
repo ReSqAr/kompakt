@@ -1,0 +1,36 @@
+[package]
+name = "zslg-net-fake"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "In-memory net ports for tests"
+publish = false
+
+[dependencies]
+error-union = { workspace = true }
+async-trait = { workspace = true }
+crossbeam-channel = { workspace = true }
+parking_lot = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+crossbeam-combinators = { workspace = true }
+futures = { workspace = true }
+raft-kit = { workspace = true }
+zslg-consensus = { workspace = true }
+zslg-lifecycle-types = { workspace = true }
+zslg-snapshot = { workspace = true }
+zslg-time = { workspace = true }
+zslg-log = { workspace = true }
+zslg-net = { workspace = true }
+zslg-raft = { workspace = true }
+
+[dev-dependencies]
+bytes = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "time"] }
+zslg-log-fake = { workspace = true }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "fake"

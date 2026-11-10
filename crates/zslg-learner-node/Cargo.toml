@@ -1,0 +1,38 @@
+[package]
+name = "zslg-learner-node"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Learner node assembly: read-only node over the learner assembly"
+publish = false
+
+[dependencies]
+zslg-error = { workspace = true }
+object_store = { workspace = true }
+zslg-observability = { workspace = true }
+bytesize = { workspace = true }
+rocksdb-kit = { workspace = true }
+shutdown = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+zslg-consensus = { workspace = true }
+zslg-hlc-clock = { workspace = true }
+zslg-learner = { workspace = true }
+zslg-lifecycle-types = { workspace = true }
+zslg-log = { workspace = true }
+zslg-net = { workspace = true }
+zslg-net-setup = { workspace = true }
+zslg-node-id = { workspace = true }
+zslg-object-store = { workspace = true }
+zslg-object-store-config = { workspace = true }
+zslg-peers = { workspace = true }
+zslg-raft-tracker = { workspace = true }
+zslg-snapshot = { workspace = true }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "assembly"

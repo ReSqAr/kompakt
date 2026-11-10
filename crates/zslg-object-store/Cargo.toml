@@ -1,0 +1,37 @@
+[package]
+name = "zslg-object-store"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "SnapshotStore over an object-store backend"
+publish = false
+
+[dependencies]
+bytes = { workspace = true }
+async-trait = { workspace = true }
+crossbeam-combinators = { workspace = true, features = ["tokio"] }
+framing = { workspace = true }
+futures = { workspace = true }
+metrics-kit = { workspace = true }
+object_store = { workspace = true }
+postcard = { workspace = true, features = ["alloc", "use-std"] }
+serde = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync"] }
+tokio-util = { workspace = true, features = ["io-util"] }
+tracing = { workspace = true }
+zslg-log = { workspace = true }
+zslg-snapshot = { workspace = true }
+zstd = { workspace = true }
+
+[dev-dependencies]
+crossbeam-channel = { workspace = true }
+crossbeam-combinators = { workspace = true, features = ["testing"] }
+zslg-time = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time", "test-util"] }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "implementation"

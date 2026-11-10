@@ -1,0 +1,21 @@
+[package]
+name = "warn-throttle"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Rate limiter for hot-path warn! sites"
+publish = false
+
+[dependencies]
+parking_lot = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros", "rt"] }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "library"

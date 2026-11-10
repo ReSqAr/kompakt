@@ -1,0 +1,73 @@
+[package]
+name = "zslg-replica-node"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Replica node assembly: raft voter, replica log, learner, leader loop and writer on one node"
+publish = false
+
+[dependencies]
+zslg-raft-node = { workspace = true, optional = true }
+zslg-error = { workspace = true }
+crossbeam-channel = { workspace = true }
+bytesize = { workspace = true }
+futures = { workspace = true }
+object_store = { workspace = true }
+rocksdb-kit = { workspace = true }
+shutdown = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+zslg-consensus = { workspace = true }
+zslg-hlc-clock = { workspace = true }
+zslg-hlc-gate = { workspace = true }
+zslg-leader = { workspace = true }
+zslg-leader-membership = { workspace = true }
+zslg-learner = { workspace = true }
+zslg-lifecycle-types = { workspace = true }
+zslg-log = { workspace = true }
+zslg-net = { workspace = true }
+zslg-net-setup = { workspace = true }
+zslg-node-id = { workspace = true }
+zslg-object-store = { workspace = true }
+zslg-object-store-config = { workspace = true }
+zslg-observability = { workspace = true }
+zslg-peers = { workspace = true }
+zslg-raft-setup = { workspace = true }
+zslg-raft-storage = { workspace = true }
+zslg-raft-tracker = { workspace = true }
+zslg-replica-log = { workspace = true }
+zslg-replica-service = { workspace = true }
+zslg-snapshot = { workspace = true }
+zslg-time = { workspace = true }
+zslg-writer = { workspace = true }
+
+[dev-dependencies]
+testing-kit = { workspace = true }
+bytes = { workspace = true }
+bytesize = { workspace = true }
+crossbeam-combinators = { workspace = true, features = ["testing"] }
+futures = { workspace = true }
+rocksdb-kit = { workspace = true, features = ["testing"] }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "test-util"] }
+tokio-util = { workspace = true }
+zslg-consensus-fake = { workspace = true }
+zslg-log-fake = { workspace = true }
+zslg-net-fake = { workspace = true }
+zslg-replica-log = { workspace = true, features = ["testing"] }
+zslg-raft-node = { workspace = true, features = ["testing"] }
+zslg-raft-storage = { workspace = true, features = ["testing"] }
+zslg-net-client = { workspace = true, features = ["testing"] }
+zslg-net-wire = { workspace = true, features = ["testing"] }
+zslg-time-fake = { workspace = true }
+
+[features]
+testing = ["dep:zslg-raft-node", "zslg-raft-node/testing"]
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "assembly"

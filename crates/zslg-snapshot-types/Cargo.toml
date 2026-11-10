@@ -1,0 +1,24 @@
+[package]
+name = "zslg-snapshot-types"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Snapshots: identity, metadata, compression and compaction vocabulary, and the errors of keeping them"
+publish = false
+
+[dependencies]
+metrics-kit = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+zslg-lifecycle-types = { workspace = true }
+zslg-log-types = { workspace = true }
+zslg-time-types = { workspace = true }
+
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "types"

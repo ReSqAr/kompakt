@@ -1,0 +1,23 @@
+[package]
+name = "shutdown"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Supervision tree: any background task exiting unrequested stops the node"
+publish = false
+
+[dependencies]
+tokio-util = { workspace = true }
+tokio = { workspace = true, features = ["rt", "time"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "test-util"] }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "library"

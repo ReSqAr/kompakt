@@ -12,6 +12,7 @@ crossbeam-channel = { workspace = true }
 parking_lot = { workspace = true }
 tokio = { workspace = true, optional = true, features = ["rt", "sync"] }
 tokio-util = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
@@ -22,6 +23,11 @@ tokio-util = { workspace = true }
 [features]
 default = []
 tokio = ["dep:tokio", "dep:tokio-util"]
+# `ChannelTestExt`: test-only reads of a channel, for dependents' tests.
+testing = ["tokio", "dep:futures"]
 
 [lints]
 workspace = true
+
+[package.metadata.layer]
+role = "library"

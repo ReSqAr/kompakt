@@ -1,0 +1,30 @@
+[package]
+name = "zslg-writer-node"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Writer node assembly: tracks the cluster over RPC and fans writes to a quorum"
+publish = false
+
+[dependencies]
+zslg-error = { workspace = true }
+bytesize = { workspace = true }
+shutdown = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+zslg-consensus = { workspace = true }
+zslg-hlc-clock = { workspace = true }
+zslg-log = { workspace = true }
+zslg-net = { workspace = true }
+zslg-net-setup = { workspace = true }
+zslg-observability = { workspace = true }
+zslg-peers = { workspace = true }
+zslg-raft-tracker = { workspace = true }
+zslg-writer = { workspace = true }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "assembly"

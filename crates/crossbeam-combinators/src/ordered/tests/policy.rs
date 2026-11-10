@@ -124,3 +124,39 @@ fn non_decreasing_first_key_is_strictly_after() {
     let ch = Channel::from_vec(vec![3u64, 3, 4]).ordered::<NonDecreasing<u64>>(Some(2), "nd");
     assert_eq!(drain(ch), (vec![3, 3, 4], End::Complete));
 }
+
+#[derive(Debug, PartialEq)]
+struct Narrow;
+#[derive(Debug, PartialEq)]
+struct Wide;
+
+impl From<Narrow> for Wide {
+    fn from(_: Narrow) -> Self {
+        Wide
+    }
+}
+
+impl<E> Key<Result<u64, E>> for u64 {
+    fn key(item: &Result<u64, E>) -> Option<Self> {
+        item.as_ref().ok().copied()
+    }
+}
+
+/// The order check ran before the conversion: a violation still ends the
+/// converted stream, and errors pass through with their positions untouched.
+#[test]
+fn err_into_keeps_the_order_check() {
+    let items: Vec<Result<u64, Narrow>> = vec![Ok(1), Err(Narrow), Ok(2), Ok(2)];
+    let mut ch = OrderedChannel::<Result<u64, Narrow>, StrictlyIncreasing<u64>, Finite>::new(
+        Channel::from_vec(items),
+        None,
+    )
+    .err_into::<Wide>();
+    assert_eq!(ch.recv(), Ok(Ok(1)));
+    assert_eq!(ch.recv(), Ok(Err(Wide)));
+    assert_eq!(ch.recv(), Ok(Ok(2)));
+    assert!(
+        ch.recv().is_err(),
+        "the repeated 2 violates StrictlyIncreasing"
+    );
+}

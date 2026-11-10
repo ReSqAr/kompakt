@@ -1,0 +1,25 @@
+nvzn_fold_batch_bytes	Histogram	Some(Bytes)	Bytes a committed batch staged (rows and index entries, estimated). At `fold_commit` (4 MiB unless configured) a burst folds in several commits.
+nvzn_fold_batch_entries	Histogram	Some(Count)	Log entries per committed batch.
+nvzn_fold_batch_seconds	Histogram	Some(Seconds)	Time to fold and commit one batch: decode, project, and commit.
+nvzn_fold_batches_total	Counter	None	Batches committed by the fold loop. One batch is one store transaction covering whole log entries until it holds `fold_commit` bytes of writes.
+nvzn_fold_entries_total	Counter	None	Log entries seen by the fold loop, by what became of them. Deliberately unlabelled by tenant: `foreign_tenant` counts entries for tenants this dispatcher does not host, whose ids are unbounded on a shared log.
+nvzn_fold_stopped_total	Counter	None	Fold-loop exits by reason. `poison_entry` and `non_monotone_data_id` are permanent: the entry stays in the log, so a restart fails identically and the read model is frozen until an operator acts.
+nvzn_fold_watermark_advanced_timestamp_seconds	Gauge	Some(Seconds)	Unix-epoch seconds of the last fold-watermark advance. THE staleness alert, evaluated as `time() - nvzn_fold_watermark_advanced_timestamp_seconds`: a lag gauge goes stale exactly when the dispatcher dies, this keeps climbing.
+nvzn_fold_watermark_hlc_physical_ms	Gauge	Some(Milliseconds)	Physical-millisecond part of the folded watermark's HLC. Distance to zslg's zslg_manifest_end_hlc_physical_ms is projection lag in wall-clock terms.
+nvzn_fold_watermark_log_index	Gauge	Some(Count)	Stable-log index the read model has folded through. Where the projections are, in log terms.
+nvzn_live_coverage	Gauge	None	A live view's state, by tenant and state: 1 for the current one of `scanning` (cold start, snapshots wait), `complete`, `overflowed` (over the cap: snapshots serve the fold's state alone until it passes what was dropped).
+nvzn_live_held_bytes	Gauge	Some(Bytes)	Payload bytes of the writes a live view holds, by tenant; with nvzn_live_held_events, what the overflow cap is checked against.
+nvzn_live_held_events	Gauge	Some(Count)	Writes a live view holds above the fold's watermark, by tenant: the `S` events that reached this node and are not folded yet. Small unless the fold stalls or `S` events flood.
+nvzn_live_materialise_entries	Histogram	Some(Count)	Held writes folded into one live snapshot. Repeated per snapshot, so this is the per-read cost the held set adds.
+nvzn_live_materialise_seconds	Histogram	Some(Seconds)	Time to build one live snapshot: open the store, fold the held events through the live projections.
+nvzn_live_scan_entries	Histogram	Some(Count)	Stable-log entries a live view's cold-start scan read: the gap between the store's watermark and the stable watermark at start.
+nvzn_live_scan_seconds	Histogram	Some(Seconds)	Duration of a live view's cold-start scan of the stable log, which the first snapshots wait for.
+nvzn_live_undecodable_total	Counter	None	Payloads a live view could not decode, by tenant: logged and skipped (the fold stops on the same entry once it is stable).
+nvzn_projection_rows_total	Counter	None	Projection rows written by the fold loop, by tenant, projection type and operation. The churn each projection actually sees.
+nvzn_reads_total	Counter	None	Snapshots opened, by tenant and freshness. `stable` sees only what has gone stable in the log, so a caller expecting read-your-own-writes and finding `stable` here is reading the wrong one.
+nvzn_store_fence_seconds	Histogram	Some(Seconds)	Time for one store fsync (flush_wal).
+nvzn_store_fence_total	Counter	None	Store fsyncs by outcome. `failed` is terminal — nothing this dispatcher commits can be made durable any more, so the fold loop stops.
+nvzn_store_live_sst_files_size_bytes	Gauge	Some(Bytes)	rocksdb.live-sst-files-size: on-disk size of the live SST files, per column family. Sampled on every store fence tick; matches zslg's zslg_storage_live_sst_files_size_bytes.
+nvzn_store_resets_total	Counter	None	Config-hash mismatches that wiped the store and refolded the log from index zero. Expected on a deploy that changes the registered projections; a steady rate is not.
+nvzn_write_events_total	Counter	None	Events written to the log, by tenant. Against nvzn_writes_total, the batch size a caller is actually achieving.
+nvzn_writes_total	Counter	None	Event batches written to the log, by tenant.

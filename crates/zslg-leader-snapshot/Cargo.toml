@@ -1,0 +1,41 @@
+[package]
+name = "zslg-leader-snapshot"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "The leader snapshot jobs: cutoff, snapshot build/commit and object cleanup"
+publish = false
+
+[dependencies]
+zslg-error = { workspace = true }
+zslg-quorum-read = { workspace = true }
+shutdown = { workspace = true }
+warn-throttle = { workspace = true }
+pace-kit = { workspace = true }
+crossbeam-combinators = { workspace = true }
+error-union = { workspace = true }
+metrics-kit = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "time", "macros"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+zslg-consensus = { workspace = true }
+zslg-lifecycle-types = { workspace = true }
+zslg-log = { workspace = true }
+zslg-net = { workspace = true }
+zslg-snapshot = { workspace = true }
+zslg-time = { workspace = true }
+
+[dev-dependencies]
+async-trait = { workspace = true }
+crossbeam-channel = { workspace = true }
+zslg-net-fake = { workspace = true }
+metrics = { workspace = true }
+metrics-util = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "implementation"

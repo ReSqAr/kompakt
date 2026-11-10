@@ -14,54 +14,55 @@ path = "src/lib.rs"
 workspace = true
 
 [dependencies]
-async-trait = { workspace = true }
-bytes = { workspace = true }
+zslg-log-fake = { workspace = true, optional = true }
+zslg-net = { workspace = true }
+zslg-snapshot = { workspace = true }
+zslg-time = { workspace = true }
+bytesize = { workspace = true }
 console-subscriber = { workspace = true, optional = true }
-crc32fast = { workspace = true }
-crossbeam-channel = { workspace = true }
-crossbeam-combinators = { workspace = true, features = ["tokio"] }
-dashmap = { workspace = true }
-futures = { workspace = true }
-metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true, optional = true }
-object_store = { workspace = true }
-openraft = { workspace = true }
-parking_lot = { workspace = true }
-postcard = { workspace = true, features = ["alloc", "use-std"] }
-rand = { workspace = true }
-rust-rocksdb = { workspace = true }
-serde = { workspace = true, features = ["rc"] }
-socket2 = { workspace = true }
-thiserror = { workspace = true }
 tikv-jemalloc-ctl = { workspace = true, optional = true }
 tikv-jemallocator = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "fs", "signal", "net"] }
-tokio-util = { workspace = true, features = ["io-util"] }
-tracing = { workspace = true }
-uuid = { workspace = true, features = ["serde"] }
-zstd = { workspace = true }
+zslg-consensus = { workspace = true }
+zslg-log = { workspace = true }
+zslg-object-store-config = { workspace = true }
+zslg-observability = { workspace = true }
+zslg-follower-node = { workspace = true }
+zslg-learner-node = { workspace = true }
+zslg-replica-node = { workspace = true }
+zslg-error = { workspace = true }
+zslg-writer-node = { workspace = true }
 
 [dev-dependencies]
+tracing = { workspace = true }
+shutdown = { workspace = true }
+dashmap = { workspace = true }
+futures = { workspace = true }
+object_store = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "fs", "signal", "net", "test-util"] }
+tokio-util = { workspace = true, features = ["io-util"] }
+metrics = { workspace = true }
+rand = { workspace = true }
+bytes = { workspace = true }
+crossbeam-combinators = { workspace = true, features = ["testing"] }
 clap = { workspace = true, features = ["env"] }
 tracing-subscriber = { workspace = true, features = ["json"] }
 http-body-util = { workspace = true }
 hyper = { workspace = true }
 hyper-util = { workspace = true }
-metrics-util = { workspace = true }
 pprof = { workspace = true }
-proptest = { workspace = true }
-tempfile = { workspace = true }
 time = { workspace = true }
-tokio = { workspace = true, features = ["test-util"] }
 tokio-metrics = { workspace = true }
 
 
 [features]
+# zslg's deliberate public testing surface (`zslg::testing`): an in-memory log.
+testing = ["dep:zslg-log-fake"]
 default = []
-s3 = ["object_store/aws"]
-prometheus = ["dep:metrics-exporter-prometheus"]
+s3 = ["zslg-object-store-config/s3"]
+prometheus = ["dep:metrics-exporter-prometheus", "zslg-observability/prometheus"]
 tokio-console = ["dep:console-subscriber"]
-jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
+jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl", "zslg-observability/jemalloc"]
 heap-profiling = ["jemalloc", "tikv-jemallocator/profiling"]
 
 [[example]]
@@ -79,3 +80,5 @@ name = "loadgen"
 path = "examples/loadgen.rs"
 required-features = ["prometheus"]
 
+[package.metadata.layer]
+role = "facade"

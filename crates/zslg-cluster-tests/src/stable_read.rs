@@ -1,0 +1,78 @@
+//! Stable-read: write data, wait for a snapshot to be created, then verify
+//! the data is visible in the stable log across all nodes.
+
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unimplemented,
+    clippy::as_conversions,
+    clippy::arithmetic_side_effects,
+    clippy::print_stderr,
+    clippy::print_stdout,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::too_many_arguments,
+    clippy::result_large_err,
+    reason = "test code"
+)]
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use crate::{Cluster, ClusterConfig, assert_cluster_invariants_with_acks, default_fast_config};
+use bytes::Bytes;
+use object_store::memory::InMemory;
+
+/// A wrong payload under a correct `DataId` must fail the durability chain —
+/// the check is content, not presence.
+///
+/// This is the teeth check for [`assert_durability_chain`]'s payload
+/// comparison: it feeds the chain a `DataId` that really is in every stable
+/// log, paired with bytes that were never written, and requires the chain to
+/// notice. Against a presence-only chain it passes silently.
+#[tokio::test(flavor = "multi_thread")]
+#[should_panic(expected = "does not match what was acked")]
+async fn durability_chain_rejects_wrong_payload() {
+    let mut base = default_fast_config();
+    base.snapshot_interval = Duration::from_millis(200);
+
+    let cluster = Cluster::new(ClusterConfig {
+        count: 3,
+        distinct_names: false,
+        object_store: Arc::new(InMemory::new()),
+        base_config: Some(base),
+    })
+    .await
+    .expect("Cluster::new");
+    cluster.wait_for_leader(Duration::from_secs(20)).await;
+    cluster.wait_for_convergence(Duration::from_secs(20)).await;
+
+    // `find_map(.leader)` yields the leader's id. Any node would accept this
+    // write, but naming the node correctly keeps the test honest about what it
+    // is doing.
+    let leader = cluster.leader().expect("no leader");
+
+    let payload = Bytes::from_static(b"correct-payload");
+    let acked = cluster
+        .node(leader)
+        .writer()
+        .write(payload.clone())
+        .await
+        .expect("write");
+
+    // Corrupt the *expected* payload rather than the stored one: the stable
+    // log holds `correct-payload` under `acked`, and the chain is told to
+    // expect different bytes under that same id. Same length, so nothing but a
+    // content comparison can catch it.
+    let wrong = Bytes::from_static(b"WRONG!!-payload");
+    assert_eq!(
+        wrong.len(),
+        payload.len(),
+        "same length: only content differs"
+    );
+    let _ = assert_cluster_invariants_with_acks(&cluster, &[(acked, wrong)]).await;
+
+    // Unreachable: the chain panics above. No `shutdown()` — the harness drops
+    // the nodes. Same shape as `assert_monotonic_panics_on_decrease`.
+}

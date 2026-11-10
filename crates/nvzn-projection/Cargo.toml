@@ -1,0 +1,21 @@
+[package]
+name = "nvzn-projection"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "The nvzn projection model: Projection, Write, Ref, Index, View and the read ports they are written against"
+publish = false
+
+[dependencies]
+bytes = { workspace = true }
+postcard = { workspace = true, features = ["alloc", "use-std"] }
+nvzn-types = { workspace = true }
+serde = { workspace = true }
+zslg = { workspace = true }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "ports"

@@ -1,0 +1,23 @@
+[package]
+name = "zslg-net-types"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Where nodes are and how they name each other"
+publish = false
+
+[dependencies]
+tokio = { workspace = true, features = ["net"] }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+postcard = { workspace = true, features = ["alloc", "use-std"] }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "types"

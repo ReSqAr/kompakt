@@ -1,0 +1,27 @@
+[package]
+name = "zslg-log-fake"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "In-memory log ports for tests"
+publish = false
+
+[dependencies]
+async-trait = { workspace = true }
+bytes = { workspace = true }
+crossbeam-channel = { workspace = true }
+crossbeam-combinators = { workspace = true }
+parking_lot = { workspace = true }
+tokio = { workspace = true, features = ["sync", "rt"] }
+uuid = { workspace = true }
+zslg-consensus = { workspace = true }
+zslg-log = { workspace = true }
+zslg-net = { workspace = true }
+zslg-time = { workspace = true }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "fake"

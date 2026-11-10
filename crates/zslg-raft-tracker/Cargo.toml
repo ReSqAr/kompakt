@@ -1,0 +1,31 @@
+[package]
+name = "zslg-raft-tracker"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Raft state tracking from peer observations"
+publish = false
+
+[dependencies]
+zslg-error = { workspace = true }
+shutdown = { workspace = true }
+backoff-kit = { workspace = true }
+error-union = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "time", "macros"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+zslg-consensus = { workspace = true }
+zslg-lifecycle-types = { workspace = true }
+zslg-net = { workspace = true }
+
+[dev-dependencies]
+uuid = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "implementation"

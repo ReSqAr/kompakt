@@ -1,0 +1,23 @@
+[package]
+name = "btrb-background"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "The btrb background capability: jobs that end only when told to, and the process's stop signals"
+publish = false
+
+[dependencies]
+btrb-types = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true, features = ["signal"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "implementation"

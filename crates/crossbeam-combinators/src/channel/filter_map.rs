@@ -47,6 +47,15 @@ impl<S: Send + 'static, T: Send + 'static> Source<T> for FilterMap<S, T> {
     }
 }
 
+impl<A: Send + 'static, E: Send + 'static, K: Kind> Channel<Result<A, E>, K> {
+    /// Convert the error of every `Err` item with `From`, at pull time. The
+    /// seam where one crate's error type becomes the next one's.
+    #[must_use]
+    pub fn err_into<E2: From<E> + Send + 'static>(self) -> Channel<Result<A, E2>, K> {
+        self.map(|item| item.map_err(E2::from))
+    }
+}
+
 impl<T: Send + 'static, K: Kind> Channel<T, K> {
     /// Transform and filter at pull time. `f` may hold state: a channel has
     /// one consumer, so it runs on one thread at a time.

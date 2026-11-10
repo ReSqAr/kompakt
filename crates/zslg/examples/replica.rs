@@ -20,6 +20,7 @@ mod common;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use zslg::LifecycleError;
 
 use clap::Parser;
 use futures::FutureExt;
@@ -251,7 +252,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("BINARY: waiting until ready (quorum freshness gate)...");
     let node = match initialising.wait_until_ready().boxed().await {
         Ok(node) => node,
-        Err(Error::StartupCancelled) => {
+        Err(Error::Lifecycle(LifecycleError::StartupCancelled)) => {
             // Not a fault: the operator asked us to stop (SIGTERM/SIGINT)
             // before the node ever became ready. `wait_until_ready` has
             // already drained and shut Raft down gracefully by the time this

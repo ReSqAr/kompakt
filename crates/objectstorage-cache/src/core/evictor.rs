@@ -144,6 +144,16 @@ impl Inner {
         if victims.is_empty() {
             return;
         }
+        #[cfg(test)]
+        {
+            let gate = self.delete_gate.lock().clone();
+            if let Some(gate) = gate {
+                // Consumed, not returned: each permit lets one deletion through.
+                if let Ok(permit) = gate.acquire().await {
+                    permit.forget();
+                }
+            }
+        }
         let inner = self.clone();
         tokio::task::spawn_blocking(move || {
             for id in victims {

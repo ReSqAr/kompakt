@@ -1,0 +1,140 @@
+//! `Writer` — the public write entry point.
+//!
+//! ```text
+//!   write(blob):
+//!       data_id = (hlc_now, node_id, 64 random bits)
+//!       Coordinator::submit ─┬─> quorum acked      Ok(data_id)
+//!                            ├─> replica error     Err(e)
+//!                            ├─> channel dropped   Err(QuorumUnreachable)
+//!                            └─> write_timeout     Err(WriteTimeout)
+//! ```
+//!
+//! Fan-out, quorum evaluation, reconnect and resend are all
+//! [`crate::coordinator::Coordinator`]'s. What is left here is the identity and the
+//! deadline.
+//!
+//! Minting identity — rather than deriving it from the payload — is what makes
+//! a `data_id` impossible to semantically reuse (CLAUDE.md §8), so the
+//! coordinator's resends dedup downstream instead of conflicting.
+//!
+//! `write_timeout` caps the whole wait; it is not a retry bound, since the
+//! coordinator retries on its own. Giving up drops the receiver, which is how
+//! the coordinator learns to reap the entry and free its permit — so every
+//! per-write resource here is released by `Drop`, not by the success path.
+
+use std::sync::Arc;
+use std::time::Duration;
+use zslg_consensus::ConsensusError;
+use zslg_consensus::RaftStateTracker;
+use zslg_lifecycle_types::ConfigError;
+use zslg_log::LogError;
+use zslg_net::Router;
+
+use bytes::Bytes;
+use tracing::warn;
+
+use crate::Error;
+use crate::coordinator::Coordinator;
+use crate::metrics;
+use metrics_kit::OpState;
+use zslg_consensus::NodeId;
+use zslg_log::Data;
+use zslg_time::Clock;
+
+pub struct WriterConfig {
+    pub node_id: NodeId,
+    pub write_timeout: Duration,
+}
+
+impl WriterConfig {
+    pub fn validate(&self) -> Result<(), Error> {
+        if self.write_timeout.is_zero() {
+            return Err(Error::Config(ConfigError::InvalidConfiguration(
+                "write_timeout must be > 0".to_owned(),
+            )));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub struct WriterService {
+    coord: Arc<Coordinator>,
+    clock: Arc<dyn Clock>,
+    node_id: NodeId,
+    write_timeout: Duration,
+}
+
+impl WriterService {
+    #[must_use]
+    pub fn new(
+        router: Arc<dyn Router>,
+        raft_state: Arc<dyn RaftStateTracker>,
+        clock: Arc<dyn Clock>,
+        WriterConfig {
+            node_id,
+            write_timeout,
+        }: WriterConfig,
+    ) -> Self {
+        Self {
+            coord: Coordinator::new(router, raft_state),
+            clock,
+            node_id,
+            write_timeout,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl zslg_log::Writer for WriterService {
+    async fn write(&self, blob: Bytes) -> Result<zslg_log::DataId, zslg_log::Error> {
+        async {
+            let creation_hlc = self.clock.now();
+            let data_id = zslg_log::DataId::from_parts(creation_hlc, self.node_id, rand::random());
+
+            let _in_flight = metrics::writes_in_flight_guard();
+            let probe = metrics::write_duration_probe();
+
+            let rx = self.coord.submit(Data { data_id, blob });
+            let out = match tokio::time::timeout(self.write_timeout, rx).await {
+                Ok(Ok(Ok(()))) => Ok(data_id),
+                Ok(Ok(Err(e))) => Err(e),
+                // A dropped sender is either backpressure at submit or a departed
+                // coordinator; neither is distinguishable here, and both mean the
+                // write never reached a quorum.
+                Ok(Err(_)) => Err(Error::Consensus(ConsensusError::QuorumUnreachable)),
+                Err(_) => {
+                    warn!(
+                        node_id = ?self.node_id,
+                        limit_s = self.write_timeout.as_secs(),
+                        "write exceeded its hard deadline (quorum stalled)"
+                    );
+                    Err(Error::Log(LogError::WriteTimeout {
+                        elapsed: self.write_timeout,
+                    }))
+                }
+            };
+            probe.finish(OpState::from_ok(out.is_ok()));
+            out
+        }
+        .await
+        .map_err(Into::into)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn writer_config_rejects_zero_write_timeout() {
+        let c = WriterConfig {
+            node_id: zslg_consensus::NodeId::new_v4(),
+            write_timeout: Duration::ZERO,
+        };
+        assert!(matches!(
+            c.validate(),
+            Err(Error::Config(ConfigError::InvalidConfiguration(_)))
+        ));
+    }
+}

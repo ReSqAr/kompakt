@@ -1,0 +1,24 @@
+[package]
+name = "zslg-consensus-fake"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "In-memory consensus ports for tests"
+publish = false
+
+[dependencies]
+async-trait = { workspace = true }
+parking_lot = { workspace = true }
+uuid = { workspace = true }
+zslg-consensus = { workspace = true }
+zslg-net = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "fake"

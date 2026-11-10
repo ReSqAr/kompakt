@@ -1,0 +1,29 @@
+[package]
+name = "btrb-live"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Read-after-write for btrb apps: the interactive write handle and the cookie layer that carries a write's position"
+publish = false
+
+[dependencies]
+tokio = { workspace = true, features = ["time"] }
+axum = { workspace = true }
+btrb-types = { workspace = true }
+btrb-web = { workspace = true }
+futures = { workspace = true }
+metrics = { workspace = true }
+nvzn = { workspace = true }
+zslg = { workspace = true }
+
+[dev-dependencies]
+nvzn = { workspace = true, features = ["testing"] }
+tokio = { workspace = true, features = ["time", "macros", "rt", "test-util"] }
+tower = { workspace = true, features = ["util"] }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "assembly"

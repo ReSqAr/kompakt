@@ -73,7 +73,15 @@ jobs:
           key: ${{ matrix.crate }}
       - name: system dependencies
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang cmake libclang-dev pkg-config libssl-dev build-essential
-      - run: cargo test -p "${{ matrix.crate }}" --all-targets --all-features --locked
+      - name: test
+        run: |
+          # zslg and nvzn are families of crates (docs/logs/2026-11-07_design_crate_split.md).
+          case "${{ matrix.crate }}" in
+            zslg) args=(--workspace --exclude btrb --exclude 'nvzn*' --exclude objectstorage-cache --exclude svg-charts --exclude crossbeam-combinators) ;;
+            nvzn) args=(-p 'nvzn*') ;;
+            *) args=(-p "${{ matrix.crate }}") ;;
+          esac
+          cargo test "${args[@]}" --all-targets --all-features --locked
 
   tests:
     name: tests

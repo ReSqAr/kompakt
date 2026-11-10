@@ -1,0 +1,17 @@
+[package]
+name = "error-union"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Flat unions of leaf errors, with compiler-checked conversions between unions"
+publish = false
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "library"
+
+[dev-dependencies]
+thiserror = { workspace = true }

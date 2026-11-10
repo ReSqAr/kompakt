@@ -21,8 +21,9 @@
 use tracing_subscriber as _;
 #[cfg(test)]
 use {
-    clap as _, http_body_util as _, hyper as _, hyper_util as _, pprof as _, time as _,
-    tokio_metrics as _,
+    bytes as _, clap as _, crossbeam_combinators as _, dashmap as _, futures as _,
+    http_body_util as _, hyper as _, hyper_util as _, metrics as _, object_store as _, pprof as _,
+    shutdown as _, time as _, tokio as _, tokio_metrics as _, tokio_util as _,
 };
 
 // Used by `examples/common`, not here; a normal dependency only because Cargo
@@ -37,66 +38,69 @@ use console_subscriber as _;
 // dependency is used there, not here; a normal dependency only because Cargo
 // has no optional dev-dependencies.
 #[cfg(feature = "jemalloc")]
+use tikv_jemalloc_ctl as _;
+#[cfg(feature = "jemalloc")]
 use tikv_jemallocator as _;
 
-pub(crate) mod api;
-mod database;
-pub(crate) mod error;
-pub(crate) mod follower_node;
-pub(crate) mod framing;
-pub(crate) mod hlc;
-pub(crate) mod ids;
-pub(crate) mod leader;
-pub(crate) mod learner;
-pub(crate) mod learner_node;
-pub(crate) mod meta;
-pub(crate) mod metrics;
-pub(crate) mod network;
-pub(crate) mod object_store;
-pub(crate) mod observability;
-mod ordered;
-pub(crate) mod quorum;
-pub(crate) mod raft;
-pub(crate) mod replica;
-pub(crate) mod replica_node;
-pub(crate) mod shutdown;
+// Used by the examples only.
 #[cfg(test)]
-pub(crate) mod test_stream;
+use rand as _;
 #[cfg(test)]
-mod tests;
-mod unit;
-pub(crate) mod warn_throttle;
-pub(crate) mod writer;
-pub(crate) mod writer_node;
+use tracing as _;
 
-pub use crate::api::{RaftStateView, Reader, StableStream, Writer};
-pub use crate::error::Error;
-pub use crate::follower_node::{FollowerNode, FollowerNodeConfig};
-pub use crate::hlc::{Hlc, HlcClock};
-pub use crate::ids::{
-    DataId, HostPort, LogIndex, NodeId, PeerAddr, RaftGeneration, ServerName, SnapshotId,
+pub use bytesize::ByteSize;
+pub use zslg_consensus::NodeId;
+pub use zslg_consensus::RaftStateView;
+pub use zslg_consensus::{
+    ConsensusError, Exit, RaftGeneration, RaftManifestState, RaftState, RaftStateHandle,
+    ReplicaMembership, SpareSelectionStrategy,
 };
-pub use crate::leader::CompactionTier;
-pub use crate::learner_node::{LearnerNode, LearnerNodeConfig};
-pub use crate::meta::{
-    Data, Exit, RaftManifestState, RaftState, ReplicaMembership, SnapshotMetadata, StableLogEvent,
-    UnstableEvent,
+pub use zslg_error::{ConfigError, Error, LifecycleError};
+
+/// An in-process log serving [`Reader`] and [`Writer`], so a consumer can test
+/// against zslg without a cluster. Behind the `testing` feature.
+#[cfg(feature = "testing")]
+pub mod testing {
+    pub use zslg_log_fake::{TestLog, data_id};
+}
+pub use zslg_follower_node::{FollowerNode, FollowerNodeConfig};
+pub use zslg_learner_node::{LearnerNode, LearnerNodeConfig};
+pub use zslg_log::{Data, DataId, LogError, LogIndex, StableLogEvent, UnstableEvent};
+pub use zslg_log::{Error as LogApiError, Reader, StableStream, Writer};
+pub use zslg_net::{HostPort, NetError, PeerAddr, ServerName};
+pub use zslg_object_store_config::{IntoArcObjectStore, ObjectStoreConfig};
+pub use zslg_observability::{METRIC_NAMESPACE, describe_metrics, histogram_buckets};
+pub use zslg_replica_node::{InitialisingReplicaNode, ReplicaNode, ReplicaNodeConfig};
+pub use zslg_snapshot::{
+    CompactionTier, CompressionLevel, SnapshotError, SnapshotId, SnapshotMetadata,
 };
-pub use crate::object_store::{CompressionLevel, IntoArcObjectStore, ObjectStoreConfig};
+pub use zslg_time::{ClockError, Hlc};
+pub use zslg_writer_node::{WriterNode, WriterNodeConfig};
+
+/// Apply this crate's histogram buckets to a Prometheus builder.
+///
+/// Configuration only — the builder is yours, and installing it stays your
+/// call. Composes with any other crate that offers the same, and touches
+/// nothing global: each histogram gets an exact `Matcher::Full`, so a bucket
+/// choice here can never reach another crate's metrics.
+///
+/// ```no_run
+/// # fn main() -> Result<(), zslg::Error> {
+/// use metrics_exporter_prometheus::PrometheusBuilder;
+///
+/// let builder = PrometheusBuilder::new().with_http_listener(([0, 0, 0, 0], 9090));
+/// let builder = zslg::configure_prometheus(builder)?;
+/// builder.install().expect("install recorder");
+///
+/// // After the recorder exists: descriptions sent to the no-op recorder are
+/// // dropped, not replayed.
+/// zslg::describe_metrics();
+/// # Ok(())
+/// # }
+/// ```
 #[cfg(feature = "prometheus")]
-pub use crate::observability::configure_prometheus;
-pub use crate::observability::{METRIC_NAMESPACE, describe_metrics, histogram_buckets};
-pub use crate::raft::{RaftStateHandle, SpareSelectionStrategy};
-pub use crate::replica_node::{InitialisingReplicaNode, ReplicaNode, ReplicaNodeConfig};
-pub use crate::unit::ByteSize;
-pub use crate::writer_node::{WriterNode, WriterNodeConfig};
-
-pub(crate) fn jitter(d: std::time::Duration) -> std::time::Duration {
-    let ms = u64::try_from(d.as_millis()).unwrap_or(u64::MAX);
-    let quarter = ms.checked_div(4).unwrap_or(1).max(1);
-    let spread = quarter.saturating_mul(2);
-    let range = spread.saturating_add(1);
-    let delta = rand::random::<u64>().checked_rem(range).unwrap_or(0);
-    let ms = ms.saturating_sub(quarter).saturating_add(delta);
-    std::time::Duration::from_millis(ms)
+pub fn configure_prometheus(
+    builder: metrics_exporter_prometheus::PrometheusBuilder,
+) -> Result<metrics_exporter_prometheus::PrometheusBuilder, Error> {
+    zslg_observability::configure_prometheus(builder).map_err(Error::from)
 }

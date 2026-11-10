@@ -82,6 +82,10 @@ struct Inner {
     asks: mpsc::UnboundedSender<evictor::Ask>,
     stop: watch::Sender<bool>,
     evictor: Mutex<Option<JoinHandle<()>>>,
+    /// Test hook: while set, every deletion waits for a permit, so a test can
+    /// hold the evictor inside a drain batch.
+    #[cfg(test)]
+    delete_gate: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
 }
 
 /// One group's holdings, for reports and metrics.
@@ -131,6 +135,8 @@ impl Core {
             asks,
             stop,
             evictor: Mutex::new(None),
+            #[cfg(test)]
+            delete_gate: Mutex::new(None),
         });
         inner.publish();
         let channels = evictor::Channels {
@@ -160,6 +166,14 @@ impl Core {
         if self.inner.asks.send(evictor::Ask::Settle(reply)).is_ok() {
             done.await.ok();
         }
+    }
+
+    /// Hold every deletion until the returned semaphore is given permits.
+    #[cfg(test)]
+    pub(crate) fn hold_deletes(&self) -> Arc<tokio::sync::Semaphore> {
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *self.inner.delete_gate.lock() = Some(gate.clone());
+        gate
     }
 
     /// Ask the evictor for room for `bytes`, as a download would.

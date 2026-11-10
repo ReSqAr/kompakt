@@ -104,6 +104,31 @@ where
     }
 }
 
+impl<A, E, P, K> OrderedChannel<Result<A, E>, P, K>
+where
+    A: Send + 'static,
+    E: Send + 'static,
+    P: OrderPolicy,
+    K: Kind,
+{
+    /// Convert the error of every `Err` item with `From`, keeping the order
+    /// check that already ran on the original items. Errors carry no position,
+    /// so the policy's key is unaffected by the conversion.
+    #[must_use]
+    pub fn err_into<E2>(self) -> OrderedChannel<Result<A, E2>, P, K>
+    where
+        E2: From<E> + Send + 'static,
+        P::Key: Key<Result<A, E2>>,
+    {
+        OrderedChannel {
+            inner: self.inner.err_into(),
+            after: self.after,
+            what: self.what,
+            _policy: PhantomData,
+        }
+    }
+}
+
 impl<T: Send + 'static, K: Kind> Channel<T, K> {
     /// Wrap in policy `P`, checked from `after`; see [`OrderedChannel::named`].
     #[must_use]

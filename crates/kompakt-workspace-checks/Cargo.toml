@@ -1,0 +1,17 @@
+[package]
+name = "kompakt-workspace-checks"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Checks over the whole workspace: crate layering and the like"
+publish = false
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "application"

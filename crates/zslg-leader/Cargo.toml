@@ -1,0 +1,68 @@
+[package]
+name = "zslg-leader"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ReSqAr/kompakt"
+description = "Leader assembly: hands every leader job its handles and config slice"
+publish = false
+
+[dependencies]
+zslg-error = { workspace = true }
+error-union = { workspace = true }
+shutdown = { workspace = true }
+zslg-consensus = { workspace = true }
+zslg-leader-compaction = { workspace = true }
+zslg-leader-integrator = { workspace = true }
+zslg-leader-membership = { workspace = true }
+zslg-leader-snapshot = { workspace = true }
+zslg-lifecycle-types = { workspace = true }
+zslg-log = { workspace = true }
+zslg-net = { workspace = true }
+zslg-snapshot = { workspace = true }
+zslg-time = { workspace = true }
+
+[dev-dependencies]
+rocksdb-kit = { workspace = true, features = ["testing"] }
+parking_lot = { workspace = true }
+uuid = { workspace = true }
+proptest = { workspace = true }
+metrics-util = { workspace = true }
+metrics = { workspace = true }
+futures = { workspace = true }
+crossbeam-combinators = { workspace = true, features = ["tokio", "testing"] }
+crossbeam-channel = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }
+tokio-util = { workspace = true }
+zslg-leader-integrator = { workspace = true, features = ["testing"] }
+zslg-leader-membership = { workspace = true, features = ["testing"] }
+zslg-net-fake = { workspace = true }
+bytes = { workspace = true }
+bytesize = { workspace = true }
+object_store = { workspace = true }
+raft-kit = { workspace = true }
+tempfile = { workspace = true }
+testing-kit = { workspace = true }
+zslg-consensus-fake = { workspace = true }
+zslg-hlc-clock = { workspace = true }
+zslg-hlc-gate = { workspace = true }
+zslg-learner = { workspace = true, features = ["testing"] }
+zslg-log-fake = { workspace = true }
+zslg-net-client = { workspace = true, features = ["testing"] }
+zslg-net-setup = { workspace = true }
+zslg-net-wire = { workspace = true, features = ["testing"] }
+zslg-object-store = { workspace = true }
+zslg-peers = { workspace = true }
+zslg-raft = { workspace = true }
+zslg-raft-fake = { workspace = true }
+zslg-raft-setup = { workspace = true, features = ["testing"] }
+zslg-replica-log = { workspace = true, features = ["testing"] }
+zslg-replica-service = { workspace = true }
+zslg-time-fake = { workspace = true }
+
+[lints]
+workspace = true
+
+[package.metadata.layer]
+role = "assembly"
