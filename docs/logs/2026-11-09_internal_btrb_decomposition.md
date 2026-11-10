@@ -34,7 +34,9 @@ assembly over them, `btrb` the facade. Obstacles: `app` ↔ `admin` cycle; `live
 | 2 | ~~capability cut~~ | settled: D2 |
 | 2b | ~~settings ownership~~ | settled: D3, slices |
 | 2c | ~~`live.rs` placement~~ | settled: D4, own crate |
-| 2d | the app seam (`App`, `Entry`, `Handles`, boot) and the process roles (serve/work/standalone/cli): one assembly or two, seam below roles? | two, seam below roles |
+| 2d | ~~seam vs roles~~ | settled: D5, two crates |
+| 2f | `Error` is one opaque boxed error that crosses the seam (apps' errors ride inside it): one shared crate under everything, or per-capability errors like the zslg unions? | one shared opaque error; typed only where a caller matches (`ConfigError`) |
+| 2g | from btrb's point of view are the `zslg` and `nvzn` facades libraries (as zslg was for nvzn)? | yes |
 | 2e | `AppConfig`, `CookiePolicy`, `SigningKey`: web? | web |
 | 3 | does the zslg-knob reader belong in btrb at all? | no: it belongs next to `ReplicaNodeConfig` |
 | 4 | tests: integration tests (`tests/live_write.rs`) stay in the facade? | yes, like nvzn |

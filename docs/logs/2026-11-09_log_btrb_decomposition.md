@@ -73,3 +73,13 @@ place, and `Live::write` returns a web response part (`Written`), so splitting i
 Rejected: a module in the web crate behind the `Waits` trait (web would carry a db dependency for one seam),
 and a split across db and web. Accepted cost: the smallest crate of the set.
 
+### D5 — the app seam and the process roles are two assemblies, seam below roles (settled)
+
+`btrb-app` (App, Entry, Handles, Nvzn, boot) sits over the capability crates and knows nothing about
+processes. `btrb-host` (the serve, work, standalone and cli roles) sits over `btrb-app`. The `app` ↔ `admin`
+cycle disappears because the shutdown types live in the background crate beneath both.
+
+Why: the seam is the contract an app is written against and must not be able to grow process logic.
+
+Rejected: one assembly containing both — fewer boundaries, but nothing would stop `App` from mentioning roles.
+
