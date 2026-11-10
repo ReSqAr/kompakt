@@ -111,3 +111,20 @@ nothing in nvzn names the engine.
 Why: nothing in nvzn or nlnr matches on the two variants, so keeping them would be dead surface.
 
 Rejected: keeping both variant names with string payloads.
+
+### D6 — sequence and verification (settled)
+
+Six steps, each green on clippy and tests before its commit: (1) kit access modes, (2) kit snapshot, (3) kit dirty
+tracking and `sync_if_dirty`, (4) `zslg-local-store` onto `sync_if_dirty`, (5) `nvzn-store-rocksdb` onto the kit,
+(6) close (docs, post note, nlnr pin and e2e).
+
+Verification: the 25-metric golden dump; nvzn's tests (including `every_write_path_arms_the_fence`); a test that
+pins the option set `Plain` builds; a test that `fence` syncs with the flag clear; the generated-faults proptest
+after steps 4 and 5 (they touch durability); nlnr's `cargo check` against the patched workspace and `e2e quick`.
+
+Dropped by the user: an old-format open test (a database written with nvzn's old options, opened through the new
+path). Not needed: projections are rebuildable derived state, and RocksDB reads SSTs whatever filter or index
+settings wrote them.
+
+Where RocksDB does not expose an option's value, a behavioural test covers it (for instance a prefix scan that
+skips non-matching files) and the post note says which.

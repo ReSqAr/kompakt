@@ -1,0 +1,27 @@
+# nvzn-store on rocksdb-kit — my mental model
+
+## What I think we are doing
+
+Make nvzn use the same engine layer as zslg. The two stores' option building, budget arithmetic, write and fence
+are already nearly the same code; the differences are exactly three access patterns and one durability helper.
+
+## The shape
+
+```text
+  rocksdb-kit   Access = Plain | Lookup | Prefixed<N>   (types, not flags)
+                Snapshot
+                write arms a flag; fence unchanged; sync_if_dirty
+  zslg stores   Plain; fence for commits; local store's timer uses sync_if_dirty
+  nvzn store    Lookup + Prefixed<N>; sync_if_dirty; its own Storage and budget
+```
+
+## What would make this wrong
+
+- If `Storage::open` cannot create missing families in an existing directory (A3): nvzn's open would need a path.
+- If nvzn's snapshot is held across more than one read view (A4): the borrow in `Snapshot` would not fit.
+- If a `Plain` option set differs from what zslg builds today by anything I did not read: the pinning test is the
+  guard, and a step-1 finding would go to the log.
+
+## Status
+
+Design doc written; waiting for sign-off.
