@@ -72,3 +72,31 @@ explicit, and zslg cannot receive a filter it never had.
 
 Rejected: two modes with the bloom filter on `Plain`; it would change zslg's cache use and read profile, the
 accident D1 exists to prevent.
+
+### D4 — dirty tracking and the periodic sync live in the kit, opt-in; the local store converges in this round (settled)
+
+Durability belongs in the kit, but no store is forced onto it. Two contracts, kept apart by name:
+
+```text
+  Storage::write(batch)        arms an internal flag after db.write returns, whatever the outcome
+  Storage::fence()             unchanged: unconditional flush_wal(true); the commit fence zslg relies on
+  Storage::sync_if_dirty()     the periodic contract: swap(false), flush_wal, re-arm on failure
+  Storage::snapshot()          a handle borrowing the Storage: get_pinned and scan on a Cf
+```
+
+Why: the "dirty flag + timer fsync" pattern exists twice already, in `nvzn-store-rocksdb` (`write_armed`,
+`flush`) and in `zslg-local-store` (`mark_dirty`, `flush_if_dirty`), each with its own ordering comment. A
+commit fence promises that everything written before the call is durable; the periodic sync promises only a
+bounded loss window, and a sync racing an in-flight write may return `Ok` without covering it. The ordering
+argument (arm after the write, never before) is written once, in the kit.
+
+Guards: `fence` must still sync when the flag is clear (test); both methods carry the contract in their docs.
+
+Scope: `zslg-local-store` drops its copy and uses `sync_if_dirty` in this round, so the pattern converges
+instead of becoming a third copy. zslg's commit paths are untouched.
+
+Rejected: dirty tracking in nvzn only (a third copy beside the local store's); a tracked fence that replaces
+`fence` (would weaken the commit fence).
+
+Note (not a decision): the engine-property gauges stay with their callers. The kit exposes
+`Storage::property_u64`; nvzn keeps `nvzn_store_live_sst_files_size_bytes` and its name.
