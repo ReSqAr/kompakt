@@ -24,4 +24,4 @@ are already nearly the same code; the differences are exactly three access patte
 
 ## Status
 
-Design doc written; waiting for sign-off.
+Implemented (steps 1-3); closing. See the post note.

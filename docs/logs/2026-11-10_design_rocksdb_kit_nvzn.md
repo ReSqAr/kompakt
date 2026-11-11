@@ -1,6 +1,6 @@
 # nvzn-store on rocksdb-kit — design
 
-Status: written after the interview (`2026-11-10_log_rocksdb_kit_nvzn.md`, D1–D7); awaiting sign-off.
+Status: signed off and implemented; deviations in `2026-11-10_post_rocksdb_kit_nvzn.md`. Decisions D1–D8 in `2026-11-10_log_rocksdb_kit_nvzn.md`.
 Mental model: `2026-11-10_internal_rocksdb_kit_nvzn.md`.
 
 ## 1. The idea

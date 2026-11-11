@@ -33,7 +33,7 @@ The `nvzn*` crates are built on the `zslg` facade (D11) and may depend on it; no
 | `objectstorage-cache` | Disk cache and fetch scheduler for object stores |
 | `pace-kit` | A floor on a loop's iteration rate |
 | `raft-kit` | The one place that names openraft |
-| `rocksdb-kit` | One explicit RocksDB open per node: memory budget, column families, batches, scans, fence |
+| `rocksdb-kit` | A typed wrapper around one RocksDB per node: memory budget, column families typed by access mode (plain, lookup, prefixed), batches, scans, snapshots, fence |
 | `shutdown` | Supervision tree: any background task exiting unrequested stops the node |
 | `svg-charts` | A server-side SVG line chart: grouping, viewport math and the renderer |
 | `warn-throttle` | Rate limiter for hot-path warn! sites |
