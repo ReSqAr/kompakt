@@ -3,16 +3,16 @@
 ## What I think we are doing
 
 Make nvzn use the same engine layer as zslg. The two stores' option building, budget arithmetic, write and fence
-are already nearly the same code; the differences are exactly three access patterns and one durability helper.
+are already nearly the same code; the differences are exactly three access patterns, which the kit models as types.
 
 ## The shape
 
 ```text
   rocksdb-kit   Access = Plain | Lookup | Prefixed<N>   (types, not flags)
                 Snapshot
-                write arms a flag; fence unchanged; sync_if_dirty
-  zslg stores   Plain; fence for commits; local store's timer uses sync_if_dirty
-  nvzn store    Lookup + Prefixed<N>; sync_if_dirty; its own Storage and budget
+                write and fence unchanged: the kit is a type wrapper, durability stays with callers
+  zslg stores   Plain; fence for commits; the local store keeps its own dirty flag
+  nvzn store    Lookup + Prefixed<N>; its own dirty flag around write/fence; its own Storage and budget
 ```
 
 ## What would make this wrong

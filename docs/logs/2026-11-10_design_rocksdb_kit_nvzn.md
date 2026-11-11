@@ -1,13 +1,13 @@
 # nvzn-store on rocksdb-kit — design
 
-Status: written after the interview (`2026-11-10_log_rocksdb_kit_nvzn.md`, D1–D6); awaiting sign-off.
+Status: written after the interview (`2026-11-10_log_rocksdb_kit_nvzn.md`, D1–D7); awaiting sign-off.
 Mental model: `2026-11-10_internal_rocksdb_kit_nvzn.md`.
 
 ## 1. The idea
 
 `rocksdb-kit` is zslg's engine layer. `nvzn-store-rocksdb` rebuilds the same machinery by hand against
-`rust_rocksdb`. After this change nvzn uses the kit too: one engine layer, two instances (D2), and the one pattern
-that exists twice today, the dirty flag with a periodic fsync, lives once, in the kit (D4).
+`rust_rocksdb`. After this change nvzn uses the kit too: one engine layer, two instances (D2). The kit is a typed
+wrapper around the engine and owns no durability policy (D7).
 
 ```text
   before    zslg stores ──▶ rocksdb-kit ──▶ rust_rocksdb        nvzn-store-rocksdb ──▶ rust_rocksdb
@@ -19,10 +19,11 @@ that exists twice today, the dirty flag with a periodic fsync, lives once, in th
 Goals
 - nvzn and zslg share the engine layer; nothing outside the kit names `rust_rocksdb`.
 - zslg's RocksDB configuration is **unchanged**, provably (a test pins it).
-- The dirty-flag pattern exists once; `zslg-local-store` uses it.
+- nvzn's budget arithmetic exists once (the kit's), not twice.
 
 Non-goals
-- One database for both (D2). A shared fence for zslg's commit path. Any change to nvzn's key encodings, families
+- One database for both (D2). Any durability policy in the kit (D7): `write` and `fence` are unchanged, and the
+  dirty flag stays with its callers. Any change to nvzn's key encodings, families
   or read semantics. Compaction or tuning changes.
 
 Success: workspace clippy and tests clean; the 25-metric golden dump identical; zslg's option set unchanged;
@@ -40,9 +41,9 @@ nlnr builds and `e2e quick` passes against the new kompakt.
 
 ## 4. Constraints and assumptions
 
-### 4.1 Settled (D1–D6)
-Typed opt-in access modes; three modes; nvzn keeps its own `Storage`; dirty tracking and `sync_if_dirty` in the kit,
-`fence` untouched; the local store converges in this round; nvzn's error gets one `Storage` variant.
+### 4.1 Settled (D1–D7)
+Typed opt-in access modes; three modes; nvzn keeps its own `Storage`; the kit stays a type wrapper and durability
+stays with the callers (D7, which narrows D4); nvzn's error gets one `Storage` variant.
 
 ### 4.2 Assumptions I took — strike any of them
 - **A1.** `nvzn-types` (a types crate) may depend on `rocksdb-kit` (a library). The layering test allows it.
@@ -58,10 +59,9 @@ No new crates. Changes by crate:
 
 | crate | change |
 |---|---|
-| `rocksdb-kit` | `Access` (`Plain`, `Lookup`, `Prefixed<N>`), typed `ColumnFamily<A>` / `Cf<A>`, `scan_prefix`, `scan_all`, `Snapshot`, dirty tracking, `sync_if_dirty` |
-| `zslg-local-store` | drop its flag; use `sync_if_dirty` |
+| `rocksdb-kit` | `Access` (`Plain`, `Lookup`, `Prefixed<N>`), typed `ColumnFamily<A>` / `Cf<A>`, `scan_prefix`, `scan_all`, `Snapshot`. `write` and `fence` unchanged. |
 | `nvzn-types` | `Error::Storage(StorageError)`; drop `rust-rocksdb` |
-| `nvzn-store-rocksdb` | onto the kit; `StoreConfig → StorageConfig`; families `Lookup` and `Prefixed`; `sync_if_dirty` |
+| `nvzn-store-rocksdb` | onto the kit; `StoreConfig → StorageConfig`; families `Lookup` and `Prefixed`; its own dirty flag around the kit's `write` and `fence` |
 
 ## 6. Interfaces
 
@@ -94,19 +94,19 @@ check is that the key layout puts constant-width fields first; that stays a doc 
   Snapshot::get_pinned(&Cf<A>, key)    Snapshot::scan(&Cf<A>)    Snapshot::scan_prefix(&Cf<Prefixed<N>>, &[u8; N])
 ```
 
-### 6.3 Dirty tracking and the two durability contracts (D4)
+### 6.3 Durability stays with the callers (D7)
+
+The kit adds no durability API: `Storage::write` and `Storage::fence` (an unconditional `flush_wal(true)`) are as
+they are, so zslg's commit path does not move. nvzn's store keeps its dirty flag itself:
 
 ```text
-  Storage::write(batch)        db.write, then arms the flag, whatever the outcome
-  Storage::fence()             unchanged: unconditional flush_wal(true). Commit fence: everything written before
-                               the call is durable when it returns. zslg's replica and stable log use it.
-  Storage::sync_if_dirty()     periodic contract: swap(false); if it was set, flush_wal(true); re-arm on failure.
-                               A sync racing an in-flight write may return Ok without covering it. A timer, not
-                               a commit fence.
+  write(batch)   storage.write(batch), then dirty.store(true)       armed after the write, whatever the outcome
+  flush()        if dirty.swap(false) { storage.fence() }           re-arm on failure
 ```
 
-The ordering argument (arm after the write, never before) is written once, in the kit, taken from nvzn's comment.
-`write` gains one atomic store; `fence` is byte-for-byte what it is.
+The ordering argument (arm after the write, never before) stays in nvzn's comment. A flush racing an in-flight
+write may return `Ok` without covering it; the write's own arming forces a later sync, so this is a timer, not a
+commit fence. `zslg-local-store` keeps its own copy of the pattern.
 
 ### 6.4 nvzn's error (D5)
 
@@ -120,45 +120,43 @@ reads the property through the kit. The 25-metric golden dump is unchanged.
 
 ## 7. State transitions
 
-The dirty flag is the only state: `clear → armed` by `write` (after the write returns), `armed → clear` by
-`sync_if_dirty` before its fsync, `clear → armed` again if the fsync fails. `fence` does not touch it.
+None in the kit. nvzn's dirty flag moves as it does today: `clear → armed` after a write, `armed → clear` before the
+fsync in `flush`, `clear → armed` again if the fsync fails.
 
 ## 8. Complexity
 
-Not a hot-path change: `write` adds one `AtomicBool::store(Release)`. `scan` for `Plain` and `Lookup` is the
-iterator it is today. nvzn's reads gain no indirection beyond the typed handle.
+Not a hot-path change: `write` and `fence` are untouched. `scan` for `Plain` and `Lookup` is the iterator it is
+today. nvzn's reads gain no indirection beyond the typed handle.
 
 ## 9. Edge cases
 
 - A prefix scan on a family opened `Plain` does not compile.
 - `seek_to_first` on a prefix-mode iterator is unreachable: `scan` on `Prefixed` opts into total-order seek.
-- A failed fence in `sync_if_dirty` re-arms the flag, so the next tick retries (as nvzn and the local store do).
-- `sync_if_dirty` while a write is in flight may not cover it; the write's own arming forces a later sync.
+- A failed fence in nvzn's `flush` re-arms its flag, so the next tick retries (as today).
 - Families missing from an existing directory: see A3.
 
 ## 10. Alternatives considered
 
 Raw-options escape hatch; a runtime `access` field; two modes with a bloom on `Plain`; one shared database; dirty
-tracking in nvzn only; a tracked fence replacing `fence`. All rejected in the log with reasons.
+tracking in the kit (D4, superseded by D7); a tracked fence replacing `fence`. All rejected in the log with reasons.
 
 ## 11. Testing strategy
 
 - The option set `Plain` builds is pinned (zslg's tuning cannot change silently).
-- `fence` syncs with the flag clear; `sync_if_dirty` skips when clear, syncs when armed, re-arms on failure.
+- nvzn's flush skips the fence when clear, fences when armed, and re-arms on failure.
 - A `Prefixed` scan returns exactly the keys with the prefix, and `scan_all` walks the family end to end.
 - Where RocksDB does not expose an option's value, a behavioural test covers it and the post note says which.
-- The local store's flush tests pass unchanged; nvzn's tests pass, including `every_write_path_arms_the_fence`.
-- The 25-metric golden dump; the generated-faults proptest after steps 4 and 5.
+- nvzn's tests pass, including `every_write_path_arms_the_fence`; zslg's tests pass unchanged.
+- The 25-metric golden dump; the generated-faults proptest after step 3.
 - nlnr: `cargo check --all-targets` against the patched workspace; `e2e quick`.
 
 ## 12. Implementation sequence
 
 1. **Kit: access modes.** `Access`, typed `ColumnFamily<A>` / `Cf<A>`, `scan_prefix`, `scan_all`; the pinning test.
 2. **Kit: snapshot.**
-3. **Kit: dirty tracking and `sync_if_dirty`**; the fence tests.
-4. **`zslg-local-store`** onto `sync_if_dirty`; proptest.
-5. **`nvzn-store-rocksdb`** onto the kit; `nvzn-types` error; proptest; golden dump.
-6. **Close.** `crates/README.md`, `docs/crate_inventory.md`, the post note, nlnr pin and e2e.
+3. **`nvzn-store-rocksdb` onto the kit.** `StoreConfig → StorageConfig`; `Lookup` and `Prefixed` families; its dirty
+   flag around the kit's `write` and `fence`; `nvzn-types` error; proptest; golden dump.
+4. **Close.** `crates/README.md`, `docs/crate_inventory.md`, the post note, nlnr pin and `e2e quick`.
 
 ## 13. Operational concerns
 

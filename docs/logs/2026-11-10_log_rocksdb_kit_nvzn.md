@@ -73,7 +73,7 @@ explicit, and zslg cannot receive a filter it never had.
 Rejected: two modes with the bloom filter on `Plain`; it would change zslg's cache use and read profile, the
 accident D1 exists to prevent.
 
-### D4 — dirty tracking and the periodic sync live in the kit, opt-in; the local store converges in this round (settled)
+### D4 — dirty tracking and the periodic sync live in the kit, opt-in; the local store converges in this round (superseded by D7)
 
 Durability belongs in the kit, but no store is forced onto it. Two contracts, kept apart by name:
 
@@ -128,3 +128,25 @@ settings wrote them.
 
 Where RocksDB does not expose an option's value, a behavioural test covers it (for instance a prefix scan that
 skips non-matching files) and the post note says which.
+
+### D7 — the kit stays a type wrapper; durability stays with the callers (settled; narrows D4)
+
+The kit is a typed wrapper around the engine: access modes, snapshots, batches, scans, `write`, `fence`. It owns
+no durability policy. `Storage::write` and `Storage::fence` are exactly what they are today; there is no dirty
+flag and no `sync_if_dirty` in the kit.
+
+nvzn's store keeps its dirty flag in nvzn: `write` through the kit, then arm; `flush` is
+`if dirty.swap(false) { storage.fence() }`, re-arming on failure. The ordering argument (arm after the write,
+never before) stays in nvzn's comment. `zslg-local-store` keeps its own copy and is not touched.
+
+Why: the user's framing is that the kit is a type wrapper and durability is a concern of the zslg and nvzn crates.
+The kit's `fence` is already an unconditional fsync, so nvzn's conditional is caller logic around it; nothing in
+the kit has to change for it, and zslg's commit path stays byte-for-byte as it is.
+
+Cost accepted: the pattern exists in two places (nvzn and the local store), each beside its own durability
+decision.
+
+Effect on the plan: steps 3 (kit dirty tracking) and 4 (local store) of D6 fall away; the generated-faults
+proptest runs once, after nvzn moves. D6's other verification stands, without the dirty-flag tests.
+
+Snapshots stay in the kit (D4's snapshot part is unaffected).
