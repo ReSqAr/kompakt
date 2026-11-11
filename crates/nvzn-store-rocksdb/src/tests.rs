@@ -28,7 +28,6 @@ fn rocksdb(dir: &std::path::Path) -> ArcStore {
     Arc::new(RocksDBStore::new(&store_config(dir)).expect("open rocksdb"))
 }
 
-use rust_rocksdb::{ColumnFamilyDescriptor, DB, Options};
 use std::sync::Arc;
 
 fn write_todo(store: &ArcStore, id: u128, title: &str) {
@@ -107,26 +106,6 @@ fn rocksdb_watermark_defaults_empty() {
     );
 }
 
-#[test]
-fn rocksdb_missing_cf_errors() {
-    let dir = tempfile::TempDir::new().unwrap();
-    let mut opts = Options::default();
-    opts.create_if_missing(true);
-    opts.create_missing_column_families(true);
-    let cfs = [ColumnFamilyDescriptor::new("watermark", Options::default())];
-    let db = Arc::new(DB::open_cf_descriptors(&opts, dir.path(), cfs).unwrap());
-    let store = RocksDBStore::from_db(db);
-
-    let err = store.read().err().expect("missing CF must error");
-    assert!(
-        matches!(
-            &err,
-            Error::RocksDBColumnFamilyMissing(name) if name == "store" || name == "index"
-        ),
-        "unexpected error: {err:?}"
-    );
-}
-
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(256))]
 
@@ -190,13 +169,16 @@ proptest! {
 }
 
 fn temp_store(dir: &tempfile::TempDir) -> RocksDBStore {
-    let mut opts = Options::default();
-    opts.create_if_missing(true);
-    opts.create_missing_column_families(true);
-    let cfs = ["config_hash", "watermark", "store", "index"]
-        .map(|name| ColumnFamilyDescriptor::new(name, Options::default()));
-    let db = DB::open_cf_descriptors(&opts, dir.path(), cfs).expect("open");
-    RocksDBStore::from_db(Arc::new(db))
+    RocksDBStore::new(&store_config(dir.path())).expect("open")
+}
+
+/// Put every family's rows into SSTs, so reads and sizes are those of flushed
+/// data rather than of a memtable.
+fn flush_memtables(store: &RocksDBStore) {
+    store.storage.flush_memtable(CONFIG_HASH_CF).unwrap();
+    store.storage.flush_memtable(WATERMARK_CF).unwrap();
+    store.storage.flush_memtable(STORE_CF).unwrap();
+    store.storage.flush_memtable(INDEX_CF).unwrap();
 }
 
 #[test]
@@ -269,7 +251,7 @@ fn rocksdb_compresses_by_default_and_reports_sst_sizes() {
         for id in 0..200 {
             write_todo(&arc, id, &title);
         }
-        store.db.flush_cf(store.store_cf().unwrap()).unwrap();
+        store.storage.flush_memtable(STORE_CF).unwrap();
 
         let recorder = DebuggingRecorder::new();
         let snapshotter = recorder.snapshotter();
@@ -282,7 +264,7 @@ fn rocksdb_compresses_by_default_and_reports_sst_sizes() {
             .collect();
         let store_bytes = gauges
             .iter()
-            .find(|(k, ..)| k.key().labels().any(|l| l.value() == STORE_CF))
+            .find(|(k, ..)| k.key().labels().any(|l| l.value() == STORE_CF.name()))
             .map(|(.., v)| match v {
                 DebugValue::Gauge(g) => g.into_inner(),
                 other => panic!("not a gauge: {other:?}"),
@@ -293,7 +275,7 @@ fn rocksdb_compresses_by_default_and_reports_sst_sizes() {
 
     let (compressed, families) = sst_bytes(true);
     let (plain, _) = sst_bytes(false);
-    assert_eq!(families, COLUMN_FAMILIES.len(), "one gauge per family");
+    assert_eq!(families, 4, "one gauge per family");
     assert!(compressed > 0.0, "the flushed rows are in an SST");
     assert!(
         compressed < plain,
@@ -347,9 +329,7 @@ fn rocksdb_a_scan_reads_its_transactions_snapshot() {
     // "now".
     let scan = txn.scan_index(tenant_id(), Todo::TYPE_ID, iid, q);
     add(3);
-    for cf in COLUMN_FAMILIES {
-        store.db.flush_cf(store.db.cf_handle(cf).unwrap()).unwrap();
-    }
+    flush_memtables(&store);
 
     let got: Vec<ProjectionId> = scan.map(|r| r.unwrap()).collect();
     assert_eq!(
@@ -387,9 +367,7 @@ fn rocksdb_prefix_scans_are_exact_across_many_ssts() {
             .unwrap();
         }
         txn.commit(Watermark::default()).unwrap();
-        for cf in COLUMN_FAMILIES {
-            store.db.flush_cf(store.db.cf_handle(cf).unwrap()).unwrap();
-        }
+        flush_memtables(&store);
     }
 
     let txn = store.read().unwrap();
@@ -439,9 +417,7 @@ fn rocksdb_reset_clears_an_index_spread_over_many_ssts() {
             .unwrap();
         }
         txn.commit(Watermark::default()).unwrap();
-        for cf in COLUMN_FAMILIES {
-            store.db.flush_cf(store.db.cf_handle(cf).unwrap()).unwrap();
-        }
+        flush_memtables(&store);
     }
 
     store.reset().unwrap();

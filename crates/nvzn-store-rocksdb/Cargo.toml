@@ -9,15 +9,15 @@ publish = false
 
 [dependencies]
 postcard = { workspace = true, features = ["alloc", "use-std"] }
-zslg = { workspace = true }
 bytes = { workspace = true }
 metrics-kit = { workspace = true }
 nvzn-projection = { workspace = true }
 nvzn-store = { workspace = true }
 nvzn-types = { workspace = true }
-rust-rocksdb = { workspace = true }
+rocksdb-kit = { workspace = true }
 
 [dev-dependencies]
+rocksdb-kit = { workspace = true, features = ["testing"] }
 metrics = { workspace = true }
 metrics-util = { workspace = true }
 nvzn-fixtures = { workspace = true }

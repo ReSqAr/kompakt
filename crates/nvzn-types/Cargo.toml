@@ -14,7 +14,7 @@ tracing = { workspace = true }
 const-fnv1a-hash = { workspace = true }
 crossbeam-combinators = { workspace = true }
 postcard = { workspace = true, features = ["alloc", "use-std"] }
-rust-rocksdb = { workspace = true }
+rocksdb-kit = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }

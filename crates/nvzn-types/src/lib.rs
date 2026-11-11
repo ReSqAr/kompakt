@@ -83,8 +83,8 @@ pub enum Error {
     },
     #[error("poisoned lock")]
     Poison(String),
-    #[error("rocksdb error {0}")]
-    RocksDB(#[from] rust_rocksdb::Error),
+    #[error("storage error: {0}")]
+    Storage(#[from] rocksdb_kit::StorageError),
     #[error("invalid configuration: {0}")]
     InvalidConfiguration(String),
     #[error("observability setup: {0}")]
@@ -93,8 +93,6 @@ pub enum Error {
     Io(String),
     #[error("dispatcher task failed: {0}")]
     TaskJoin(String),
-    #[error("rocksdb column family {0} is missing")]
-    RocksDBColumnFamilyMissing(String),
     #[error("decode error: {0}")]
     Decode(String),
     #[error("an tenant with ID {0} is already registered")]

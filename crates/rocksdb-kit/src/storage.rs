@@ -464,6 +464,19 @@ impl Storage {
         self.db.property_int_value(name).ok().flatten()
     }
 
+    /// Flush one family's memtable to an SST now. Blocking.
+    ///
+    /// Test-only: production flushes on size and on the WAL cap. This exists so
+    /// a test can put rows into an SST, which reads and sizes differently from
+    /// rows still in a memtable.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn flush_memtable<A: Access>(&self, family: ColumnFamily<A>) -> Result<(), StorageError> {
+        let cf = self.cf(family)?;
+        self.db
+            .flush_cf(&cf.0)
+            .map_err(|e| StorageError::Storage(e.to_string()))
+    }
+
     /// Force the retirement-tombstone rewrite of one family now. Blocking.
     ///
     /// Test-only: production reclamation is `periodic_compaction_seconds`

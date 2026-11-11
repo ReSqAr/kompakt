@@ -2414,7 +2414,7 @@ dependencies = [
  "nvzn-types",
  "postcard",
  "proptest",
- "rust-rocksdb",
+ "rocksdb-kit",
  "tempfile",
  "zslg",
 ]
@@ -2429,7 +2429,7 @@ dependencies = [
  "metrics-kit",
  "postcard",
  "proptest",
- "rust-rocksdb",
+ "rocksdb-kit",
  "serde",
  "thiserror 2.0.21",
  "tokio",

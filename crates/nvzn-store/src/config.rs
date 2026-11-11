@@ -3,12 +3,6 @@ use std::path::PathBuf;
 use std::time::Duration;
 use zslg::ByteSize;
 
-const BACKGROUND_JOBS: i32 = 2;
-const WRITE_BUFFERS_PER_CF: u64 = 2;
-const MIN_WRITE_BUFFER_BYTES: u64 = 64 * 1024;
-const MEMTABLE_SHARE_PERCENT: u64 = 40;
-const RETIRE_SWEEP_DEFAULT: Duration = Duration::from_secs(60 * 60);
-
 const DEFAULT_MEMORY: ByteSize = ByteSize::from_mib(256);
 const DEFAULT_FLUSH_INTERVAL: Duration = Duration::from_secs(1);
 /// What a fold commit stages, at most, unless configured.
@@ -37,6 +31,9 @@ pub struct StoreConfig {
     /// durability one. The single-row families are never compressed.
     pub compression: bool,
 
+    // Engine tuning. Unset means derived from `memory`; the derivation (and its
+    // constants) belongs to `rocksdb-kit::StorageConfig`, which these map onto
+    // field for field when the store opens.
     pub write_buffer: Option<ByteSize>,
     pub target_file_size: Option<ByteSize>,
     pub max_total_wal: Option<ByteSize>,
@@ -61,71 +58,6 @@ impl StoreConfig {
             max_open_files: None,
             retire_sweep: None,
         }
-    }
-
-    #[must_use]
-    pub fn memtable_budget(&self) -> u64 {
-        // saturating: a budget large enough to overflow this is not a budget.
-        self.memory
-            .as_u64()
-            .saturating_mul(MEMTABLE_SHARE_PERCENT)
-            .checked_div(100)
-            .unwrap_or(0)
-    }
-
-    #[must_use]
-    pub fn write_buffer_bytes(&self, cf_count: usize) -> u64 {
-        if let Some(explicit) = self.write_buffer {
-            return explicit.as_u64().max(MIN_WRITE_BUFFER_BYTES);
-        }
-        let families = u64::try_from(cf_count).unwrap_or(1).max(1);
-        self.memtable_budget()
-            .checked_div(families.saturating_mul(WRITE_BUFFERS_PER_CF))
-            .unwrap_or(MIN_WRITE_BUFFER_BYTES)
-            .max(MIN_WRITE_BUFFER_BYTES)
-    }
-
-    #[must_use]
-    pub fn target_file_size_bytes(&self, cf_count: usize) -> u64 {
-        match self.target_file_size {
-            Some(explicit) => explicit.as_u64().max(1),
-            None => self.write_buffer_bytes(cf_count).saturating_mul(2),
-        }
-    }
-
-    #[must_use]
-    pub fn max_total_wal_bytes(&self) -> u64 {
-        match self.max_total_wal {
-            Some(explicit) => explicit.as_u64(),
-            None => self.memtable_budget().saturating_mul(2).max(1024 * 1024),
-        }
-    }
-
-    #[must_use]
-    pub fn background_jobs(&self) -> i32 {
-        self.max_background_jobs.unwrap_or(BACKGROUND_JOBS)
-    }
-
-    #[must_use]
-    pub fn open_files(&self) -> i32 {
-        if let Some(explicit) = self.max_open_files {
-            return explicit;
-        }
-        let scaled = self
-            .memory
-            .as_u64()
-            .checked_div(2 * 1024 * 1024)
-            .unwrap_or(0)
-            .clamp(16, 512);
-        i32::try_from(scaled).unwrap_or(64)
-    }
-
-    #[must_use]
-    pub fn retire_sweep_secs(&self) -> u64 {
-        self.retire_sweep
-            .unwrap_or(RETIRE_SWEEP_DEFAULT)
-            .as_secs()
-            .max(1)
     }
 
     #[must_use]
@@ -262,27 +194,5 @@ mod tests {
         let mut c = config();
         c.max_open_files = Some(-1);
         c.validate().unwrap();
-    }
-
-    #[test]
-    fn derivations_scale_off_memory_and_yield_to_overrides() {
-        let mut c = config();
-        c.memory = ByteSize::from_mib(256);
-        let cfs = 4;
-
-        let small = c.write_buffer_bytes(cfs);
-        c.memory = ByteSize::from_mib(1024);
-        assert!(
-            c.write_buffer_bytes(cfs) > small,
-            "the memtable share must follow the budget"
-        );
-        assert_eq!(c.target_file_size_bytes(cfs), c.write_buffer_bytes(cfs) * 2);
-
-        c.write_buffer = Some(ByteSize::from_mib(7));
-        assert_eq!(c.write_buffer_bytes(cfs), ByteSize::from_mib(7).as_u64());
-
-        // A sub-second sweep must not truncate to "disabled".
-        c.retire_sweep = Some(Duration::from_millis(500));
-        assert_eq!(c.retire_sweep_secs(), 1);
     }
 }
