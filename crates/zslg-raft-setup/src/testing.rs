@@ -29,10 +29,7 @@ use zslg_raft_storage::{RAFT_LOG_CF, RAFT_META_CF, build_raft_for_test};
 /// # Errors
 /// When the root cannot be opened.
 pub fn open_storage_for_test(root: &Path) -> Result<Arc<Storage>, Box<dyn std::error::Error>> {
-    let cfs = [RAFT_LOG_CF, RAFT_META_CF].map(|cf| CfSpec {
-        cf,
-        compress: false,
-    });
+    let cfs = [RAFT_LOG_CF, RAFT_META_CF].map(|cf| CfSpec::new(cf, false));
     Ok(Storage::open(
         root,
         StorageConfig::new(bytesize::ByteSize::from_mib(64)),

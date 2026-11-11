@@ -131,29 +131,14 @@ impl ReplicaNodeConfig {
         cfs.extend([
             // Compression is a per-store footprint/CPU trade, never a
             // durability one — the block CRC is what protects a record.
-            CfSpec {
-                cf: REPLICA_LOG_CF,
-                compress: self.replica_log_compression,
-            },
-            CfSpec {
-                cf: STABLE_LOG_CF,
-                compress: self.stable_log_compression,
-            },
-            CfSpec {
-                cf: LOCAL_STORE_DATA_CF,
-                compress: self.learner_local_store_compression,
-            },
+            CfSpec::new(REPLICA_LOG_CF, self.replica_log_compression),
+            CfSpec::new(STABLE_LOG_CF, self.stable_log_compression),
+            CfSpec::new(LOCAL_STORE_DATA_CF, self.learner_local_store_compression),
             // Cursors follow the data family rather than carrying a second
             // knob: one overwritten slot per peer has no workload behind it.
-            CfSpec {
-                cf: LOCAL_STORE_CURSORS_CF,
-                compress: self.learner_local_store_compression,
-            },
+            CfSpec::new(LOCAL_STORE_CURSORS_CF, self.learner_local_store_compression),
             // One tiny, never-compressed row: the write-once node identity.
-            CfSpec {
-                cf: NODE_ID_CF,
-                compress: false,
-            },
+            CfSpec::new(NODE_ID_CF, false),
         ]);
         cfs
     }

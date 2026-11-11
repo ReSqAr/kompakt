@@ -36,6 +36,7 @@
 //! `NodeId` is the operator procedure.
 
 use rocksdb_kit::ColumnFamily;
+use rocksdb_kit::Plain;
 use std::sync::Arc;
 use zslg_log::LogError;
 
@@ -57,7 +58,7 @@ use zslg_log::{Admission, Completion, ReplicaLog};
 use zslg_time::Hlc;
 
 /// This replica's dense local log.
-pub const REPLICA_LOG_CF: ColumnFamily = ColumnFamily::new("replica_log");
+pub const REPLICA_LOG_CF: ColumnFamily<Plain> = ColumnFamily::new("replica_log");
 
 /// Headroom for the non-payload part of a record (the 16-byte key, the value's
 /// 32-byte `data_id` prefix, and RocksDB's per-record framing — well under

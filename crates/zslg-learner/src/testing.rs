@@ -56,10 +56,7 @@ pub fn open_for_test(root: &std::path::Path) -> Result<Arc<rocksdb_kit::Storage>
         crate::LOCAL_STORE_CURSORS_CF,
     ]
     .into_iter()
-    .map(|cf| rocksdb_kit::CfSpec {
-        cf,
-        compress: false,
-    })
+    .map(|cf| rocksdb_kit::CfSpec::new(cf, false))
     .collect();
     Ok(rocksdb_kit::Storage::open(
         root,

@@ -1,4 +1,5 @@
 use super::*;
+use rocksdb_kit::Plain;
 use zslg_learner::{LOCAL_STORE_CURSORS_CF, LOCAL_STORE_DATA_CF, STABLE_LOG_CF};
 use zslg_replica_log::REPLICA_LOG_CF;
 
@@ -32,7 +33,7 @@ fn compression_defaults_match_the_measured_configuration() {
 #[test]
 fn compression_reaches_the_column_families() {
     let c = cfg();
-    let compress = |s: ColumnFamily| {
+    let compress = |s: ColumnFamily<Plain>| {
         c.column_families()
             .into_iter()
             .find(|spec| spec.cf == s)

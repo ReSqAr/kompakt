@@ -13,7 +13,7 @@
 //! after [`Storage::fence`] returns, never before.
 
 use rocksdb_kit::Batch;
-use rocksdb_kit::ColumnFamily;
+use rocksdb_kit::{ColumnFamily, Plain};
 use uuid::Uuid;
 use zslg_log::LogError;
 
@@ -47,7 +47,7 @@ pub fn load_or_create_node_id(storage: &Storage) -> Result<NodeId, Error> {
 }
 
 /// The write-once node identity row.
-pub const NODE_ID_CF: ColumnFamily = ColumnFamily::new("node_id");
+pub const NODE_ID_CF: ColumnFamily<Plain> = ColumnFamily::new("node_id");
 
 #[cfg(test)]
 #[allow(
@@ -65,10 +65,7 @@ mod tests {
         Storage::open(
             root,
             StorageConfig::new(ByteSize::from_mib(16)),
-            &[CfSpec {
-                cf: NODE_ID_CF,
-                compress: false,
-            }],
+            &[CfSpec::new(NODE_ID_CF, false)],
         )
         .expect("open test storage")
     }

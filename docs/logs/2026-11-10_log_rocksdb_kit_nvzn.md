@@ -150,3 +150,14 @@ Effect on the plan: steps 3 (kit dirty tracking) and 4 (local store) of D6 fall 
 proptest runs once, after nvzn moves. D6's other verification stands, without the dirty-flag tests.
 
 Snapshots stay in the kit (D4's snapshot part is unaffected).
+
+### D8 — no default type parameter: the access mode is always spelled (settled; amends D1)
+
+`ColumnFamily<A>` and `Cf<'_, A>` have no `A = Plain` default. zslg's families are written `ColumnFamily<Plain>`
+and its opened handles `Cf<'_, Plain>`; the mode is visible at every declaration.
+
+Why: the user prefers explicit over implicit. A default would hide which option set a family gets, which is the
+thing the typing exists to show. The cost is a mechanical edit across zslg's declarations.
+
+Consequence: `CfSpec` cannot be a struct literal over a generic family. It becomes `CfSpec::new(family, compress)`,
+which erases the mode into data (`AnyFamily`); `Storage::column_families` yields `AnyFamily`.

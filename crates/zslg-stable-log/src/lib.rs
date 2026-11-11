@@ -20,7 +20,7 @@ use zslg_net::NetError;
 use zslg_snapshot::SnapshotError;
 use zslg_time::ClockError;
 
-use rocksdb_kit::ColumnFamily;
+use rocksdb_kit::{ColumnFamily, Plain};
 
 mod appender;
 mod config;
@@ -46,7 +46,7 @@ pub use config::StableLogConfig;
 pub use log::{StableLog, spawn_stable_store};
 
 /// The settled prefix of the log, keyed by global `LogIndex`.
-pub const STABLE_LOG_CF: ColumnFamily = ColumnFamily::new("stable_log");
+pub const STABLE_LOG_CF: ColumnFamily<Plain> = ColumnFamily::new("stable_log");
 
 // Consumed only by `spawn_learner`.
 pub use purge::run_stable_purge_worker;

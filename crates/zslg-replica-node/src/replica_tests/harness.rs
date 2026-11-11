@@ -15,10 +15,7 @@ use zslg_time_fake::SharedClockController;
 
 /// A storage root carrying the replica-log column family.
 pub(super) fn open_storage(root: &std::path::Path) -> Result<Arc<rocksdb_kit::Storage>, Error> {
-    let cfs = [rocksdb_kit::CfSpec {
-        cf: REPLICA_LOG_CF,
-        compress: false,
-    }];
+    let cfs = [rocksdb_kit::CfSpec::new(REPLICA_LOG_CF, false)];
     Ok(rocksdb_kit::Storage::open(
         root,
         rocksdb_kit::StorageConfig::new(bytesize::ByteSize::from_mib(64)),

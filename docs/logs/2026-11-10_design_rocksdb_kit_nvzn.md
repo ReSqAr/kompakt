@@ -42,7 +42,7 @@ nlnr builds and `e2e quick` passes against the new kompakt.
 ## 4. Constraints and assumptions
 
 ### 4.1 Settled (D1–D7)
-Typed opt-in access modes; three modes; nvzn keeps its own `Storage`; the kit stays a type wrapper and durability
+Typed opt-in access modes, spelled explicitly with no default parameter (D8); three modes; nvzn keeps its own `Storage`; the kit stays a type wrapper and durability
 stays with the callers (D7, which narrows D4); nvzn's error gets one `Storage` variant.
 
 ### 4.2 Assumptions I took — strike any of them
@@ -75,7 +75,7 @@ No new crates. Changes by crate:
                    whole-key filtering off, fixed prefix extractor of width N, memtable prefix bloom.
                    nvzn: index.
 
-  ColumnFamily<A = Plain>::new(name)            const; the name is the on-disk schema
+  ColumnFamily<A>::new(name)                    const; the name is the on-disk schema; A is always written
   CfSpec::new(cf) / .compressed(bool)            options come from A; there is no access flag
   Storage::cf::<A>(family) -> Cf<'_, A>
   Storage::scan(&Cf<A>)                          total order. Plain/Lookup: today's iterator, unchanged.
@@ -83,8 +83,9 @@ No new crates. Changes by crate:
   Storage::scan_prefix(&Cf<Prefixed<N>>, &[u8; N])   prefix_same_as_start; cannot leave the prefix
 ```
 
-The default type parameter means zslg code and signatures do not change. A zslg family cannot reach the prefix
-options. `scan_prefix` takes `&[u8; N]`, so a prefix of the wrong width does not compile. What the compiler cannot
+There is no default type parameter (D8): zslg's families are written `ColumnFamily<Plain>` and `Cf<'_, Plain>`, so
+the mode is visible at every declaration. A zslg family cannot reach the prefix options. `CfSpec::new(family,
+compress)` erases the mode into data (`AnyFamily`), so a schema list stays one slice. `scan_prefix` takes `&[u8; N]`, so a prefix of the wrong width does not compile. What the compiler cannot
 check is that the key layout puts constant-width fields first; that stays a doc and a test.
 
 ### 6.2 Snapshot (D4)

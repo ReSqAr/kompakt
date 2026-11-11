@@ -19,6 +19,7 @@
 //! follows a hang-up, not the live path, is its recovery.
 
 use rocksdb_kit::ColumnFamily;
+use rocksdb_kit::Plain;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -213,7 +214,7 @@ impl LocalStore {
 }
 
 /// Local-store data rows, keyed by `DataId`.
-pub const LOCAL_STORE_DATA_CF: ColumnFamily = ColumnFamily::new("local_store_data");
+pub const LOCAL_STORE_DATA_CF: ColumnFamily<Plain> = ColumnFamily::new("local_store_data");
 
 /// Local-store subscription cursors, keyed by upstream `NodeId`.
-pub const LOCAL_STORE_CURSORS_CF: ColumnFamily = ColumnFamily::new("local_store_cursors");
+pub const LOCAL_STORE_CURSORS_CF: ColumnFamily<Plain> = ColumnFamily::new("local_store_cursors");

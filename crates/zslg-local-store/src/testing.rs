@@ -18,10 +18,7 @@ use crate::{Error, LocalStore, LocalStoreConfig};
 pub(crate) fn open_storage(root: &Path) -> Result<Arc<Storage>, Error> {
     let cfs: Vec<CfSpec> = [LOCAL_STORE_DATA_CF, LOCAL_STORE_CURSORS_CF]
         .into_iter()
-        .map(|cf| CfSpec {
-            cf,
-            compress: false,
-        })
+        .map(|cf| CfSpec::new(cf, false))
         .collect();
     Ok(Storage::open(
         root,

@@ -2,20 +2,15 @@
 
 use super::*;
 use crate::config::{BACKGROUND_JOBS, MIN_WRITE_BUFFER_BYTES, RETIRE_SWEEP_DEFAULT};
+use crate::handles::{Lookup, Plain, Prefixed};
 
-const REPLICA_LOG: ColumnFamily = ColumnFamily::new("replica_log");
-const STABLE_LOG: ColumnFamily = ColumnFamily::new("stable_log");
+const REPLICA_LOG: ColumnFamily<Plain> = ColumnFamily::new("replica_log");
+const STABLE_LOG: ColumnFamily<Plain> = ColumnFamily::new("stable_log");
 
 fn specs() -> Vec<CfSpec> {
     vec![
-        CfSpec {
-            cf: REPLICA_LOG,
-            compress: false,
-        },
-        CfSpec {
-            cf: STABLE_LOG,
-            compress: true,
-        },
+        CfSpec::new(REPLICA_LOG, false),
+        CfSpec::new(STABLE_LOG, true),
     ]
 }
 
@@ -445,4 +440,186 @@ fn a_checksum_failing_wal_record_refuses_to_open() {
     // `PointInTimeRecovery` / `SkipAnyCorruptedRecord` the open returns
     // `Ok` and the `expect` above trips.
     let _ = err;
+}
+
+/// The `OPTIONS-*` file RocksDB writes into the database directory: every
+/// database, column-family and table option as it was applied, as text.
+fn options_file(dir: &Path) -> String {
+    let newest = std::fs::read_dir(dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("OPTIONS-"))
+        })
+        .max()
+        .expect("RocksDB writes an OPTIONS file when it opens");
+    std::fs::read_to_string(newest).unwrap()
+}
+
+/// The sections of an options file that describe this database's own
+/// families: not the version stamp, and not RocksDB's built-in `default` family.
+fn own_sections(text: &str) -> String {
+    let mut sections: Vec<Vec<&str>> = Vec::new();
+    for line in text.lines() {
+        if line.starts_with('[') {
+            sections.push(Vec::new());
+        }
+        if let Some(open) = sections.last_mut() {
+            open.push(line);
+        }
+    }
+    sections
+        .into_iter()
+        .filter(|s| !s[0].starts_with("[Version]") && !s[0].contains("\"default\""))
+        .map(|s| s.join("\n").trim_end().to_string())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// zslg's tuning must not change by accident. This is the option set a `Plain`
+/// family gets, captured from the code before access modes existed: every
+/// database, column-family and block-table option, as RocksDB applied it.
+/// A change here is a change to every zslg store, so it has to be deliberate:
+/// regenerate `plain_options.golden` from the new output and say why.
+#[tokio::test]
+async fn a_plain_family_gets_exactly_the_options_zslg_has_always_had() {
+    let tmp = tempfile::tempdir().unwrap();
+    let _s = Storage::open(
+        tmp.path(),
+        StorageConfig::new(ByteSize::from_mib(64)),
+        &specs(),
+    )
+    .unwrap();
+    let applied = own_sections(&options_file(tmp.path()));
+    let golden = own_sections(include_str!("plain_options.golden"));
+    assert_eq!(applied, golden);
+}
+
+const SETS: ColumnFamily<Prefixed<2>> = ColumnFamily::new("sets");
+const POINTS: ColumnFamily<Lookup> = ColumnFamily::new("points");
+
+fn open_modes(dir: &Path) -> Arc<Storage> {
+    Storage::open(
+        dir,
+        StorageConfig::new(ByteSize::from_mib(64)),
+        &[
+            CfSpec::new(REPLICA_LOG, false),
+            CfSpec::new(POINTS, false),
+            CfSpec::new(SETS, false),
+        ],
+    )
+    .unwrap()
+}
+
+fn put_sets(storage: &Storage, keys: &[&[u8]]) {
+    let cf = storage.cf(SETS).unwrap();
+    let mut batch = Batch::new();
+    for key in keys {
+        batch.put(&cf, key, b"v");
+    }
+    storage.write(batch).unwrap();
+}
+
+fn keys_of(mut scan: Scan<'_>) -> Vec<Vec<u8>> {
+    let mut out = Vec::new();
+    while let Some(key) = scan.key() {
+        out.push(key.to_vec());
+        scan.next();
+    }
+    scan.status().unwrap();
+    out
+}
+
+/// A prefix scan yields exactly the keys that start with the prefix, and ends
+/// where the prefix does, in the memtable and after a flush to an SST alike.
+#[tokio::test]
+async fn a_prefix_scan_yields_exactly_the_keys_with_that_prefix() {
+    let tmp = tempfile::tempdir().unwrap();
+    let storage = open_modes(tmp.path());
+    put_sets(
+        &storage,
+        &[b"aa-1", b"aa-2", b"ab-1", b"ab-2", b"ab-3", b"ba-1"],
+    );
+    let cf = storage.cf(SETS).unwrap();
+    let ab = || keys_of(storage.scan_prefix(&cf, b"ab"));
+    let expected: Vec<Vec<u8>> = vec![b"ab-1".to_vec(), b"ab-2".to_vec(), b"ab-3".to_vec()];
+    assert_eq!(ab(), expected, "in the memtable");
+    storage.compact(SETS).unwrap();
+    assert_eq!(ab(), expected, "after a compaction to an SST");
+    assert!(keys_of(storage.scan_prefix(&cf, b"zz")).is_empty());
+}
+
+/// A prefixed family is still walkable end to end: `scan` opts out of prefix
+/// mode, so `seek_to_first` and `seek_to_last` work across prefixes.
+#[tokio::test]
+async fn a_whole_family_scan_crosses_prefixes_and_seeks_to_both_ends() {
+    let tmp = tempfile::tempdir().unwrap();
+    let storage = open_modes(tmp.path());
+    put_sets(&storage, &[b"aa-1", b"ab-1", b"ba-1"]);
+    let cf = storage.cf(SETS).unwrap();
+    let mut scan = storage.scan(&cf);
+    scan.seek_to_first();
+    assert_eq!(scan.key(), Some(&b"aa-1"[..]));
+    scan.seek_to_last();
+    assert_eq!(scan.key(), Some(&b"ba-1"[..]));
+    scan.seek_to_first();
+    assert_eq!(keys_of(scan).len(), 3);
+}
+
+/// A snapshot does not see what is written after it, through a point read, a
+/// whole-family scan or a prefix scan.
+#[tokio::test]
+async fn a_snapshot_does_not_see_later_writes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let storage = open_modes(tmp.path());
+    put_sets(&storage, &[b"ab-1"]);
+    let cf = storage.cf(SETS).unwrap();
+    let snapshot = storage.snapshot();
+    put_sets(&storage, &[b"ab-2"]);
+
+    assert!(snapshot.get_pinned(&cf, b"ab-1").unwrap().is_some());
+    assert!(snapshot.get_pinned(&cf, b"ab-2").unwrap().is_none());
+    assert!(storage.get_pinned(&cf, b"ab-2").unwrap().is_some());
+    assert_eq!(keys_of(snapshot.scan_prefix(&cf, b"ab")).len(), 1);
+    let mut all = snapshot.scan(&cf);
+    all.seek_to_first();
+    assert_eq!(keys_of(all).len(), 1);
+    assert_eq!(keys_of(storage.scan_prefix(&cf, b"ab")).len(), 2);
+}
+
+/// A family is opened in one mode; asking for it as another is a wiring bug
+/// and says so rather than quietly reading it the wrong way.
+#[tokio::test]
+async fn a_family_asked_for_in_another_mode_is_refused() {
+    let tmp = tempfile::tempdir().unwrap();
+    let storage = open_modes(tmp.path());
+    let wrong: ColumnFamily<Plain> = ColumnFamily::new("sets");
+    let err = storage.cf(wrong).err().expect("a mode mismatch is refused");
+    assert!(err.to_string().contains("opened as"), "{err}");
+}
+
+/// The three modes build three different option sets, and `Plain` is the one
+/// zslg has always had (`a_plain_family_gets_exactly_the_options_zslg_has_always_had`).
+#[tokio::test]
+async fn each_mode_applies_its_own_filter_options() {
+    let tmp = tempfile::tempdir().unwrap();
+    let _storage = open_modes(tmp.path());
+    let text = options_file(tmp.path());
+    let section = |header: String| -> String {
+        let (_, rest) = text.split_once(&header).expect("a section");
+        rest.split("\n[").next().unwrap_or(rest).to_string()
+    };
+    let table = |family: &str| section(format!("[TableOptions/BlockBasedTable \"{family}\"]"));
+    assert!(table("replica_log").contains("filter_policy=nullptr"));
+    assert!(table("points").contains("bloomfilter"));
+    assert!(table("points").contains("whole_key_filtering=true"));
+    assert!(table("sets").contains("bloomfilter"));
+    assert!(table("sets").contains("whole_key_filtering=false"));
+    let cf = |family: &str| section(format!("[CFOptions \"{family}\"]"));
+    assert!(cf("replica_log").contains("prefix_extractor=nullptr"));
+    assert!(cf("points").contains("prefix_extractor=nullptr"));
+    assert!(cf("sets").contains("rocksdb.FixedPrefix.2"));
 }

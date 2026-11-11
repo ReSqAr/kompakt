@@ -31,7 +31,7 @@
 //! borrowed block-cache blocks rather than copies. That block stays pinned for
 //! as long as the borrow lives, so no pinned value may cross an `.await` or a
 //! batch commit — every such site states the rule where it is taken.
-use rocksdb_kit::ColumnFamily;
+use rocksdb_kit::{ColumnFamily, Plain};
 use std::fmt::Debug;
 use std::sync::Arc;
 use zslg_log::LogError;
@@ -60,10 +60,10 @@ use zslg_log::ToStorage;
 use zslg_raft::TypeConfig;
 
 /// The raft log.
-pub const RAFT_LOG_CF: ColumnFamily = ColumnFamily::new("raft_log");
+pub const RAFT_LOG_CF: ColumnFamily<Plain> = ColumnFamily::new("raft_log");
 
 /// The raft meta singletons.
-pub const RAFT_META_CF: ColumnFamily = ColumnFamily::new("raft_meta");
+pub const RAFT_META_CF: ColumnFamily<Plain> = ColumnFamily::new("raft_meta");
 
 #[cfg(test)]
 #[allow(
@@ -101,14 +101,8 @@ pub use self::testing::{build_raft_for_test, seed_foreign_membership_for_test};
 #[must_use]
 pub fn raft_cf_specs() -> [CfSpec; 2] {
     [
-        CfSpec {
-            cf: RAFT_LOG_CF,
-            compress: true,
-        },
-        CfSpec {
-            cf: RAFT_META_CF,
-            compress: true,
-        },
+        CfSpec::new(RAFT_LOG_CF, true),
+        CfSpec::new(RAFT_META_CF, true),
     ]
 }
 

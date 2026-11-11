@@ -7,21 +7,40 @@ use std::sync::Arc;
 use bytesize::ByteSize;
 use rust_rocksdb::{
     BlockBasedIndexType, BlockBasedOptions, Cache, ColumnFamilyDescriptor, DBCompressionType,
-    DBRecoveryMode, DBWithThreadMode, MultiThreaded, Options, WriteBufferManager,
+    DBRecoveryMode, DBWithThreadMode, MultiThreaded, Options, ReadOptions, SliceTransform,
+    WriteBufferManager,
 };
 
 use crate::config::{StorageConfig, WRITE_BUFFERS_PER_CF, memtable_budget};
 use crate::error::StorageError;
-use crate::handles::{Batch, Cf, ColumnFamily, Pinned, Scan};
+use crate::handles::{
+    Access, AccessKind, AnyFamily, Batch, Cf, ColumnFamily, Pinned, Prefixed, Scan,
+};
 
-/// One column family to create: which store owns it, and the one knob the
-/// owning store gets to choose.
+/// One column family to create: which store owns it, how it is read (carried
+/// as data, from the family's type), and the one knob the owning store gets to
+/// choose.
 #[derive(Debug, Clone, Copy)]
 pub struct CfSpec {
-    pub cf: ColumnFamily,
+    pub cf: AnyFamily,
     /// zstd, or none for the high-volume rebuildable stores.
     pub compress: bool,
 }
+
+impl CfSpec {
+    #[must_use]
+    pub fn new<A: Access>(cf: ColumnFamily<A>, compress: bool) -> Self {
+        Self {
+            cf: cf.into(),
+            compress,
+        }
+    }
+}
+
+/// Share of each memtable spent on a prefix bloom, charged against the write
+/// buffer rather than added to it: a just-written batch is still in a memtable,
+/// so a prefix scan that skips every SST still has to get past one.
+const MEMTABLE_PREFIX_BLOOM_RATIO: f64 = 0.1;
 
 /// Create the storage root and fsync its *parent*, so the root's own directory
 /// entry is durable before any store opens beneath it. Without that, a crash can
@@ -92,6 +111,7 @@ fn cf_options(
     cfg: StorageConfig,
     cf_count: usize,
     cache: &Cache,
+    access: AccessKind,
     compress: bool,
 ) -> Result<Options, StorageError> {
     let mut bb = BlockBasedOptions::default();
@@ -108,6 +128,16 @@ fn cf_options(
     bb.set_partition_filters(true);
     bb.set_metadata_block_size(4096);
 
+    // A bloom filter answers a point lookup and is ignored by an iterator, so
+    // only the modes that are read that way get one; a prefix-scanned family
+    // filters by prefix instead and drops whole-key filtering.
+    if matches!(access, AccessKind::Lookup | AccessKind::Prefixed(_)) {
+        bb.set_bloom_filter(10.0, false);
+    }
+    if matches!(access, AccessKind::Prefixed(_)) {
+        bb.set_whole_key_filtering(false);
+    }
+
     let mut o = Options::default();
     o.set_block_based_table_factory(&bb);
     o.set_compression_type(if compress {
@@ -115,6 +145,13 @@ fn cf_options(
     } else {
         DBCompressionType::None
     });
+
+    // Sound at a fixed width only because the owning store lays the id fields
+    // down first at constant widths, so the cut lands on a field boundary.
+    if let AccessKind::Prefixed(width) = access {
+        o.set_prefix_extractor(SliceTransform::create_fixed_prefix(width));
+        o.set_memtable_prefix_bloom_ratio(MEMTABLE_PREFIX_BLOOM_RATIO);
+    }
 
     let write_buffer = cfg.write_buffer_bytes(cf_count);
     o.set_write_buffer_size(ByteSize::from_bytes(write_buffer).as_usize()?);
@@ -151,7 +188,7 @@ pub struct Storage {
     /// back what was actually opened instead of re-deriving it.
     ///
     /// [`open`]: Self::open
-    families: Vec<ColumnFamily>,
+    families: Vec<AnyFamily>,
     /// Fault injection for the fail-stop tests. The claim under test — an
     /// append failure fail-stops the replica's flush loop and never continues —
     /// is worth pinning, but RocksDB writes into an already-open WAL and buffers
@@ -183,7 +220,7 @@ impl Storage {
             .map_err(|e| StorageError::Storage(format!("create rocksdb root: {e}")))?;
         let (db_opts, cache) = db_options(cfg)?;
 
-        let families: Vec<ColumnFamily> = cfs.iter().map(|spec| spec.cf).collect();
+        let families: Vec<AnyFamily> = cfs.iter().map(|spec| spec.cf).collect();
 
         // In a multi-node-in-one-process test, a killed node's `Arc<Storage>`
         // clones may still be held by aborted tokio tasks whose drop is
@@ -203,7 +240,7 @@ impl Storage {
             loop {
                 let mut descriptors = Vec::with_capacity(cfs.len());
                 for spec in cfs {
-                    let opts = cf_options(cfg, cfs.len(), &cache, spec.compress)?;
+                    let opts = cf_options(cfg, cfs.len(), &cache, spec.cf.access(), spec.compress)?;
                     descriptors.push(ColumnFamilyDescriptor::new(spec.cf.name(), opts));
                 }
                 match DBWithThreadMode::open_cf_descriptors(&db_opts, root, descriptors) {
@@ -238,21 +275,34 @@ impl Storage {
     }
 
     /// The column-family handle. Missing means the store was not named in the
-    /// `CfSpec` list at open, which is a boot-wiring bug, not a runtime state.
-    pub fn cf(&self, family: ColumnFamily) -> Result<Cf<'_>, StorageError> {
-        self.db.cf_handle(family.name()).map(Cf).ok_or_else(|| {
+    /// `CfSpec` list at open, which is a boot-wiring bug, not a runtime state;
+    /// so is opening it as a different access mode than the list named.
+    pub fn cf<A: Access>(&self, family: ColumnFamily<A>) -> Result<Cf<'_, A>, StorageError> {
+        let listed = self.families.iter().find(|f| f.name() == family.name());
+        match listed {
+            Some(f) if f.access() != A::KIND => Err(StorageError::Storage(format!(
+                "column family {} was opened as {:?} but asked for as {:?}",
+                family.name(),
+                f.access(),
+                A::KIND
+            ))),
+            _ => self.handle(family.name()).map(Cf::new),
+        }
+    }
+
+    fn handle(&self, name: &str) -> Result<Arc<rust_rocksdb::BoundColumnFamily<'_>>, StorageError> {
+        self.db.cf_handle(name).ok_or_else(|| {
             StorageError::Storage(format!(
-                "column family {} was not opened (not in the node's CfSpec list)",
-                family.name()
+                "column family {name} was not opened (not in the node's CfSpec list)"
             ))
         })
     }
 
     /// One point read. The returned value pins its block in the cache, so it
     /// must not cross an `.await` or a batch commit.
-    pub fn get_pinned(
+    pub fn get_pinned<A: Access>(
         &self,
-        cf: &Cf<'_>,
+        cf: &Cf<'_, A>,
         key: impl AsRef<[u8]>,
     ) -> Result<Option<Pinned<'_>>, StorageError> {
         self.db
@@ -262,9 +312,40 @@ impl Storage {
     }
 
     /// An ordered scan over one column family, unpositioned: seek before reading.
+    ///
+    /// Over the whole family, in total order: on a [`Prefixed`] family that
+    /// opts out of prefix mode, so `seek_to_first` and `seek_to_last` work. To
+    /// read one prefix's set, use [`scan_prefix`](Self::scan_prefix).
     #[must_use]
-    pub fn scan(&self, cf: &Cf<'_>) -> Scan<'_> {
-        Scan(self.db.raw_iterator_cf(&cf.0))
+    pub fn scan<A: Access>(&self, cf: &Cf<'_, A>) -> Scan<'_> {
+        match A::KIND {
+            AccessKind::Prefixed(_) => Scan(self.db.raw_iterator_cf_opt(&cf.0, total_order_opts())),
+            AccessKind::Plain | AccessKind::Lookup => Scan(self.db.raw_iterator_cf(&cf.0)),
+        }
+    }
+
+    /// A scan of the keys that start with `prefix`, positioned at the first of
+    /// them. It ends when the prefix does: the caller never has to check, and
+    /// the prefix filter lets the engine skip files holding nothing for it.
+    #[must_use]
+    pub fn scan_prefix<const N: usize>(
+        &self,
+        cf: &Cf<'_, Prefixed<N>>,
+        prefix: &[u8; N],
+    ) -> Scan<'_> {
+        let mut scan = Scan(self.db.raw_iterator_cf_opt(&cf.0, prefix_scan_opts()));
+        scan.seek(prefix);
+        scan
+    }
+
+    /// A consistent view of every family as of now: reads through it do not see
+    /// writes made after it was taken. It borrows the storage, so it cannot
+    /// outlive it.
+    #[must_use]
+    pub fn snapshot(&self) -> Snapshot<'_> {
+        Snapshot {
+            snapshot: self.db.snapshot(),
+        }
     }
 
     /// Atomic across the batch, and across column families. Not durable until
@@ -359,7 +440,7 @@ impl Storage {
     /// Every column family this storage has open, read back off the list
     /// [`open`](Self::open) populated rather than re-deriving it, so a
     /// metrics loop cannot drift from what was actually opened.
-    pub fn column_families(&self) -> impl Iterator<Item = ColumnFamily> + '_ {
+    pub fn column_families(&self) -> impl Iterator<Item = AnyFamily> + '_ {
         self.families.iter().copied()
     }
 
@@ -371,9 +452,9 @@ impl Storage {
     /// deliberately: a broken reading must not be published as a healthy
     /// zero, so the caller's job is to skip the gauge, never to substitute
     /// one.
-    pub fn property_u64(&self, family: ColumnFamily, name: &str) -> Option<u64> {
-        let cf = self.cf(family).ok()?;
-        self.db.property_int_value_cf(&cf.0, name).ok().flatten()
+    pub fn property_u64(&self, family: AnyFamily, name: &str) -> Option<u64> {
+        let cf = self.handle(family.name()).ok()?;
+        self.db.property_int_value_cf(&cf, name).ok().flatten()
     }
 
     /// One DB-wide RocksDB property (e.g. `rocksdb.actual-delayed-write-rate`),
@@ -393,11 +474,77 @@ impl Storage {
     /// different code path from the all-in-memtable case a plain reopen
     /// exercises.
     #[cfg(any(test, feature = "testing"))]
-    pub fn compact(&self, family: ColumnFamily) -> Result<(), StorageError> {
+    pub fn compact<A: Access>(&self, family: ColumnFamily<A>) -> Result<(), StorageError> {
         let cf = self.cf(family)?;
         self.db
             .compact_range_cf(&cf.0, None::<&[u8]>, None::<&[u8]>);
         Ok(())
+    }
+}
+
+/// Read options for a scan that stays inside one prefix.
+///
+/// `prefix_same_as_start` is the caller promising not to ask for anything
+/// outside the seek key's prefix, and that promise is what lets the seek
+/// consult the prefix filter at all.
+fn prefix_scan_opts() -> ReadOptions {
+    let mut opts = ReadOptions::default();
+    opts.set_prefix_same_as_start(true);
+    opts
+}
+
+/// Read options for walking a whole family. A configured prefix extractor puts
+/// iterators in prefix mode, where `seek_to_first` and `seek_to_last` are
+/// unsupported; anything walking a family end to end has to opt back out.
+fn total_order_opts() -> ReadOptions {
+    let mut opts = ReadOptions::default();
+    opts.set_total_order_seek(true);
+    opts
+}
+
+/// A consistent read view, taken by [`Storage::snapshot`].
+pub struct Snapshot<'db> {
+    snapshot: rust_rocksdb::SnapshotWithThreadMode<'db, DBWithThreadMode<MultiThreaded>>,
+}
+
+impl<'db> Snapshot<'db> {
+    /// One point read as of the snapshot. The value pins its block while alive.
+    pub fn get_pinned<A: Access>(
+        &self,
+        cf: &Cf<'_, A>,
+        key: impl AsRef<[u8]>,
+    ) -> Result<Option<Pinned<'_>>, StorageError> {
+        let mut opts = ReadOptions::default();
+        opts.set_snapshot(&self.snapshot);
+        self.snapshot
+            .get_pinned_cf_opt(&cf.0, key, opts)
+            .map(|found| found.map(Pinned))
+            .map_err(|e| StorageError::Storage(e.to_string()))
+    }
+
+    /// An ordered scan as of the snapshot; see [`Storage::scan`].
+    #[must_use]
+    pub fn scan<A: Access>(&self, cf: &Cf<'_, A>) -> Scan<'_> {
+        let mut opts = match A::KIND {
+            AccessKind::Prefixed(_) => total_order_opts(),
+            AccessKind::Plain | AccessKind::Lookup => ReadOptions::default(),
+        };
+        opts.set_snapshot(&self.snapshot);
+        Scan(self.snapshot.raw_iterator_cf_opt(&cf.0, opts))
+    }
+
+    /// A prefix scan as of the snapshot; see [`Storage::scan_prefix`].
+    #[must_use]
+    pub fn scan_prefix<const N: usize>(
+        &self,
+        cf: &Cf<'_, Prefixed<N>>,
+        prefix: &[u8; N],
+    ) -> Scan<'_> {
+        let mut opts = prefix_scan_opts();
+        opts.set_snapshot(&self.snapshot);
+        let mut scan = Scan(self.snapshot.raw_iterator_cf_opt(&cf.0, opts));
+        scan.seek(prefix);
+        scan
     }
 }
 

@@ -159,10 +159,10 @@ pub(crate) async fn boot_fake_snapshot_harness() -> FakeSnapshotHarness {
 pub(super) fn open_replica_storage(
     root: &std::path::Path,
 ) -> Result<Arc<rocksdb_kit::Storage>, zslg_error::Error> {
-    let cfs = [rocksdb_kit::CfSpec {
-        cf: zslg_replica_log::REPLICA_LOG_CF,
-        compress: false,
-    }];
+    let cfs = [rocksdb_kit::CfSpec::new(
+        zslg_replica_log::REPLICA_LOG_CF,
+        false,
+    )];
     Ok(rocksdb_kit::Storage::open(
         root,
         rocksdb_kit::StorageConfig::new(bytesize::ByteSize::from_mib(64)),

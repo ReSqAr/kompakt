@@ -13,10 +13,7 @@ pub(crate) fn open_for_test(root: &Path) -> Result<Arc<Storage>, Error> {
     Ok(Storage::open(
         root,
         StorageConfig::new(ByteSize::from_mib(64)),
-        &[CfSpec {
-            cf: STABLE_LOG_CF,
-            compress: false,
-        }],
+        &[CfSpec::new(STABLE_LOG_CF, false)],
     )?)
 }
 

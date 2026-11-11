@@ -2,7 +2,7 @@
 
 use crate::Error;
 use rocksdb_kit::Storage;
-use rocksdb_kit::{Batch, Cf};
+use rocksdb_kit::{Batch, Cf, Plain};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use zslg_log::LogError;
@@ -38,7 +38,7 @@ pub(super) fn read_meta<T: DeserializeOwned>(
 /// because a multi-slot batch has to be one atomic write.
 pub(super) fn put_meta<T: Serialize>(
     batch: &mut Batch,
-    cf: &Cf<'_>,
+    cf: &Cf<'_, Plain>,
     slot: RaftMetaSlot,
     value: &T,
 ) -> Result<(), Error> {
