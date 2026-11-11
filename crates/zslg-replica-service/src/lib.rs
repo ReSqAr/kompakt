@@ -28,7 +28,7 @@ use zslg_consensus::ConsensusError;
 use zslg_consensus::RaftStateView;
 use zslg_lifecycle_types::LifecycleError;
 use zslg_net::PeersWatcher;
-use zslg_time::ClockError;
+use zslg_time::{ClockError, CutoffError};
 
 use futures::StreamExt as _;
 use futures::stream::BoxStream;
@@ -283,7 +283,33 @@ impl WriteSubmitter {
         // under load a perfectly-clocked write that waited >max_clock_skew in
         // flight would be falsely rejected, collapsing throughput. So the only
         // gate left here is the HLC cutoff (logical ordering / staleness).
-        let guard = match self.hlc_gate.check_hlc(data.data_id.hlc()) {
+        // Against the cutoff of the state just read, then against the gate.
+        //
+        // The gate holds the cutoff the applier task has installed, and that
+        // task only follows the replicated state: a restarted replica restores
+        // its committed cutoff from disk and a joiner's arrives with its first
+        // snapshot, both before the applier has run, and the gate admits
+        // anything while it holds no cutoff. Writers resend what they still
+        // hold the moment a replica comes back, and those writes can be older
+        // than the cutoff the cluster has since committed. A write that a
+        // quorum admits below the cutoff is acked into no snapshot at all: it is
+        // on the replicas, the stable watermark has passed it, and the leader
+        // never integrates it. Refusing at or below the cutoff of the state this
+        // replica is looking at leaves no window, whatever the applier's timing.
+        //
+        // The gate stays for what only it does: its guard is what the drain
+        // before a new cutoff waits out.
+        let hlc = data.data_id.hlc();
+        let rejected = state
+            .manifest_state
+            .hlc_cutoff
+            .filter(|&cutoff| hlc <= cutoff)
+            .map(|cutoff| CutoffError::AtOrBeforeCutoff { hlc, cutoff });
+        let checked = match rejected {
+            Some(e) => Err(e),
+            None => self.hlc_gate.check_hlc(hlc),
+        };
+        let guard = match checked {
             Ok(g) => g,
             Err(e) => {
                 metrics::replica_write_request(ReplicaWriteState::FailHlcCutoff);

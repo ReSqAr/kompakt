@@ -281,6 +281,55 @@ mod tests {
             .expect("> cutoff accepted");
     }
 
+    /// A replica refuses a write at or below the cutoff of the replicated state
+    /// it holds even when its gate has not caught up to that state.
+    ///
+    /// The gate admits anything until the applier task has installed a cutoff,
+    /// and the applier only follows the state: a restarted replica restores its
+    /// committed cutoff from disk, and a joiner's arrives with its first
+    /// snapshot, both before the applier has run. Writers resend what they still
+    /// hold the moment a replica returns, and those writes can be older than the
+    /// cutoff the cluster has committed. A write that a quorum admits below it is
+    /// acked into no snapshot: on the replicas, passed by the stable watermark,
+    /// never integrated by the leader. Here the gate holds no cutoff at all while
+    /// the state holds 1_000.
+    #[tokio::test]
+    async fn a_replica_refuses_writes_below_the_cutoff_its_state_holds_before_its_gate_does() {
+        let me = nid(1);
+        let rig = rig(me, &[me], 5_000, Duration::from_secs(10)).await;
+        rig.raft_state.replace(RaftState {
+            replica: ReplicaMembership::single([me].into_iter().collect()),
+            manifest_state: zslg_consensus::RaftManifestState {
+                manifest: Vec::new(),
+                manifest_watermark: Some(Hlc(1_000)),
+                hlc_cutoff: Some(Hlc(1_000)),
+            },
+            ..RaftState::empty()
+        });
+        assert!(
+            rig.gate.check_hlc(Hlc(900)).is_ok(),
+            "the premise: the gate holds no cutoff yet"
+        );
+
+        for below in [900, 1_000] {
+            let err = zslg_log_fake::replica_write(&*rig.node, make_data(0, below, b"payload"))
+                .await
+                .expect_err("at or below the state's cutoff must be refused");
+            assert!(
+                matches!(
+                    err,
+                    Error::Clock(ClockError::HlcCutoff(
+                        zslg_time::CutoffError::AtOrBeforeCutoff { .. }
+                    ))
+                ),
+                "write at {below}: {err:?}"
+            );
+        }
+        zslg_log_fake::replica_write(&*rig.node, make_data(0, 1_001, b"payload"))
+            .await
+            .expect("strictly above the cutoff is accepted");
+    }
+
     #[tokio::test]
     async fn write_accepted_when_also_in_joint_next_set() {
         let me = nid(1);
